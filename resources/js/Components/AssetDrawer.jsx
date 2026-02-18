@@ -90,6 +90,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [generateLoading, setGenerateLoading] = useState(false)
     const [generateError, setGenerateError] = useState(null)
     const [generateTimeoutId, setGenerateTimeoutId] = useState(null)
+    const [reprocessLoading, setReprocessLoading] = useState(false)
     // Details modal state
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     // Publish confirmation modal state
@@ -890,6 +891,26 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             }
             
             setGenerateLoading(false)
+        }
+    }
+
+    // Reprocess Asset — full pipeline (same as upload). Use when Regenerate Preview doesn't work.
+    const handleReprocessAsset = async () => {
+        if (!displayAsset?.id || !canRetryThumbnails) return
+        setReprocessLoading(true)
+        try {
+            await window.axios.post(`/app/assets/${displayAsset.id}/reprocess`)
+            setToastMessage('Asset reprocessing started. Ensure queue worker is running.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 5000)
+            if (onAssetUpdate) onAssetUpdate()
+            router.reload({ only: ['assets'] })
+        } catch (e) {
+            setToastMessage(e.response?.data?.message || 'Failed to reprocess asset')
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setReprocessLoading(false)
         }
     }
     
@@ -2432,7 +2453,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </p>
                                 <p className="text-xs text-indigo-700 mb-3">
                                     {thumbnailStatus === 'pending'
-                                        ? 'Click below to regenerate. Ensure the queue worker is running (sail artisan queue:work) for jobs to process.'
+                                        ? 'Reprocess Asset runs the full pipeline (thumbnails, metadata, color analysis). Use when Regenerate Preview doesn&apos;t work.'
                                         : displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')
                                             ? 'PDF previews generate from page 1'
                                             : 'Thumbnail generation is now available for this file type'}
@@ -2451,23 +2472,38 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     </div>
                                 )}
                                 
-                                <button
-                                    type="button"
-                                    onClick={handleGenerateThumbnail}
-                                    disabled={generateLoading}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {generateLoading ? (
-                                        <>
-                                            <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                            Generating...
-                                        </>
-                                    ) : (
-                                        <>
-                                            {thumbnailStatus === 'pending' ? 'Regenerate Preview' : 'Generate Preview'}
-                                        </>
-                                    )}
-                                </button>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleReprocessAsset}
+                                        disabled={reprocessLoading || generateLoading}
+                                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {reprocessLoading ? (
+                                            <>
+                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                                Reprocessing...
+                                            </>
+                                        ) : (
+                                            <>Reprocess Asset</>
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleGenerateThumbnail}
+                                        disabled={generateLoading || reprocessLoading}
+                                        className="inline-flex items-center rounded-md border border-indigo-600 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {generateLoading ? (
+                                            <>
+                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                                Generating...
+                                            </>
+                                        ) : (
+                                            <>{thumbnailStatus === 'pending' ? 'Regenerate Preview' : 'Generate Preview'}</>
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                         ) : (
                             /* Truly unsupported file types - show static message */
@@ -2498,7 +2534,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             <div className="mt-2">
                                                 <p className="text-xs text-green-700 font-medium">
                                                     💡 {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg' 
-                                                        ? 'SVG support is now available (passthrough).'
+                                                        ? 'SVG support is now available (rasterized via Imagick).'
                                                         : 'TIFF/AVIF support is now available via Imagick.'}
                                                 </p>
                                                 <p className="text-xs text-green-600 mt-1">
@@ -2543,19 +2579,26 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </div>
                             )}
                             
-                            <div className="flex items-center gap-2">
-                                {/* Retry button - only show if retry is allowed */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <button
+                                    type="button"
+                                    onClick={handleReprocessAsset}
+                                    disabled={reprocessLoading}
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                >
+                                    {reprocessLoading ? <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" /> : null}
+                                    Reprocess Asset
+                                </button>
                                 {canRetryThumbnail && (
                                     <button
                                         type="button"
                                         onClick={() => setShowRetryModal(true)}
-                                        className="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                        className="inline-flex items-center rounded-md border border-red-600 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                                     >
                                         <ArrowPathIcon className="h-4 w-4 mr-2" />
-                                        Retry Thumbnail Generation
+                                        Retry Thumbnails Only
                                     </button>
                                 )}
-                                
                             </div>
                             
                             {/* Retry limit or unsupported type message */}

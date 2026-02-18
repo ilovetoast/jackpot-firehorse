@@ -449,6 +449,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/reanalyze', [\App\Http\Controllers\AssetMetadataController::class, 'reanalyze'])->name('assets.reanalyze');
             Route::get('/assets/{asset}/incidents', [\App\Http\Controllers\AssetMetadataController::class, 'getIncidents'])->name('assets.incidents');
             Route::post('/assets/{asset}/retry-processing', [\App\Http\Controllers\AssetMetadataController::class, 'retryProcessing'])->name('assets.retry-processing');
+            Route::post('/assets/{asset}/reprocess', [\App\Http\Controllers\AssetMetadataController::class, 'reprocess'])->name('assets.reprocess');
             Route::post('/assets/{asset}/submit-ticket', [\App\Http\Controllers\AssetMetadataController::class, 'submitTicket'])->name('assets.submit-ticket');
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');

@@ -1300,6 +1300,47 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Reprocess asset — runs full pipeline (same as upload).
+     * POST /assets/{asset}/reprocess
+     *
+     * Clears blocking flags and dispatches ProcessAssetJob. Use when Regenerate Preview
+     * or individual steps don't work — this ensures thumbnails, metadata, color analysis,
+     * etc. all run in correct order. Requires assets.retry_thumbnails permission.
+     */
+    public function reprocess(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('retryThumbnails', $asset);
+
+        if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+            return response()->json(['message' => 'Asset is already processing'], 409);
+        }
+
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['processing_started'], $metadata['processing_started_at']);
+        unset($metadata['thumbnail_skip_reason']);
+        unset($metadata['processing_failed'], $metadata['failure_reason'], $metadata['failed_job']);
+        unset($metadata['failure_attempts'], $metadata['failure_is_retryable'], $metadata['failed_at']);
+
+        $asset->update([
+            'analysis_status' => 'uploading',
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'thumbnail_error' => null,
+            'metadata' => $metadata,
+        ]);
+
+        ProcessAssetJob::dispatch($asset->id);
+
+        return response()->json(['status' => 'queued', 'message' => 'Asset reprocessing started']);
+    }
+
+    /**
      * Submit support ticket for asset with full diagnostic payload.
      * POST /assets/{asset}/submit-ticket
      *

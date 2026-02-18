@@ -823,34 +823,13 @@ class ThumbnailGenerationService
             throw new \RuntimeException("Source file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
         }
 
-        // Rasterize with Imagick when available (enables color analysis and embedding)
-        if (extension_loaded('imagick')) {
-            try {
-                return $this->generateSvgRasterizedThumbnail($sourcePath, $styleConfig);
-            } catch (\ImagickException $e) {
-                Log::warning('[ThumbnailGenerationService] SVG rasterization failed, falling back to passthrough', [
-                    'source_path' => $sourcePath,
-                    'error' => $e->getMessage(),
-                ]);
-            } catch (\Exception $e) {
-                Log::warning('[ThumbnailGenerationService] SVG rasterization failed, falling back to passthrough', [
-                    'source_path' => $sourcePath,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        // Require Imagick for SVG — raw SVG passthrough produces wrong output (paths end in .svg,
+        // getimagesize returns null, grid shows placeholder). Rasterization is mandatory.
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('SVG thumbnail generation requires Imagick extension');
         }
 
-        // Fallback: passthrough (original SVG) when Imagick unavailable or rasterization fails
-        $tempPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.svg';
-        if (!copy($sourcePath, $tempPath)) {
-            throw new \RuntimeException("Failed to copy SVG file for thumbnail");
-        }
-        Log::info('[ThumbnailGenerationService] SVG passthrough thumbnail prepared', [
-            'source_path' => $sourcePath,
-            'temp_path' => $tempPath,
-            'source_file_size' => $sourceFileSize,
-        ]);
-        return $tempPath;
+        return $this->generateSvgRasterizedThumbnail($sourcePath, $styleConfig);
     }
 
     /**
