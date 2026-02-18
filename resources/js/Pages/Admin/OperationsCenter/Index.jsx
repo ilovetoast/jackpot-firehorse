@@ -122,6 +122,11 @@ export default function OperationsCenterIndex({
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
     const selectAllRef = useRef(null)
+
+    const incidentList = incidents || []
+    const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
+    const someSelected = selectedIds.size > 0
+
     useEffect(() => {
         if (selectAllRef.current) {
             selectAllRef.current.indeterminate = someSelected && !allSelected
@@ -129,10 +134,6 @@ export default function OperationsCenterIndex({
     }, [someSelected, allSelected])
 
     const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
-
-    const incidentList = incidents || []
-    const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
-    const someSelected = selectedIds.size > 0
 
     const toggleSelect = (id, checked) => {
         setSelectedIds((prev) => {
