@@ -234,27 +234,35 @@ class DominantColorsExtractor
         $asset->update(['metadata' => $metadata]);
 
         // Canonical: persist to asset_metadata so filters, drawer, and schema see the same data
+        // Version-bound: resolver filters by asset_version_id when asset has currentVersion
+        $version = $asset->currentVersion;
         $field = DB::table('metadata_fields')->where('key', 'dominant_colors')->first();
         if ($field) {
             $valueJson = json_encode($colors);
-            $existing = DB::table('asset_metadata')
+            $existingQuery = DB::table('asset_metadata')
                 ->where('asset_id', $asset->id)
-                ->where('metadata_field_id', $field->id)
-                ->first();
+                ->where('metadata_field_id', $field->id);
+            if ($version) {
+                $existingQuery->where('asset_version_id', $version->id);
+            } else {
+                $existingQuery->whereNull('asset_version_id');
+            }
+            $existing = $existingQuery->first();
 
+            $updateData = [
+                'value_json' => $valueJson,
+                'source' => 'system',
+                'confidence' => 0.95,
+                'producer' => 'system',
+                'approved_at' => now(),
+                'approved_by' => null,
+                'updated_at' => now(),
+            ];
             if ($existing) {
                 $oldValueJson = $existing->value_json;
                 DB::table('asset_metadata')
                     ->where('id', $existing->id)
-                    ->update([
-                        'value_json' => $valueJson,
-                        'source' => 'system',
-                        'confidence' => 0.95,
-                        'producer' => 'system',
-                        'approved_at' => now(),
-                        'approved_by' => null,
-                        'updated_at' => now(),
-                    ]);
+                    ->update($updateData);
                 DB::table('asset_metadata_history')->insert([
                     'asset_metadata_id' => $existing->id,
                     'old_value_json' => $oldValueJson,
@@ -264,7 +272,7 @@ class DominantColorsExtractor
                     'created_at' => now(),
                 ]);
             } else {
-                $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+                $insertData = [
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
                     'value_json' => $valueJson,
@@ -275,7 +283,11 @@ class DominantColorsExtractor
                     'approved_by' => null,
                     'created_at' => now(),
                     'updated_at' => now(),
-                ]);
+                ];
+                if ($version) {
+                    $insertData['asset_version_id'] = $version->id;
+                }
+                $assetMetadataId = DB::table('asset_metadata')->insertGetId($insertData);
                 DB::table('asset_metadata_history')->insert([
                     'asset_metadata_id' => $assetMetadataId,
                     'old_value_json' => null,
@@ -328,13 +340,20 @@ class DominantColorsExtractor
         $asset->update(['dominant_hue_group' => $clusterKey]);
 
         // Persist to asset_metadata (canonical for filters/schema)
+        // Version-bound: resolver filters by asset_version_id when asset has currentVersion
+        $version = $asset->currentVersion;
         $field = DB::table('metadata_fields')->where('key', 'dominant_hue_group')->first();
         if ($field) {
             $valueJson = json_encode($clusterKey);
-            $existing = DB::table('asset_metadata')
+            $existingQuery = DB::table('asset_metadata')
                 ->where('asset_id', $asset->id)
-                ->where('metadata_field_id', $field->id)
-                ->first();
+                ->where('metadata_field_id', $field->id);
+            if ($version) {
+                $existingQuery->where('asset_version_id', $version->id);
+            } else {
+                $existingQuery->whereNull('asset_version_id');
+            }
+            $existing = $existingQuery->first();
 
             if ($existing) {
                 $oldValueJson = $existing->value_json;
@@ -358,7 +377,7 @@ class DominantColorsExtractor
                     'created_at' => now(),
                 ]);
             } else {
-                $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+                $insertData = [
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
                     'value_json' => $valueJson,
@@ -369,7 +388,11 @@ class DominantColorsExtractor
                     'approved_by' => null,
                     'created_at' => now(),
                     'updated_at' => now(),
-                ]);
+                ];
+                if ($version) {
+                    $insertData['asset_version_id'] = $version->id;
+                }
+                $assetMetadataId = DB::table('asset_metadata')->insertGetId($insertData);
                 DB::table('asset_metadata_history')->insert([
                     'asset_metadata_id' => $assetMetadataId,
                     'old_value_json' => null,

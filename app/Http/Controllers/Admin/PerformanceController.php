@@ -148,6 +148,13 @@ class PerformanceController extends Controller
             'server' => $serverLogs,
             'client' => $clientMetrics,
             'period_hours' => 24,
+            'config' => [
+                'enabled' => config('performance.enabled', false),
+                'persist_slow_logs' => config('performance.persist_slow_logs', false),
+                'persist_all_requests' => config('performance.persist_all_requests', false),
+                'client_metrics_enabled' => config('performance.client_metrics_enabled', false),
+                'slow_threshold_ms' => config('performance.slow_threshold_ms', 1000),
+            ],
         ];
     }
 

@@ -516,7 +516,9 @@ class ComputedMetadataService
      */
     protected function persistComputedMetadata(Asset $asset, array $computedValues): void
     {
-        DB::transaction(function () use ($asset, $computedValues) {
+        $version = $asset->currentVersion;
+
+        DB::transaction(function () use ($asset, $computedValues, $version) {
             foreach ($computedValues as $fieldKey => $value) {
                 // Skip null values (unknown/unable to compute)
                 if ($value === null) {
@@ -537,34 +539,36 @@ class ComputedMetadataService
                     continue;
                 }
 
-                // Check if user-approved value already exists (never overwrite)
-                $existingUserValue = DB::table('asset_metadata')
+                // Version-bound lookup: resolver filters by asset_version_id when version exists
+                $existingUserQuery = DB::table('asset_metadata')
                     ->where('asset_id', $asset->id)
                     ->where('metadata_field_id', $field->id)
                     ->where('source', 'user')
-                    ->whereNotNull('approved_at')
-                    ->exists();
+                    ->whereNotNull('approved_at');
+                $existingSystemQuery = DB::table('asset_metadata')
+                    ->where('asset_id', $asset->id)
+                    ->where('metadata_field_id', $field->id)
+                    ->where('source', 'system');
+                if ($version) {
+                    $existingUserQuery->where('asset_version_id', $version->id);
+                    $existingSystemQuery->where('asset_version_id', $version->id);
+                } else {
+                    $existingUserQuery->whereNull('asset_version_id');
+                    $existingSystemQuery->whereNull('asset_version_id');
+                }
 
-                if ($existingUserValue) {
+                // Check if user-approved value already exists (never overwrite)
+                if ($existingUserQuery->exists()) {
                     continue;
                 }
 
                 // Check if system value already exists (idempotency)
-                // If same value exists, skip to avoid duplicates
-                $existingSystemValue = DB::table('asset_metadata')
-                    ->where('asset_id', $asset->id)
-                    ->where('metadata_field_id', $field->id)
-                    ->where('source', 'system')
-                    ->first();
-
+                $existingSystemValue = $existingSystemQuery->first();
                 if ($existingSystemValue) {
-                    // Compare values - only create new if different
                     $existingValue = json_decode($existingSystemValue->value_json, true);
                     if ($existingValue === $value) {
-                        // Same value, skip (idempotency)
                         continue;
                     }
-                    // Different value - create new row (never update existing)
                 }
 
                 // Validate value against field options (for select fields)
@@ -584,33 +588,35 @@ class ComputedMetadataService
                     }
                 }
 
-                // Create new asset_metadata row
-                // CRITICAL: Check if this is an automatic field - automatic fields do NOT require approval
                 $fieldDef = DB::table('metadata_fields')->where('id', $field->id)->first();
                 $isAutomaticField = $fieldDef && ($fieldDef->population_mode === 'automatic');
-                
+
                 Log::debug('[ComputedMetadataService] Writing metadata field', [
                     'asset_id' => $asset->id,
+                    'asset_version_id' => $version?->id,
                     'field_key' => $fieldKey,
                     'field_id' => $field->id,
                     'population_mode' => $fieldDef->population_mode ?? 'manual',
                     'is_automatic' => $isAutomaticField,
                     'value' => $value,
                 ]);
-                
-                // Phase M-1: System and automatic metadata always auto-approve
-                $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+
+                $insertData = [
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
                     'value_json' => json_encode($value),
                     'source' => 'system',
-                    'confidence' => 0.95, // System-computed values are highly confident
-                    'producer' => 'system', // System-computed values are from system
-                    'approved_at' => now(), // Phase M-1: System metadata always auto-approves
+                    'confidence' => 0.95,
+                    'producer' => 'system',
+                    'approved_at' => now(),
                     'approved_by' => null,
                     'created_at' => now(),
                     'updated_at' => now(),
-                ]);
+                ];
+                if ($version) {
+                    $insertData['asset_version_id'] = $version->id;
+                }
+                $assetMetadataId = DB::table('asset_metadata')->insertGetId($insertData);
 
                 // Create audit history entry
                 DB::table('asset_metadata_history')->insert([

@@ -34,15 +34,26 @@ class AssetMetadataStateResolver
 
         // Phase 3B: Version-bound metadata. When currentVersion exists, filter by asset_version_id.
         // Legacy assets (no versions) fall back to asset_id.
+        // Fallback: when version exists, also include rows with asset_version_id=null (legacy system
+        // metadata written before versioning). Prefer version-bound rows when both exist.
         $query = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->where('asset_metadata.asset_id', $asset->id)
             ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected']);
 
         if ($version) {
-            $query->where('asset_metadata.asset_version_id', $version->id);
+            $query->where(function ($q) use ($version) {
+                $q->where('asset_metadata.asset_version_id', $version->id)
+                    ->orWhereNull('asset_metadata.asset_version_id');
+            });
         } else {
-            $query->where('asset_metadata.asset_id', $asset->id);
+            $query->whereNull('asset_metadata.asset_version_id');
         }
+
+        $orderBy = $version
+            ? "CASE WHEN asset_metadata.asset_version_id = ? THEN 0 ELSE 1 END, asset_metadata.created_at DESC"
+            : 'asset_metadata.created_at DESC';
+        $bindings = $version ? [$version->id] : [];
 
         $allRows = $query
             ->select(
@@ -51,7 +62,7 @@ class AssetMetadataStateResolver
                 'metadata_fields.type',
                 'metadata_fields.population_mode'
             )
-            ->orderBy('asset_metadata.created_at', 'desc')
+            ->orderByRaw($orderBy, $bindings)
             ->get();
 
         // Group by metadata_field_id

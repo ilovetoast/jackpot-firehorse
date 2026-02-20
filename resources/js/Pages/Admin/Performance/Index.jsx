@@ -7,6 +7,7 @@ export default function AdminPerformanceIndex({ auth, metrics }) {
     const server = metrics?.server ?? {}
     const client = metrics?.client ?? {}
     const period = metrics?.period_hours ?? 24
+    const config = metrics?.config ?? {}
 
     return (
         <div className="min-h-full bg-slate-50">
@@ -67,7 +68,11 @@ export default function AdminPerformanceIndex({ auth, metrics }) {
                         )}
                         {(!server.avg_duration_ms && !server.slowest_routes?.length) && (
                             <p className="mt-4 text-sm text-slate-500">
-                                Enable PERFORMANCE_PERSIST_SLOW_LOGS to record slow requests.
+                                {config.persist_all_requests
+                                    ? 'No requests recorded yet. Persist all is enabled; data will appear after page loads.'
+                                    : config.persist_slow_logs
+                                    ? `No slow requests in the last 24h. Only requests exceeding ${config.slow_threshold_ms ?? 1000}ms are logged. Set PERFORMANCE_PERSIST_ALL_REQUESTS=true for avg metrics.`
+                                    : 'Enable PERFORMANCE_PERSIST_SLOW_LOGS to record slow requests, or PERFORMANCE_PERSIST_ALL_REQUESTS=true for all requests.'}
                             </p>
                         )}
                     </div>
@@ -115,20 +120,26 @@ export default function AdminPerformanceIndex({ auth, metrics }) {
                         )}
                         {(!client.avg_ttfb_ms && !client.slowest_pages?.length) && (
                             <p className="mt-4 text-sm text-slate-500">
-                                Enable PERFORMANCE_CLIENT_METRICS_ENABLED to collect client metrics.
+                                {config.client_metrics_enabled
+                                    ? 'No client metrics received yet. Metrics are sent once per session when pages load.'
+                                    : 'Enable PERFORMANCE_CLIENT_METRICS_ENABLED to collect client metrics.'}
                             </p>
                         )}
                     </div>
                 </div>
 
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-sm font-semibold text-slate-900">Configuration</h3>
+                    <h3 className="text-sm font-semibold text-slate-900">Configuration (runtime values)</h3>
                     <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                        <li>PERFORMANCE_MONITORING_ENABLED — response timing middleware</li>
-                        <li>PERFORMANCE_PERSIST_SLOW_LOGS — store slow requests in DB</li>
-                        <li>PERFORMANCE_CLIENT_METRICS_ENABLED — accept client metrics</li>
-                        <li>PERFORMANCE_SLOW_THRESHOLD_MS — slow request threshold (default 1000)</li>
+                        <li>PERFORMANCE_MONITORING_ENABLED — <span className={config.enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.enabled ? 'enabled' : 'disabled'}</span></li>
+                        <li>PERFORMANCE_PERSIST_SLOW_LOGS — <span className={config.persist_slow_logs ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.persist_slow_logs ? 'enabled' : 'disabled'}</span></li>
+                        <li>PERFORMANCE_PERSIST_ALL_REQUESTS — <span className={config.persist_all_requests ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.persist_all_requests ? 'enabled' : 'disabled'}</span> (persist every request for avg)</li>
+                        <li>PERFORMANCE_CLIENT_METRICS_ENABLED — <span className={config.client_metrics_enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.client_metrics_enabled ? 'enabled' : 'disabled'}</span></li>
+                        <li>PERFORMANCE_SLOW_THRESHOLD_MS — {config.slow_threshold_ms ?? 1000}ms</li>
                     </ul>
+                    <p className="mt-3 text-xs text-slate-500">
+                        If values are wrong, run <code className="bg-slate-100 px-1 rounded">php artisan config:clear</code> and restart the server.
+                    </p>
                 </div>
             </main>
             <AppFooter />

@@ -30,17 +30,19 @@ class ResponseTimingMiddleware
         $response->headers->set('X-Response-Time', "{$durationMs}ms");
 
         $threshold = (int) config('performance.slow_threshold_ms', 1000);
-        if ($durationMs >= $threshold) {
+        $isSlow = $durationMs >= $threshold;
+
+        if ($isSlow) {
             Log::warning('[Slow Request]', [
                 'url' => $request->fullUrl(),
                 'method' => $request->method(),
                 'duration_ms' => $durationMs,
                 'user_id' => $request->user()?->id,
             ]);
+        }
 
-            if ($this->shouldPersist()) {
-                $this->persistLog($request, $durationMs, $memoryUsage);
-            }
+        if ($this->shouldPersist($isSlow)) {
+            $this->persistLog($request, $durationMs, $memoryUsage);
         }
 
         return $response;
@@ -51,9 +53,12 @@ class ResponseTimingMiddleware
         return (bool) config('performance.enabled', false);
     }
 
-    protected function shouldPersist(): bool
+    protected function shouldPersist(bool $isSlow): bool
     {
-        return (bool) config('performance.persist_slow_logs', false);
+        if (config('performance.persist_all_requests', false)) {
+            return true;
+        }
+        return $isSlow && config('performance.persist_slow_logs', false);
     }
 
     protected function persistLog(Request $request, int $durationMs, int $memoryUsage): void
