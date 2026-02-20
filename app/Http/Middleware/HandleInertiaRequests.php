@@ -289,9 +289,9 @@ class HandleInertiaRequests extends Middleware
         // Remove this in a future cleanup after confirming the new polling approach works
         $processingAssets = [];
 
-        // Category selection (GET /app/assets?category=... or /app/deliverables?category=...) must not carry flash - avoids ghost toasts
+        // Category selection (GET /app/assets?category=... or /app/executions?category=...) must not carry flash - avoids ghost toasts
         $isCategorySelection = $request->isMethod('GET')
-            && ($request->is('app/assets') || $request->is('app/deliverables'))
+            && ($request->is('app/assets') || $request->is('app/executions'))
             && $request->has('category');
 
         $flashKeys = ['success', 'error', 'warning', 'info', 'status', 'download_policy_saved', 'show_toast'];
@@ -416,6 +416,11 @@ class HandleInertiaRequests extends Middleware
                 'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && (is_array($brands) && count($brands) === 0),
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'effective_permissions' => $effectivePermissions, // Always array; [] when no tenant
+                // Computed permission flags for UI (derived from effective_permissions)
+                'permissions' => [
+                    'can_edit_metadata' => in_array('metadata.edit_post_upload', $effectivePermissions, true)
+                        || in_array('metadata.bulk_edit', $effectivePermissions, true),
+                ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);
@@ -446,6 +451,8 @@ class HandleInertiaRequests extends Middleware
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
             // Phase D1: Download bucket count (session-based) for sticky bar
             'download_bucket_count' => $user && $tenant ? app(\App\Services\DownloadBucketService::class)->count() : 0,
+            // Phase D2: Download management features (plan-gated) for CreateDownloadPanel, EditDownloadSettingsModal
+            'download_features' => $tenant ? app(PlanService::class)->getDownloadManagementFeatures($tenant) : [],
             // D11/D12: Enterprise download policy — disable single-asset download button in quick view/drawer
             'download_policy_disable_single_asset' => $tenant ? app(\App\Services\EnterpriseDownloadPolicy::class)->disableSingleAssetDownloads($tenant) : false,
         ];

@@ -39,13 +39,7 @@ export default function AssetGridToolbar({
     cardSize = 220,
     onCardSizeChange = () => {},
     primaryColor = '#6366f1', // Default indigo-600
-    bulkSelectedCount = 0, // Phase 2 – Step 7
-    onBulkEdit = null, // Phase 2 – Step 7
-    onToggleBulkMode = null, // Phase 2 – Step 7
-    isBulkMode = false, // Phase 2 – Step 7
-    onSelectAllForDownload = null, // Phase D1: Select all for download bucket
-    bucketCount = 0, // Phase D1: Download bucket count
-    showSelectAllForDownload = false, // Phase D1: Show "Select all" when not in bulk mode
+    selectedCount = 0, // SelectionContext count (replaces bucketCount)
     filterable_schema = [], // Primary metadata filters
     selectedCategoryId = null, // Current category
     available_values = {}, // Available filter values
@@ -320,42 +314,6 @@ export default function AssetGridToolbar({
 
                     {/* Controls - Right Side on Desktop */}
                     <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
-                        {/* Phase 2 – Step 7: Bulk Actions (only in main row when no More filters bar, e.g. Collections) */}
-                        {onToggleBulkMode && !showMoreFilters && (
-                            <>
-                                <button
-                                    type="button"
-                                    onClick={onToggleBulkMode}
-                                    className={`px-2.5 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors ${
-                                        isBulkMode
-                                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
-                                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                                    }`}
-                                >
-                                    {isBulkMode ? 'Cancel Selection' : 'Select Multiple'}
-                                </button>
-                                {isBulkMode && bulkSelectedCount > 0 && onBulkEdit && (
-                                    <button
-                                        type="button"
-                                        onClick={onBulkEdit}
-                                        className="px-2.5 py-1.5 text-xs sm:text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                    >
-                                        Edit Metadata ({bulkSelectedCount})
-                                    </button>
-                                )}
-                            </>
-                        )}
-                        {/* Phase D1: Select all (only in main row when no More filters bar) */}
-                        {showSelectAllForDownload && onSelectAllForDownload && !showMoreFilters && (
-                            <button
-                                type="button"
-                                onClick={onSelectAllForDownload}
-                                className="px-2.5 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                            >
-                                Select all
-                            </button>
-                        )}
-
                         {/* Show Info Toggle */}
                         <label className="flex items-center gap-2 cursor-pointer">                        
                             <InformationCircleIcon className="h-4 w-4 text-gray-700" title="Show info" />

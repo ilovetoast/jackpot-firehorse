@@ -90,11 +90,44 @@ export default function PublicPageTheme({
     <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
       {/* Left: Theme configuration */}
       <div className="space-y-10">
+        {/* Enable branding — must be on for logo/colors to appear on public download pages */}
+        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3">
+          <div>
+            <label htmlFor="dls-enabled" className="text-sm font-medium text-gray-900">Enable public page branding</label>
+            <p className="text-xs text-gray-500 mt-0.5">When on, your logo, colors, and theme appear on download landing pages.</p>
+          </div>
+          <button
+            type="button"
+            id="dls-enabled"
+            onClick={() => setData('download_landing_settings', {
+              ...(data.download_landing_settings || {}),
+              enabled: !(data.download_landing_settings?.enabled !== false),
+            })}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+              (data.download_landing_settings?.enabled !== false) ? 'bg-indigo-600' : 'bg-gray-200'
+            }`}
+            role="switch"
+            aria-checked={data.download_landing_settings?.enabled !== false}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                (data.download_landing_settings?.enabled !== false) ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
         <DownloadBrandingSelector
           logoAssets={brand.logo_assets || []}
           brandLogoPath={brand.logo_path}
+          logoMode={data.download_landing_settings?.logo_mode || 'brand'}
           selectedLogoAssetId={data.download_landing_settings?.logo_asset_id ?? null}
-          onLogoChange={(id) => setData('download_landing_settings.logo_asset_id', id)}
+          onLogoChange={(mode, assetId) => {
+            setData('download_landing_settings', {
+              ...(data.download_landing_settings || {}),
+              logo_mode: mode,
+              logo_asset_id: mode === 'custom' ? assetId : null,
+            })
+          }}
           fetchLogoAssets={(opts) => {
             const params = new URLSearchParams({ format: 'json' })
             if (opts?.category) params.set('category', opts.category)
@@ -147,15 +180,19 @@ export default function PublicPageTheme({
         </p>
         <PublicPageThemePreview
           logoUrl={(() => {
+            const mode = data.download_landing_settings?.logo_mode || 'brand'
+            if (mode === 'none') return null
             const lid = data.download_landing_settings?.logo_asset_id
-            if (lid && typeof route === 'function') {
+            if (mode === 'custom' && lid && typeof route === 'function') {
               return route('assets.thumbnail.final', { asset: lid, style: 'medium' })
             }
             return brand.logo_path
           })()}
           logoUrlFallback={(() => {
+            const mode = data.download_landing_settings?.logo_mode || 'brand'
+            if (mode === 'none') return null
             const lid = data.download_landing_settings?.logo_asset_id
-            if (lid && typeof route === 'function') {
+            if (mode === 'custom' && lid && typeof route === 'function') {
               return route('assets.thumbnail.final', { asset: lid, style: 'medium' })
             }
             return null

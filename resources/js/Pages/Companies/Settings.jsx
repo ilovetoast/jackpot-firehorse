@@ -16,7 +16,7 @@ const DEFAULT_DOWNLOAD_POLICY = {
     disallow_non_expiring: false,
 }
 
-export default function CompanySettings({ tenant, company_url_domain = 'jackpot.local', billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
+export default function CompanySettings({ tenant, company_url_domain = 'jackpot.local', billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null, can_use_require_landing_page: canUseRequireLandingPage = false }) {
     const page = usePage()
     const { auth, errors: pageErrors = {}, flash = {} } = page.props
     const { can } = usePermission()
@@ -66,6 +66,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                 contributor_asset_approval: tenant.settings?.features?.contributor_asset_approval ?? false, // Phase J.3.1
             },
             download_name_template: tenant.settings?.download_name_template ?? '', // Download default name template
+            require_landing_page: tenant.settings?.require_landing_page ?? false,
         },
     })
 
@@ -771,6 +772,42 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                         </div>
                                     )}
                                     <div className="space-y-6">
+                                        {/* Require landing page — visible for all plans, editable for Pro+Enterprise */}
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-900">Download Settings</h3>
+                                            <div className="mt-4 space-y-5">
+                                                <div className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="policy-require-landing"
+                                                        checked={data.settings?.require_landing_page ?? false}
+                                                        disabled={!canUseRequireLandingPage || !canEditCompanySettings}
+                                                        onChange={(e) => {
+                                                            if (!canUseRequireLandingPage || !canEditCompanySettings) return
+                                                            const nextSettings = { ...data.settings, require_landing_page: e.target.checked }
+                                                            setData('settings', nextSettings)
+                                                            router.put('/app/companies/settings', {
+                                                                name: data.name,
+                                                                slug: data.slug,
+                                                                timezone: data.timezone,
+                                                                settings: nextSettings,
+                                                            }, { preserveScroll: true })
+                                                        }}
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                    <div>
+                                                        <label htmlFor="policy-require-landing" className="text-sm font-medium text-gray-900">
+                                                            Require landing page
+                                                        </label>
+                                                        <p className="mt-0.5 text-sm text-gray-500">
+                                                            Show a branded landing page before downloads instead of starting the file immediately. Useful for tracking and presenting context.
+                                                        </p>
+                                                        {!canUseRequireLandingPage && <p className="mt-1 text-xs text-gray-500">Available on Pro and Enterprise plans.</p>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         {/* Delivery Controls */}
                                         <div>
                                             <h3 className="text-sm font-semibold text-gray-900">Delivery Controls</h3>

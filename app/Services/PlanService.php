@@ -498,6 +498,31 @@ class PlanService
     }
 
     /**
+     * Check if tenant's plan allows the require-landing-page company setting.
+     * Pro and Enterprise; plans that allow password_protection also allow landing page.
+     */
+    public function canUseRequireLandingPage(Tenant $tenant): bool
+    {
+        $features = $this->getDownloadManagementFeatures($tenant);
+
+        return ($features['require_landing_page'] ?? false) === true
+            || ($features['password_protection'] ?? false) === true;
+    }
+
+    /**
+     * Whether the tenant has require_landing_page enabled (company-wide).
+     * Only effective when plan allows it.
+     */
+    public function tenantRequiresLandingPage(Tenant $tenant): bool
+    {
+        if (! $this->canUseRequireLandingPage($tenant)) {
+            return false;
+        }
+
+        return ($tenant->settings['require_landing_page'] ?? false) === true;
+    }
+
+    /**
      * D7: Check if tenant can set branding on download landing pages (Pro + Enterprise).
      */
     public function canBrandDownload(Tenant $tenant): bool

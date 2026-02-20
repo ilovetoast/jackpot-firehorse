@@ -59,6 +59,23 @@ export function hexToRgba(hexColor, alpha = 1) {
 }
 
 /**
+ * Darken a hex color by subtracting from each RGB channel.
+ * Matches the Add Execution / Add Asset button hover behavior.
+ * @param {string} hexColor - Hex color (e.g. "#6366f1")
+ * @param {number} amount - Amount to subtract from each channel (default 20)
+ * @returns {string} Darkened hex color
+ */
+export function darkenColor(hexColor, amount = 20) {
+    if (!hexColor) return '#4f46e5'
+    let hex = String(hexColor).replace('#', '')
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('')
+    let r = Math.max(0, parseInt(hex.substring(0, 2), 16) - amount)
+    let g = Math.max(0, parseInt(hex.substring(2, 4), 16) - amount)
+    let b = Math.max(0, parseInt(hex.substring(4, 6), 16) - amount)
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+/**
  * Get appropriate text color (white or black) based on background color
  * Uses WCAG contrast ratio guidelines - returns white for dark backgrounds, black for light
  * @param {string} backgroundColor - Hex color string

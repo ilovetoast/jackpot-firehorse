@@ -26,6 +26,9 @@ export default function DownloadBucketBar({
   onRemove = null,
   onClear = null,
   primaryColor,
+  items: itemsProp = null, // Phase 3: when provided, use instead of fetch (SelectionContext)
+  onBeforeCreateDownloadClick = null, // Phase 3: sync SelectionContext to bucket before opening
+  onCreateSuccess = null, // Phase 3: clear SelectionContext after download created
 }) {
   const { errors: pageErrors = {}, auth } = usePage().props
   const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -41,7 +44,10 @@ export default function DownloadBucketBar({
   useEffect(() => {
     if (hasDownloadCreateError && bucketCount > 0) setShowCreatePanel(true)
   }, [hasDownloadCreateError, bucketCount])
-  const [previewItems, setPreviewItems] = useState([])
+  // Phase 3: when itemsProp provided (SelectionContext), use directly; otherwise fetch from bucket API
+  const previewItems = itemsProp ?? []
+  const [fetchedPreviewItems, setFetchedPreviewItems] = useState([])
+  const displayPreviewItems = itemsProp !== null ? previewItems : fetchedPreviewItems
   const [loadingPreview, setLoadingPreview] = useState(false)
   const expandedOnceRef = useRef(false)
   const prevCountRef = useRef(bucketCount)
@@ -51,7 +57,7 @@ export default function DownloadBucketBar({
   useEffect(() => {
     if (bucketCount <= 0) {
       setExpanded(false)
-      setPreviewItems([])
+      setFetchedPreviewItems([])
       expandedOnceRef.current = false
     }
   }, [bucketCount])
@@ -77,23 +83,27 @@ export default function DownloadBucketBar({
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Failed to load'))))
       .then((data) => {
-        setPreviewItems(data.items || [])
+        setFetchedPreviewItems(data.items || [])
       })
-      .catch(() => setPreviewItems([]))
+      .catch(() => setFetchedPreviewItems([]))
       .finally(() => setLoadingPreview(false))
   }, [bucketCount])
 
-  // Fetch only when user first opens the panel — avoids refetch on every remove (no flash)
+  // Fetch only when user first opens the panel (and itemsProp not provided) — avoids refetch on every remove
   useEffect(() => {
     if (!expanded) {
       expandedOnceRef.current = false
+      return
+    }
+    if (itemsProp !== null) {
+      expandedOnceRef.current = true
       return
     }
     if (bucketCount > 0 && !expandedOnceRef.current) {
       expandedOnceRef.current = true
       fetchPreviewItems()
     }
-  }, [expanded, bucketCount])
+  }, [expanded, bucketCount, itemsProp])
 
   const handleToggleExpand = () => {
     setExpanded((prev) => !prev)
@@ -129,7 +139,11 @@ export default function DownloadBucketBar({
   }
 
   const handleRemoveItem = (assetId) => {
-    setPreviewItems((prev) => prev.filter((i) => i.id !== assetId))
+    if (itemsProp !== null) {
+      if (onRemove) onRemove(assetId)
+      return
+    }
+    setFetchedPreviewItems((prev) => prev.filter((i) => i.id !== assetId))
     if (onRemove) {
       onRemove(assetId)
     } else {
@@ -151,8 +165,11 @@ export default function DownloadBucketBar({
     router.get(route('assets.index'), { asset: assetId }, { preserveState: true, preserveScroll: true })
   }
 
-  const handleOpenCreatePanel = () => {
+  const handleOpenCreatePanel = async () => {
     setError(null)
+    if (onBeforeCreateDownloadClick) {
+      await onBeforeCreateDownloadClick()
+    }
     setShowCreatePanel(true)
   }
 
@@ -160,6 +177,7 @@ export default function DownloadBucketBar({
     setShowCreatePanel(false)
     setExpanded(false)
     if (onCountChange) onCountChange(0)
+    if (onCreateSuccess) onCreateSuccess()
   }
 
   if (bucketCount <= 0) return null
@@ -172,13 +190,13 @@ export default function DownloadBucketBar({
         <div className="border-b border-gray-200 bg-gray-50 max-h-64 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
             <p className="text-xs font-medium text-gray-500 mb-2">
-              {loadingPreview ? 'Loading…' : `${previewItems.length} item${previewItems.length !== 1 ? 's' : ''} selected`}
+              {itemsProp === null && loadingPreview ? 'Loading…' : `${displayPreviewItems.length} item${displayPreviewItems.length !== 1 ? 's' : ''} selected`}
             </p>
             <div className="flex flex-wrap gap-2">
-              {loadingPreview ? (
+              {itemsProp === null && loadingPreview ? (
                 <span className="text-sm text-gray-400">Loading preview…</span>
               ) : (
-                previewItems.map((item) => {
+                displayPreviewItems.map((item) => {
                   const displayName = item.original_filename || item.title || 'Asset'
                   // Use backend-provided URL only (final or preview); no client fallback to avoid 404 for non-completed
                   const thumbUrl = item.thumbnail_url || item.final_thumbnail_url || item.preview_thumbnail_url || null
@@ -310,7 +328,7 @@ export default function DownloadBucketBar({
       open={showCreatePanel}
       onClose={() => setShowCreatePanel(false)}
       bucketCount={bucketCount}
-      previewItems={previewItems}
+      previewItems={displayPreviewItems}
       onSuccess={handleCreateSuccess}
     />
     </>

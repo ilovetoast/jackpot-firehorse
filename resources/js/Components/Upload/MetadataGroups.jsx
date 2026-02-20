@@ -40,7 +40,7 @@ export default function MetadataGroups({
     // UX-1: Check if we should show metadata approval helper message
     // Show when: metadata approval is enabled AND user does not have bypass permission
     const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
-    const hasBypassPermission = auth?.permissions?.includes('metadata.bypass_approval') === true
+    const hasBypassPermission = (auth?.effective_permissions || []).includes('metadata.bypass_approval')
     const showApprovalMessage = metadataApprovalEnabled && !hasBypassPermission
 
     // Handle empty state

@@ -13,7 +13,9 @@ import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
-import { useBucket } from '../../contexts/BucketContext'
+import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
+import SelectionActionBar from '../../Components/SelectionActionBar'
+import { useSelection } from '../../contexts/SelectionContext'
 import { RectangleStackIcon, PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
@@ -33,7 +35,7 @@ export default function CollectionsIndex({
     sort_direction = 'desc',
     q: searchQuery = '',
 }) {
-    const { auth, download_bucket_count } = usePage().props
+    const { auth } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
 
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937'
@@ -107,6 +109,8 @@ export default function CollectionsIndex({
     const mobileTouchStartRef = useRef(null)
     const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     const [activeAssetId, setActiveAssetId] = useState(null)
+    const [showBulkEditModal, setShowBulkEditModal] = useState(false)
+    const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const safeAssetsList = (assetsList || []).filter(Boolean)
     const activeAsset = activeAssetId ? safeAssetsList.find((a) => a?.id === activeAssetId) : null
 
@@ -133,30 +137,7 @@ export default function CollectionsIndex({
         setActiveAssetId(null)
     }, [selectedCollectionId])
 
-    // Phase D1: Download bucket from app-level context so the bar does not remount on collection/category change (no flash)
-    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
-
-    useEffect(() => {
-        clearIfEmpty(download_bucket_count ?? 0)
-    }, [download_bucket_count, clearIfEmpty])
-
-    const handleBucketToggle = useCallback((assetId) => {
-        if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
-        else bucketAdd(assetId)
-    }, [bucketAssetIds, bucketAdd, bucketRemove])
-
-    const visibleIds = useMemo(() => (assetsList || []).filter(Boolean).map((a) => a?.id).filter(Boolean), [assetsList])
-    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
-    const handleSelectAllToggle = useCallback(async () => {
-        if (visibleIds.length === 0) return
-        if (allVisibleInBucket) {
-            for (const id of visibleIds) {
-                await bucketRemove(id)
-            }
-        } else {
-            await bucketAddBatch(visibleIds)
-        }
-    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
+    const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
 
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
@@ -410,7 +391,7 @@ export default function CollectionsIndex({
                         </div>
                     </div>
                     <div
-                        className={`flex-1 min-h-0 overflow-y-auto ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
+                        className="flex-1 min-h-0 overflow-y-auto pb-0"
                         style={{ touchAction: 'pan-y' }}
                         onTouchStart={handleMobileContentTouchStart}
                         onTouchMove={handleMobileContentTouchMove}
@@ -523,10 +504,7 @@ export default function CollectionsIndex({
                                             cardSize={cardSize}
                                             onCardSizeChange={setCardSize}
                                             primaryColor={workspaceAccentColor}
-                                            bulkSelectedCount={0}
-                                            onBulkEdit={null}
-                                            onToggleBulkMode={null}
-                                            isBulkMode={false}
+                                            selectedCount={selectedCount}
                                             filterable_schema={[]}
                                             selectedCategoryId={null}
                                             available_values={{}}
@@ -558,19 +536,6 @@ export default function CollectionsIndex({
                                                     assetResultCount={assetsList?.length ?? 0}
                                                     totalInCategory={assetsList?.length ?? 0}
                                                     hasMoreAvailable={!!nextPageUrl}
-                                                    barTrailingContent={
-                                                        hasAssets ? (
-                                                            <div className="flex items-center gap-2">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={handleSelectAllToggle}
-                                                                    className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
-                                                                >
-                                                                    {allVisibleInBucket ? 'Deselect all' : 'Select all'}
-                                                                </button>
-                                                            </div>
-                                                        ) : null
-                                                    }
                                                 />
                                             }
                                         />
@@ -588,8 +553,6 @@ export default function CollectionsIndex({
                                             primaryColor={workspaceAccentColor}
                                             selectedAssetIds={[]}
                                             onAssetSelect={null}
-                                            bucketAssetIds={bucketAssetIds}
-                                            onBucketToggle={handleBucketToggle}
                                         />
                                         {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                                         {loading && (
@@ -631,8 +594,7 @@ export default function CollectionsIndex({
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
-                                bucketAssetIds={bucketAssetIds}
-                                onBucketToggle={handleBucketToggle}
+                                selectionAssetType="asset"
                                 collectionContext={{
                                     show: true,
                                     selectedCollectionId,
@@ -682,6 +644,34 @@ export default function CollectionsIndex({
                                 }}
                     />
                 </div>
+            )}
+
+            {/* Phase 4: Unified Selection ActionBar */}
+            <SelectionActionBar
+                currentPageIds={safeAssetsList.map((a) => a.id)}
+                currentPageItems={safeAssetsList.map((a) => ({
+                    id: a.id,
+                    type: 'asset',
+                    name: a.title ?? a.original_filename ?? '',
+                    thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
+                    category_id: a.metadata?.category_id ?? a.category_id ?? null,
+                }))}
+                onOpenBulkEdit={(ids) => {
+                    setBulkSelectedAssetIds(ids)
+                    setShowBulkEditModal(true)
+                }}
+            />
+
+            {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
+                <BulkMetadataEditModal
+                    assetIds={bulkSelectedAssetIds}
+                    onClose={() => setShowBulkEditModal(false)}
+                    onComplete={() => {
+                        router.reload({ only: ['assets', 'next_page_url'] })
+                        setBulkSelectedAssetIds([])
+                        clearSelection()
+                    }}
+                />
             )}
         </div>
     )

@@ -230,14 +230,14 @@ export default function AppNav({ brand, tenant }) {
             label: 'Assets',
             shortLabel: 'Assets',
             icon: PhotoIcon,
-            isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/deliverables'),
+            isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions'),
         },
         {
-            href: '/app/deliverables',
+            href: '/app/executions',
             label: DELIVERABLES_PAGE_LABEL,
             shortLabel: DELIVERABLES_PAGE_LABEL,
             icon: Squares2X2Icon,
-            isActive: (url) => url.startsWith('/app/deliverables'),
+            isActive: (url) => url.startsWith('/app/executions'),
         },
         {
             href: '/app/generative',
@@ -505,10 +505,10 @@ export default function AppNav({ brand, tenant }) {
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
+                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -516,13 +516,13 @@ export default function AppNav({ brand, tenant }) {
                                     Assets
                                 </Link>
                                 <Link
-                                    href="/app/deliverables"
+                                    href="/app/executions"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/deliverables')
+                                        color: currentUrl.startsWith('/app/executions')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/deliverables')
+                                        borderBottomColor: currentUrl.startsWith('/app/executions')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -578,10 +578,10 @@ export default function AppNav({ brand, tenant }) {
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
+                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -589,13 +589,13 @@ export default function AppNav({ brand, tenant }) {
                                     Assets
                                 </Link>
                                 <Link
-                                    href="/app/deliverables"
+                                    href="/app/executions"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/deliverables')
+                                        color: currentUrl.startsWith('/app/executions')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/deliverables')
+                                        borderBottomColor: currentUrl.startsWith('/app/executions')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -1014,11 +1014,11 @@ export default function AppNav({ brand, tenant }) {
                                 {[
                                     { href: '/app/dashboard', label: 'Dashboard' },
                                     { href: '/app/assets', label: 'Assets' },
-                                    { href: '/app/deliverables', label: DELIVERABLES_PAGE_LABEL },
+                                    { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL },
                                     { href: '/app/collections', label: 'Collections' },
                                     { href: '/app/generative', label: 'Generative' },
                                 ].map(({ href, label }) => {
-                                    const isActive = href === '/app/dashboard' ? currentUrl === href : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/deliverables'))
+                                    const isActive = href === '/app/dashboard' ? currentUrl === href : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/executions'))
                                     return (
                                         <Link
                                             key={href}

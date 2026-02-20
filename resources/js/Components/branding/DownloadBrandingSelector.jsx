@@ -17,6 +17,7 @@ const COLOR_ROLES = [
 export default function DownloadBrandingSelector({
   logoAssets = [],
   brandLogoPath = null,
+  logoMode = 'brand', // 'brand' | 'custom' | 'none'
   selectedLogoAssetId = null,
   onLogoChange,
   fetchLogoAssets,
@@ -46,27 +47,49 @@ export default function DownloadBrandingSelector({
 
   return (
     <div className="space-y-10">
-      {/* Brand Mark — optional override */}
+      {/* Brand Mark — Logo (brand identity), Choose from library, or No logo */}
       <div>
         <h4 className="text-sm font-medium text-gray-900 mb-1">Brand Mark</h4>
         <p className="text-sm text-gray-500 mb-4">
-          Choose from library. Fallback to brand identity logo if empty.
+          Logo (brand identity), choose from library, or no logo.
         </p>
         <div className="flex flex-wrap gap-2 items-center">
+          {/* Logo — brand identity (default) */}
           <button
             type="button"
-            onClick={() => !disabled && onLogoChange?.(null)}
-            className={`w-16 h-16 rounded-lg border-2 flex items-center justify-center text-xs font-medium transition-colors ${
-              selectedLogoAssetId === null
-                ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50 text-indigo-700'
-                : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300'
+            onClick={() => !disabled && onLogoChange?.('brand', null)}
+            className={`w-16 h-16 rounded-lg border-2 flex flex-col items-center justify-center overflow-hidden transition-colors ${
+              logoMode === 'brand'
+                ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50'
+                : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+            }`}
+            disabled={disabled}
+            title="Use brand identity logo"
+          >
+            {brandLogoPath ? (
+              <>
+                <img src={brandLogoPath} alt="" className="w-10 h-10 object-contain flex-shrink-0" />
+                <span className={`text-[10px] font-medium leading-tight ${logoMode === 'brand' ? 'text-indigo-700' : 'text-gray-500'}`}>Logo</span>
+              </>
+            ) : (
+              <span className={`text-xs font-medium ${logoMode === 'brand' ? 'text-indigo-700' : 'text-gray-500'}`}>Logo</span>
+            )}
+          </button>
+          {/* No logo */}
+          <button
+            type="button"
+            onClick={() => !disabled && onLogoChange?.('none', null)}
+            className={`w-16 h-16 rounded-lg border-2 flex flex-col items-center justify-center overflow-hidden transition-colors ${
+              logoMode === 'none'
+                ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50'
+                : 'border-gray-200 bg-gray-50 hover:border-gray-300'
             }`}
             disabled={disabled}
             title="No logo"
           >
-            None
+            <span className={`text-xs font-medium ${logoMode === 'none' ? 'text-indigo-700' : 'text-gray-500'}`}>No logo</span>
           </button>
-          {selectedLogoAssetId != null && (() => {
+          {logoMode === 'custom' && selectedLogoAssetId != null && (() => {
             const sel = (logoAssets || []).find((a) => a.id === selectedLogoAssetId)
             return sel ? (
               <div key={sel.id} className="relative">
@@ -80,7 +103,7 @@ export default function DownloadBrandingSelector({
                 {!disabled && (
                   <button
                     type="button"
-                    onClick={() => onLogoChange?.(null)}
+                    onClick={() => onLogoChange?.('brand', null)}
                     className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-90 hover:opacity-100 shadow"
                     aria-label="Remove logo"
                   >
@@ -98,7 +121,11 @@ export default function DownloadBrandingSelector({
             <button
               type="button"
               onClick={() => setShowLogoPicker(true)}
-              className="rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:border-indigo-400 hover:text-indigo-600 flex items-center gap-2"
+              className={`rounded-lg border-2 border-dashed px-3 py-2 text-sm font-medium flex items-center gap-2 transition-colors ${
+                logoMode === 'custom'
+                  ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600'
+              }`}
             >
               <PhotoIcon className="w-4 h-4" />
               Choose from library
@@ -108,7 +135,7 @@ export default function DownloadBrandingSelector({
             <button
               key={a.id}
               type="button"
-              onClick={() => !disabled && onLogoChange?.(a.id)}
+              onClick={() => !disabled && onLogoChange?.('custom', a.id)}
               className={`w-16 h-16 rounded-lg border-2 overflow-hidden flex-shrink-0 transition-colors ${
                 selectedLogoAssetId === a.id
                   ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1'
@@ -131,7 +158,7 @@ export default function DownloadBrandingSelector({
             onClose={() => setShowLogoPicker(false)}
             fetchAssets={fetchLogoAssets}
             onSelect={(result) => {
-              if (result.asset_id) onLogoChange?.(result.asset_id)
+              if (result.asset_id) onLogoChange?.('custom', result.asset_id)
               setShowLogoPicker(false)
             }}
             title="Select logo"

@@ -43,6 +43,7 @@ class DeliverableController extends Controller
      */
     public function index(Request $request): Response|JsonResponse
     {
+        $t0 = microtime(true);
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
@@ -354,6 +355,7 @@ class DeliverableController extends Controller
         $perPage = 36;
         $paginator = $assetsQuery->paginate($perPage);
         $assetModels = $paginator->getCollection();
+        $t1 = microtime(true);
 
         $nextPageUrl = null;
         if ($paginator->hasMorePages()) {
@@ -627,6 +629,20 @@ class DeliverableController extends Controller
             })
             ->values()
             ->all();
+
+        $t2 = microtime(true);
+
+        $isLoadMore = $request->boolean('load_more');
+        if (! $isLoadMore) {
+            Log::info('[DELIVERABLE_GRID_TIMING] DeliverableController::index', [
+                'total_ms' => round((microtime(true) - $t0) * 1000),
+                'after_query_ms' => round(($t1 - $t0) * 1000),
+                'after_transform_ms' => round(($t2 - $t1) * 1000),
+                'assets_count' => count($mappedAssets),
+                's3_presign_count' => 0,
+                'note' => 'Deliverables do not include video_preview_url',
+            ]);
+        }
 
         // Keep collection for availableValues block
         $assets = collect($mappedAssets);
@@ -935,6 +951,14 @@ class DeliverableController extends Controller
         // Brand DNA: show compliance filter only when enabled with active version
         $brandModel = $brand->brandModel;
         $showComplianceFilter = $brandModel && $brandModel->is_enabled && $brandModel->active_version_id !== null;
+
+        $t3 = microtime(true);
+        if (! $isLoadMore) {
+            Log::info('[DELIVERABLE_GRID_TIMING] DeliverableController::index before Inertia', [
+                'total_ms' => round(($t3 - $t0) * 1000),
+                'before_return_ms' => round(($t3 - $t2) * 1000),
+            ]);
+        }
 
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,

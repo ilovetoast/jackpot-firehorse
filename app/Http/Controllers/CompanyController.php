@@ -9,6 +9,7 @@ use App\Services\AiTagPolicyService;
 use App\Services\BillingService;
 use App\Services\CompanyCostService;
 use App\Services\EnterpriseDownloadPolicy;
+use App\Services\PlanService;
 use App\Services\TagQualityMetricsService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
@@ -224,6 +225,9 @@ class CompanyController extends Controller
         // Domain for company URL slug display (from APP_URL so staging/production show correct host)
         $companyUrlDomain = config('subdomain.main_domain') ?: parse_url(config('app.url'), PHP_URL_HOST) ?: 'jackpot.local';
 
+        $planService = app(PlanService::class);
+        $canUseRequireLandingPage = $planService->canUseRequireLandingPage($tenant);
+
         // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -245,6 +249,7 @@ class CompanyController extends Controller
             'tenant_users' => $tenantUsers,
             'pending_transfer' => $pendingTransferData,
             'enterprise_download_policy' => $enterpriseDownloadPolicy,
+            'can_use_require_landing_page' => $canUseRequireLandingPage,
         ]);
     }
 
@@ -328,6 +333,7 @@ class CompanyController extends Controller
                     }
                 },
             ],
+            'settings.require_landing_page' => 'nullable|boolean',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -349,6 +355,14 @@ class CompanyController extends Controller
             $mergedSettings['download_name_template'] = $settings['download_name_template'] === ''
                 ? null
                 : $settings['download_name_template'];
+        }
+        if (array_key_exists('require_landing_page', $settings)) {
+            $planService = app(PlanService::class);
+            if ($planService->canUseRequireLandingPage($tenant)) {
+                $mergedSettings['require_landing_page'] = (bool) $settings['require_landing_page'];
+            } else {
+                $mergedSettings['require_landing_page'] = false;
+            }
         }
 
         $tenant->update($validated);

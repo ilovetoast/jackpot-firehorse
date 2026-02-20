@@ -114,7 +114,7 @@ class Brand extends Model
     {
         $settings = $this->download_landing_settings ?? [];
 
-        return ($settings['enabled'] ?? false) === true;
+        return ($settings['enabled'] ?? true) !== false;
     }
 
     /**

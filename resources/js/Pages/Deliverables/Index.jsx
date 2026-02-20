@@ -13,10 +13,12 @@ import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
-import { useBucket } from '../../contexts/BucketContext'
+import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
+import SelectionActionBar from '../../Components/SelectionActionBar'
+import { useSelection } from '../../contexts/SelectionContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
-import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
+import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
 import {
     TagIcon,
     SparklesIcon,
@@ -63,11 +65,17 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     }, [])
 
     useEffect(() => {
-        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
+        const list = Array.isArray(assets) ? assets.filter(Boolean) : []
+        setAssetsList(list)
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
             window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', { detail: { hasStaleAssetGrid: false } }))
+        }
+        // Grid timing: log navigation-to-first-render (staging diagnostic)
+        if (list.length > 0 && typeof window !== 'undefined' && window.__inertiaVisitStart != null) {
+            const ms = Math.round(performance.now() - window.__inertiaVisitStart)
+            console.info('[DELIVERABLE_GRID_TIMING] navigation to first grid render', { ms, assetCount: list.length })
         }
     }, [assets, next_page_url])
 
@@ -103,6 +111,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    const [showBulkEditModal, setShowBulkEditModal] = useState(false)
+    const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
     
@@ -123,30 +133,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         }
     }, [activeAssetId, safeAssetsList])
 
-    // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
-    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
-
-    useEffect(() => {
-        clearIfEmpty(pageProps.download_bucket_count ?? 0)
-    }, [pageProps.download_bucket_count, clearIfEmpty])
-
-    const handleBucketToggle = useCallback((assetId) => {
-        if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
-        else bucketAdd(assetId)
-    }, [bucketAssetIds, bucketAdd, bucketRemove])
-
-    const visibleIds = useMemo(() => (assetsList || []).filter(Boolean).map((a) => a?.id).filter(Boolean), [assetsList])
-    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
-    const handleSelectAllToggle = useCallback(async () => {
-        if (visibleIds.length === 0) return
-        if (allVisibleInBucket) {
-            for (const id of visibleIds) {
-                await bucketRemove(id)
-            }
-        } else {
-            await bucketAddBatch(visibleIds)
-        }
-    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
+    const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
 
     // Category switches should reset the drawer selection
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -167,7 +154,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     }, [selectedCategoryId])
     
     // Open drawer from URL query parameter (e.g., ?asset={id}&edit_metadata={field_id})
-    // Also clear staleness flag on mount (navigation to /app/deliverables completes)
+    // Also clear staleness flag on mount (navigation to /app/executions completes)
     useEffect(() => {
         // Clear staleness flag when navigating to deliverables page (view is synced)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -313,7 +300,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         
         setSelectedCategoryId(categoryId)
         
-        router.get('/app/deliverables', 
+        router.get('/app/executions', 
             categorySlug ? { category: categorySlug } : {},
             { 
                 preserveState: true, 
@@ -336,10 +323,15 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         return luminance > 0.5
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    // Use full accent color for selected category; hover uses subtle tint
-    const activeBgColor = workspaceAccentColor
-    const activeTextColor = getContrastTextColor(workspaceAccentColor)
-    const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
+    // Match Add Execution button: selected/hover use dark hue (same as button hover state)
+    const contextualDarkColor = darkenColor(workspaceAccentColor, 20)
+    const activeBgColor = contextualDarkColor
+    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const hoverBgColor = contextualDarkColor
+    // Unselected: reduced opacity for visual hierarchy (matches icon treatment)
+    const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
+    const unselectedIconColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
+    const unselectedCountColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
 
     const visibleMobileCategories = useMemo(() => (
         categories.filter((category) => !(
@@ -654,25 +646,25 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                 className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                 style={{
                                                     backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent',
-                                                    color: selectedCategoryId === null ? activeTextColor : textColor,
+                                                    color: selectedCategoryId === null ? activeTextColor : unselectedTextColor,
                                                 }}
                                                 onMouseEnter={(e) => {
                                                     if (selectedCategoryId !== null) {
                                                         e.currentTarget.style.backgroundColor = hoverBgColor
-                                                        e.currentTarget.style.color = textColor
+                                                        e.currentTarget.style.color = activeTextColor
                                                     }
                                                 }}
                                                 onMouseLeave={(e) => {
                                                     if (selectedCategoryId !== null) {
                                                         e.currentTarget.style.backgroundColor = 'transparent'
-                                                        e.currentTarget.style.color = textColor
+                                                        e.currentTarget.style.color = unselectedTextColor
                                                     }
                                                 }}
                                                 >
-                                                <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: selectedCategoryId === null ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }} />
+                                                <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: selectedCategoryId === null ? activeTextColor : unselectedIconColor }} />
                                                 <span className="flex-1">All</span>
                                                 {total_asset_count > 0 && (
-                                                    <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === null ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
+                                                    <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === null ? activeTextColor : unselectedCountColor }}>
                                                         {total_asset_count}
                                                     </span>
                                                 )}
@@ -695,29 +687,29 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                     className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
                                                         backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent',
-                                                        color: selectedCategoryId === category.id ? activeTextColor : textColor,
+                                                        color: selectedCategoryId === category.id ? activeTextColor : unselectedTextColor,
                                                     }}
                                                     onMouseEnter={(e) => {
                                                         if (selectedCategoryId !== category.id) {
                                                             e.currentTarget.style.backgroundColor = hoverBgColor
-                                                            e.currentTarget.style.color = textColor
+                                                            e.currentTarget.style.color = activeTextColor
                                                         }
                                                     }}
                                                     onMouseLeave={(e) => {
                                                         if (selectedCategoryId !== category.id) {
                                                             e.currentTarget.style.backgroundColor = 'transparent'
-                                                            e.currentTarget.style.color = textColor
+                                                            e.currentTarget.style.color = unselectedTextColor
                                                         }
                                                     }}
                                                 >
                                                     <CategoryIcon 
                                                         iconId={category.icon || 'folder'} 
                                                         className="mr-3 flex-shrink-0 h-5 w-5" 
-                                                        style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }}
+                                                        style={{ color: selectedCategoryId === category.id ? activeTextColor : unselectedIconColor }}
                                                     />
                                                     <span className="flex-1">{category.name}</span>
                                                     {category.asset_count !== undefined && category.asset_count > 0 && (
-                                                        <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
+                                                        <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === category.id ? activeTextColor : unselectedCountColor }}>
                                                             {category.asset_count}
                                                         </span>
                                                     )}
@@ -725,7 +717,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                         <div className="relative ml-2 group">
                                                             <LockClosedIcon 
                                                                 className="h-4 w-4 flex-shrink-0 cursor-help" 
-                                                                style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }}
+                                                                style={{ color: selectedCategoryId === category.id ? activeTextColor : unselectedIconColor }}
                                                                 onMouseEnter={() => setTooltipVisible(category.id || `template-${category.slug}-${category.asset_type}`)}
                                                                 onMouseLeave={() => setTooltipVisible(null)}
                                                             />
@@ -814,7 +806,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         </div>
                     </div>
                     <div 
-                        className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
+                        className="flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0"
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -912,7 +904,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         filterable_schema={filterable_schema}
                                         selectedCategoryId={selectedCategoryId}
                                         available_values={available_values}
-                                        canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                                        canManageFields={(auth?.effective_permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
                                         assetType="image"
                                         primaryColor={workspaceAccentColor}
                                         sortBy={sort}
@@ -936,19 +928,6 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
                                         hasMoreAvailable={!!nextPageUrl}
-                                        barTrailingContent={
-                                            assetsList?.length > 0 ? (
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSelectAllToggle}
-                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 whitespace-nowrap"
-                                                    >
-                                                        {allVisibleInBucket ? 'Deselect all' : 'Select all'}
-                                                    </button>
-                                                </div>
-                                            ) : null
-                                        }
                                     />
                                 }
                             />
@@ -965,8 +944,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 showInfo={showInfo}
                                 selectedAssetId={activeAssetId}
                                 primaryColor={workspaceAccentColor}
-                                bucketAssetIds={bucketAssetIds}
-                                onBucketToggle={handleBucketToggle}
+                                selectionAssetType="execution"
                             />
                             {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                             {loading && (
@@ -1021,9 +999,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
-                                bucketAssetIds={bucketAssetIds}
-                                onBucketToggle={handleBucketToggle}
                                 primaryColor={workspaceAccentColor}
+                                selectionAssetType="execution"
                             />
                         </div>
                     )}
@@ -1051,11 +1028,40 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}
                             primaryColor={workspaceAccentColor}
+                            selectionAssetType="execution"
                         />
                     </div>
                 )}
             </div>
             
+            {/* Phase 4: Unified Selection ActionBar */}
+            <SelectionActionBar
+                currentPageIds={safeAssetsList.map((a) => a.id)}
+                currentPageItems={safeAssetsList.map((a) => ({
+                    id: a.id,
+                    type: 'execution',
+                    name: a.title ?? a.original_filename ?? '',
+                    thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
+                    category_id: a.metadata?.category_id ?? a.category_id ?? null,
+                }))}
+                onOpenBulkEdit={(ids) => {
+                    setBulkSelectedAssetIds(ids)
+                    setShowBulkEditModal(true)
+                }}
+            />
+
+            {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
+                <BulkMetadataEditModal
+                    assetIds={bulkSelectedAssetIds}
+                    onClose={() => setShowBulkEditModal(false)}
+                    onComplete={() => {
+                        router.reload({ only: ['assets', 'next_page_url'] })
+                        setBulkSelectedAssetIds([])
+                        clearSelection()
+                    }}
+                />
+            )}
+
             {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
                 Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (

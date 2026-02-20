@@ -54,6 +54,7 @@ class AssetController extends Controller
      */
     public function index(Request $request): Response|JsonResponse
     {
+        $t0 = microtime(true);
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
@@ -354,6 +355,7 @@ class AssetController extends Controller
         $perPage = 36;
         $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
+        $t1 = microtime(true);
 
         // Build next_page_url from current request query so category, sort, filters, q, etc. are always preserved
         $nextPageUrl = null;
@@ -681,6 +683,25 @@ class AssetController extends Controller
             })
             ->values()
             ->all();
+
+        $t2 = microtime(true);
+
+        // Count assets that trigger S3 presigned URL generation (video_preview_url accessor)
+        $assetsWithVideoPreview = $assetModels->filter(function ($a) {
+            return $a->mime_type && str_starts_with((string) $a->mime_type, 'video/')
+                && ! empty($a->metadata['video_preview'] ?? null);
+        })->count();
+
+        if (! $isLoadMore) {
+            Log::info('[ASSET_GRID_TIMING] AssetController::index', [
+                'total_ms' => round((microtime(true) - $t0) * 1000),
+                'after_query_ms' => round(($t1 - $t0) * 1000),
+                'after_transform_ms' => round(($t2 - $t1) * 1000),
+                'assets_count' => count($mappedAssets),
+                's3_presign_count' => $assetsWithVideoPreview,
+                'note' => 'video_preview_url accessor triggers getPresignedGetUrl per video asset',
+            ]);
+        }
 
         // Keep collection for availableValues block (expects $assets as collection of arrays)
         $assets = collect($mappedAssets);
@@ -1122,6 +1143,14 @@ class AssetController extends Controller
             }
         }
         unset($field);
+
+        $t3 = microtime(true);
+        if (! $isLoadMore) {
+            Log::info('[ASSET_GRID_TIMING] AssetController::index before Inertia', [
+                'total_ms' => round(($t3 - $t0) * 1000),
+                'before_return_ms' => round(($t3 - $t2) * 1000),
+            ]);
+        }
 
         return Inertia::render('Assets/Index', [
             'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete

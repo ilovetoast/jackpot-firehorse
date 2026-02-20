@@ -12,15 +12,18 @@
  */
 
 import { useState, useEffect } from 'react'
+import { usePage } from '@inertiajs/react'
 import { XMarkIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
 import CollectionSelector from './Collections/CollectionSelector' // C9.2
+import ConfirmDialog from './ConfirmDialog'
 
 export default function BulkMetadataEditModal({
     assetIds,
     onClose,
     onComplete,
 }) {
+    const { auth } = usePage().props
     const [step, setStep] = useState(1) // 1: operation, 2: field, 3: value, 4: preview, 5: execute
     const [operationType, setOperationType] = useState('add') // 'add' | 'replace' | 'clear'
     const [selectedField, setSelectedField] = useState(null)
@@ -38,21 +41,33 @@ export default function BulkMetadataEditModal({
     const [collectionFieldVisible, setCollectionFieldVisible] = useState(false)
     const [firstAssetCategoryId, setFirstAssetCategoryId] = useState(null)
     const [selectedCollectionIds, setSelectedCollectionIds] = useState([])
+    const [showCategoryChangeConfirm, setShowCategoryChangeConfirm] = useState(false)
+    const [pendingCategoryField, setPendingCategoryField] = useState(null)
 
-    // C9.2: Fetch first asset to get category for collection field visibility check
+    const canShowCategoryWarning = () => {
+        const brandRole = (auth?.user?.brand_role || auth?.brand_role || '').toLowerCase()
+        const tenantRole = (auth?.user?.tenant_role || auth?.tenant_role || '').toLowerCase()
+        return ['brand_owner', 'brand_admin', 'owner', 'admin'].includes(brandRole) || ['owner', 'admin'].includes(tenantRole)
+    }
+
+    // C9.2: Fetch first asset's metadata to get category for collection field visibility check
+    // Uses GET /assets/{asset}/metadata/all (no bare GET /assets/{asset} route exists)
     useEffect(() => {
         if (assetIds.length > 0) {
-            fetch(`/app/assets/${assetIds[0]}`, {
+            fetch(`/app/assets/${assetIds[0]}/metadata/all`, {
                 method: 'GET',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
                 },
                 credentials: 'same-origin',
             })
-            .then((res) => res.json())
+            .then((res) => {
+                if (!res.ok) throw new Error(res.status)
+                return res.json()
+            })
             .then((data) => {
-                const categoryId = data.asset?.category_id || data.category_id
+                const categoryId = data.category?.id ?? null
                 setFirstAssetCategoryId(categoryId)
             })
             .catch(() => {
@@ -153,11 +168,22 @@ export default function BulkMetadataEditModal({
 
     // Handle field selection
     const handleFieldSelect = (field) => {
+        const isCategoryField = field && typeof field === 'object' && (field.field_key === 'category' || field.field_key === 'category_id')
+        if (isCategoryField && assetIds.length > 1 && canShowCategoryWarning()) {
+            setPendingCategoryField(field)
+            setShowCategoryChangeConfirm(true)
+            return
+        }
+        applyFieldSelect(field)
+    }
+
+    const applyFieldSelect = (field) => {
         setSelectedField(field)
+        setPendingCategoryField(null)
         // C9.2: For collections, initialize with empty array
         if (field === 'collections') {
             setValue([])
-        } else {
+        } else if (field && typeof field === 'object') {
             setValue(field.current_value ?? null)
         }
         setStep(3)
@@ -280,6 +306,10 @@ export default function BulkMetadataEditModal({
 
     // Handle execute
     const handleExecute = async () => {
+        // Phase 11: Bulk metadata backend not yet wired — disable until refactor
+        console.warn('Bulk metadata backend not yet wired. Phase 11 refactor pending.')
+        return
+
         if (!previewToken) {
             setError('Preview token missing')
             return
@@ -630,6 +660,23 @@ export default function BulkMetadataEditModal({
                     </div>
                 </div>
             </div>
+
+            <ConfirmDialog
+                open={showCategoryChangeConfirm}
+                onClose={() => { setShowCategoryChangeConfirm(false); setPendingCategoryField(null) }}
+                onConfirm={() => {
+                    if (pendingCategoryField) {
+                        applyFieldSelect(pendingCategoryField)
+                        setShowCategoryChangeConfirm(false)
+                        setPendingCategoryField(null)
+                    }
+                }}
+                title="Category change warning"
+                message="Changing category may reset available metadata fields. This cannot be undone in bulk. Continue?"
+                confirmText="Continue"
+                cancelText="Cancel"
+                variant="warning"
+            />
         </>
     )
 }

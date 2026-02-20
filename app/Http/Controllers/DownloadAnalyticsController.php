@@ -47,6 +47,7 @@ class DownloadAnalyticsController extends Controller
         return response()->json([
             'summary' => [
                 'total_downloads' => $summary['total_downloads'],
+                'landing_page_views' => $summary['landing_page_views'] ?? 0,
                 'unique_users' => $summary['unique_users'],
                 'first_downloaded_at' => $summary['first_downloaded_at']?->toIso8601String(),
                 'last_downloaded_at' => $summary['last_downloaded_at']?->toIso8601String(),

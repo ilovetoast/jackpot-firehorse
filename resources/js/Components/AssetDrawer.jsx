@@ -67,8 +67,9 @@ import { useAssetMetrics } from '../hooks/useAssetMetrics'
 import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/solid'
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
+import { useSelectionOptional } from '../contexts/SelectionContext'
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null, primaryColor }) {
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null, primaryColor, selectionAssetType = 'asset' }) {
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const drawerRef = useRef(null)
@@ -185,6 +186,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
     // Initialize metrics tracking hook (must be before useEffects that use it)
     const { trackView, getViewCount, getDownloadCount } = useAssetMetrics()
+    // Phase 3: SelectionContext for Add to download button
+    const selection = useSelectionOptional()
     
     // Analytics/metrics state
     const [viewCount, setViewCount] = useState(null)
@@ -1787,11 +1790,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 const isEligibleForDownload = displayAsset && displayAsset.is_published !== false && !displayAsset.archived_at
                                 const singleAssetDisabledByPolicy = !!policyDisableSingleAsset
                                 const canSingleAssetDownload = isEligibleForDownload && !singleAssetDisabledByPolicy
-                                const isInBucket = bucketAssetIds && bucketAssetIds.includes(displayAsset?.id)
+                                const isInBucket = selection ? selection.isSelected(displayAsset?.id) : (bucketAssetIds && bucketAssetIds.includes(displayAsset?.id))
+                                const showAddToDownload = selection != null
                                 return (
                                     <div className="space-y-2">
                                         {/* Row 1: View (Details) + Add to download */}
-                                        <div className={`grid gap-2 ${onBucketToggle != null ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                        <div className={`grid gap-2 ${showAddToDownload ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                             <button
                                                 type="button"
                                                 onClick={() => setShowDetailsModal(true)}
@@ -1800,11 +1804,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 <EyeIcon className="h-4 w-4 mr-2" />
                                                 Details
                                             </button>
-                                            {onBucketToggle != null && (
+                                            {showAddToDownload && (
                                                 <button
                                                     type="button"
                                                     disabled={!isEligibleForDownload}
-                                                    onClick={() => onBucketToggle(displayAsset.id)}
+                                                    onClick={() => {
+                                                        if (selection) {
+                                                            selection.toggleItem({
+                                                                id: displayAsset.id,
+                                                                type: selectionAssetType,
+                                                                name: displayAsset.title ?? displayAsset.original_filename ?? '',
+                                                                thumbnail_url: displayAsset.final_thumbnail_url ?? displayAsset.thumbnail_url ?? displayAsset.preview_thumbnail_url ?? null,
+                                                                category_id: displayAsset.metadata?.category_id ?? displayAsset.category_id ?? null,
+                                                            })
+                                                        }
+                                                    }}
                                                     className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                                                         isInBucket
                                                             ? 'text-white'

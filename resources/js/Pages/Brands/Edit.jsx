@@ -585,7 +585,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         },
         // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
         download_landing_settings: {
-            enabled: brand.download_landing_settings?.enabled === true,
+            enabled: brand.download_landing_settings?.enabled !== false,
+            logo_mode: brand.download_landing_settings?.logo_mode ?? (brand.download_landing_settings?.logo_asset_id ? 'custom' : 'brand'),
             logo_asset_id: brand.download_landing_settings?.logo_asset_id ?? null,
             color_role: brand.download_landing_settings?.color_role || 'primary',
             custom_color: brand.download_landing_settings?.custom_color || '',
@@ -1495,7 +1496,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                                 )}
                                                             </div>
                                                             <nav className="flex-1 py-2 space-y-0.5">
-                                                                {['Assets', 'Collections', 'Deliverables'].map((label) => (
+                                                                {['Assets', 'Collections', 'Executions'].map((label) => (
                                                                     <div key={label} className="px-2 py-1.5 text-[9px] font-medium truncate opacity-90" style={{ color: 'inherit' }}>
                                                                         {label}
                                                                     </div>

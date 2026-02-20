@@ -406,7 +406,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
     const fetchDeliverablesForRefs = (opts) => {
         const params = new URLSearchParams({ format: 'json' })
         if (opts?.category) params.set('category', opts.category)
-        return fetch(`/app/deliverables?${params}`, {
+        return fetch(`/app/executions?${params}`, {
             credentials: 'same-origin',
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         }).then((r) => r.json())
@@ -522,7 +522,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                         <ul className="mt-2 space-y-1.5">
                                             {topExecutions?.map((e, i) => (
                                                 <li key={i} className="flex items-center justify-between gap-2 text-sm">
-                                                    <Link href={typeof route === 'function' ? route('deliverables.index', { asset: e.id }) : `/app/deliverables?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
+                                                    <Link href={typeof route === 'function' ? route('executions.index', { asset: e.id }) : `/app/executions?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
                                                         {e.title || 'Untitled'}
                                                     </Link>
                                                     <span className="flex-shrink-0 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">{e.score != null ? `${e.score}%` : '—'}</span>
@@ -535,7 +535,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                         <ul className="mt-2 space-y-1.5">
                                             {bottomExecutions?.map((e, i) => (
                                                 <li key={i} className="flex items-center justify-between gap-2 text-sm">
-                                                    <Link href={typeof route === 'function' ? route('deliverables.index', { asset: e.id }) : `/app/deliverables?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
+                                                    <Link href={typeof route === 'function' ? route('executions.index', { asset: e.id }) : `/app/executions?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
                                                         {e.title || 'Untitled'}
                                                     </Link>
                                                     <span className="flex-shrink-0 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">{e.score != null ? `${e.score}%` : '—'}</span>

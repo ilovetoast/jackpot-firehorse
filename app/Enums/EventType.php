@@ -193,6 +193,9 @@ class EventType
     // D9 — Download access (internal analytics)
     public const DOWNLOAD_ACCESS_GRANTED = 'download.access.granted';
 
+    // Download landing page view (when user sees the share/landing page before downloading)
+    public const DOWNLOAD_LANDING_PAGE_VIEWED = 'download.landing.page.viewed';
+
     // D-SHARE — Share link email sent (audit only; no recipient in metadata)
     public const DOWNLOAD_SHARE_EMAIL_SENT = 'download.share_email_sent';
 
@@ -344,6 +347,7 @@ class EventType
             self::DOWNLOAD_ZIP_FAILED,
             self::DOWNLOAD_GROUP_FAILED,
             self::DOWNLOAD_ACCESS_GRANTED,
+            self::DOWNLOAD_LANDING_PAGE_VIEWED,
             self::DOWNLOAD_SHARE_EMAIL_SENT,
             self::SUBSCRIPTION_CREATED,
             self::SUBSCRIPTION_UPDATED,

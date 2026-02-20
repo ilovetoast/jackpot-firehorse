@@ -89,6 +89,63 @@
         animation: fade-in 600ms ease-in-out forwards;
     }
 
+    /* Download landing: fluid, abstract jackpot-inspired animation — morphing blobs + subtle shimmer */
+    @keyframes download-blob-1 {
+        0%, 100% {
+            border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+            transform: translate(0, 0) scale(1);
+            opacity: 0.4;
+        }
+        25% {
+            border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%;
+            transform: translate(5%, -8%) scale(1.05);
+            opacity: 0.5;
+        }
+        50% {
+            border-radius: 50% 60% 30% 60% / 30% 60% 70% 40%;
+            transform: translate(-5%, 5%) scale(0.95);
+            opacity: 0.35;
+        }
+        75% {
+            border-radius: 60% 40% 60% 30% / 70% 30% 50% 60%;
+            transform: translate(3%, 3%) scale(1.02);
+            opacity: 0.45;
+        }
+    }
+    @keyframes download-blob-2 {
+        0%, 100% {
+            border-radius: 40% 60% 60% 40% / 70% 30% 70% 30%;
+            transform: translate(0, 0) scale(1);
+            opacity: 0.25;
+        }
+        33% {
+            border-radius: 60% 40% 30% 70% / 40% 70% 50% 60%;
+            transform: translate(-8%, 4%) scale(1.08);
+            opacity: 0.35;
+        }
+        66% {
+            border-radius: 30% 70% 70% 30% / 50% 50% 50% 50%;
+            transform: translate(6%, -5%) scale(0.92);
+            opacity: 0.2;
+        }
+    }
+    @keyframes download-shimmer {
+        0% { transform: translateX(-80%) skewX(-12deg); opacity: 0; }
+        15% { opacity: 0.1; }
+        50% { transform: translateX(50%) skewX(-12deg); opacity: 0.06; }
+        85% { opacity: 0.08; }
+        100% { transform: translateX(180%) skewX(-12deg); opacity: 0; }
+    }
+    .download-accent-blob-1 {
+        animation: download-blob-1 12s ease-in-out infinite;
+    }
+    .download-accent-blob-2 {
+        animation: download-blob-2 14s ease-in-out infinite 1.5s;
+    }
+    .download-accent-shimmer {
+        animation: download-shimmer 8s ease-in-out infinite 2s;
+    }
+
 }
 
 

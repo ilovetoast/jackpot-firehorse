@@ -12,7 +12,7 @@
  * @param {Function} props.onVideoPreviewRetry - Callback for video preview retry
  */
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
-import { Activity, AlertCircle, Slash, RefreshCw } from 'lucide-react'
+import { Activity, AlertCircle, Slash, RefreshCw, History } from 'lucide-react'
 
 export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0, onVideoPreviewRetry = null }) {
     // Format event type to human-readable description
@@ -55,6 +55,14 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.brand_compliance.incomplete': 'Brand alignment incomplete — missing required metadata',
             'asset.brand_compliance.not_applicable': 'Brand alignment not configured for this brand',
             'asset.brand_compliance.file_type_unsupported': 'Brand alignment not available for this file type',
+            // Version lifecycle: when a new version becomes the active one
+            'asset.version.created': metadata?.version_number != null
+                ? `Version switched over to v${metadata.version_number}`
+                : 'Version switched over',
+            'asset.version.restored': metadata?.version_number != null
+                ? `Version switched over to v${metadata.version_number} (restored)`
+                : 'Version switched over (restored)',
+            'asset.replaced': 'File replaced',
         }
         
         return eventMap[eventType] || eventType
@@ -92,6 +100,15 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
     }
 
     const getEventIcon = (eventType, allEvents = []) => {
+        // Version switched over events (version lifecycle)
+        if (eventType === 'asset.version.created' || eventType === 'asset.version.restored' || eventType === 'asset.replaced') {
+            return {
+                icon: History,
+                color: 'text-indigo-500',
+                bgColor: 'bg-indigo-50',
+            }
+        }
+
         // Brand compliance events (Lucide icons)
         if (eventType === 'asset.brand_compliance.evaluated') {
             return { icon: Activity, color: 'text-green-500', bgColor: 'bg-green-50' }

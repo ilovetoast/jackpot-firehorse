@@ -4,7 +4,14 @@ import { initPerformanceTracking } from './utils/performanceTracking'
 
 initPerformanceTracking()
 
-import { createInertiaApp } from '@inertiajs/react'
+import { createInertiaApp, router } from '@inertiajs/react'
+
+// Grid timing: record visit start for navigation-to-render diagnostic
+router.on('start', () => {
+    if (typeof window !== 'undefined') {
+        window.__inertiaVisitStart = performance.now()
+    }
+})
 import { createRoot } from 'react-dom/client'
 import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'
@@ -12,6 +19,7 @@ import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
 import { BucketProvider } from './contexts/BucketContext'
+import { SelectionProvider } from './contexts/SelectionContext'
 
 if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPwaInitialized) {
     window.__jackpotPwaInitialized = true
@@ -75,7 +83,7 @@ createInertiaApp({
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
                 <FlashMessage />
                 <AssetProcessingTray />
-                <DownloadBucketBarGlobal />
+                {false && <DownloadBucketBarGlobal />}
             </>
         )
     },
@@ -84,7 +92,9 @@ createInertiaApp({
         root.render(
             <BrandThemeProvider initialPage={props.initialPage}>
                 <BucketProvider>
-                    <App {...props} />
+                    <SelectionProvider>
+                        <App {...props} />
+                    </SelectionProvider>
                 </BucketProvider>
             </BrandThemeProvider>
         )

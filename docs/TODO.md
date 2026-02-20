@@ -1,5 +1,48 @@
 Must Have
 
+## Phase 11 — Bulk Metadata System Refactor
+
+We will:
+
+Create proper route:
+
+- `POST /assets/bulk-update`
+
+Create:
+
+- `BulkMetadataController@update`
+
+Rebuild BulkMetadataService with:
+
+- Version-aware logic
+- Category change handling
+- ApprovalResolver properly injected
+- Permission checks server-side
+- Per-item result reporting
+- Transaction wrapping
+
+Return structured response:
+
+```json
+{
+  "success": 12,
+  "failed": [
+    { "id": "...", "error": "..." }
+  ]
+}
+```
+
+Frontend:
+
+- Remove GET fallback
+- Call correct POST endpoint
+- Use proper error reporting
+- Clear selection on success
+
+🚫 For Now: Bulk metadata submit is disabled until Phase 11 backend is wired.
+
+---
+
 - versioning fixed, test all options, restore, new verions file type diff, delete, restore
 - performance stats
 - glacvier for version and archive

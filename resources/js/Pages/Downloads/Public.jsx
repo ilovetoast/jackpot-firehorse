@@ -1,10 +1,9 @@
 /**
  * Phase D4 — Public download page (trust signals).
- * D7: Password-protected view + branded skinning (logo, accent, headline, subtext).
- * D10.1: When show_landing_layout is true, the SAME branded wrapper is used for ALL states.
- * D-SHARE: Share page (state=ready) with download info, Download button, Share via email, plan-based footer.
+ * D7: Password-protected view + branded skinning.
+ * D10.1: Public layout pulls design from Brand Settings > Public Pages (logo, accent color, background).
+ * Clean design: white background, big typography, brand name/logo, CTAs in brand colors.
  */
-import { useState } from 'react'
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
 
@@ -44,7 +43,6 @@ export default function DownloadsPublic({
   zip_size_bytes = null,
   expires_at = null,
   file_url = '',
-  share_email_url = '',
   show_jackpot_promo = false,
   footer_promo = {},
 }) {
@@ -53,23 +51,14 @@ export default function DownloadsPublic({
   const isReady = state === 'ready'
   const isPasswordRequired = password_required && unlock_url && download_id
 
-  const [shareModalOpen, setShareModalOpen] = useState(false)
-
   const accentColor = branding_options?.accent_color || '#4F46E5'
-  const overlayColor = branding_options?.overlay_color || accentColor
   const logoUrl = branding_options?.logo_url || null
-  const headline = branding_options?.headline || null
-  const subtext = branding_options?.subtext || null
+  const brandName = branding_options?.brand_name || 'Jackpot'
   const backgroundImageUrl = branding_options?.background_image_url || null
-  const hasBranding = show_landing_layout || logoUrl || headline || subtext || accentColor
+  const useWhiteBackground = branding_options?.use_white_background !== false
 
   const { data, setData, post, processing, error: formError } = useForm({
     password: '',
-  })
-
-  const shareForm = useForm({
-    to: '',
-    message: '',
   })
 
   const handleUnlock = (e) => {
@@ -77,75 +66,38 @@ export default function DownloadsPublic({
     post(unlock_url)
   }
 
-  const handleShareEmail = (e) => {
-    e.preventDefault()
-    shareForm.post(share_email_url, {
-      preserveScroll: true,
-      onSuccess: () => {
-        setShareModalOpen(false)
-        shareForm.reset()
-      },
-    })
-  }
+  // Clean public layout: 50/50 split on md+, left = content, right = accent panel with radiant animation
+  const hasBackgroundImage = !!backgroundImageUrl && !useWhiteBackground
 
-  const isLandingLayout = show_landing_layout
-  const containerClass = isLandingLayout
-    ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12 relative'
-    : hasBranding
-      ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12'
-      : 'min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12'
-
-  const accentStyle = hasBranding ? { '--accent': accentColor } : {}
-
-  const backgroundSection = isLandingLayout && (
-    <>
-      <div
-        className={backgroundImageUrl ? 'fixed inset-0 bg-cover bg-center bg-no-repeat' : 'absolute inset-0'}
-        style={backgroundImageUrl ? { backgroundImage: `url(${backgroundImageUrl})` } : { backgroundColor: overlayColor }}
-        aria-hidden
-      />
-      <div
-        className={backgroundImageUrl ? 'fixed inset-0' : 'absolute inset-0'}
-        style={{
-          backgroundColor: overlayColor,
-          opacity: backgroundImageUrl ? 0.65 : 1,
-        }}
-        aria-hidden
-      />
-    </>
-  )
-
-  const textClass = (ready) =>
-    isLandingLayout && !ready ? 'text-white drop-shadow-md' : 'text-gray-900'
-  const textMutedClass = (ready) =>
-    isLandingLayout && !ready ? 'text-white/95 drop-shadow' : 'text-gray-600'
+  const textClass = 'text-gray-900'
+  const textMutedClass = 'text-gray-500'
 
   return (
-    <div className={containerClass} style={accentStyle}>
-      {backgroundSection}
-      <div className={`max-w-md w-full text-center ${isLandingLayout ? 'relative z-10' : ''}`}>
-        {hasBranding && logoUrl && (
-          <div className="flex justify-center mb-6">
+    <div className="min-h-screen flex flex-col bg-white">
+      <div className="flex-1 flex flex-col md:flex-row">
+      {/* Left: download content — full width on mobile (centered), 50% on md+ (block centered, text left-aligned) */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 md:px-12 lg:px-16">
+        <div className="w-full max-w-md md:max-w-xl text-center md:text-left">
+        {/* Brand: logo or name */}
+        <div className="mb-10 text-center md:text-left">
+          {logoUrl ? (
             <img
               src={logoUrl}
               alt=""
-              className={`object-contain object-center ${isLandingLayout ? 'max-h-24 w-auto' : 'h-12'}`}
-              style={isLandingLayout ? { maxHeight: '96px' } : {}}
+              className="mx-auto md:mx-0 h-14 w-auto max-h-20 object-contain object-center"
             />
-          </div>
-        )}
-        {hasBranding && headline && (
-          <h2 className={`font-medium mb-1 ${isLandingLayout ? 'text-xl text-white drop-shadow-md' : 'text-lg text-gray-900'}`}>{headline}</h2>
-        )}
-        {hasBranding && subtext && (
-          <p className={`mb-6 ${isLandingLayout ? 'text-sm text-white/95 drop-shadow' : 'text-sm text-gray-600'}`}>{subtext}</p>
-        )}
+          ) : (
+            <span className="text-xl font-semibold tracking-tight text-gray-900 font-sans">{brandName}</span>
+          )}
+        </div>
 
         {isPasswordRequired && (
           <>
-            <h1 className={`font-semibold text-xl ${textClass(false)}`}>This download is protected.</h1>
-            <p className={`mt-2 text-sm ${textMutedClass(false)}`}>{message || 'Enter the password to continue.'}</p>
-            <form onSubmit={handleUnlock} className="mt-6 text-left">
+            <h1 className="mt-2 text-2xl font-semibold text-gray-900 font-sans">
+              This download is protected
+            </h1>
+            <p className="mt-2 text-sm text-gray-500">{message || 'Enter the password to continue.'}</p>
+            <form onSubmit={handleUnlock} className="mt-8 max-w-xs mx-auto md:mx-0 text-left">
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Password
               </label>
@@ -154,7 +106,7 @@ export default function DownloadsPublic({
                 type="password"
                 value={data.password}
                 onChange={(e) => setData('password', e.target.value)}
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 sm:text-sm"
                 autoComplete="current-password"
                 autoFocus
               />
@@ -166,8 +118,8 @@ export default function DownloadsPublic({
               <button
                 type="submit"
                 disabled={processing}
-                className="mt-4 w-full rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white shadow-sm focus:ring-2 focus:ring-offset-2"
-                style={{ backgroundColor: accentColor || '#4F46E5' }}
+                className="mt-4 w-full rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-sm focus:ring-2 focus:ring-offset-2"
+                style={{ backgroundColor: accentColor }}
               >
                 {processing ? 'Checking…' : 'Unlock'}
               </button>
@@ -177,62 +129,56 @@ export default function DownloadsPublic({
 
         {isReady && (
           <>
-            <h1 className={`text-xl font-semibold ${textClass(true)}`}>
+            <h1 className="mt-3 text-2xl font-medium tracking-tight text-gray-900 sm:text-3xl font-sans">
               {download_title || 'Your download is ready'}
             </h1>
-            <div className={`mt-4 text-sm ${textMutedClass(true)} space-y-1`}>
+            <div className="mt-4 flex flex-wrap items-center justify-center md:justify-start gap-x-3 gap-y-1 text-xs text-gray-500 font-sans">
               {asset_count != null && asset_count > 0 && (
-                <p>{asset_count} {asset_count === 1 ? 'file' : 'files'}</p>
+                <span>{asset_count} {asset_count === 1 ? 'file' : 'files'}</span>
               )}
               {zip_size_bytes != null && zip_size_bytes > 0 && (
-                <p>{formatBytes(zip_size_bytes)}</p>
+                <>
+                  {(asset_count != null && asset_count > 0) && <span className="text-gray-300">·</span>}
+                  <span>{formatBytes(zip_size_bytes)}</span>
+                </>
               )}
               {expires_at && (
-                <p>Expires {formatExpiration(expires_at)}</p>
+                <>
+                  {((asset_count != null && asset_count > 0) || (zip_size_bytes != null && zip_size_bytes > 0)) && <span className="text-gray-300">·</span>}
+                  <span>Expires {formatExpiration(expires_at)}</span>
+                </>
               )}
             </div>
-            <div className="mt-6 space-y-3">
+            <div className="mt-8">
               <a
                 href={file_url}
-                className="inline-block w-full rounded-md border border-transparent px-4 py-3 text-sm font-medium text-white shadow-sm focus:ring-2 focus:ring-offset-2"
-                style={{ backgroundColor: accentColor || '#4F46E5' }}
+                className="inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-sm focus:ring-2 focus:ring-offset-2"
+                style={{ backgroundColor: accentColor }}
               >
                 Download
               </a>
-              {share_email_url && (
-                <button
-                  type="button"
-                  onClick={() => setShareModalOpen(true)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                >
-                  Share via email
-                </button>
-              )}
             </div>
-            {flash.share_email_sent && (
-              <p className="mt-4 text-sm text-green-600">Email sent.</p>
-            )}
           </>
         )}
 
         {!isPasswordRequired && !isReady && (
           <>
             {isProcessing && (
-              <div className="flex justify-center mb-6">
+              <div className="flex justify-center md:justify-start mb-6">
                 <svg
                   className="animate-spin h-12 w-12"
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
                   viewBox="0 0 24 24"
                   aria-hidden="true"
-                  style={isLandingLayout ? { color: 'rgba(255,255,255,0.9)' } : { color: accentColor || '#4F46E5' }}
+                  style={{ color: accentColor }}
                 >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               </div>
             )}
-            <h1 className={`text-xl font-semibold ${textClass(false)}`}>
+            <h1 className={`text-2xl font-semibold font-sans ${textClass}`}>
               {isProcessing ? "We're preparing your download"
                 : state === 'not_found' ? 'Download not found'
                 : state === 'expired' ? 'This download has expired'
@@ -241,9 +187,9 @@ export default function DownloadsPublic({
                 : state === 'failed' ? 'Download not available'
                 : 'Download not available'}
             </h1>
-            <p className={`mt-2 text-sm ${textMutedClass(false)}`}>{message}</p>
+            <p className={`mt-2 text-sm ${textMutedClass}`}>{message}</p>
             {isProcessing && (
-              <p className={`mt-4 text-xs ${isLandingLayout ? 'text-white/80' : 'text-gray-500'}`}>
+              <p className="mt-4 text-xs text-gray-500">
                 {is_zip_stalled
                   ? "This download is taking longer than usual. We're still working on it."
                   : zip_total_chunks != null && zip_total_chunks > 0
@@ -257,75 +203,54 @@ export default function DownloadsPublic({
             )}
           </>
         )}
+        </div>
+      </div>
+
+      {/* Right: accent panel — background visual (overlay blend) + fluid blobs + shimmer, hidden on mobile */}
+      <div
+        className="hidden md:flex md:w-1/2 lg:w-1/2 relative overflow-hidden"
+        style={{ backgroundColor: accentColor }}
+        aria-hidden
+      >
+        {/* Background visual — covers accent area, blend mode overlay */}
+        {hasBackgroundImage && (
+          <div
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat mix-blend-overlay opacity-60"
+            style={{ backgroundImage: `url(${backgroundImageUrl})` }}
+          />
+        )}
+        {/* Fluid morphing blobs — organic, abstract shapes */}
+        <div
+          className="absolute w-[70%] h-[70%] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 download-accent-blob-1 pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%)' }}
+        />
+        <div
+          className="absolute w-[55%] h-[55%] top-1/3 right-1/4 download-accent-blob-2 pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 65%)' }}
+        />
+        {/* Subtle jackpot shimmer — soft sweep across */}
+        <div
+          className="absolute inset-0 w-1/3 download-accent-shimmer pointer-events-none"
+          style={{
+            background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.12) 45%, rgba(255,255,255,0.08) 55%, transparent 100%)',
+          }}
+        />
+      </div>
       </div>
 
       {/* Footer: plan-based promo (FREE only) */}
       {show_jackpot_promo && footer_promo && (footer_promo.line1 || footer_promo.line2) && (
-        <footer className={`mt-auto py-6 text-center text-sm ${isLandingLayout ? 'text-white/80 relative z-10' : 'text-gray-500'}`}>
+        <footer className="mt-auto py-6 text-center text-sm text-gray-500">
           {footer_promo.line1 && <p>{footer_promo.line1}</p>}
           {footer_promo.line2 && footer_promo.signup_url && (
             <p className="mt-1">
-              <a href={footer_promo.signup_url} className={isLandingLayout ? 'text-white underline' : 'text-indigo-600 hover:text-indigo-500'}>
+              <a href={footer_promo.signup_url} className="text-indigo-600 hover:text-indigo-500 underline">
                 {footer_promo.line2}
               </a>
             </p>
           )}
           {footer_promo.line2 && !footer_promo.signup_url && <p className="mt-1">{footer_promo.line2}</p>}
         </footer>
-      )}
-
-      {/* Share via email modal */}
-      {shareModalOpen && share_email_url && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" aria-modal="true" role="dialog">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900">Share via email</h3>
-            <form onSubmit={handleShareEmail} className="mt-4 space-y-4">
-              <div>
-                <label htmlFor="share-to" className="block text-sm font-medium text-gray-700">To</label>
-                <input
-                  id="share-to"
-                  type="email"
-                  required
-                  value={shareForm.data.to}
-                  onChange={(e) => shareForm.setData('to', e.target.value)}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                  placeholder="email@example.com"
-                />
-                {(shareForm.errors?.to || pageErrors?.to) && (
-                  <p className="mt-1 text-sm text-red-600">{shareForm.errors.to || pageErrors.to}</p>
-                )}
-              </div>
-              <div>
-                <label htmlFor="share-message" className="block text-sm font-medium text-gray-700">Optional message</label>
-                <textarea
-                  id="share-message"
-                  rows={3}
-                  value={shareForm.data.message}
-                  onChange={(e) => shareForm.setData('message', e.target.value)}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                  placeholder="Add a personal note..."
-                />
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShareModalOpen(false)}
-                  className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={shareForm.processing}
-                  className="rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white shadow-sm"
-                  style={{ backgroundColor: accentColor || '#4F46E5' }}
-                >
-                  {shareForm.processing ? 'Sending…' : 'Send'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
       )}
     </div>
   )

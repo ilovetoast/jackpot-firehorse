@@ -14,12 +14,13 @@
  */
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
+import { useSelectionOptional } from '../contexts/SelectionContext'
 import { EyeSlashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default', cardStyle = 'default' }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default', cardStyle = 'default', selectionAssetType = 'asset' }) {
     const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
@@ -91,6 +92,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     // Phase V-1: Hover preview state (desktop only)
     const [isHovering, setIsHovering] = useState(false)
     // Phase D1: Card hover for bucket checkbox visibility
+    // Phase 2 Selection: unified selection store (checkbox checked state from SelectionContext)
+    const selection = useSelectionOptional()
     const [isCardHovering, setIsCardHovering] = useState(false)
     const [previewLoaded, setPreviewLoaded] = useState(false)
     const videoPreviewRef = useRef(null)
@@ -301,34 +304,62 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                 
                 {/* Phase 2 – Step 7: Bulk selection checkbox */}
                 {onBulkSelect && (
-                    <div className="absolute top-2 left-2 z-10">
-                        <input
-                            type="checkbox"
-                            checked={isBulkSelected}
-                            onChange={(e) => {
-                                e.stopPropagation()
-                                onBulkSelect()
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
-                        />
+                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isBulkSelected ? 'scale-105' : 'scale-100'}`}>
+                        <div
+                            className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
+                                isBulkSelected ? 'bg-[var(--primary-color)]' : 'bg-white'
+                            } ${isBulkSelected ? 'ring-2 ring-[var(--primary-color)] ring-offset-0' : ''}`}
+                            style={{ '--primary-color': primaryColor }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={isBulkSelected}
+                                onChange={(e) => {
+                                    e.stopPropagation()
+                                    onBulkSelect()
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`block h-4 w-4 min-h-0 min-w-0 shrink-0 aspect-square rounded p-0 m-0 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm transition-all duration-150 ${
+                                    isBulkSelected ? 'border-[var(--primary-color)]' : 'border-gray-300'
+                                }`}
+                                style={{ '--primary-color': primaryColor }}
+                            />
+                        </div>
                     </div>
                 )}
 
-                {/* Phase D1: Download bucket checkbox. Only affordance for add/remove; visible on hover or when selected. */}
-                {!onBulkSelect && onBucketToggle && (
-                    <div className={`absolute top-2 left-2 z-10 transition-opacity ${isCardHovering || isInBucket ? 'opacity-100' : 'opacity-0'}`}>
-                        <input
-                            type="checkbox"
-                            checked={isInBucket}
-                            onChange={() => {}}
-                            onClick={(e) => {
-                                e.stopPropagation()
-                                onBucketToggle()
-                            }}
-                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
-                            aria-label={isInBucket ? 'Remove from download' : 'Add to download'}
-                        />
+                {/* Phase D1/D3: Download bucket checkbox. SelectionContext is source of truth. Show when selection exists (or legacy onBucketToggle). */}
+                {!onBulkSelect && (selection || onBucketToggle) && (
+                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isCardHovering || (selection?.isSelected(asset.id) ?? isInBucket) ? 'opacity-100' : 'opacity-0'} ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'scale-105' : 'scale-100'}`}>
+                        <div
+                            className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
+                                (selection?.isSelected(asset.id) ?? isInBucket) ? 'bg-[var(--primary-color)]' : 'bg-white'
+                            } ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'ring-2 ring-[var(--primary-color)] ring-offset-0' : ''}`}
+                            style={{ '--primary-color': primaryColor }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={selection ? selection.isSelected(asset.id) : isInBucket}
+                                onChange={() => {}}
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    if (selection) {
+                                        selection.toggleItem({
+                                            id: asset.id,
+                                            type: selectionAssetType,
+                                            name: asset.title ?? asset.original_filename ?? '',
+                                            thumbnail_url: asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? null,
+                                            category_id: asset.metadata?.category_id ?? asset.category_id ?? null,
+                                        })
+                                    }
+                                }}
+                                className={`block h-4 w-4 min-h-0 min-w-0 shrink-0 aspect-square rounded p-0 m-0 cursor-pointer bg-white shadow-sm transition-all duration-150 ${
+                                    (selection?.isSelected(asset.id) ?? isInBucket) ? 'border-[var(--primary-color)]' : 'border-gray-300'
+                                }`}
+                                style={{ accentColor: primaryColor, '--primary-color': primaryColor }}
+                                aria-label={(selection ? selection.isSelected(asset.id) : isInBucket) ? 'Remove from download' : 'Add to download'}
+                            />
+                        </div>
                     </div>
                 )}
 

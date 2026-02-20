@@ -102,20 +102,23 @@ class DownloadPublicPageBrandingResolver
 
     /**
      * Default Jackpot branding (FREE plan). Used for 404 or when no brand template applies.
+     * Public layout: white background, Jackpot as brand, primary color for CTAs.
      */
     protected function defaultJackpotBranding(string $message = ''): array
     {
         $appName = config('app.name', 'Jackpot');
 
         return [
-            'show_landing_layout' => false,
+            'show_landing_layout' => true,
             'branding_options' => [
                 'logo_url' => null,
+                'brand_name' => $appName,
                 'accent_color' => '#4F46E5',
                 'overlay_color' => '#4F46E5',
                 'headline' => $appName,
                 'subtext' => $message ?: 'Download',
                 'background_image_url' => null,
+                'use_white_background' => true,
             ],
             'show_jackpot_promo' => true,
             'footer_promo' => [
@@ -128,18 +131,23 @@ class DownloadPublicPageBrandingResolver
 
     /**
      * Neutral branding (PAID plan, no brand branding). No Jackpot promotional copy.
+     * Public layout: white background, Jackpot as brand name for consistency.
      */
     protected function neutralBranding(string $message = ''): array
     {
+        $appName = config('app.name', 'Jackpot');
+
         return [
-            'show_landing_layout' => false,
+            'show_landing_layout' => true,
             'branding_options' => [
                 'logo_url' => null,
+                'brand_name' => $appName,
                 'accent_color' => '#4F46E5',
                 'overlay_color' => '#4F46E5',
-                'headline' => '',
+                'headline' => $appName,
                 'subtext' => $message ?: 'Download',
                 'background_image_url' => null,
+                'use_white_background' => true,
             ],
             'show_jackpot_promo' => false,
             'footer_promo' => [],
@@ -157,10 +165,19 @@ class DownloadPublicPageBrandingResolver
         $overlayColor = $accentColor;
 
         $logoUrl = null;
+        $logoMode = $settings['logo_mode'] ?? null;
         $logoAssetId = $settings['logo_asset_id'] ?? null;
-        if ($logoAssetId && Route::has('downloads.public.logo')) {
-            $logoAsset = Asset::where('id', $logoAssetId)->where('brand_id', $brand->id)->first();
-            if ($logoAsset && $logoAsset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+        // Infer mode for backward compat: logo_asset_id set → custom, else → brand
+        if (! $logoMode) {
+            $logoMode = $logoAssetId ? 'custom' : 'brand';
+        }
+        if ($logoMode !== 'none' && Route::has('downloads.public.logo')) {
+            if ($logoMode === 'custom' && $logoAssetId) {
+                $logoAsset = Asset::where('id', $logoAssetId)->where('brand_id', $brand->id)->first();
+                if ($logoAsset && $logoAsset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+                    $logoUrl = route('downloads.public.logo', ['download' => $download->id]);
+                }
+            } elseif ($logoMode === 'brand' && ($brand->logo_id ?? null)) {
                 $logoUrl = route('downloads.public.logo', ['download' => $download->id]);
             }
         }
@@ -176,11 +193,13 @@ class DownloadPublicPageBrandingResolver
 
         return [
             'logo_url' => $logoUrl,
+            'brand_name' => $brand->name ?? null,
             'accent_color' => $accentColor,
             'overlay_color' => $overlayColor,
             'headline' => $headline,
             'subtext' => $subtext,
             'background_image_url' => $backgroundImageUrl,
+            'use_white_background' => empty($backgroundIds),
         ];
     }
 
@@ -210,22 +229,25 @@ class DownloadPublicPageBrandingResolver
      */
     protected function normalizeLegacyBranding(array $legacy, Download $download): array
     {
+        $brand = $download->getLandingPageTemplateBrand();
         $out = [
             'logo_url' => $legacy['logo_url'] ?? null,
+            'brand_name' => $brand?->name ?? config('app.name', 'Jackpot'),
             'accent_color' => $legacy['accent_color'] ?? '#4F46E5',
             'overlay_color' => $legacy['overlay_color'] ?? $legacy['accent_color'] ?? '#4F46E5',
             'headline' => $legacy['headline'] ?? '',
             'subtext' => $legacy['subtext'] ?? '',
             'background_image_url' => $legacy['background_image_url'] ?? null,
+            'use_white_background' => empty($legacy['background_image_url']),
         ];
 
         if ($out['background_image_url'] === null && Route::has('downloads.public.background')) {
-            $brand = $download->getLandingPageTemplateBrand();
             if ($brand !== null) {
                 $settings = $brand->download_landing_settings ?? [];
                 $backgroundIds = $settings['background_asset_ids'] ?? [];
                 if (is_array($backgroundIds) && ! empty($backgroundIds)) {
                     $out['background_image_url'] = route('downloads.public.background', ['download' => $download->id]);
+                    $out['use_white_background'] = false;
                 }
             }
         }

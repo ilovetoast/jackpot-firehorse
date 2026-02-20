@@ -833,6 +833,11 @@ export default function DownloadsIndex({
                             ? `Accessed ${d.access_count} time${d.access_count !== 1 ? 's' : ''}`
                             : 'Not accessed yet'}
                         </span>
+                        {d.landing_page_views != null && d.landing_page_views > 0 && (
+                          <span className="text-sm text-slate-500" title="Landing page views">
+                            {d.landing_page_views} landing view{d.landing_page_views !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         {isReady && d.public_url && (
@@ -1169,6 +1174,11 @@ export default function DownloadsIndex({
                                     ? `Accessed ${d.access_count} time${d.access_count !== 1 ? 's' : ''}`
                                     : 'Not accessed yet'}
                                 </span>
+                                {d.landing_page_views != null && d.landing_page_views > 0 && (
+                                  <span className="text-slate-500 text-xs" title="Landing page views">
+                                    {d.landing_page_views} landing view{d.landing_page_views !== 1 ? 's' : ''}
+                                  </span>
+                                )}
                               </div>
                               {d.zip_size_bytes != null && d.zip_size_bytes > 0 && (
                                 <span className="text-slate-500">{formatBytes(d.zip_size_bytes)}</span>

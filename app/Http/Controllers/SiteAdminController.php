@@ -233,6 +233,11 @@ class SiteAdminController extends Controller
                     })
                     ->where('last_failed_at', '>=', now()->subDay())
                     ->count(),
+                // Download landing page views (site-wide)
+                'download_landing_page_views_total' => \App\Models\ActivityEvent::where('event_type', 'download.landing.page.viewed')->count(),
+                'download_landing_page_views_24h' => \App\Models\ActivityEvent::where('event_type', 'download.landing.page.viewed')
+                    ->where('created_at', '>=', now()->subDay())
+                    ->count(),
                 // Phase U-1: Upload failure stats
                 'upload_failures_last_24h' => UploadSession::withTrashed()
                     ->whereNotNull('last_failed_at')

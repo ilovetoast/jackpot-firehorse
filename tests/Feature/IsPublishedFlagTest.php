@@ -220,7 +220,7 @@ class IsPublishedFlagTest extends TestCase
         ]);
 
         // Test Deliverables index endpoint
-        $response = $this->get('/app/deliverables');
+        $response = $this->get('/app/executions');
         $response->assertStatus(200);
         $data = $response->inertiaPage();
         
@@ -276,7 +276,7 @@ class IsPublishedFlagTest extends TestCase
         ]);
 
         // Test Deliverables index endpoint with unpublished filter
-        $response = $this->get('/app/deliverables?lifecycle=unpublished');
+        $response = $this->get('/app/executions?lifecycle=unpublished');
         $response->assertStatus(200);
         $data = $response->inertiaPage();
         

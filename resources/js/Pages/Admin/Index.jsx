@@ -149,7 +149,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         {
             heading: 'Technical & System Operations',
             tools: [
-                { name: 'Download Failures', icon: ArrowDownTrayIcon, description: stats ? `Failed: ${stats.download_failures_last_24h ?? 0} (24h), Escalated: ${stats.download_failures_escalated ?? 0}, Awaiting: ${stats.download_failures_awaiting_review ?? 0}` : 'Failed ZIP builds, escalated cases, AI assessments', href: '/app/admin/download-failures' },
+                { name: 'Download Failures', icon: ArrowDownTrayIcon, description: stats ? `Failed: ${stats.download_failures_last_24h ?? 0} (24h), Escalated: ${stats.download_failures_escalated ?? 0}, Awaiting: ${stats.download_failures_awaiting_review ?? 0} · Landing views: ${stats.download_landing_page_views_24h ?? 0} (24h)` : 'Failed ZIP builds, escalated cases, AI assessments, landing page views', href: '/app/admin/download-failures' },
                 { name: 'Upload Failures', icon: CloudArrowUpIcon, description: stats ? `Failed: ${stats.upload_failures_last_24h ?? 0} (24h), Escalated: ${stats.upload_failures_escalated ?? 0}, Awaiting: ${stats.upload_failures_awaiting_review ?? 0}` : 'Failed uploads, escalated cases, AI assessments', href: '/app/admin/upload-failures' },
                 { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
                 { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },

@@ -458,7 +458,7 @@ class BrandComplianceTest extends TestCase
         // Verify sort params are accepted: endpoint returns 200 with compliance_high
         $response = $this->actingAs($this->user)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
-            ->get("/app/deliverables?category={$this->category->slug}&sort=compliance_high&sort_direction=desc");
+            ->get("/app/executions?category={$this->category->slug}&sort=compliance_high&sort_direction=desc");
 
         $response->assertStatus(200);
         $props = $response->inertiaPage()['props'] ?? [];
@@ -497,7 +497,7 @@ class BrandComplianceTest extends TestCase
 
         $response = $this->actingAs($this->user)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
-            ->get("/app/deliverables?category={$this->category->slug}&compliance_filter=unscored");
+            ->get("/app/executions?category={$this->category->slug}&compliance_filter=unscored");
 
         $response->assertStatus(200);
         $assets = $response->inertiaPage()['props']['assets'] ?? [];

@@ -418,7 +418,17 @@ class AssetThumbnailController extends Controller
         }
         $brand->refresh();
         $brandSettings = $brand->download_landing_settings ?? [];
+        $logoMode = $brandSettings['logo_mode'] ?? null;
         $logoAssetId = $brandSettings['logo_asset_id'] ?? null;
+        if (! $logoMode) {
+            $logoMode = $logoAssetId ? 'custom' : 'brand';
+        }
+        if ($logoMode === 'none') {
+            abort(404, 'Logo not available.');
+        }
+        if (! $logoAssetId && $logoMode === 'brand') {
+            $logoAssetId = $brand->logo_id ?? null;
+        }
         if (! $logoAssetId) {
             abort(404, 'Logo not available.');
         }
@@ -475,12 +485,17 @@ class AssetThumbnailController extends Controller
 
         $brand->refresh();
         $settings = $brand->download_landing_settings ?? [];
+        $logoMode = $settings['logo_mode'] ?? null;
         $logoAssetId = $settings['logo_asset_id'] ?? null;
-
-        if (! $logoAssetId) {
+        if (! $logoMode) {
+            $logoMode = $logoAssetId ? 'custom' : 'brand';
+        }
+        if ($logoMode === 'none') {
+            abort(404, 'Logo not available.');
+        }
+        if (! $logoAssetId && $logoMode === 'brand') {
             $logoAssetId = $brand->logo_id ?? null;
         }
-
         if (! $logoAssetId) {
             abort(404, 'Logo not available.');
         }

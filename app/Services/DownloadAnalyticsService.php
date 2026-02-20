@@ -20,8 +20,10 @@ class DownloadAnalyticsService
 {
     public const ACCESS_GRANTED_EVENT = 'download.access.granted';
 
+    public const LANDING_PAGE_VIEWED_EVENT = 'download.landing.page.viewed';
+
     /**
-     * Summary stats for a download: total downloads, unique users (null for public), first/last, source breakdown.
+     * Summary stats for a download: total downloads, unique users (null for public), first/last, source breakdown, landing page views.
      */
     public function summaryForDownload(Download $download): array
     {
@@ -60,8 +62,15 @@ class DownloadAnalyticsService
             $sourceBreakdown[$download->source === DownloadSource::SINGLE_ASSET ? 'single_asset' : 'zip'] = $totalDownloads;
         }
 
+        $landingPageViews = ActivityEvent::query()
+            ->where('subject_type', $download->getMorphClass())
+            ->where('subject_id', (string) $download->id)
+            ->where('event_type', self::LANDING_PAGE_VIEWED_EVENT)
+            ->count();
+
         return [
             'total_downloads' => $totalDownloads,
+            'landing_page_views' => $landingPageViews,
             'unique_users' => $uniqueUsers,
             'first_downloaded_at' => $firstDownloadedAt ? Carbon::parse($firstDownloadedAt) : null,
             'last_downloaded_at' => $lastDownloadedAt ? Carbon::parse($lastDownloadedAt) : null,

@@ -386,7 +386,7 @@ export default function AssetImagePicker({
                       source === 'deliverables' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    Deliverables
+                    Executions
                   </button>
                 </div>
               </div>

@@ -33,7 +33,12 @@ class PublicCollectionPageBrandingResolver
         $primaryColor = $brand->primary_color ?? '#4F46E5';
 
         $logoUrl = null;
-        if (Route::has('public.collections.logo')) {
+        $logoMode = $settings['logo_mode'] ?? null;
+        $logoAssetId = $settings['logo_asset_id'] ?? null;
+        if (! $logoMode) {
+            $logoMode = $logoAssetId ? 'custom' : 'brand';
+        }
+        if ($logoMode !== 'none' && Route::has('public.collections.logo')) {
             $logoUrl = route('public.collections.logo', [
                 'brand_slug' => $brand->slug,
                 'collection_slug' => $collection->slug,

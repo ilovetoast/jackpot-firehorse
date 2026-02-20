@@ -115,8 +115,16 @@ sudo -u "$APP_USER" "$COMPOSER" install \
 echo "⚙️ Running migrations"
 sudo -u "$APP_USER" "$PHP" artisan migrate --force
 
-echo "⚙️ Optimizing"
-#sudo -u "$APP_USER" "$PHP" artisan optimize
+############################################
+# CACHE CLEAR + REBUILD (MATCH WEB DEPLOY)
+############################################
+# Ensures workers pick up fresh config (e.g. file_types.php unsupported list).
+# Run in release dir BEFORE atomic switch so new workers get correct config.
+echo "🗑️ Clearing application cache"
+sudo -u "$APP_USER" "$PHP" artisan optimize:clear
+
+echo "⚙️ Optimizing (config cache for workers)"
+sudo -u "$APP_USER" "$PHP" artisan optimize
 
 ############################################
 # DEPLOY METADATA
@@ -142,19 +150,20 @@ echo "🔁 current → $RELEASE_DIR"
 ############################################
 # GRACEFUL WORKER RESTART (NEW CODE)
 ############################################
-# When Horizon is terminated on deploy, workers restart cleanly.
+# Minimize interruption: workers finish current job before exiting.
 # queue:restart signals workers to finish current job then exit.
 # horizon:terminate gracefully stops Horizon (workers drain and restart).
 # Chain interruption: Jobs in Bus::chain() may be interrupted mid-chain.
 # Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
 # See docs/DEPLOY_INTERRUPTION_BEHAVIOR.md
 
-if command -v php >/dev/null; then
-  echo "♻️ Signaling queue workers to restart"
-  php artisan queue:restart || true
-  if php artisan list 2>/dev/null | grep -q horizon; then
-    echo "♻️ Gracefully terminating Horizon"
-    php artisan horizon:terminate || true
+cd "$RELEASE_DIR"
+if command -v "$PHP" >/dev/null; then
+  echo "♻️ Signaling queue workers to restart (finish current job, then exit)"
+  sudo -u "$APP_USER" "$PHP" artisan queue:restart || true
+  if sudo -u "$APP_USER" "$PHP" artisan list 2>/dev/null | grep -q horizon; then
+    echo "♻️ Gracefully terminating Horizon (workers drain, then restart)"
+    sudo -u "$APP_USER" "$PHP" artisan horizon:terminate || true
   fi
 fi
 

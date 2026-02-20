@@ -9,12 +9,13 @@ import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataP
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
-import { useBucket } from '../../contexts/BucketContext'
+import SelectionActionBar from '../../Components/SelectionActionBar'
+import { useSelection } from '../../contexts/SelectionContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
-import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
+import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
@@ -69,11 +70,17 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             loadMoreAbortRef.current.abort()
             loadMoreAbortRef.current = null
         }
-        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
+        const list = Array.isArray(assets) ? assets.filter(Boolean) : []
+        setAssetsList(list)
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
             window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', { detail: { hasStaleAssetGrid: false } }))
+        }
+        // Grid timing: log navigation-to-first-render (staging diagnostic)
+        if (list.length > 0 && typeof window !== 'undefined' && window.__inertiaVisitStart != null) {
+            const ms = Math.round(performance.now() - window.__inertiaVisitStart)
+            console.info('[ASSET_GRID_TIMING] navigation to first grid render', { ms, assetCount: list.length })
         }
     }, [assets, next_page_url])
 
@@ -125,53 +132,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     
     // Phase 2 – Step 7: Bulk selection state
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
-    const [isBulkMode, setIsBulkMode] = useState(false)
     const [showBulkEditModal, setShowBulkEditModal] = useState(false)
 
-    // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
-    const { bucketAssetIds, bucketAdd: ctxBucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
-    const [bucketAddFeedback, setBucketAddFeedback] = useState(null) // Brief message when asset can't be added (e.g. not published)
-
-    useEffect(() => {
-        clearIfEmpty(pageProps.download_bucket_count ?? 0)
-    }, [pageProps.download_bucket_count, clearIfEmpty])
-
-    const bucketAdd = useCallback((assetId) => {
-        return ctxBucketAdd(assetId).then((data) => {
-            const ids = (data?.items || []).filter(Boolean).map((i) => (typeof i === 'string' ? i : i?.id)).filter(Boolean)
-            if (ids && !ids.includes(assetId)) {
-                setBucketAddFeedback("This asset can't be added to the download (it may not be published yet).")
-                setTimeout(() => setBucketAddFeedback(null), 4000)
-            }
-        })
-    }, [ctxBucketAdd])
-
-    // UX: Click on asset card always opens drawer. Checkbox is the only way to add/remove from download bucket.
+    // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext.
     const handleAssetClick = useCallback((asset) => {
         setActiveAssetId(asset?.id || null)
     }, [])
 
-    const handleBucketToggle = useCallback((assetId) => {
-        if (bucketAssetIds.includes(assetId)) {
-            bucketRemove(assetId)
-        } else {
-            bucketAdd(assetId)
-        }
-    }, [bucketAssetIds, bucketAdd, bucketRemove])
-
-    const visibleIds = useMemo(() => (assetsList || []).filter(Boolean).map((a) => a?.id).filter(Boolean), [assetsList])
-    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
-
-    const handleSelectAllToggle = useCallback(async () => {
-        if (visibleIds.length === 0) return
-        if (allVisibleInBucket) {
-            for (const id of visibleIds) {
-                await bucketRemove(id)
-            }
-        } else {
-            await bucketAddBatch(visibleIds)
-        }
-    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
+    const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
 
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
@@ -674,10 +642,15 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         return luminance > 0.5
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    // Use full accent color for selected category; hover uses subtle tint
-    const activeBgColor = workspaceAccentColor
-    const activeTextColor = getContrastTextColor(workspaceAccentColor)
-    const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
+    // Match Add Asset button: selected/hover use dark hue (same as button hover state)
+    const contextualDarkColor = darkenColor(workspaceAccentColor, 20)
+    const activeBgColor = contextualDarkColor
+    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const hoverBgColor = contextualDarkColor
+    // Unselected: reduced opacity for visual hierarchy (matches icon treatment)
+    const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
+    const unselectedIconColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
+    const unselectedCountColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
     
 
     return (
@@ -717,25 +690,25 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
                                                         backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
-                                                        color: selectedCategoryId === null || selectedCategoryId === undefined ? activeTextColor : textColor,
+                                                        color: selectedCategoryId === null || selectedCategoryId === undefined ? activeTextColor : unselectedTextColor,
                                                     }}
                                                     onMouseEnter={(e) => {
                                                         if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
                                                             e.currentTarget.style.backgroundColor = hoverBgColor
-                                                            e.currentTarget.style.color = textColor
+                                                            e.currentTarget.style.color = activeTextColor
                                                         }
                                                     }}
                                                     onMouseLeave={(e) => {
                                                         if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
                                                             e.currentTarget.style.backgroundColor = 'transparent'
-                                                            e.currentTarget.style.color = textColor
+                                                            e.currentTarget.style.color = unselectedTextColor
                                                         }
                                                     }}
                                                 >
-                                                    <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }} />
+                                                    <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedIconColor }} />
                                                     <span className="flex-1">All</span>
                                                     {total_asset_count > 0 && (
-                                                        <span className="text-xs font-normal opacity-80" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
+                                                        <span className="text-xs font-normal opacity-80" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedCountColor }}>
                                                             {total_asset_count}
                                                         </span>
                                                     )}
@@ -752,29 +725,29 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                         className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                         style={{
                                                             backgroundColor: isSelected ? activeBgColor : 'transparent',
-                                                            color: isSelected ? activeTextColor : textColor,
+                                                            color: isSelected ? activeTextColor : unselectedTextColor,
                                                         }}
                                                         onMouseEnter={(e) => {
                                                             if (!isSelected) {
                                                                 e.currentTarget.style.backgroundColor = hoverBgColor
-                                                                e.currentTarget.style.color = textColor
+                                                                e.currentTarget.style.color = activeTextColor
                                                             }
                                                         }}
                                                         onMouseLeave={(e) => {
                                                             if (!isSelected) {
                                                                 e.currentTarget.style.backgroundColor = 'transparent'
-                                                                e.currentTarget.style.color = textColor
+                                                                e.currentTarget.style.color = unselectedTextColor
                                                             }
                                                         }}
                                                     >
                                                         <CategoryIcon 
                                                             iconId={category.icon || 'folder'} 
                                                             className="mr-3 flex-shrink-0 h-5 w-5" 
-                                                            style={{ color: isSelected ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }}
+                                                            style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
                                                         />
                                                         <span className="flex-1">{category.name}</span>
                                                         {category.asset_count !== undefined && category.asset_count > 0 && (
-                                                            <span className="text-xs font-normal opacity-80 ml-2" style={{ color: isSelected ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
+                                                            <span className="text-xs font-normal opacity-80 ml-2" style={{ color: isSelected ? activeTextColor : unselectedCountColor }}>
                                                                 {category.asset_count}
                                                             </span>
                                                         )}
@@ -782,8 +755,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                             <div className="relative ml-2 group">
                                                                 <LockClosedIcon 
                                                                     className="h-4 w-4 flex-shrink-0 cursor-help" 
-                                                                    style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
-                                                                    onMouseEnter={() => setTooltipVisible(category.id)}
+                                                                style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
+                                                                onMouseEnter={() => setTooltipVisible(category.id)}
                                                                     onMouseLeave={() => setTooltipVisible(null)}
                                                                 />
                                                                 {tooltipVisible === category.id && (
@@ -923,7 +896,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         </button>
                     </div>
                     <div 
-                        className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
+                        className="flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0"
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -963,11 +936,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Brief feedback when an asset can't be added to the download bucket (e.g. not published) */}
-                        {bucketAddFeedback && (
-                            <div className="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800" role="alert">
-                                {bucketAddFeedback}
-                            </div>
-                        )}
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
                         <div className="mb-8">
@@ -977,22 +945,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
                                 primaryColor={workspaceAccentColor}
-                                bulkSelectedCount={bulkSelectedAssetIds.length}
-                                onBulkEdit={() => {
-                                    if (bulkSelectedAssetIds.length > 0) {
-                                        setShowBulkEditModal(true)
-                                    }
-                                }}
-                                onToggleBulkMode={() => {
-                                    setIsBulkMode((prev) => !prev)
-                                    if (isBulkMode) {
-                                        setBulkSelectedAssetIds([])
-                                    }
-                                }}
-                                isBulkMode={isBulkMode}
-                                onSelectAllForDownload={handleSelectAllToggle}
-                                bucketCount={bucketAssetIds.length}
-                                showSelectAllForDownload={!isBulkMode && assetsList?.length > 0}
+                                selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
@@ -1031,7 +984,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         filterable_schema={filterable_schema}
                                         selectedCategoryId={selectedCategoryId}
                                         available_values={availableValues}
-                                        canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                                        canManageFields={(auth?.effective_permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
                                         assetType="image"
                                         primaryColor={workspaceAccentColor}
                                         sortBy={sort}
@@ -1046,38 +999,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
                                         hasMoreAvailable={!!nextPageUrl}
-                                        barTrailingContent={
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setIsBulkMode((prev) => !prev)
-                                                        if (isBulkMode) setBulkSelectedAssetIds([])
-                                                    }}
-                                                    className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap ${isBulkMode ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'}`}
-                                                >
-                                                    {isBulkMode ? 'Cancel Selection' : 'Select Multiple'}
-                                                </button>
-                                                {isBulkMode && bulkSelectedAssetIds.length > 0 && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowBulkEditModal(true)}
-                                                        className="px-2 py-1 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 whitespace-nowrap"
-                                                    >
-                                                        Edit Metadata ({bulkSelectedAssetIds.length})
-                                                    </button>
-                                                )}
-                                                {!isBulkMode && assetsList?.length > 0 && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSelectAllToggle}
-                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 whitespace-nowrap"
-                                                    >
-                                                        {allVisibleInBucket ? 'Deselect all' : 'Select all'}
-                                                    </button>
-                                                )}
-                                            </div>
-                                        }
                                     />
                                 }
                             />
@@ -1094,16 +1015,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}
                                     primaryColor={workspaceAccentColor}
-                                    selectedAssetIds={isBulkMode ? bulkSelectedAssetIds : []}
-                                    onAssetSelect={isBulkMode ? ((assetId) => {
-                                        setBulkSelectedAssetIds((prev) =>
-                                            prev.includes(assetId)
-                                                ? prev.filter((id) => id !== assetId)
-                                                : [...prev, assetId]
-                                        )
-                                    }) : null}
-                                    bucketAssetIds={bucketAssetIds}
-                                    onBucketToggle={handleBucketToggle}
                                     isPendingApprovalMode={isPendingApprovalMode}
                                     isPendingPublicationFilter={isPendingPublicationFilter}
                                     onAssetApproved={(assetId) => {
@@ -1180,8 +1091,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 assets={assetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
-                                bucketAssetIds={bucketAssetIds}
-                                onBucketToggle={handleBucketToggle}
+                                selectionAssetType="asset"
                                 primaryColor={workspaceAccentColor}
                             />
                         </div>
@@ -1205,8 +1115,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
-                            bucketAssetIds={bucketAssetIds}
-                            onBucketToggle={handleBucketToggle}
                             primaryColor={workspaceAccentColor}
                         />
                     </div>
@@ -1214,6 +1122,22 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             </div>
             
             {/* Phase 2 – Step 7: Bulk Metadata Edit Modal */}
+            {/* Phase 4: Unified Selection ActionBar */}
+            <SelectionActionBar
+                currentPageIds={safeAssetsList.map((a) => a.id)}
+                currentPageItems={safeAssetsList.map((a) => ({
+                    id: a.id,
+                    type: 'asset',
+                    name: a.title ?? a.original_filename ?? '',
+                    thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
+                    category_id: a.metadata?.category_id ?? a.category_id ?? null,
+                }))}
+                onOpenBulkEdit={(ids) => {
+                    setBulkSelectedAssetIds(ids)
+                    setShowBulkEditModal(true)
+                }}
+            />
+
             {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
@@ -1225,6 +1149,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         setIsBulkMode(false)
+                        clearSelection()
                     }}
                 />
             )}

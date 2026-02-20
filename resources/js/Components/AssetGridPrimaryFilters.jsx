@@ -224,7 +224,7 @@ export default function AssetGridPrimaryFilters({
                             onChange={(e) => {
                                 // Asset type changes trigger navigation
                                 const newAssetType = e.target.value
-                                router.get(`/app/${newAssetType === 'deliverable' ? 'deliverables' : 'assets'}`, {}, {
+                                router.get(`/app/${newAssetType === 'deliverable' ? 'executions' : 'assets'}`, {}, {
                                     preserveState: false,
                                     preserveScroll: false,
                                 })

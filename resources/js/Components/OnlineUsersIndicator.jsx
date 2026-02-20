@@ -6,7 +6,7 @@ function pageToLabel(path) {
   if (!path || typeof path !== 'string') return null
   const p = path.toLowerCase()
   if (p.startsWith('/app/assets')) return 'Assets'
-  if (p.startsWith('/app/deliverables')) return 'Executions'
+  if (p.startsWith('/app/executions')) return 'Executions'
   if (p.startsWith('/app/dashboard')) return 'Dashboard'
   if (p.startsWith('/app/collections')) return 'Collections'
   if (p.startsWith('/app/downloads')) return 'Downloads'

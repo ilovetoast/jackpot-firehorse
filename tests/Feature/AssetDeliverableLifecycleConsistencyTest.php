@@ -304,7 +304,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
         // Test Deliverables endpoint
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         
         // Extract Inertia props from response
@@ -377,7 +377,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
         // Test Deliverables endpoint with unpublished filter
-        $deliverableResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $deliverableResponse = $this->get('/app/executions?lifecycle=unpublished');
         $deliverableResponse->assertStatus(200);
         
         $deliverableResponse->assertInertia(fn ($page) => $page->has('assets'));
@@ -448,7 +448,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
         // Test Deliverables endpoint (no filter)
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         
         $deliverableResponse->assertInertia(fn ($page) => $page->has('assets'));
@@ -578,7 +578,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetData = $assetResponse->inertiaPage();
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableResponse = $this->get("/app/deliverables?category={$this->deliverableCategory->slug}");
+        $deliverableResponse = $this->get("/app/executions?category={$this->deliverableCategory->slug}");
         $deliverableResponse->assertStatus(200);
         
         $deliverableResponse->assertInertia(fn ($page) => $page->has('assets'));
@@ -679,7 +679,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
         // Test Deliverables endpoint
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         
         $deliverableResponse->assertInertia(fn ($page) => $page->has('assets'));
@@ -727,7 +727,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
         // Test Deliverables endpoint with unpublished filter
-        $deliverableResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $deliverableResponse = $this->get('/app/executions?lifecycle=unpublished');
         $deliverableResponse->assertStatus(200);
         
         $deliverableResponse->assertInertia(fn ($page) => $page->has('assets'));
@@ -792,7 +792,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetData = $assetResponse->inertiaPage();
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         $deliverableData = $deliverableResponse->inertiaPage();
         $deliverableIds = collect($deliverableData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -854,7 +854,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetData = $assetResponse->inertiaPage();
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         $deliverableData = $deliverableResponse->inertiaPage();
         $deliverableIds = collect($deliverableData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1051,7 +1051,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetData = $assetResponse->inertiaPage();
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableResponse->assertStatus(200);
         $deliverableData = $deliverableResponse->inertiaPage();
         $deliverableIds = collect($deliverableData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1086,7 +1086,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetUnpublishedData = $assetUnpublishedResponse->inertiaPage();
         $assetUnpublishedIds = collect($assetUnpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableUnpublishedResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $deliverableUnpublishedResponse = $this->get('/app/executions?lifecycle=unpublished');
         $deliverableUnpublishedResponse->assertStatus(200);
         $deliverableUnpublishedData = $deliverableUnpublishedResponse->inertiaPage();
         $deliverableUnpublishedIds = collect($deliverableUnpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1215,7 +1215,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         );
 
         // Verify deliverable appears in default index (published deliverables are visible)
-        $indexResponse = $this->get('/app/deliverables');
+        $indexResponse = $this->get('/app/executions');
         $indexResponse->assertStatus(200);
         $indexData = $indexResponse->inertiaPage();
         $deliverableIds = collect($indexData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1227,7 +1227,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         );
 
         // Verify deliverable is NOT in unpublished filter
-        $unpublishedResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $unpublishedResponse = $this->get('/app/executions?lifecycle=unpublished');
         $unpublishedResponse->assertStatus(200);
         $unpublishedData = $unpublishedResponse->inertiaPage();
         $unpublishedIds = collect($unpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1317,7 +1317,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
             );
 
             // Verify it still appears in default index after reload
-            $indexResponse = $this->get($type === 'Asset' ? '/app/assets' : '/app/deliverables');
+            $indexResponse = $this->get($type === 'Asset' ? '/app/assets' : '/app/executions');
             $indexResponse->assertStatus(200);
             $indexData = $indexResponse->inertiaPage();
             $assetIds = collect($indexData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1430,7 +1430,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetIndexData = $assetIndexResponse->inertiaPage();
         $assetIds = collect($assetIndexData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableIndexResponse = $this->get('/app/deliverables');
+        $deliverableIndexResponse = $this->get('/app/executions');
         $deliverableIndexResponse->assertStatus(200);
         $deliverableIndexData = $deliverableIndexResponse->inertiaPage();
         $deliverableIds = collect($deliverableIndexData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1443,7 +1443,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         $assetUnpublishedData = $assetUnpublishedResponse->inertiaPage();
         $assetUnpublishedIds = collect($assetUnpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
 
-        $deliverableUnpublishedResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $deliverableUnpublishedResponse = $this->get('/app/executions?lifecycle=unpublished');
         $deliverableUnpublishedData = $deliverableUnpublishedResponse->inertiaPage();
         $deliverableUnpublishedIds = collect($deliverableUnpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
 
@@ -1568,7 +1568,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         );
 
         // Test Deliverables endpoint
-        $deliverableIndexResponse = $this->get('/app/deliverables');
+        $deliverableIndexResponse = $this->get('/app/executions');
         $deliverableIndexResponse->assertStatus(200);
         $deliverableIndexData = $deliverableIndexResponse->inertiaPage();
         $deliverableIds = collect($deliverableIndexData['props']['assets'] ?? [])->pluck('id')->toArray();
@@ -1581,7 +1581,7 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
         );
 
         // CRITICAL: Published deliverable must NOT appear in unpublished filter
-        $deliverableUnpublishedResponse = $this->get('/app/deliverables?lifecycle=unpublished');
+        $deliverableUnpublishedResponse = $this->get('/app/executions?lifecycle=unpublished');
         $deliverableUnpublishedData = $deliverableUnpublishedResponse->inertiaPage();
         $deliverableUnpublishedIds = collect($deliverableUnpublishedData['props']['assets'] ?? [])->pluck('id')->toArray();
 

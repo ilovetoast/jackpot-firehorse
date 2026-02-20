@@ -20,6 +20,7 @@
  * @param {number|null} props.selectedAssetId - ID of currently selected asset
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import AssetCard from './AssetCard'
 import AssetGridContainer from './AssetGridContainer'
 
@@ -39,19 +40,78 @@ export default function AssetGrid({
     isPendingApprovalMode = false, // Phase L.6.2: Approval inbox mode
     isPendingPublicationFilter = false, // Phase J.3.1: Pending publication filter active
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
+    selectionAssetType = 'asset', // Phase 2 Selection: 'asset' | 'execution' for SelectionContext type
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     if (safeAssets.length === 0) {
         return null
     }
-    
+
+    // Per-item entrance: only animate new items (initial load or infinite scroll append)
+    const prevIdsRef = useRef(new Set())
+    const [animatedIds, setAnimatedIds] = useState(new Set())
+    const [visibleIds, setVisibleIds] = useState(new Set())
+
+    // Stable dependency: only run when asset ids actually change (safeAssets is new array every render)
+    const idsKey = safeAssets.map((a) => a.id).join(',')
+
+    useLayoutEffect(() => {
+        const currIds = new Set(safeAssets.map((a) => a.id))
+        const prevIds = prevIdsRef.current
+
+        if (prevIds.size === 0) {
+            setAnimatedIds(currIds)
+        } else {
+            const isAppend = [...prevIds].every((id) => currIds.has(id)) && currIds.size > prevIds.size
+            if (isAppend) {
+                const newIds = new Set([...currIds].filter((id) => !prevIds.has(id)))
+                if (newIds.size > 0) {
+                    setAnimatedIds((prev) => new Set([...prev, ...newIds]))
+                }
+            } else {
+                setAnimatedIds(currIds)
+            }
+        }
+        prevIdsRef.current = currIds
+    }, [idsKey])
+
+    // Trigger transition: double rAF ensures hidden state is painted before we transition
+    useLayoutEffect(() => {
+        if (animatedIds.size === 0) return
+        const id = requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setVisibleIds((prev) => new Set([...prev, ...animatedIds]))
+            })
+        })
+        return () => cancelAnimationFrame(id)
+    }, [animatedIds])
+
+    // Clear animatedIds after cascade completes (34 tiles × 20ms + 280ms ≈ 960ms)
+    useEffect(() => {
+        if (animatedIds.size === 0) return
+        const t = setTimeout(() => setAnimatedIds(new Set()), 1000)
+        return () => clearTimeout(t)
+    }, [animatedIds])
+
+    // Waterfall cascade: 20ms stagger, 280ms duration — noticeable but not slow
+    const minAnimatedIndex = safeAssets.findIndex((a) => animatedIds.has(a.id))
+    const staggerMs = 20
+
     return (
         <AssetGridContainer cardSize={cardSize}>
-            {safeAssets.map((asset) => (
-                <AssetCard
-                    // CRITICAL: Stable key to prevent remounts/flashing.
-                    // Asset cards must be keyed by asset.id ONLY.
+            {safeAssets.map((asset, index) => {
+                const isEntering = animatedIds.has(asset.id)
+                const isVisible = !isEntering || visibleIds.has(asset.id)
+                const delay = isEntering && minAnimatedIndex >= 0 ? (index - minAnimatedIndex) * staggerMs : 0
+                return (
+                <div
                     key={asset.id}
+                    className={`transition-all duration-300 ease-out ${
+                        isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-[0.98]'
+                    }`}
+                    style={{ transitionDelay: `${delay}ms` }}
+                >
+                <AssetCard
                     asset={asset}
                     onClick={onAssetClick}
                     showInfo={showInfo}
@@ -66,8 +126,11 @@ export default function AssetGrid({
                     isPendingPublicationFilter={isPendingPublicationFilter} // Phase J.3.1
                     onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null} // Phase L.6.2
                     cardStyle={cardStyle}
+                    selectionAssetType={selectionAssetType} // Phase 2 Selection
                 />
-            ))}
+                </div>
+                )
+            })}
         </AssetGridContainer>
     )
 }

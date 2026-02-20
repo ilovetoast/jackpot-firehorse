@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -164,6 +165,15 @@ class Download extends Model
     public function revokedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'revoked_by_user_id');
+    }
+
+    /**
+     * Landing page view events (download.landing.page.viewed).
+     */
+    public function landingPageViewEvents(): MorphMany
+    {
+        return $this->morphMany(ActivityEvent::class, 'subject')
+            ->where('event_type', 'download.landing.page.viewed');
     }
 
     /**

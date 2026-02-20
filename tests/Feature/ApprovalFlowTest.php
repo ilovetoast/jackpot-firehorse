@@ -366,7 +366,7 @@ class ApprovalFlowTest extends TestCase
         $assetIds = collect($assetData['props']['assets'] ?? [])->pluck('id')->toArray();
         $this->assertNotContains($asset->id, $assetIds, 'Unpublished asset should not appear');
 
-        $deliverableResponse = $this->get('/app/deliverables');
+        $deliverableResponse = $this->get('/app/executions');
         $deliverableData = $deliverableResponse->inertiaPage();
         $deliverableIds = collect($deliverableData['props']['assets'] ?? [])->pluck('id')->toArray();
         $this->assertNotContains($deliverable->id, $deliverableIds, 'Unpublished deliverable should not appear');
@@ -389,7 +389,7 @@ class ApprovalFlowTest extends TestCase
         $assetIds2 = collect($assetData2['props']['assets'] ?? [])->pluck('id')->toArray();
         $this->assertContains($asset->id, $assetIds2, 'Published asset should appear');
 
-        $deliverableResponse2 = $this->get('/app/deliverables');
+        $deliverableResponse2 = $this->get('/app/executions');
         $deliverableData2 = $deliverableResponse2->inertiaPage();
         $deliverableIds2 = collect($deliverableData2['props']['assets'] ?? [])->pluck('id')->toArray();
         $this->assertContains($deliverable->id, $deliverableIds2, 'Published deliverable should appear');

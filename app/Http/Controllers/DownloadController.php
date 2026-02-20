@@ -26,6 +26,7 @@ use App\Services\AssetDownloadMetricService;
 use App\Services\DownloadNameResolver;
 use App\Services\PlanService;
 use App\Services\StreamingZipService;
+use App\Enums\EventType;
 use App\Mail\DownloadShareEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -137,10 +138,11 @@ class DownloadController extends Controller
             $query->orderBy($sortColumn[0], $sortColumn[1]);
 
             $perPage = 15;
-            $paginator = $query->with(['assets' => function ($q) {
-                $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
-                    ->orderBy('download_asset.is_primary', 'desc');
-            }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_path,icon'])
+            $paginator = $query->withCount('landingPageViewEvents')
+                ->with(['assets' => function ($q) {
+                    $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
+                        ->orderBy('download_asset.is_primary', 'desc');
+                }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_path,icon'])
                 ->paginate($perPage, ['*'], 'page', $page);
 
             $planService = app(PlanService::class);
@@ -329,6 +331,7 @@ class DownloadController extends Controller
             'brands' => $brandPayload ? [$brandPayload] : [],
             'source' => $source,
             'access_count' => (int) ($download->access_count ?? 0),
+            'landing_page_views' => (int) ($download->landing_page_view_events_count ?? 0),
             'created_by' => $createdBy,
         ];
     }
@@ -836,14 +839,25 @@ class DownloadController extends Controller
         $requiresPassword = $download->requiresPassword();
         $isUnlocked = session('download_unlocked.' . $download->id) === true;
         if ($requiresPassword && ! $isUnlocked) {
+            $this->recordLandingPageView($download);
+
             return $this->publicPage($download, 'password_required', 'Enter the password to continue.', true);
         }
 
         // UX-R2: Single-asset download — no ZIP; show ready page with file_url to deliver direct_asset_path
         if (! empty($download->direct_asset_path)) {
+            $tenant = $download->tenant;
+            $planService = app(PlanService::class);
+            $requiresLanding = $tenant && $planService->tenantRequiresLandingPage($tenant);
+            if (! $requiresLanding) {
+                return redirect()->route('downloads.public.file', ['download' => $download->id]);
+            }
+
             $branding = app(DownloadPublicPageBrandingResolver::class)->resolve($download, '');
             $firstAsset = $download->assets()->first();
             $downloadTitle = $firstAsset?->original_filename ?? basename($download->direct_asset_path);
+
+            $this->recordLandingPageView($download);
 
             return $this->publicPage($download, 'ready', '', false, null, 200, null, [
                 'download_title' => $downloadTitle,
@@ -886,7 +900,16 @@ class DownloadController extends Controller
         }
 
         // D-SHARE: Show share page with download info and Download button (links to /file for actual delivery)
+        $tenant = $download->tenant;
+        $planService = app(PlanService::class);
+        $requiresLanding = $tenant && $planService->tenantRequiresLandingPage($tenant);
+        if (! $requiresLanding) {
+            return redirect()->route('downloads.public.file', ['download' => $download->id]);
+        }
+
         $branding = app(DownloadPublicPageBrandingResolver::class)->resolve($download, '');
+
+        $this->recordLandingPageView($download);
 
         return $this->publicPage($download, 'ready', '', false, null, 200, null, [
             'download_title' => $download->title ?? $this->getDownloadZipFilename($download),
@@ -1251,6 +1274,28 @@ class DownloadController extends Controller
         $safe = preg_replace('/[\r\n"\\\\]/', '', $base);
 
         return (($safe !== null && $safe !== '') ? $safe : 'download') . '.zip';
+    }
+
+    /**
+     * Record a landing page view for analytics (when user sees the share/password page).
+     */
+    protected function recordLandingPageView(Download $download): void
+    {
+        try {
+            $tenant = $download->tenant;
+            if (! $tenant) {
+                return;
+            }
+            ActivityRecorder::guest($tenant, EventType::DOWNLOAD_LANDING_PAGE_VIEWED, $download, [
+                'download_id' => $download->id,
+                'viewed_at' => now()->toIso8601String(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::debug('[DownloadController] Failed to record landing page view', [
+                'download_id' => $download->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
