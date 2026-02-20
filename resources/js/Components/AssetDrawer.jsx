@@ -289,7 +289,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         }, 350) // Slightly longer than grid transition (300ms)
 
         return () => clearTimeout(timer)
-    }, [asset])
+    }, [asset?.id])
 
     // Fetch activity events when asset is set
     useEffect(() => {
@@ -314,7 +314,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 setActivityEvents([])
                 setActivityLoading(false)
             })
-    }, [asset])
+    }, [asset?.id])
 
     // C5: Fetch collections this asset is in (for "In X collections")
     // C9.1: Always fetch collections if asset exists (not dependent on collectionContext)
@@ -327,11 +327,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
             .then(res => {
                 // C9.1: DEBUG - Log collections received
-                console.log('[AssetDrawer] Collections received', {
-                    asset_id: asset.id,
-                    collections: res.data?.collections ?? [],
-                    collections_count: (res.data?.collections ?? []).length,
-                })
                 setAssetCollections((res.data?.collections ?? []).filter(Boolean))
             })
             .catch((err) => {
@@ -1615,32 +1610,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 // Check if approvals are enabled
                                 const approvalsEnabled = auth?.approval_features?.approvals_enabled
                                 
-                                // Debug logging
-                                if (displayAsset?.id) {
-                                    console.log('[AssetDrawer] Review button check:', {
-                                        assetId: displayAsset.id,
-                                        approvalsEnabled,
-                                        approvalStatus,
-                                        rawApprovalStatus: displayAsset.approval_status,
-                                        isPending,
-                                        brandRole: brandRole || 'null/undefined',
-                                        tenantRole: tenantRole || 'null/undefined',
-                                        rawBrandRole: auth?.brand_role,
-                                        rawTenantRole: auth?.tenant_role,
-                                        isBrandApprover,
-                                        isTenantOwnerOrAdmin,
-                                        canApprove,
-                                        shouldShow: approvalsEnabled && isPending && canApprove,
-                                        authObject: { brand_role: auth?.brand_role, tenant_role: auth?.tenant_role },
-                                    })
-                                }
-                                
                                 return approvalsEnabled && isPending && canApprove
                             })() && (
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        console.log('[AssetDrawer] Opening review modal for asset:', displayAsset.id)
                                         setShowReviewModal(true)
                                     }}
                                     className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"

@@ -108,7 +108,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         
         // Stop if no targets
         if (pollTargets.length === 0) {
-            console.log('[useThumbnailSmartPoll] Stopping - no poll targets')
             isActiveRef.current = false
             pollAttemptRef.current = 0
             return
@@ -116,10 +115,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         
         // Check if category changed
         if (prevCategoryIdRef.current !== selectedCategoryId) {
-            console.log('[useThumbnailSmartPoll] Stopping - category changed', {
-                previous: prevCategoryIdRef.current,
-                current: selectedCategoryId,
-            })
             isActiveRef.current = false
             pollAttemptRef.current = 0
             prevCategoryIdRef.current = selectedCategoryId
@@ -128,10 +123,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         
         // Check if we've exceeded max attempts
         if (pollAttemptRef.current >= MAX_POLL_ATTEMPTS) {
-            console.log('[useThumbnailSmartPoll] Stopping - max attempts reached', {
-                attempts: pollAttemptRef.current,
-                max: MAX_POLL_ATTEMPTS,
-            })
             isActiveRef.current = false
             pollAttemptRef.current = 0
             return
@@ -139,12 +130,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         
         try {
             const assetIds = pollTargets.map(asset => asset.id)
-            
-            console.log('[useThumbnailSmartPoll] Polling', {
-                attempt: pollAttemptRef.current + 1,
-                assetCount: assetIds.length,
-                assetIds: assetIds.slice(0, 5), // Log first 5 for debugging
-            })
             
             const response = await window.axios.get('/app/assets/thumbnail-status/batch', {
                 params: {
@@ -187,20 +172,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
                 // Only update if something actually changed (prevent unnecessary re-renders)
                 if (versionChanged || finalNowAvailable || previewNowAvailable || isFailed || 
                     thumbnailStatusChanged || previewUrlChanged || finalUrlChanged || errorChanged) {
-                    console.log('[useThumbnailSmartPoll] Status change detected', {
-                        assetId,
-                        currentVersion,
-                        newVersion,
-                        finalNowAvailable,
-                        previewNowAvailable,
-                        isFailed,
-                        statusFailed,
-                        hasError,
-                        thumbnailStatusChanged,
-                        previewUrlChanged,
-                        finalUrlChanged,
-                    })
-                    
                     hasUpdates = true
                     
                     // Map updatedAsset to match currentAsset structure
@@ -219,10 +190,7 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
                     
                     // If asset failed, stop polling for it (remove from poll targets)
                     if (isFailed) {
-                        console.log('[useThumbnailSmartPoll] Asset failed, will stop polling', {
-                            assetId,
-                            error: updatedAsset.thumbnail_error,
-                        })
+                        // Asset failed - will stop polling (removed from poll targets)
                     }
                     
                     // Notify parent component
@@ -233,7 +201,7 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
             })
             
             if (hasUpdates) {
-                console.log('[useThumbnailSmartPoll] Updates applied, continuing to poll for remaining assets')
+                // Updates applied - continue polling for remaining assets
             }
             
             // Schedule next poll with exponential backoff
@@ -243,7 +211,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
             const remainingTargets = getPollTargets()
             
             if (remainingTargets.length === 0) {
-                console.log('[useThumbnailSmartPoll] Stopping - no remaining targets after update')
                 isActiveRef.current = false
                 pollAttemptRef.current = 0
                 return
@@ -255,7 +222,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
                     performPoll()
                 }, nextDelay)
             } else {
-                console.log('[useThumbnailSmartPoll] Stopping - max attempts reached')
                 isActiveRef.current = false
                 pollAttemptRef.current = 0
             }
@@ -288,11 +254,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         
         // Start polling if we have targets and aren't already polling
         if (pollTargets.length > 0 && !isActiveRef.current) {
-            console.log('[useThumbnailSmartPoll] Starting', {
-                targetCount: pollTargets.length,
-                assetIds: pollTargets.map(a => a.id).slice(0, 5),
-            })
-            
             isActiveRef.current = true
             pollAttemptRef.current = 0
             
@@ -300,7 +261,6 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
             performPoll()
         } else if (pollTargets.length === 0 && isActiveRef.current) {
             // Stop if no targets remain
-            console.log('[useThumbnailSmartPoll] Stopping - no poll targets')
             if (timeoutIdRef.current) {
                 clearTimeout(timeoutIdRef.current)
                 timeoutIdRef.current = null
