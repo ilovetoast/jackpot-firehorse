@@ -121,6 +121,8 @@ export default function AdminAssetsIndex({
     filters: initialFilters,
     filterOptions,
     canDestructive,
+    assetsWithoutCategoryCount = 0,
+    categoriesForRecovery = [],
 }) {
     const [searchInput, setSearchInput] = useState(() => initialFilters?.search ?? '')
     const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -130,6 +132,9 @@ export default function AdminAssetsIndex({
     const [detailLoading, setDetailLoading] = useState(false)
     const [bulkLoading, setBulkLoading] = useState(false)
     const [actionsOpen, setActionsOpen] = useState(false)
+    const [recoverCategoryModalOpen, setRecoverCategoryModalOpen] = useState(false)
+    const [recoverCategoryId, setRecoverCategoryId] = useState('')
+    const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
 
     useEffect(() => {
@@ -322,6 +327,95 @@ export default function AdminAssetsIndex({
                         ← Command Center
                     </Link>
                 </div>
+
+                {/* Warning: Assets without category (disappear from grid) */}
+                {assetsWithoutCategoryCount > 0 && (
+                    <div className="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-start gap-2">
+                                <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-sm font-medium text-amber-900">
+                                        {assetsWithoutCategoryCount} asset{assetsWithoutCategoryCount !== 1 ? 's' : ''} do not have a category and will not appear in the grid.
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-800">
+                                        Assign a category to restore visibility. Only assets in the same brand as the chosen category will be updated.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setRecoverCategoryModalOpen(true)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-500"
+                            >
+                                <WrenchScrewdriverIcon className="h-4 w-4" />
+                                Fix
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Recover category modal */}
+                {recoverCategoryModalOpen && (
+                    <>
+                        <div className="fixed inset-0 z-40 bg-slate-900/50" aria-hidden onClick={() => setRecoverCategoryModalOpen(false)} />
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                                <h3 className="text-lg font-semibold text-slate-900">Assign category to affected assets</h3>
+                                <p className="mt-2 text-sm text-slate-600">
+                                    Select a category. Only assets in the same brand as the category will be updated.
+                                </p>
+                                <div className="mt-4">
+                                    <label className="block text-sm font-medium text-slate-700">Category</label>
+                                    <select
+                                        value={recoverCategoryId}
+                                        onChange={(e) => setRecoverCategoryId(e.target.value)}
+                                        className="mt-1 block w-full rounded-lg border-slate-300 text-sm"
+                                    >
+                                        <option value="">— Select —</option>
+                                        {categoriesForRecovery.map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.name} ({c.brand_name})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="mt-6 flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setRecoverCategoryModalOpen(false)}
+                                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!recoverCategoryId || recoverCategoryLoading}
+                                        onClick={async () => {
+                                            if (!recoverCategoryId) return
+                                            setRecoverCategoryLoading(true)
+                                            try {
+                                                const { data } = await axios.post('/app/admin/assets/recover-category-id', {
+                                                    category_id: parseInt(recoverCategoryId, 10),
+                                                })
+                                                setRecoverCategoryModalOpen(false)
+                                                setRecoverCategoryId('')
+                                                router.reload()
+                                            } catch (err) {
+                                                alert(err.response?.data?.error || 'Failed to recover')
+                                            } finally {
+                                                setRecoverCategoryLoading(false)
+                                            }
+                                        }}
+                                        className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                                    >
+                                        {recoverCategoryLoading ? 'Applying…' : 'Apply'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 {/* Smart Filter Bar */}
                 <div className="mb-4 flex flex-wrap items-center gap-3">

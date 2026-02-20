@@ -104,6 +104,33 @@ class AdminAssetController extends Controller
             'brands' => Brand::select('id', 'name', 'tenant_id')->orderBy('name')->get(),
         ];
 
+        // Assets without category_id disappear from grid — show warning and recovery option
+        $assetsWithoutCategoryCount = Asset::query()
+            ->whereNotNull('metadata')
+            ->whereNull('deleted_at')
+            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")')
+            ->count();
+
+        $categoriesForRecovery = [];
+        if ($assetsWithoutCategoryCount > 0) {
+            $brandIdsWithAffected = Asset::query()
+                ->whereNotNull('metadata')
+                ->whereNull('deleted_at')
+                ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")')
+                ->distinct()
+                ->pluck('brand_id');
+            $categoriesForRecovery = Category::query()
+                ->whereIn('brand_id', $brandIdsWithAffected)
+                ->where('asset_type', AssetType::ASSET)
+                ->with('brand:id,name')
+                ->orderBy('brand_id')
+                ->orderBy('name')
+                ->get(['id', 'name', 'brand_id'])
+                ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'brand_id' => $c->brand_id, 'brand_name' => $c->brand?->name ?? '—'])
+                ->values()
+                ->all();
+        }
+
         return Inertia::render('Admin/Assets/Index', [
             'assets' => $formatted,
             'pagination' => $assets->toArray(),
@@ -111,6 +138,8 @@ class AdminAssetController extends Controller
             'filters' => $filters,
             'filterOptions' => $filterOptions,
             'canDestructive' => $this->canDestructive(),
+            'assetsWithoutCategoryCount' => $assetsWithoutCategoryCount,
+            'categoriesForRecovery' => $categoriesForRecovery,
         ]);
     }
 
@@ -329,6 +358,48 @@ class AdminAssetController extends Controller
             'updated' => $result['updated'] ?? false,
             'changes' => $result['changes'] ?? [],
             'resolved' => $result['resolved'] ?? false,
+        ]);
+    }
+
+    /**
+     * POST /app/admin/assets/recover-category-id
+     *
+     * Assign category_id to assets that have null (they disappear from grid).
+     * Only updates assets in the same brand as the chosen category.
+     */
+    public function recoverCategoryId(Request $request): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $categoryId = (int) $request->input('category_id');
+        if (!$categoryId) {
+            return response()->json(['error' => 'category_id is required'], 422);
+        }
+
+        $category = Category::with('brand')->find($categoryId);
+        if (!$category) {
+            return response()->json(['error' => 'Category not found'], 404);
+        }
+
+        $query = Asset::query()
+            ->whereNotNull('metadata')
+            ->whereNull('deleted_at')
+            ->where('brand_id', $category->brand_id)
+            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")');
+
+        $assets = $query->limit(1000)->get();
+        $updated = 0;
+        foreach ($assets as $asset) {
+            $meta = $asset->metadata ?? [];
+            $meta['category_id'] = $categoryId;
+            $asset->update(['metadata' => $meta]);
+            $updated++;
+        }
+
+        return response()->json([
+            'updated' => $updated,
+            'category' => ['id' => $category->id, 'name' => $category->name],
+            'message' => "Assigned category \"{$category->name}\" to {$updated} asset(s).",
         ]);
     }
 

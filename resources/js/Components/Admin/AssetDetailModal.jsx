@@ -268,7 +268,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                                     <td className="px-4 py-3">{v.uploaded_by?.name ?? '—'}</td>
                                                     <td className="px-4 py-3">{v.is_current ? <span className="rounded px-2 py-0.5 text-xs bg-indigo-100 text-indigo-800">Current</span> : '—'}</td>
                                                     <td className="px-4 py-3">
-                                                        {!v.is_current && !isArchived && (
+                                                        {!v.is_current && !isArchived && plan_allows_versions && (
                                                             <button
                                                                 type="button"
                                                                 onClick={async () => {

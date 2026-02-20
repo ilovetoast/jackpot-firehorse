@@ -249,6 +249,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/performance/api', [\App\Http\Controllers\Admin\PerformanceController::class, 'api'])->name('admin.performance.api');
     Route::get('/admin/assets', [\App\Http\Controllers\Admin\AdminAssetController::class, 'index'])->name('admin.assets.index');
     Route::post('/admin/assets/bulk-action', [\App\Http\Controllers\Admin\AdminAssetController::class, 'bulkAction'])->name('admin.assets.bulk-action');
+    Route::post('/admin/assets/recover-category-id', [\App\Http\Controllers\Admin\AdminAssetController::class, 'recoverCategoryId'])->name('admin.assets.recover-category-id');
     Route::get('/admin/assets/{asset}', [\App\Http\Controllers\Admin\AdminAssetController::class, 'show'])->name('admin.assets.show');
     Route::get('/admin/assets/{asset}/download-source', [\App\Http\Controllers\Admin\AdminAssetController::class, 'downloadSource'])->name('admin.assets.download-source');
     Route::get('/admin/assets/{asset}/thumbnail', [\App\Http\Controllers\AssetThumbnailController::class, 'adminThumbnail'])->name('admin.assets.thumbnail');
