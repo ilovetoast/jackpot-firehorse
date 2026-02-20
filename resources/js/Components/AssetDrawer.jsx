@@ -2447,10 +2447,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {canGenerateThumbnail ? (
                             <div className="bg-indigo-50 border border-indigo-200 rounded-md p-4">
                                 <p className="text-sm font-medium text-indigo-900 mb-2">
-                                    {thumbnailStatus === 'pending' ? 'Preview removed — ready to regenerate' : 'Preview not generated yet'}
+                                    {(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete')
+                                        ? 'Preview removed — ready to regenerate'
+                                        : 'Preview not generated yet'}
                                 </p>
                                 <p className="text-xs text-indigo-700 mb-3">
-                                    {thumbnailStatus === 'pending'
+                                    {(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete')
                                         ? 'Reprocess Asset runs the full pipeline (thumbnails, metadata, color analysis). Use when Regenerate Preview doesn&apos;t work.'
                                         : displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')
                                             ? 'PDF previews generate from page 1'
@@ -2498,7 +2500,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 Generating...
                                             </>
                                         ) : (
-                                            <>{thumbnailStatus === 'pending' ? 'Regenerate Preview' : 'Generate Preview'}</>
+                                            <>{(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete') ? 'Regenerate Preview' : 'Generate Preview'}</>
                                         )}
                                     </button>
                                 </div>

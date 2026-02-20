@@ -2434,7 +2434,11 @@ class ThumbnailGenerationService
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $mime = $version ? $version->mime_type : $asset->mime_type;
-        $ext = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        // When version is provided, use extension from version->file_path (authoritative for replace).
+        // asset.original_filename can be stale after replace (e.g. wrong ext from previous file).
+        $ext = $version && $version->file_path
+            ? pathinfo($version->file_path, PATHINFO_EXTENSION)
+            : pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
         $ext = $ext ? strtolower($ext) : '';
         $fileType = $fileTypeService->detectFileType($mime, $ext);
 
@@ -2444,6 +2448,12 @@ class ThumbnailGenerationService
         $resolved = $fileType ?? 'unknown';
         if (in_array($ext, ['tif', 'tiff'], true) && in_array($resolved, ['image', 'unknown'], true)) {
             return 'tiff';
+        }
+
+        // SVG fallback: SVG is XML, not raster. When MIME is wrong or application/octet-stream,
+        // we may get 'image' or 'unknown'. For .svg extension, route to svg to avoid getimagesize() failure.
+        if (in_array($ext, ['svg'], true) && in_array($resolved, ['image', 'unknown'], true)) {
+            return 'svg';
         }
 
         return $resolved;
