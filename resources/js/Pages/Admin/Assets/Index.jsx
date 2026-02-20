@@ -60,6 +60,7 @@ function parseSmartFilter(search) {
         [/tag:([a-z0-9_-]+)/gi, 'tag', String],
         [/category:(\w+)/gi, 'category_slug', String],
         [/user:(\d+)/gi, 'created_by', (v) => parseInt(v, 10)],
+        [/deleted:(true|false|1|0)/gi, 'deleted', (v) => ['true', '1'].includes(String(v).toLowerCase())],
     ]
     for (const [regex, key, fn] of patterns) {
         const m = search.match(regex)
@@ -298,7 +299,7 @@ export default function AdminAssetsIndex({
                         <FunnelIcon className="h-4 w-4" />
                         Filters
                     </button>
-                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type || initialFilters?.visible_in_grid != null) && (
+                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type || initialFilters?.visible_in_grid != null || initialFilters?.deleted != null) && (
                         <button
                             type="button"
                             onClick={clearFilters}
@@ -431,6 +432,21 @@ export default function AdminAssetsIndex({
                                     <option value="">All</option>
                                     <option value="1">Visible in grid</option>
                                     <option value="0">Not visible</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Deleted</label>
+                                <select
+                                    value={initialFilters?.deleted === true ? '1' : initialFilters?.deleted === false ? '0' : ''}
+                                    onChange={(e) => {
+                                        const v = e.target.value
+                                        applyFilters({ deleted: v === '' ? null : v === '1', page: 1 })
+                                    }}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="1">Deleted only</option>
+                                    <option value="0">Not deleted</option>
                                 </select>
                             </div>
                         </div>

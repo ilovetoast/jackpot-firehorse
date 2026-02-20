@@ -401,23 +401,33 @@ class ThumbnailGenerationService
             // These are the actual pixel dimensions of the original image, not thumbnails
             $imageInfo = @getimagesize($tempPath);
             if ($imageInfo === false) {
-                throw new \RuntimeException("Downloaded file is not a valid image (size: {$sourceFileSize} bytes)");
+                // Fallback: File may be SVG misdetected as image (wrong MIME/extension after replace).
+                // SVG is XML, not raster - getimagesize() fails. Check content and re-route to SVG path.
+                $content = file_get_contents($tempPath, false, null, 0, 500);
+                if ($content !== false && preg_match('/<\s*(svg|\?xml)/i', $content)) {
+                    Log::info('[ThumbnailGenerationService] File detected as SVG via content (was misdetected as image)', [
+                        'asset_id' => $asset->id,
+                        'source_file_size' => $sourceFileSize,
+                    ]);
+                    $fileType = 'svg';
+                } else {
+                    throw new \RuntimeException("Downloaded file is not a valid image (size: {$sourceFileSize} bytes)");
+                }
             }
             
-            // Capture source dimensions from original image file
-            // These are the authoritative pixel dimensions for the source image (original size)
-            // NOT thumbnail dimensions - these represent the actual uploaded file dimensions
-            $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
-            $sourceImageHeight = (int) ($imageInfo[1] ?? 0);
-            
-            Log::info('[ThumbnailGenerationService] Source image file downloaded and verified', [
-                'asset_id' => $asset->id,
-                'temp_path' => $tempPath,
-                'source_file_size' => $sourceFileSize,
-                'source_image_width' => $sourceImageWidth,
-                'source_image_height' => $sourceImageHeight,
-                'image_type' => $imageInfo[2] ?? null,
-            ]);
+            // Capture source dimensions from original image file (raster only; SVG has no dimensions here)
+            if ($imageInfo !== false) {
+                $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
+                $sourceImageHeight = (int) ($imageInfo[1] ?? 0);
+                Log::info('[ThumbnailGenerationService] Source image file downloaded and verified', [
+                    'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
+                    'source_file_size' => $sourceFileSize,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'image_type' => $imageInfo[2] ?? null,
+                ]);
+            }
         } else {
             // Other file types (videos, documents, etc.) - no pixel dimensions available
             Log::info('[ThumbnailGenerationService] Source file downloaded (non-image type)', [
@@ -2436,9 +2446,20 @@ class ThumbnailGenerationService
         $mime = $version ? $version->mime_type : $asset->mime_type;
         // When version is provided, use extension from version->file_path (authoritative for replace).
         // asset.original_filename can be stale after replace (e.g. wrong ext from previous file).
+        // Prefer version->file_path when available (authoritative for replace); fallback to original_filename, then storage_root_path
         $ext = $version && $version->file_path
             ? pathinfo($version->file_path, PATHINFO_EXTENSION)
             : pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        if (empty($ext) && $asset->storage_root_path) {
+            $ext = pathinfo($asset->storage_root_path, PATHINFO_EXTENSION);
+        }
+        // After replace: storage_root_path may be correct while original_filename is stale (e.g. still .jpg)
+        if (!$version && $asset->storage_root_path) {
+            $pathExt = strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION));
+            if ($pathExt === 'svg') {
+                $ext = 'svg';
+            }
+        }
         $ext = $ext ? strtolower($ext) : '';
         $fileType = $fileTypeService->detectFileType($mime, $ext);
 

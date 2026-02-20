@@ -538,6 +538,7 @@ class AdminAssetController extends Controller
             'analysis_status' => $request->filled('analysis_status') ? trim($request->analysis_status) : null,
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
+            'deleted' => $this->parseBoolParam($request, 'deleted'),
             'date_from' => $request->filled('date_from') ? trim($request->date_from) : null,
             'date_to' => $request->filled('date_to') ? trim($request->date_to) : null,
         ];
@@ -583,6 +584,7 @@ class AdminAssetController extends Controller
             '/category:(\w+)/i' => 'category_slug',
             '/user:(\d+)/i' => 'created_by',
             '/dead:(true|1)/i' => 'storage_missing',
+            '/deleted:(true|false|1|0)/i' => 'deleted',
         ];
 
         foreach ($patterns as $regex => $key) {
@@ -590,6 +592,8 @@ class AdminAssetController extends Controller
                 $val = $m[1];
                 if ($key === 'has_incident') {
                     $parsed[$key] = in_array(strtolower($val), ['true', '1']);
+                } elseif ($key === 'deleted') {
+                    $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : null);
                 } elseif ($key === 'storage_missing') {
                     $parsed[$key] = true;
                 } elseif ($key === 'brand_slug' || $key === 'category_slug') {
@@ -697,6 +701,11 @@ class AdminAssetController extends Controller
         }
         if (!empty($filters['date_to'])) {
             $query->whereDate('created_at', '<=', $filters['date_to']);
+        }
+        if (($filters['deleted'] ?? null) === true || $filters['deleted'] === '1') {
+            $query->whereNotNull('deleted_at');
+        } elseif (($filters['deleted'] ?? null) === false || $filters['deleted'] === '0') {
+            $query->whereNull('deleted_at');
         }
 
         return $query;
