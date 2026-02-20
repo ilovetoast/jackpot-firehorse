@@ -44,6 +44,9 @@ class AssetVersionController extends Controller
             ] : null,
             'created_at' => $v->created_at?->toIso8601String(),
             'pipeline_status' => $v->pipeline_status,
+            'storage_class' => $v->storage_class,
+            'change_note' => $v->change_note,
+            'restored_from_version_id' => $v->restored_from_version_id,
         ];
 
         $total = $query->count();
@@ -77,6 +80,12 @@ class AssetVersionController extends Controller
 
         if (!$version) {
             abort(404, 'Version not found');
+        }
+
+        // Phase 6.5: Block restore when version is archived in Glacier
+        $archived = in_array($version->storage_class ?? '', ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'], true);
+        if ($archived) {
+            abort(400, 'This version is archived in Glacier and must be restored before use.');
         }
 
         $preserveMetadata = $request->boolean('preserve_metadata', true);

@@ -81,6 +81,9 @@ class EventType
     public const ASSET_ARCHIVED = 'asset.archived';
     public const ASSET_UNARCHIVED = 'asset.unarchived';
     public const ASSET_VERSION_ADDED = 'asset.version_added';
+    public const ASSET_VERSION_CREATED = 'asset.version.created';
+    public const ASSET_VERSION_RESTORED = 'asset.version.restored';
+    public const ASSET_REPLACED = 'asset.replaced';
     public const ASSET_PREVIEWED = 'asset.previewed';
     public const ASSET_METADATA_UPDATED = 'asset.metadata_updated';
     public const ASSET_METADATA_POPULATED = 'asset.metadata.populated';
@@ -280,6 +283,9 @@ class EventType
             self::ASSET_ARCHIVED,
             self::ASSET_UNARCHIVED,
             self::ASSET_VERSION_ADDED,
+            self::ASSET_VERSION_CREATED,
+            self::ASSET_VERSION_RESTORED,
+            self::ASSET_REPLACED,
             self::ASSET_PREVIEWED,
             self::ASSET_METADATA_UPDATED,
             self::ASSET_METADATA_POPULATED,

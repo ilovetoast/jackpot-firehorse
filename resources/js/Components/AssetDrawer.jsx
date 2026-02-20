@@ -1791,12 +1791,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </button>
                             )}
                             
-                            {/* Phase J.3.1: Replace File button - show if asset is rejected, user is contributor and uploader */}
+                            {/* Phase J.3.1 / Phase 6.5: Replace File only when Starter. Pro/Enterprise use Upload New Version in Versions section. */}
                             {auth?.approval_features?.approvals_enabled && 
                              displayAsset.approval_status === 'rejected' &&
                              displayAsset.uploaded_by?.id === auth?.user?.id &&
                              auth?.user?.brand_role === 'contributor' &&
-                             !['admin', 'owner'].includes(auth?.user?.tenant_role?.toLowerCase() || '') && (
+                             !['admin', 'owner'].includes(auth?.user?.tenant_role?.toLowerCase() || '') &&
+                             !(auth?.plan_allows_versions ?? false) && (
                                 <button
                                     type="button"
                                     onClick={() => setShowReplaceFileModal(true)}

@@ -1,5 +1,15 @@
 Must Have
 
+- versioning fixed, test all options, restore, new verions file type diff, delete, restore
+- performance stats
+- glacvier for version and archive
+- clean up pooling to much
+- generate all pages of pdf for ocr
+- combine down and selects with floating dialog like actions
+- change details view to be full screen dark, shopify esk with deatil on the side
+- see trashed files
+
+login screen, splash screen
 CloudFront CDN implementation
 S3 image versioning support
 AI-generated recommended categories from tags

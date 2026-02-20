@@ -37,10 +37,12 @@ const STATUS_COLORS = {
 
 export default function AssetDetailModal({ data, onClose, onAction, onRefresh, showThumbnail = false }) {
     const [tab, setTab] = useState('overview')
-    const { asset, incidents, pipeline_flags, failed_jobs } = data || {}
+    const [restoreVersionLoading, setRestoreVersionLoading] = useState(false)
+    const { asset, incidents, pipeline_flags, failed_jobs, versions = [], plan_allows_versions = false } = data || {}
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
+        ...(plan_allows_versions ? [{ id: 'versions', label: `Versions (${versions?.length ?? 0})` }] : []),
         { id: 'metadata', label: 'Metadata JSON' },
         { id: 'pipeline', label: 'Pipeline State' },
         { id: 'incidents', label: 'Incidents' },
@@ -135,6 +137,11 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         <span className="text-slate-600">No</span>
                                     )}
                                 </div>
+                                {plan_allows_versions && (
+                                    <div><span className="text-slate-500">Versions</span><br />
+                                        <span className="text-slate-600">{versions?.length ?? 0} version(s)</span>
+                                    </div>
+                                )}
                             </div>
                             <div className="flex flex-wrap gap-2 pt-4">
                                 <button
@@ -178,6 +185,72 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         Restore
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    )}
+                    {tab === 'versions' && (
+                        <div className="space-y-4">
+                            <p className="text-sm text-slate-500">Version history for this asset. Restore makes a version the new current.</p>
+                            <div className="overflow-x-auto rounded border border-slate-200">
+                                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                                    <thead>
+                                        <tr>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Version</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Size</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Uploaded</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">User</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Current</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200">
+                                        {versions.map((v) => {
+                                            const status = (v.pipeline_status || 'pending').toLowerCase()
+                                            const statusClass = status === 'complete' ? 'bg-emerald-100 text-emerald-800' : status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                            const isArchived = ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'].includes(v.storage_class || '')
+                                            const fmtSize = (b) => (!b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`)
+                                            const fmtDate = (d) => (!d ? '—' : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))
+                                            return (
+                                                <tr key={v.id} className={isArchived ? 'bg-slate-50' : ''}>
+                                                    <td className="px-4 py-3 font-medium">v{v.version_number}</td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`rounded px-2 py-0.5 text-xs ${statusClass}`}>{status}</span>
+                                                        {isArchived && <span className="ml-1 rounded px-2 py-0.5 text-xs bg-slate-200 text-slate-700">Archived</span>}
+                                                    </td>
+                                                    <td className="px-4 py-3">{fmtSize(v.file_size)}</td>
+                                                    <td className="px-4 py-3">{fmtDate(v.created_at)}</td>
+                                                    <td className="px-4 py-3">{v.uploaded_by?.name ?? '—'}</td>
+                                                    <td className="px-4 py-3">{v.is_current ? <span className="rounded px-2 py-0.5 text-xs bg-indigo-100 text-indigo-800">Current</span> : '—'}</td>
+                                                    <td className="px-4 py-3">
+                                                        {!v.is_current && !isArchived && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    if (restoreVersionLoading) return
+                                                                    setRestoreVersionLoading(true)
+                                                                    try {
+                                                                        await window.axios.post(`/app/admin/assets/${asset.id}/versions/${v.id}/restore`)
+                                                                        onRefresh?.()
+                                                                    } catch (err) {
+                                                                        alert(err.response?.data?.error || 'Restore failed')
+                                                                    } finally {
+                                                                        setRestoreVersionLoading(false)
+                                                                    }
+                                                                }}
+                                                                disabled={restoreVersionLoading}
+                                                                className="text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                                                            >
+                                                                Restore
+                                                            </button>
+                                                        )}
+                                                        {isArchived && <span className="text-slate-400 text-xs" title="Archived in Glacier">—</span>}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     )}

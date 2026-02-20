@@ -131,6 +131,15 @@ class ProcessAssetJob implements ShouldQueue
         $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
         $thumbnailJobId = $version ? $version->id : $asset->id;
 
+        // Phase 7: Idempotent - skip if version already complete
+        if ($version && $version->pipeline_status === 'complete') {
+            Log::info('[ProcessAssetJob] Skipping - version already complete', [
+                'version_id' => $version->id,
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
         PipelineLogger::error('PROCESS ASSET: HANDLE START', [
             'asset_id' => $asset->id,
             'version_id' => $version?->id,
@@ -148,13 +157,17 @@ class ProcessAssetJob implements ShouldQueue
                 'file_size' => $inspection['file_size'],
                 'is_image' => $inspection['is_image'] ?? null,
             ]);
-            $version->update([
+            $versionUpdate = [
                 'mime_type' => $inspection['mime_type'],
                 'file_size' => $inspection['file_size'],
                 'width' => $inspection['width'],
                 'height' => $inspection['height'],
                 'pipeline_status' => 'processing',
-            ]);
+            ];
+            if (isset($inspection['storage_class'])) {
+                $versionUpdate['storage_class'] = $inspection['storage_class'];
+            }
+            $version->update($versionUpdate);
         }
 
         // Skip if failed (don't reprocess failed assets automatically)
@@ -329,9 +342,9 @@ class ProcessAssetJob implements ShouldQueue
                 'trace' => collect($e->getTrace())->take(5),
             ]);
 
-            // Phase 8: On failure, update version pipeline_status = failed
+            // Phase 7: On failure, only mark failed if still processing (idempotent)
             $failedVersion = AssetVersion::find($this->assetId);
-            if ($failedVersion) {
+            if ($failedVersion && $failedVersion->pipeline_status === 'processing') {
                 $failedVersion->update(['pipeline_status' => 'failed']);
             }
 

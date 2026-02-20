@@ -65,8 +65,8 @@ class FinalizeAssetJob implements ShouldQueue
         $isComplete = $completionService->isComplete($asset);
 
         if ($isComplete) {
+            // Phase 7: NEVER trust stale asset state - always derive from currentVersion
             $currentVersion = $asset->versions()->where('is_current', true)->first();
-            // Sync asset from currentVersion (derived fields from FileInspectionService)
             if ($currentVersion && $currentVersion->pipeline_status === 'complete') {
                 $asset->mime_type = $currentVersion->mime_type;
                 $asset->width = $currentVersion->width;

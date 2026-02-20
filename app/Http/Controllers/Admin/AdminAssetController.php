@@ -162,12 +162,67 @@ class AdminAssetController extends Controller
             ])
             ->all();
 
+        $versions = [];
+        $planAllowsVersions = $asset->tenant && app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant);
+        if ($planAllowsVersions) {
+            $versions = $asset->versions()
+                ->with('uploadedBy:id,first_name,last_name')
+                ->orderByDesc('version_number')
+                ->limit(50)
+                ->get()
+                ->map(fn ($v) => [
+                    'id' => $v->id,
+                    'version_number' => $v->version_number,
+                    'is_current' => $v->is_current,
+                    'file_size' => $v->file_size,
+                    'mime_type' => $v->mime_type,
+                    'uploaded_by' => $v->uploadedBy ? ['id' => $v->uploadedBy->id, 'name' => $v->uploadedBy->name] : null,
+                    'created_at' => $v->created_at?->toIso8601String(),
+                    'pipeline_status' => $v->pipeline_status,
+                    'storage_class' => $v->storage_class,
+                    'change_note' => $v->change_note,
+                    'restored_from_version_id' => $v->restored_from_version_id,
+                ])
+                ->values()
+                ->all();
+        }
+
         return response()->json([
             'asset' => $this->formatAssetForDetail($asset),
             'incidents' => $incidents,
             'pipeline_flags' => $pipelineFlags,
             'failed_jobs' => $failedJobs,
+            'versions' => $versions,
+            'plan_allows_versions' => $planAllowsVersions,
         ]);
+    }
+
+    /**
+     * POST /app/admin/assets/{asset}/versions/{version}/restore
+     * Admin-only version restore (bypasses tenant policy).
+     */
+    public function restoreVersion(string $assetId, string $versionId): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $asset = Asset::withTrashed()->findOrFail($assetId);
+        $version = \Illuminate\Support\Str::isUuid($versionId)
+            ? \App\Models\AssetVersion::where('asset_id', $asset->id)->where('id', $versionId)->firstOrFail()
+            : \App\Models\AssetVersion::where('asset_id', $asset->id)->where('version_number', (int) $versionId)->firstOrFail();
+
+        if (!app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant)) {
+            return response()->json(['error' => 'Versioning not enabled for this tenant.'], 403);
+        }
+
+        $archived = in_array($version->storage_class ?? '', ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'], true);
+        if ($archived) {
+            return response()->json(['error' => 'This version is archived in Glacier and must be restored before use.'], 400);
+        }
+
+        $service = app(\App\Services\AssetVersionRestoreService::class);
+        $newVersion = $service->restore($asset, $version, true, false, (string) Auth::id());
+
+        return response()->json(['success' => true, 'new_version_id' => $newVersion->id]);
     }
 
     /**

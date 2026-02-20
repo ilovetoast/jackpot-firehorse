@@ -15,10 +15,11 @@
  *
  * Reusable as full page in admin contexts via prop fullPage.
  */
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, Fragment } from 'react'
 import {
     XMarkIcon,
     ChevronDownIcon,
+    ChevronRightIcon,
     ArrowPathIcon,
     TrashIcon,
     LockClosedIcon,
@@ -129,6 +130,7 @@ export default function AssetDetailPanel({
     const [restorePreserveMetadata, setRestorePreserveMetadata] = useState(true)
     const [restoreRerunPipeline, setRestoreRerunPipeline] = useState(false)
     const [restoreLoading, setRestoreLoading] = useState(false)
+    const [expandedVersionId, setExpandedVersionId] = useState(null)
 
     const [showActionsDropdown, setShowActionsDropdown] = useState(false)
     const actionsDropdownRef = useRef(null)
@@ -727,7 +729,8 @@ export default function AssetDetailPanel({
                                                         Restore
                                                     </button>
                                                 )}
-                                                {onReplaceFile && (
+                                                {/* Phase 6.5: Replace file only when Starter (no versioning). Pro/Enterprise use Upload New Version in Versions section. */}
+                                                {onReplaceFile && !planAllowsVersions && (
                                                     <button
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); onReplaceFile(); }}
@@ -1535,6 +1538,7 @@ export default function AssetDetailPanel({
                                                     <table className="min-w-full divide-y divide-gray-200">
                                                         <thead>
                                                             <tr>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8" aria-label="Expand" />
                                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
                                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
@@ -1550,47 +1554,92 @@ export default function AssetDetailPanel({
                                                                 const statusPillClass = status === 'complete' ? 'bg-green-100 text-green-800' : status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
                                                                 const fmtSize = (b) => (!b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`)
                                                                 const fmtDate = (d) => (!d ? '—' : (() => { try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) } catch { return '—' } })())
+                                                                const isArchived = ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'].includes(v.storage_class || '')
+                                                                const restoredFrom = v.restored_from_version_id ? versions.find(x => x.id === v.restored_from_version_id) : null
+                                                                const isExpanded = expandedVersionId === v.id
                                                                 return (
-                                                                    <tr key={v.id}>
-                                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">v{v.version_number}</td>
-                                                                        <td className="px-4 py-3 text-sm">
-                                                                            <span
-                                                                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusPillClass}`}
-                                                                                title={v.pipeline_status || 'Pipeline status'}
-                                                                            >
-                                                                                {status}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td className="px-4 py-3 text-sm text-gray-700">{fmtSize(v.file_size)}</td>
-                                                                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(v.created_at)}</td>
-                                                                        <td className="px-4 py-3 text-sm text-gray-700">{v.uploaded_by?.name ?? '—'}</td>
-                                                                        <td className="px-4 py-3 text-sm">
-                                                                            {v.is_current && (
-                                                                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800" title="Current version">
-                                                                                    <CheckIcon className="h-3.5 w-3.5 mr-0.5" aria-hidden />
-                                                                                    Current
-                                                                                </span>
-                                                                            )}
-                                                                        </td>
-                                                                        {canRestoreVersion && (
+                                                                    <Fragment key={v.id}>
+                                                                        <tr className={isArchived ? 'bg-gray-50' : ''}>
                                                                             <td className="px-4 py-3 text-sm">
-                                                                                {!v.is_current && (
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => {
-                                                                                            setRestoreVersion(v)
-                                                                                            setRestorePreserveMetadata(true)
-                                                                                            setRestoreRerunPipeline(false)
-                                                                                            setShowRestoreModal(true)
-                                                                                        }}
-                                                                                        className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setExpandedVersionId(isExpanded ? null : v.id)}
+                                                                                    className="text-gray-500 hover:text-gray-700 p-0.5 rounded"
+                                                                                    aria-expanded={isExpanded}
+                                                                                >
+                                                                                    {isExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+                                                                                </button>
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-sm font-medium text-gray-900">v{v.version_number}</td>
+                                                                            <td className="px-4 py-3 text-sm">
+                                                                                <span
+                                                                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusPillClass}`}
+                                                                                    title={v.pipeline_status || 'Pipeline status'}
+                                                                                >
+                                                                                    {status}
+                                                                                </span>
+                                                                                {isArchived && (
+                                                                                    <span
+                                                                                        className="ml-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-200 text-slate-700"
+                                                                                        title="This version is archived in Glacier and must be restored before use."
                                                                                     >
-                                                                                        Restore
-                                                                                    </button>
+                                                                                        Archived
+                                                                                    </span>
                                                                                 )}
                                                                             </td>
+                                                                            <td className="px-4 py-3 text-sm text-gray-700">{fmtSize(v.file_size)}</td>
+                                                                            <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(v.created_at)}</td>
+                                                                            <td className="px-4 py-3 text-sm text-gray-700">{v.uploaded_by?.name ?? '—'}</td>
+                                                                            <td className="px-4 py-3 text-sm">
+                                                                                {v.is_current && (
+                                                                                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800" title="Current version">
+                                                                                        <CheckIcon className="h-3.5 w-3.5 mr-0.5" aria-hidden />
+                                                                                        Current
+                                                                                    </span>
+                                                                                )}
+                                                                            </td>
+                                                                            {canRestoreVersion && (
+                                                                                <td className="px-4 py-3 text-sm">
+                                                                                    {!v.is_current && (
+                                                                                        isArchived ? (
+                                                                                            <span
+                                                                                                className="text-gray-400 cursor-not-allowed"
+                                                                                                title="This version is archived in Glacier and must be restored before use."
+                                                                                            >
+                                                                                                Restore
+                                                                                            </span>
+                                                                                        ) : (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => {
+                                                                                                    setRestoreVersion(v)
+                                                                                                    setRestorePreserveMetadata(true)
+                                                                                                    setRestoreRerunPipeline(false)
+                                                                                                    setShowRestoreModal(true)
+                                                                                                }}
+                                                                                                className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                                            >
+                                                                                                Restore
+                                                                                            </button>
+                                                                                        )
+                                                                                    )}
+                                                                                </td>
+                                                                            )}
+                                                                        </tr>
+                                                                        {isExpanded && (
+                                                                            <tr key={`${v.id}-expanded`}>
+                                                                                <td colSpan={canRestoreVersion ? 8 : 7} className="px-4 py-3 text-sm bg-gray-50 border-b border-gray-200">
+                                                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-gray-600">
+                                                                                        {v.change_note && <div><span className="font-medium text-gray-700">Comment:</span> {v.change_note}</div>}
+                                                                                        {restoredFrom && <div><span className="font-medium text-gray-700">Restored from:</span> v{restoredFrom.version_number}</div>}
+                                                                                        {v.storage_class && <div><span className="font-medium text-gray-700">Storage:</span> {v.storage_class}</div>}
+                                                                                        <div><span className="font-medium text-gray-700">Pipeline:</span> {status}</div>
+                                                                                        <div><span className="font-medium text-gray-700">Uploaded by:</span> {v.uploaded_by?.name ?? '—'}</div>
+                                                                                    </div>
+                                                                                </td>
+                                                                            </tr>
                                                                         )}
-                                                                    </tr>
+                                                                    </Fragment>
                                                                 )
                                                             })}
                                                         </tbody>

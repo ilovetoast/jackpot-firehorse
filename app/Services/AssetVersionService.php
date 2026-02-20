@@ -31,9 +31,11 @@ class AssetVersionService
 
             $nextVersion = $currentMax + 1;
 
-            // Toggle previous current
+            // Phase 7: Lock versions for this asset to prevent race corruption
             $asset->versions()
                 ->where('is_current', true)
+                ->whereNull('deleted_at')
+                ->lockForUpdate()
                 ->update(['is_current' => false]);
 
             // Do NOT copy width/height/mime from previous version; all derived fields come from FileInspectionService
@@ -54,8 +56,24 @@ class AssetVersionService
                 'restored_from_version_id' => $restoredFromVersionId,
             ]);
 
+            $this->assertSingleCurrentVersion($asset);
+
             return $version;
         });
+    }
+
+    /**
+     * Phase 7: Assert exactly one current version per asset.
+     *
+     * @throws \RuntimeException when version integrity is violated
+     */
+    public function assertSingleCurrentVersion(Asset $asset): void
+    {
+        $count = $asset->versions()->where('is_current', true)->whereNull('deleted_at')->count();
+
+        if ($count !== 1) {
+            throw new \RuntimeException("Version integrity violation for asset {$asset->id}: expected 1 current version, found {$count}");
+        }
     }
 
     /**

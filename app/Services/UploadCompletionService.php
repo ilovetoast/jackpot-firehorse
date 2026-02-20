@@ -15,6 +15,7 @@ use App\Models\Category;
 use App\Models\UploadSession;
 use App\Services\AssetVersionService;
 use App\Services\MetadataPersistenceService;
+use App\Services\PlanService;
 use App\Services\UploadMetadataSchemaResolver;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -110,14 +111,19 @@ class UploadCompletionService
         // Refresh to get latest state
         $uploadSession->refresh();
 
-        // Phase J.3.1: Handle replace mode (file-only replacement for rejected assets)
+        // Phase J.3.1 / Phase 6.5: Handle replace mode (plan-aware: version vs in-place)
         if ($uploadSession->mode === 'replace' && $uploadSession->asset_id) {
             // For replace mode, comment is passed via metadata array (hacky but works with existing finalize flow)
             $comment = null;
             if (is_array($metadata) && isset($metadata['comment'])) {
                 $comment = $metadata['comment'];
             }
-            return $this->completeReplace($uploadSession, $s3Key, $userId, $comment, $filename);
+            $asset = Asset::findOrFail($uploadSession->asset_id);
+            $planAllowsVersions = app(PlanService::class)->planAllowsVersions($asset->tenant);
+            if ($planAllowsVersions) {
+                return $this->completeReplaceWithVersion($uploadSession, $s3Key, $userId, $comment, $filename);
+            }
+            return $this->completeReplaceInPlace($uploadSession, $s3Key, $userId, $comment, $filename);
         }
 
         // IDEMPOTENT CHECK: If upload session is already COMPLETED, check for existing asset
@@ -1332,12 +1338,10 @@ class UploadCompletionService
     }
 
     /**
-     * Complete an upload session in replace mode.
+     * Complete replace with new version (Pro/Enterprise).
      * 
-     * Phase J.3.1: File-only replacement for rejected contributor assets
-     * 
-     * Replaces the S3 file for an existing asset without modifying metadata.
-     * Updates asset file properties and resets approval status.
+     * Phase 6.5: MUST create new version. Never overwrite current version in place.
+     * Version history must remain intact.
      * 
      * @param UploadSession $uploadSession Upload session with mode='replace' and asset_id set
      * @param string|null $s3Key Optional S3 key if known
@@ -1347,7 +1351,7 @@ class UploadCompletionService
      * @return Asset The updated asset
      * @throws \Exception
      */
-    protected function completeReplace(
+    protected function completeReplaceWithVersion(
         UploadSession $uploadSession,
         ?string $s3Key = null,
         ?int $userId = null,
@@ -1516,13 +1520,196 @@ class UploadCompletionService
             }
         }
 
+        // Phase 6.5: Record activity event
+        $user = $userId ? \App\Models\User::find($userId) : null;
+        \App\Services\ActivityRecorder::logAsset(
+            $asset,
+            \App\Enums\EventType::ASSET_VERSION_CREATED,
+            ['version_number' => $newVersion->version_number, 'version_id' => $newVersion->id],
+            $user
+        );
+
+        // Phase 7: Prevent double dispatch - claim job atomically
+        $newVersion->refresh();
+        if ($newVersion->pipeline_status !== 'pending') {
+            Log::info('[UploadCompletionService] Skipping ProcessAssetJob dispatch - version not pending', [
+                'asset_id' => $asset->id,
+                'version_id' => $newVersion->id,
+                'pipeline_status' => $newVersion->pipeline_status,
+            ]);
+            return $asset;
+        }
+        $newVersion->update(['pipeline_status' => 'processing']);
+
         // Dispatch version-aware pipeline (ProcessAssetJob with version ID).
-        // Do NOT fire AssetUploaded - that would dispatch with asset ID (legacy) and skip version-aware path.
         Log::info('[UploadCompletionService] Dispatching ProcessAssetJob for replaced file (version-aware)', [
             'asset_id' => $asset->id,
             'version_id' => $newVersion->id,
         ]);
         \App\Jobs\ProcessAssetJob::dispatch($newVersion->id);
+
+        return $asset;
+    }
+
+    /**
+     * Complete replace in place (Starter plan only).
+     * 
+     * Phase 6.5: Overwrites file at storage_root_path. No new version record.
+     * 
+     * @param UploadSession $uploadSession Upload session with mode='replace' and asset_id set
+     * @param string|null $s3Key Optional S3 key if known
+     * @param int|null $userId User ID performing the replacement
+     * @param string|null $comment Optional comment for resubmission
+     * @param string|null $resolvedFilename Optional filename from client (resolved_filename from manifest)
+     * @return Asset The updated asset
+     * @throws \LogicException When versioning is enabled (plan forbids in-place replace)
+     */
+    protected function completeReplaceInPlace(
+        UploadSession $uploadSession,
+        ?string $s3Key = null,
+        ?int $userId = null,
+        ?string $comment = null,
+        ?string $resolvedFilename = null
+    ): Asset {
+        $asset = Asset::findOrFail($uploadSession->asset_id);
+
+        // Phase 6.5: Hard protection - in-place replace forbidden when versioning enabled
+        if (app(PlanService::class)->planAllowsVersions($asset->tenant)) {
+            throw new \LogicException('In-place replace is forbidden when versioning is enabled.');
+        }
+
+        Log::info('[UploadCompletionService] Starting in-place replace (Starter plan)', [
+            'upload_session_id' => $uploadSession->id,
+            'asset_id' => $asset->id,
+            'user_id' => $userId,
+        ]);
+
+        if ($asset->tenant_id !== $uploadSession->tenant_id || $asset->brand_id !== $uploadSession->brand_id) {
+            throw new \RuntimeException('Asset does not belong to the same tenant/brand as upload session.');
+        }
+
+        if (!$uploadSession->canTransitionTo(UploadStatus::COMPLETED)) {
+            throw new \RuntimeException(
+                "Cannot transition upload session from {$uploadSession->status->value} to COMPLETED."
+            );
+        }
+
+        if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
+            Log::info('[UploadCompletionService] Finalizing multipart upload for in-place replace', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+            ]);
+            try {
+                $this->finalizeMultipartUpload($uploadSession);
+            } catch (\Exception $e) {
+                Log::error('[UploadCompletionService] Failed to finalize multipart upload for in-place replace', [
+                    'upload_session_id' => $uploadSession->id,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to finalize multipart upload: {$e->getMessage()}", 0, $e);
+            }
+        }
+
+        $tempS3Key = $s3Key ?? $this->generateTempUploadPath($uploadSession);
+        $fileInfo = $this->getFileInfoFromS3($uploadSession, $tempS3Key, $resolvedFilename);
+
+        $newFilename = $resolvedFilename ?? ($fileInfo['original_filename'] !== 'unknown' ? $fileInfo['original_filename'] : null) ?? $asset->original_filename;
+
+        // Overwrite file at existing storage_root_path (no new version)
+        $destPath = $asset->storage_root_path;
+        $this->copyTempToVersionedPath($uploadSession, $destPath);
+
+        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId, $newFilename) {
+            $asset->size_bytes = $fileInfo['size_bytes'];
+            if ($newFilename) {
+                $asset->original_filename = $newFilename;
+            }
+
+            $featureGate = app(\App\Services\FeatureGate::class);
+            $approvalsEnabled = $asset->tenant && $featureGate->approvalsEnabled($asset->tenant);
+            $categoryId = $asset->metadata['category_id'] ?? null;
+            $category = $categoryId ? Category::find($categoryId) : null;
+            $requiresApproval = $approvalsEnabled && (
+                ($asset->brand && $asset->brand->requiresContributorApproval()) ||
+                ($category && $category->requiresApproval())
+            );
+            if ($requiresApproval) {
+                $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
+                $asset->rejected_at = null;
+                $asset->rejection_reason = null;
+            }
+
+            $asset->analysis_status = 'uploading';
+            $asset->thumbnail_status = \App\Enums\ThumbnailStatus::PENDING;
+            $metadata = $asset->metadata ?? [];
+            foreach (['thumbnails', 'preview_thumbnails', 'processing_started', 'processing_started_at', 'thumbnails_generated', 'thumbnails_generated_at', 'metadata_extracted', 'metadata_extracted_at'] as $key) {
+                if (isset($metadata[$key])) {
+                    unset($metadata[$key]);
+                }
+            }
+            $asset->metadata = $metadata;
+
+            $asset->save();
+
+            $uploadSession->update([
+                'status' => UploadStatus::COMPLETED,
+                'uploaded_size' => $fileInfo['size_bytes'],
+            ]);
+
+            if ($userId) {
+                $user = \App\Models\User::find($userId);
+                if ($user) {
+                    $commentService = app(\App\Services\AssetApprovalCommentService::class);
+                    $commentText = $comment ?? 'File replaced';
+                    $commentService->recordResubmitted($asset, $user, $commentText);
+
+                    $notificationService = app(\App\Services\ApprovalNotificationService::class);
+                    $notificationService->notifyOnResubmitted($asset, $user);
+                }
+            }
+
+            Log::info('[UploadCompletionService] Asset file replaced in place (Starter)', [
+                'asset_id' => $asset->id,
+                'upload_session_id' => $uploadSession->id,
+                'new_size' => $asset->size_bytes,
+            ]);
+        });
+
+        $asset->refresh();
+
+        $bucket = $uploadSession->storageBucket;
+        if ($bucket) {
+            $s3Client = $this->createS3Client();
+            try {
+                $s3Client->headObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $asset->storage_root_path,
+                ]);
+                Log::info('[UploadCompletionService] Verified in-place replaced file exists in S3', [
+                    'asset_id' => $asset->id,
+                    'storage_path' => $asset->storage_root_path,
+                ]);
+            } catch (S3Exception $e) {
+                Log::error('[UploadCompletionService] In-place replaced file not found in S3', [
+                    'asset_id' => $asset->id,
+                    'storage_path' => $asset->storage_root_path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $user = $userId ? \App\Models\User::find($userId) : null;
+        \App\Services\ActivityRecorder::logAsset(
+            $asset,
+            \App\Enums\EventType::ASSET_REPLACED,
+            [],
+            $user
+        );
+
+        Log::info('[UploadCompletionService] Dispatching ProcessAssetJob for in-place replace (asset mode)', [
+            'asset_id' => $asset->id,
+        ]);
+        \App\Jobs\ProcessAssetJob::dispatch($asset->id);
 
         return $asset;
     }

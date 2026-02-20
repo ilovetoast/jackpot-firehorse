@@ -10,12 +10,33 @@ class FileInspectionService
 {
     /**
      * Inspect the actual file and return canonical file metadata.
+     * Phase 6.5: Captures StorageClass from S3 headObject when bucket is provided.
      *
      * @param string $s3Path S3 object key (e.g. assets/{id}/v1/original.tif)
      * @param StorageBucket|null $bucket When provided, fetches from this bucket; otherwise uses default s3 disk
      */
     public function inspect(string $s3Path, ?StorageBucket $bucket = null): array
     {
+        $storageClass = null;
+        $headData = null;
+        if ($bucket) {
+            $headData = app(TenantBucketService::class)->headObject($bucket, $s3Path);
+            $storageClass = $headData['StorageClass'] ?? 'STANDARD';
+        }
+
+        // Glacier: skip download (getObject would fail or trigger restore). Return metadata from headObject.
+        $archived = in_array($storageClass ?? '', ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'], true);
+        if ($archived && $headData) {
+            return [
+                'mime_type' => $headData['ContentType'] ?? 'application/octet-stream',
+                'file_size' => $headData['ContentLength'] ?? 0,
+                'width' => null,
+                'height' => null,
+                'is_image' => false,
+                'storage_class' => $storageClass,
+            ];
+        }
+
         $contents = $bucket
             ? app(TenantBucketService::class)->getObjectContents($bucket, $s3Path)
             : Storage::disk('s3')->get($s3Path);
@@ -55,12 +76,17 @@ class FileInspectionService
 
         fclose($tmp);
 
-        return [
+        $result = [
             'mime_type' => $mime,
             'file_size' => $size,
             'width' => $width,
             'height' => $height,
             'is_image' => $isImage,
         ];
+        if ($storageClass !== null) {
+            $result['storage_class'] = $storageClass;
+        }
+
+        return $result;
     }
 }

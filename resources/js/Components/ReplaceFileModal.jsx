@@ -11,6 +11,8 @@ import { usePage } from '@inertiajs/react'
 
 export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) {
     const { auth } = usePage().props
+    const planAllowsVersions = auth?.plan_allows_versions ?? false
+    const actionLabel = planAllowsVersions ? 'Upload New Version' : 'Replace File'
     const [selectedFile, setSelectedFile] = useState(null)
     const [comment, setComment] = useState('')
     const [uploading, setUploading] = useState(false)
@@ -150,10 +152,12 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                     <div className="sm:flex sm:items-start">
                         <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
                             <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
-                                Replace File
+                                {actionLabel}
                             </h3>
                             <p className="text-sm text-gray-500 mb-4">
-                                Replace the file for this asset. Metadata will remain unchanged and the asset will be reviewed again before publishing.
+                                {planAllowsVersions
+                                    ? 'Upload a new version of this asset. Version history will be preserved and the asset will be reviewed again before publishing.'
+                                    : 'Replace the file for this asset. Metadata will remain unchanged and the asset will be reviewed again before publishing.'}
                             </p>
 
                             {/* File Input */}
@@ -232,7 +236,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                             onClick={handleReplace}
                             className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:ml-3 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {uploading ? 'Replacing...' : 'Replace File'}
+                            {uploading ? (planAllowsVersions ? 'Uploading...' : 'Replacing...') : actionLabel}
                         </button>
                         <button
                             type="button"

@@ -184,6 +184,27 @@ class TenantBucketService
     }
 
     /**
+     * Get object metadata via headObject (Phase 6.5: StorageClass for Glacier awareness).
+     *
+     * @param StorageBucket $bucket
+     * @param string $key S3 object key
+     * @return array{StorageClass?: string, ContentLength?: int, ContentType?: string}
+     */
+    public function headObject(StorageBucket $bucket, string $key): array
+    {
+        $result = $this->s3Client->headObject([
+            'Bucket' => $bucket->name,
+            'Key' => $key,
+        ]);
+
+        return [
+            'StorageClass' => $result->get('StorageClass') ?? 'STANDARD',
+            'ContentLength' => (int) $result->get('ContentLength', 0),
+            'ContentType' => $result->get('ContentType'),
+        ];
+    }
+
+    /**
      * Resolve ACTIVE bucket if it exists (no throw). Used by getOrProvisionBucket in local/testing.
      */
     protected function resolveActiveBucketOrFailIfExists(Tenant $tenant): ?StorageBucket

@@ -121,6 +121,15 @@ class GenerateThumbnailsJob implements ShouldQueue
         try {
             $version = AssetVersion::find($this->assetVersionId);
             if ($version) {
+                // Phase 7: Idempotent - skip if version already failed
+                if ($version->pipeline_status === 'failed') {
+                    Log::info('[GenerateThumbnailsJob] Skipping - version pipeline_status is failed', [
+                        'version_id' => $version->id,
+                        'asset_id' => $version->asset_id,
+                    ]);
+                    return;
+                }
+
                 $asset = $version->asset;
                 $sourcePath = $version->file_path;
 
