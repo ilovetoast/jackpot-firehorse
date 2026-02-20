@@ -129,6 +129,10 @@ class ProcessAssetJob implements ShouldQueue
         // Resolve version-aware or legacy: accept version ID or asset ID
         $version = AssetVersion::find($this->assetId);
         $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
+        // When asset ID was passed (e.g. from ProcessAssetOnUpload), resolve current version for pipeline_status updates
+        if (!$version && $asset->currentVersion) {
+            $version = $asset->currentVersion;
+        }
         $thumbnailJobId = $version ? $version->id : $asset->id;
 
         // Phase 7: Idempotent - skip if version already complete
