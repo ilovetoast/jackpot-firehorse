@@ -526,6 +526,7 @@ class AdminAssetController extends Controller
             'created_by' => $request->filled('created_by') ? (int) $request->created_by : null,
             'tag' => $request->filled('tag') ? trim($request->tag) : null,
             'status' => $request->filled('status') ? trim($request->status) : null,
+            'asset_type' => $request->filled('asset_type') ? trim($request->asset_type) : null,
             'analysis_status' => $request->filled('analysis_status') ? trim($request->analysis_status) : null,
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
@@ -547,6 +548,7 @@ class AdminAssetController extends Controller
             '/brand:(\d+)/i' => 'brand_id',
             '/brand:([a-z0-9_-]+)/i' => 'brand_slug',
             '/status:(\w+)/i' => 'status',
+            '/type:(asset|deliverable|ai_generated|execution|generative)/i' => 'asset_type',
             '/analysis:(\w+)/i' => 'analysis_status',
             '/thumb:(\w+)/i' => 'thumbnail_status',
             '/incident:(true|false|1|0)/i' => 'has_incident',
@@ -565,6 +567,13 @@ class AdminAssetController extends Controller
                     $parsed[$key] = true;
                 } elseif ($key === 'brand_slug' || $key === 'category_slug') {
                     $parsed[$key] = $val;
+                } elseif ($key === 'asset_type') {
+                    $parsed[$key] = match (strtolower($val)) {
+                        'execution' => 'deliverable',
+                        'generative' => 'ai_generated',
+                        'asset', 'basic' => 'asset',
+                        default => $val,
+                    };
                 } else {
                     $parsed[$key] = is_numeric($val) ? (int) $val : $val;
                 }
@@ -627,6 +636,9 @@ class AdminAssetController extends Controller
         }
         if (!empty($filters['status'])) {
             $query->where('status', $filters['status']);
+        }
+        if (!empty($filters['asset_type'])) {
+            $query->where('type', $filters['asset_type']);
         }
         if (!empty($filters['analysis_status'])) {
             $query->where('analysis_status', $filters['analysis_status']);

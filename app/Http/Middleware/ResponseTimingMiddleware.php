@@ -68,6 +68,7 @@ class ResponseTimingMiddleware
                 'duration_ms' => $durationMs,
                 'user_id' => $request->user()?->id,
                 'memory_usage' => $memoryUsage,
+                'created_at' => now(),
             ]);
         } catch (\Throwable $e) {
             Log::warning('[PerformanceLog] Failed to persist', ['error' => $e->getMessage()]);

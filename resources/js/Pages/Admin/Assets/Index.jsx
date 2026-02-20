@@ -44,6 +44,10 @@ function parseSmartFilter(search) {
         [/brand:(\d+)/gi, 'brand_id', (v) => parseInt(v, 10)],
         [/brand:([a-z0-9_-]+)/gi, 'brand_slug', String],
         [/status:(\w+)/gi, 'status', String],
+        [/type:(asset|deliverable|ai_generated|execution|generative)/gi, 'asset_type', (v) => {
+            const map = { execution: 'deliverable', generative: 'ai_generated', asset: 'asset', basic: 'asset' }
+            return map[v?.toLowerCase()] ?? v
+        }],
         [/analysis:(\w+)/gi, 'analysis_status', String],
         [/thumb:(\w+)/gi, 'thumbnail_status', String],
         [/incident:(true|false|1|0)/gi, 'has_incident', (v) => ['true', '1'].includes(String(v).toLowerCase())],
@@ -267,7 +271,7 @@ export default function AdminAssetsIndex({
                                 type="text"
                                 value={searchInput}
                                 onChange={(e) => setSearchInput(e.target.value)}
-                                placeholder="Search assets... tenant:3 brand:augusta status:failed tag:whiskey"
+                                placeholder="Search assets... tenant:3 brand:augusta type:execution status:failed tag:whiskey"
                                 className="relative z-10 block w-full rounded-lg border-slate-300 pl-10 pr-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                             />
                         </div>
@@ -288,7 +292,7 @@ export default function AdminAssetsIndex({
                         <FunnelIcon className="h-4 w-4" />
                         Filters
                     </button>
-                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status) && (
+                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type) && (
                         <button
                             type="button"
                             onClick={clearFilters}
@@ -328,6 +332,19 @@ export default function AdminAssetsIndex({
                                     {filterOptions?.brands?.map((b) => (
                                         <option key={b.id} value={b.id}>{b.name}</option>
                                     ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Asset type</label>
+                                <select
+                                    value={initialFilters?.asset_type ?? ''}
+                                    onChange={(e) => applyFilters({ asset_type: e.target.value || null, page: 1 })}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="asset">Asset</option>
+                                    <option value="deliverable">Execution</option>
+                                    <option value="ai_generated">Generative</option>
                                 </select>
                             </div>
                             <div>
