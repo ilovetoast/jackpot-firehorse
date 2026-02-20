@@ -344,6 +344,66 @@ class Asset extends Model
     }
 
     /**
+     * Whether this asset is visible in the default brand asset grid.
+     *
+     * CRITICAL: This is the single source of truth for grid visibility.
+     * An asset is visible when ALL of: not deleted, not archived, published,
+     * status != FAILED/HIDDEN, and processing did not fail.
+     *
+     * Keep in sync with scopeVisibleInGrid() / scopeNotVisibleInGrid().
+     */
+    public function isVisibleInGrid(): bool
+    {
+        if ($this->deleted_at !== null) {
+            return false;
+        }
+        if ($this->archived_at !== null) {
+            return false;
+        }
+        if ($this->published_at === null) {
+            return false;
+        }
+        if ($this->status === AssetStatus::FAILED || $this->status === AssetStatus::HIDDEN) {
+            return false;
+        }
+        if (($this->metadata['processing_failed'] ?? false)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Scope: assets visible in the default brand asset grid.
+     *
+     * Must match isVisibleInGrid() logic. Used for filtering (e.g. Admin Operations).
+     */
+    public function scopeVisibleInGrid($query)
+    {
+        return $query->whereNull('deleted_at')
+            ->whereNull('archived_at')
+            ->whereNotNull('published_at')
+            ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::HIDDEN])
+            ->whereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.processing_failed')), 'false') NOT IN ('true', '1')");
+    }
+
+    /**
+     * Scope: assets NOT visible in the default brand asset grid.
+     *
+     * Inverse of scopeVisibleInGrid. Used for Admin Operations filter.
+     */
+    public function scopeNotVisibleInGrid($query)
+    {
+        return $query->where(function ($qb) {
+            $qb->whereNotNull('deleted_at')
+                ->orWhereNotNull('archived_at')
+                ->orWhereNull('published_at')
+                ->orWhereIn('status', [AssetStatus::FAILED, AssetStatus::HIDDEN])
+                ->orWhereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.processing_failed')), 'false') IN ('true', '1')");
+        });
+    }
+
+    /**
      * Get the tenant that owns this asset.
      */
     public function tenant(): BelongsTo

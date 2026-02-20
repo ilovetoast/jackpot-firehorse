@@ -51,6 +51,12 @@ function parseSmartFilter(search) {
         [/analysis:(\w+)/gi, 'analysis_status', String],
         [/thumb:(\w+)/gi, 'thumbnail_status', String],
         [/incident:(true|false|1|0)/gi, 'has_incident', (v) => ['true', '1'].includes(String(v).toLowerCase())],
+        [/visible:(true|false|1|0)/gi, 'visible_in_grid', (v) => {
+            const s = String(v).toLowerCase()
+            if (['true', '1'].includes(s)) return true
+            if (['false', '0'].includes(s)) return false
+            return undefined
+        }],
         [/tag:([a-z0-9_-]+)/gi, 'tag', String],
         [/category:(\w+)/gi, 'category_slug', String],
         [/user:(\d+)/gi, 'created_by', (v) => parseInt(v, 10)],
@@ -292,7 +298,7 @@ export default function AdminAssetsIndex({
                         <FunnelIcon className="h-4 w-4" />
                         Filters
                     </button>
-                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type) && (
+                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type || initialFilters?.visible_in_grid != null) && (
                         <button
                             type="button"
                             onClick={clearFilters}
@@ -410,6 +416,21 @@ export default function AdminAssetsIndex({
                                     <option value="">All</option>
                                     <option value="1">Has incident</option>
                                     <option value="0">No incident</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Grid visibility</label>
+                                <select
+                                    value={initialFilters?.visible_in_grid === true ? '1' : initialFilters?.visible_in_grid === false ? '0' : ''}
+                                    onChange={(e) => {
+                                        const v = e.target.value
+                                        applyFilters({ visible_in_grid: v === '' ? null : v === '1', page: 1 })
+                                    }}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="1">Visible in grid</option>
+                                    <option value="0">Not visible</option>
                                 </select>
                             </div>
                         </div>

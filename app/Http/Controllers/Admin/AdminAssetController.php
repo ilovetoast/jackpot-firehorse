@@ -137,7 +137,7 @@ class AdminAssetController extends Controller
             ]);
 
         $metadata = $asset->metadata ?? [];
-        $visibility = $this->computeVisibilityAndFix($asset);
+        $visibility = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
         $pipelineFlags = [
             'visible_in_grid' => $visibility['visible'],
             'processing_failed' => (bool) ($metadata['processing_failed'] ?? false),
@@ -527,6 +527,7 @@ class AdminAssetController extends Controller
             'tag' => $request->filled('tag') ? trim($request->tag) : null,
             'status' => $request->filled('status') ? trim($request->status) : null,
             'asset_type' => $request->filled('asset_type') ? trim($request->asset_type) : null,
+            'visible_in_grid' => $this->parseBoolParam($request, 'visible_in_grid'),
             'analysis_status' => $request->filled('analysis_status') ? trim($request->analysis_status) : null,
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
@@ -541,6 +542,24 @@ class AdminAssetController extends Controller
         return $parsed;
     }
 
+    protected function parseBoolParam(Request $request, string $key): ?bool
+    {
+        if (!$request->has($key)) {
+            return null;
+        }
+        $val = $request->get($key);
+        if (is_bool($val)) {
+            return $val;
+        }
+        if (in_array(strtolower((string) $val), ['true', '1', 'yes'], true)) {
+            return true;
+        }
+        if (in_array(strtolower((string) $val), ['false', '0', 'no'], true)) {
+            return false;
+        }
+        return null;
+    }
+
     protected function parseSmartFilter(string $search, array &$parsed): void
     {
         $patterns = [
@@ -552,6 +571,7 @@ class AdminAssetController extends Controller
             '/analysis:(\w+)/i' => 'analysis_status',
             '/thumb:(\w+)/i' => 'thumbnail_status',
             '/incident:(true|false|1|0)/i' => 'has_incident',
+            '/visible:(true|false|1|0)/i' => 'visible_in_grid',
             '/tag:([a-z0-9_-]+)/i' => 'tag',
             '/category:(\w+)/i' => 'category_slug',
             '/user:(\d+)/i' => 'created_by',
@@ -574,6 +594,8 @@ class AdminAssetController extends Controller
                         'asset', 'basic' => 'asset',
                         default => $val,
                     };
+                } elseif ($key === 'visible_in_grid') {
+                    $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : $parsed[$key] ?? null);
                 } else {
                     $parsed[$key] = is_numeric($val) ? (int) $val : $val;
                 }
@@ -639,6 +661,11 @@ class AdminAssetController extends Controller
         }
         if (!empty($filters['asset_type'])) {
             $query->where('type', $filters['asset_type']);
+        }
+        if (($filters['visible_in_grid'] ?? null) === true) {
+            $query->visibleInGrid();
+        } elseif (($filters['visible_in_grid'] ?? null) === false) {
+            $query->notVisibleInGrid();
         }
         if (!empty($filters['analysis_status'])) {
             $query->where('analysis_status', $filters['analysis_status']);
@@ -758,78 +785,6 @@ class AdminAssetController extends Controller
         return null;
     }
 
-    /**
-     * Compute whether asset is visible in the brand asset grid and recommend a fix when not.
-     *
-     * @return array{visible: bool, reason: string|null, recommended_action: string|null, action_key: string|null}
-     */
-    protected function computeVisibilityAndFix(Asset $asset): array
-    {
-        $metadata = $asset->metadata ?? [];
-        $status = $asset->status ?? null;
-
-        // Deleted assets never appear
-        if ($asset->deleted_at) {
-            return [
-                'visible' => false,
-                'reason' => 'Asset is deleted',
-                'recommended_action' => 'Restore the asset to make it visible again',
-                'action_key' => 'restore',
-            ];
-        }
-
-        // Processing failed → status=FAILED → excluded from grid
-        if ($status === AssetStatus::FAILED || ($metadata['processing_failed'] ?? false)) {
-            $failedJob = $metadata['failed_job'] ?? '';
-            $failureReason = $metadata['failure_reason'] ?? 'Processing failed';
-
-            // Retry Pipeline clears failure flags and re-runs ProcessAssetJob
-            return [
-                'visible' => false,
-                'reason' => $failureReason,
-                'recommended_action' => 'Retry Pipeline — clears failure flags and re-runs processing',
-                'action_key' => 'retry-pipeline',
-            ];
-        }
-
-        // Archived assets hidden from default view
-        if ($asset->archived_at) {
-            return [
-                'visible' => false,
-                'reason' => 'Asset is archived',
-                'recommended_action' => 'Restore from archive to make it visible',
-                'action_key' => null,
-            ];
-        }
-
-        // Unpublished (no published_at) — hidden from default grid
-        if (! $asset->published_at) {
-            return [
-                'visible' => false,
-                'reason' => 'Asset is not published',
-                'recommended_action' => 'Publish the asset from the brand asset view',
-                'action_key' => null,
-            ];
-        }
-
-        // Hidden status — may still appear for users with canSeeUnpublished, but typically not in default view
-        if ($status === AssetStatus::HIDDEN) {
-            return [
-                'visible' => false,
-                'reason' => 'Asset is hidden',
-                'recommended_action' => 'Publish or unhide from the brand asset view',
-                'action_key' => null,
-            ];
-        }
-
-        return [
-            'visible' => true,
-            'reason' => null,
-            'recommended_action' => null,
-            'action_key' => null,
-        ];
-    }
-
     protected function formatAssetForList(Asset $asset): array
     {
         $metadata = $asset->metadata ?? [];
@@ -886,7 +841,7 @@ class AdminAssetController extends Controller
         }
 
         // Visibility in asset grid + recommended fix when not visible
-        $list['visibility'] = $this->computeVisibilityAndFix($asset);
+        $list['visibility'] = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
 
         return $list;
     }
