@@ -138,12 +138,19 @@ class AdminAssetController extends Controller
 
         $metadata = $asset->metadata ?? [];
         $visibility = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
+        // Infer thumbnails_generated when flag missing (legacy/race): thumbnail_status=completed + thumbnails/thumbnail_dimensions
+        $thumbnailsGenerated = (bool) ($metadata['thumbnails_generated'] ?? false);
+        if (!$thumbnailsGenerated && $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+            $thumbnailsGenerated = !empty($metadata['thumbnails_generated_at'])
+                || !empty($metadata['thumbnails'])
+                || !empty($metadata['thumbnail_dimensions']['medium'] ?? []);
+        }
         $pipelineFlags = [
             'visible_in_grid' => $visibility['visible'],
             'processing_failed' => (bool) ($metadata['processing_failed'] ?? false),
             'pipeline_completed' => (bool) ($metadata['pipeline_completed_at'] ?? false),
             'metadata_extracted' => (bool) ($metadata['metadata_extracted'] ?? false),
-            'thumbnails_generated' => (bool) ($metadata['thumbnails_generated'] ?? false),
+            'thumbnails_generated' => $thumbnailsGenerated,
             'thumbnail_timeout' => (bool) ($metadata['thumbnail_timeout'] ?? false),
             'stuck_state_detected' => ($asset->analysis_status ?? '') === 'uploading' && !empty($metadata['metadata_extracted']),
             'auto_recover_attempted' => (bool) ($metadata['auto_recover_attempted'] ?? false),

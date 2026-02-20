@@ -618,27 +618,29 @@ class GenerateThumbnailsJob implements ShouldQueue
             $currentMetadata['thumbnail_timeout'] = false;
             $currentMetadata['thumbnail_timeout_reason'] = null;
 
-            // Guard: only mutate analysis_status when in expected previous state
-            $expectedStatus = 'generating_thumbnails';
-            $currentStatus = $asset->analysis_status ?? 'uploading';
-            if ($currentStatus !== $expectedStatus) {
-                Log::warning('[GenerateThumbnailsJob] Invalid analysis_status transition aborted', [
-                    'asset_id' => $asset->id,
-                    'expected' => $expectedStatus,
-                    'actual' => $currentStatus,
-                ]);
-                return;
-            }
-
             // Phase V-1: For video assets, store poster URL from thumbnail
             // 2. When thumbnails complete: set analysis_status = 'extracting_metadata'
+            // CRITICAL: Always persist metadata and thumbnail_status - never drop on analysis_status mismatch.
+            // Losing thumbnails_generated causes pipeline_completed but thumbnails_generated=false in admin.
             $updateData = [
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'thumbnail_error' => null,
                 'thumbnail_started_at' => null, // Clear start time on completion
                 'metadata' => $currentMetadata,
-                'analysis_status' => 'extracting_metadata',
             ];
+
+            // Guard: only mutate analysis_status when in expected previous state (avoids overwriting later stages)
+            $expectedStatus = 'generating_thumbnails';
+            $currentStatus = $asset->analysis_status ?? 'uploading';
+            if ($currentStatus === $expectedStatus) {
+                $updateData['analysis_status'] = 'extracting_metadata';
+            } else {
+                Log::warning('[GenerateThumbnailsJob] Skipping analysis_status transition (metadata still persisted)', [
+                    'asset_id' => $asset->id,
+                    'expected' => $expectedStatus,
+                    'actual' => $currentStatus,
+                ]);
+            }
             
             // Check if asset is a video and set poster path
             // Store S3 path (not presigned URL) - URLs are generated on-demand via AssetThumbnailController
@@ -667,7 +669,9 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (isset($version)) {
                 $version->update(['pipeline_status' => 'complete']);
             }
-            \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+            if (isset($updateData['analysis_status'])) {
+                \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+            }
 
             // Refresh asset to ensure metadata is loaded correctly
             $asset->refresh();
