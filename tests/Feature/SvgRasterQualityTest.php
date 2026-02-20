@@ -138,7 +138,8 @@ SVG;
         $mockS3 = $this->createMockS3ForSvg($svgPath);
 
         $service = new ThumbnailGenerationService($mockS3);
-        $thumbnails = $service->generateThumbnails($asset);
+        $result = $service->generateThumbnails($asset);
+        $thumbnails = $result['thumbnails'] ?? [];
 
         $this->assertNotEmpty($thumbnails);
         $medium = $thumbnails['medium'] ?? null;
@@ -162,10 +163,8 @@ SVG;
         $mockS3 = $this->createMockS3ForSvg($svgPath);
 
         $service = new ThumbnailGenerationService($mockS3);
-        $service->generateThumbnails($asset);
-
-        $asset->refresh();
-        $dims = $asset->metadata['thumbnail_dimensions']['medium'] ?? null;
+        $result = $service->generateThumbnails($asset);
+        $dims = $result['thumbnail_dimensions']['medium'] ?? null;
         $this->assertNotNull($dims);
         $this->assertArrayHasKey('width', $dims);
         $this->assertArrayHasKey('height', $dims);
@@ -186,10 +185,8 @@ SVG;
         $mockS3 = $this->createMockS3ForSvg($svgPath);
 
         $service = new ThumbnailGenerationService($mockS3);
-        $service->generateThumbnails($asset);
-
-        $asset->refresh();
-        $dims = $asset->metadata['thumbnail_dimensions'] ?? [];
+        $result = $service->generateThumbnails($asset);
+        $dims = $result['thumbnail_dimensions'] ?? [];
         $this->assertNotEmpty($dims);
         foreach (['thumb', 'medium', 'large'] as $style) {
             if (isset($dims[$style])) {

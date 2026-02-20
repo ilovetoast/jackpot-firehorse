@@ -9,6 +9,7 @@ import {
     MagnifyingGlassIcon,
     FunnelIcon,
     ChevronDownIcon,
+    ChevronUpIcon,
     XMarkIcon,
     ArrowPathIcon,
     TrashIcon,
@@ -82,6 +83,36 @@ function buildQueryParams(filters, overrides = {}) {
     return out
 }
 
+function formatDateTime(isoString) {
+    if (!isoString) return '—'
+    const d = new Date(isoString)
+    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function SortableTh({ label, sortKey, currentSort, sortDirection, onSort, className = '' }) {
+    const isActive = currentSort === sortKey
+    const handleClick = () => {
+        const nextDir = isActive && sortDirection === 'desc' ? 'asc' : 'desc'
+        onSort(sortKey, nextDir)
+    }
+    return (
+        <th className={`px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer hover:bg-slate-100 select-none ${className}`} onClick={handleClick}>
+            <span className="inline-flex items-center gap-1">
+                {label}
+                {isActive ? (
+                    sortDirection === 'asc' ? (
+                        <ChevronUpIcon className="h-4 w-4 text-indigo-600" aria-hidden />
+                    ) : (
+                        <ChevronDownIcon className="h-4 w-4 text-indigo-600" aria-hidden />
+                    )
+                ) : (
+                    <ChevronDownIcon className="h-4 w-4 text-slate-300" aria-hidden />
+                )}
+            </span>
+        </th>
+    )
+}
+
 export default function AdminAssetsIndex({
     auth,
     assets,
@@ -122,6 +153,29 @@ export default function AdminAssetsIndex({
         e?.preventDefault()
         applyFilters({ page: 1 })
     }
+
+    const handleSort = (sortKey, sortDirection) => {
+        applyFilters({ sort: sortKey, sort_direction: sortDirection, page: 1 })
+    }
+
+    const hasActiveFilters = !!(
+        initialFilters?.asset_id ||
+        initialFilters?.search ||
+        initialFilters?.tenant_id ||
+        initialFilters?.brand_id ||
+        initialFilters?.status ||
+        initialFilters?.asset_type ||
+        initialFilters?.analysis_status ||
+        initialFilters?.thumbnail_status ||
+        initialFilters?.visible_in_grid != null ||
+        initialFilters?.deleted != null ||
+        initialFilters?.has_incident != null ||
+        initialFilters?.storage_missing ||
+        initialFilters?.category_id ||
+        initialFilters?.tag ||
+        initialFilters?.date_from ||
+        initialFilters?.date_to
+    )
 
     const clearFilters = () => {
         setSearchInput('')
@@ -299,14 +353,15 @@ export default function AdminAssetsIndex({
                         <FunnelIcon className="h-4 w-4" />
                         Filters
                     </button>
-                    {(initialFilters?.search || initialFilters?.tenant_id || initialFilters?.brand_id || initialFilters?.status || initialFilters?.asset_type || initialFilters?.visible_in_grid != null || initialFilters?.deleted != null) && (
+                    {hasActiveFilters && (
                         <button
                             type="button"
                             onClick={clearFilters}
                             className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+                            title="Clear all filters (including asset ID from URL)"
                         >
                             <XMarkIcon className="h-4 w-4" />
-                            Clear
+                            Clear all
                         </button>
                     )}
                 </div>
@@ -493,13 +548,37 @@ export default function AdminAssetsIndex({
                                     </th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">ID</th>
                                     <th className="w-16 px-2 py-3" />
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Filename</th>
+                                    <SortableTh
+                                        label="Filename"
+                                        sortKey="filename"
+                                        currentSort={initialFilters?.sort ?? 'created_at'}
+                                        sortDirection={initialFilters?.sort_direction ?? 'desc'}
+                                        onSort={handleSort}
+                                    />
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tenant</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Brand</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Analysis</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Thumb</th>
+                                    <SortableTh
+                                        label="Analysis"
+                                        sortKey="analysis_status"
+                                        currentSort={initialFilters?.sort ?? 'created_at'}
+                                        sortDirection={initialFilters?.sort_direction ?? 'desc'}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTh
+                                        label="Thumb"
+                                        sortKey="thumbnail_status"
+                                        currentSort={initialFilters?.sort ?? 'created_at'}
+                                        sortDirection={initialFilters?.sort_direction ?? 'desc'}
+                                        onSort={handleSort}
+                                    />
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Incident</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Created</th>
+                                    <SortableTh
+                                        label="Created"
+                                        sortKey="created_at"
+                                        currentSort={initialFilters?.sort ?? 'created_at'}
+                                        sortDirection={initialFilters?.sort_direction ?? 'desc'}
+                                        onSort={handleSort}
+                                    />
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 bg-white">
@@ -565,8 +644,8 @@ export default function AdminAssetsIndex({
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-2 text-sm text-slate-500">
-                                                {a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}
+                                            <td className="px-4 py-2 text-sm text-slate-500 whitespace-nowrap" title={a.created_at}>
+                                                {formatDateTime(a.created_at)}
                                             </td>
                                         </tr>
                                     ))

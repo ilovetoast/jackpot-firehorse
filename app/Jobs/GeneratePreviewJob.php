@@ -30,6 +30,14 @@ class GeneratePreviewJob implements ShouldQueue
     public $tries = 3; // Maximum retry attempts (enforced by AssetProcessingFailureService)
 
     /**
+     * Job timeout in seconds. Preview generation for large images can take several minutes.
+     * Uses same config as thumbnail jobs for consistency.
+     *
+     * @var int
+     */
+    public $timeout;
+
+    /**
      * The number of seconds to wait before retrying the job.
      *
      * @var int
@@ -41,7 +49,9 @@ class GeneratePreviewJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+    }
 
     /**
      * Execute the job.
@@ -51,7 +61,8 @@ class GeneratePreviewJob implements ShouldQueue
         Log::info('[GeneratePreviewJob] Job started', [
             'asset_id' => $this->assetId,
         ]);
-        
+        \App\Services\UploadDiagnosticLogger::jobStart('GeneratePreviewJob', $this->assetId);
+
         $asset = Asset::findOrFail($this->assetId);
 
         // Idempotency: Check if preview already generated
@@ -60,6 +71,7 @@ class GeneratePreviewJob implements ShouldQueue
             Log::info('Preview generation skipped - already generated', [
                 'asset_id' => $asset->id,
             ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('GeneratePreviewJob', $asset->id, 'already_generated');
             // Job chaining is handled by Bus::chain() in ProcessAssetJob
             // Chain will continue to next job automatically
             return;
@@ -70,6 +82,9 @@ class GeneratePreviewJob implements ShouldQueue
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
             Log::warning('[GeneratePreviewJob] Preview generation skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('GeneratePreviewJob', $asset->id, 'thumbnails_not_completed', [
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
             // CRITICAL: Don't return early - let chain continue even if preview can't be generated
@@ -114,6 +129,9 @@ class GeneratePreviewJob implements ShouldQueue
 
         Log::info('Preview generated', [
             'asset_id' => $asset->id,
+            'has_preview' => !empty($preview),
+        ]);
+        \App\Services\UploadDiagnosticLogger::jobComplete('GeneratePreviewJob', $asset->id, [
             'has_preview' => !empty($preview),
         ]);
 

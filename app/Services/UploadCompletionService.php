@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AssetStatus;
+use App\Services\UploadDiagnosticLogger;
 use App\Enums\AssetType;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
@@ -499,10 +500,12 @@ class UploadCompletionService
                 
                 if ($category && $category->requiresApproval()) {
                     // Category requires approval: Keep unpublished, set status to HIDDEN, fire event
+                    $prevStatus = $asset->status instanceof AssetStatus ? $asset->status->value : ($asset->status ?? 'unknown');
                     $asset->published_at = null;
                     $asset->published_by_id = null;
                     $asset->status = AssetStatus::HIDDEN;
                     $asset->save();
+                    UploadDiagnosticLogger::statusChange($asset->id, 'status', $prevStatus, AssetStatus::HIDDEN->value, 'UploadCompletionService:category_requires_approval');
                     
                     // Fire ASSET_PENDING_APPROVAL event
                     try {
@@ -540,6 +543,7 @@ class UploadCompletionService
                     $asset->published_by_id = $userId; // Use uploader as published_by
                     // Status remains VISIBLE (set during asset creation)
                     $asset->save();
+                    UploadDiagnosticLogger::statusChange($asset->id, 'published_at', 'null', now()->toIso8601String(), 'UploadCompletionService:auto_publish');
                     
                     Log::info('[UploadCompletionService] Asset auto-published (category does not require approval)', [
                         'asset_id' => $asset->id,
@@ -718,6 +722,11 @@ class UploadCompletionService
                 'title' => $asset->title,
                 'original_filename' => $asset->original_filename,
                 'size_bytes' => $asset->size_bytes,
+            ]);
+
+            $asset->refresh(); // Ensure currentVersion and latest state for diagnostic
+            UploadDiagnosticLogger::assetSnapshot($asset, 'UploadCompletionService ASSET_CREATED', [
+                'upload_session_id' => $uploadSession->id,
             ]);
 
             // Persist upload metadata fields to asset_metadata table
@@ -1615,14 +1624,31 @@ class UploadCompletionService
 
         $newFilename = $resolvedFilename ?? ($fileInfo['original_filename'] !== 'unknown' ? $fileInfo['original_filename'] : null) ?? $asset->original_filename;
 
-        // Overwrite file at existing storage_root_path (no new version)
+        // Extension change: Starter replace must not allow extension mismatch (prevents MIME confusion)
+        $newExtension = $newFilename ? strtolower(pathinfo($newFilename, PATHINFO_EXTENSION)) : '';
+        $currentExtension = $asset->storage_root_path ? strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION)) : '';
         $destPath = $asset->storage_root_path;
+        if ($newExtension && $currentExtension && $newExtension !== $currentExtension) {
+            $dir = pathinfo($asset->storage_root_path, PATHINFO_DIRNAME);
+            $base = pathinfo($asset->storage_root_path, PATHINFO_FILENAME);
+            $destPath = "{$dir}/{$base}.{$newExtension}";
+        }
+
         $this->copyTempToVersionedPath($uploadSession, $destPath);
 
-        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId, $newFilename) {
+        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId, $newFilename, $destPath) {
             $asset->size_bytes = $fileInfo['size_bytes'];
+            $asset->storage_root_path = $destPath;
             if ($newFilename) {
                 $asset->original_filename = $newFilename;
+            }
+            if (isset($fileInfo['mime_type'])) {
+                $asset->mime_type = $fileInfo['mime_type'];
+            }
+
+            $currentVersion = $asset->currentVersion;
+            if ($currentVersion && $currentVersion->file_path !== $destPath) {
+                $currentVersion->update(['file_path' => $destPath]);
             }
 
             $featureGate = app(\App\Services\FeatureGate::class);

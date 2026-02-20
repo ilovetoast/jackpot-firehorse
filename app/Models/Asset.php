@@ -80,6 +80,30 @@ class Asset extends Model
          * - All Job classes (no job should mutate status)
          * - Processing jobs track progress via thumbnail_status, metadata, pipeline_completed_at
          */
+        /**
+         * CRITICAL: Never allow metadata updates to wipe category_id.
+         * Assets without category_id disappear from the grid. Any job or code path
+         * that replaces metadata must preserve category_id.
+         */
+        static::updating(function ($asset) {
+            if ($asset->isDirty('metadata')) {
+                $oldMeta = $asset->getOriginal('metadata');
+                $oldMeta = is_array($oldMeta) ? $oldMeta : (is_string($oldMeta) ? json_decode($oldMeta, true) ?? [] : []);
+                $oldCategoryId = $oldMeta['category_id'] ?? null;
+                $newMeta = $asset->metadata ?? [];
+                $newCategoryId = $newMeta['category_id'] ?? null;
+
+                if ($oldCategoryId !== null && $oldCategoryId !== '' && ($newCategoryId === null || $newCategoryId === '' || (is_string($newCategoryId) && strtolower(trim($newCategoryId)) === 'null'))) {
+                    $newMeta['category_id'] = $oldCategoryId;
+                    $asset->metadata = $newMeta;
+                    Log::warning('[Asset Metadata Guard] Preserved category_id from being wiped', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $oldCategoryId,
+                    ]);
+                }
+            }
+        });
+
         static::updating(function ($asset) {
             // Only trigger when status is dirty
             if (!$asset->isDirty('status')) {
@@ -347,8 +371,13 @@ class Asset extends Model
      * Whether this asset is visible in the default brand asset grid.
      *
      * CRITICAL: This is the single source of truth for grid visibility.
+     * Must match the grid query exactly: lifecycle + category_id.
      * An asset is visible when ALL of: not deleted, not archived, published,
-     * status != FAILED/HIDDEN, and processing did not fail.
+     * status != FAILED/HIDDEN, and metadata.category_id is set.
+     *
+     * Category is required because the grid filters by metadata->category_id.
+     * If category_id is null (e.g. wiped by FinalizeAssetJob bug), the asset
+     * is excluded from the grid despite passing lifecycle checks.
      *
      * Keep in sync with scopeVisibleInGrid() / scopeNotVisibleInGrid().
      */
@@ -366,7 +395,14 @@ class Asset extends Model
         if ($this->status === AssetStatus::FAILED || $this->status === AssetStatus::HIDDEN) {
             return false;
         }
-        if (($this->metadata['processing_failed'] ?? false)) {
+
+        // Category is required for grid visibility (grid filters by metadata->category_id)
+        $meta = $this->metadata ?? [];
+        $categoryId = $meta['category_id'] ?? null;
+        if ($categoryId === null || $categoryId === '') {
+            return false;
+        }
+        if (is_string($categoryId) && strtolower(trim($categoryId)) === 'null') {
             return false;
         }
 
@@ -377,14 +413,16 @@ class Asset extends Model
      * Scope: assets visible in the default brand asset grid.
      *
      * Must match isVisibleInGrid() logic. Used for filtering (e.g. Admin Operations).
+     * Includes category_id check so visibility matches actual grid display.
      */
     public function scopeVisibleInGrid($query)
     {
-        return $query->whereNull('deleted_at')
+        $q = $query->whereNull('deleted_at')
             ->whereNull('archived_at')
             ->whereNotNull('published_at')
-            ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::HIDDEN])
-            ->whereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.processing_failed')), 'false') NOT IN ('true', '1')");
+            ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::HIDDEN]);
+
+        return static::applyCategoryIdScope($q, true);
     }
 
     /**
@@ -394,13 +432,49 @@ class Asset extends Model
      */
     public function scopeNotVisibleInGrid($query)
     {
-        return $query->where(function ($qb) {
+        $extract = static::categoryIdJsonExtract();
+        $categoryMissing = "({$extract}) IS NULL OR ({$extract}) = '' OR ({$extract}) = 'null'";
+
+        return $query->where(function ($qb) use ($categoryMissing) {
             $qb->whereNotNull('deleted_at')
                 ->orWhereNotNull('archived_at')
                 ->orWhereNull('published_at')
                 ->orWhereIn('status', [AssetStatus::FAILED, AssetStatus::HIDDEN])
-                ->orWhereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.processing_failed')), 'false') IN ('true', '1')");
+                ->orWhereRaw($categoryMissing);
         });
+    }
+
+    /**
+     * JSON extract for category_id (driver-specific).
+     */
+    protected static function categoryIdJsonExtract(): string
+    {
+        $driver = DB::getDriverName();
+        if ($driver === 'mysql') {
+            return 'JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id"))';
+        }
+        if ($driver === 'pgsql') {
+            return "metadata->>'category_id'";
+        }
+        return "json_extract(metadata, '$.category_id')";
+    }
+
+    /**
+     * Apply category_id filter to scope (required for grid visibility).
+     */
+    protected static function applyCategoryIdScope($query, bool $requirePresent): \Illuminate\Database\Eloquent\Builder
+    {
+        $driver = DB::getDriverName();
+        $extract = static::categoryIdJsonExtract();
+
+        if ($requirePresent) {
+            $query->whereNotNull('metadata')
+                ->whereRaw("({$extract}) IS NOT NULL")
+                ->whereRaw("({$extract}) != ''")
+                ->whereRaw("({$extract}) != 'null'");
+        }
+
+        return $query;
     }
 
     /**
@@ -639,6 +713,14 @@ class Asset extends Model
     {
         $dimensions = $this->metadata['thumbnail_dimensions'][$style] ?? null;
 
+        // Fallback: check current version metadata (version-aware uploads)
+        if ((!is_array($dimensions) || !isset($dimensions['width'], $dimensions['height'])) && $this->relationLoaded('currentVersion')) {
+            $version = $this->currentVersion;
+            if ($version) {
+                $dimensions = ($version->metadata ?? [])['thumbnail_dimensions'][$style] ?? null;
+            }
+        }
+
         if (!is_array($dimensions) || !isset($dimensions['width'], $dimensions['height'])) {
             return null;
         }
@@ -728,11 +810,20 @@ class Asset extends Model
     {
         $metadata = $this->metadata ?? [];
         
-        if (!isset($metadata['thumbnails'][$style]['path'])) {
-            return null;
+        if (isset($metadata['thumbnails'][$style]['path'])) {
+            return $metadata['thumbnails'][$style]['path'];
         }
 
-        return $metadata['thumbnails'][$style]['path'];
+        // Fallback: check current version metadata (version-aware uploads store thumbnails on version first)
+        $version = $this->currentVersion;
+        if ($version) {
+            $versionMeta = $version->metadata ?? [];
+            if (isset($versionMeta['thumbnails'][$style]['path'])) {
+                return $versionMeta['thumbnails'][$style]['path'];
+            }
+        }
+
+        return null;
     }
 
     /**

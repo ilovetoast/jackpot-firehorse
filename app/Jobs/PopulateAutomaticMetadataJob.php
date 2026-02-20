@@ -103,6 +103,30 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             'mime_type' => $asset->mime_type,
             'original_filename' => $asset->original_filename,
         ]);
+        \App\Services\UploadDiagnosticLogger::jobStart('PopulateAutomaticMetadataJob', $asset->id, null, [
+            'asset_type' => $assetType,
+        ]);
+
+        // Skip unsupported file types (ZIP, archives, etc.) — no preview, dimensions, or color analysis
+        // Check thumbnail_skip_reason (set by GenerateThumbnailsJob) to avoid retrying
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $mimeType = $asset->mime_type ?? null;
+        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        if ($fileTypeService->getUnsupportedReason($mimeType, $extension)) {
+            PipelineLogger::info('[PopulateAutomaticMetadataJob] EARLY_RETURN', [
+                'asset_id' => $asset->id,
+                'reason' => 'unsupported_file_type',
+                'mime_type' => $mimeType,
+            ]);
+            Log::info('[PopulateAutomaticMetadataJob] Skipping unsupported file type (no dimensions/color)', [
+                'asset_id' => $asset->id,
+                'mime_type' => $mimeType,
+                'extension' => $extension,
+            ]);
+            $asset->update(['analysis_status' => 'scoring']);
+            \App\Services\AnalysisStatusLogger::log($asset, 'extracting_metadata', 'scoring', 'PopulateAutomaticMetadataJob');
+            return;
+        }
 
         // Skip if asset is not visible
         if ($asset->status !== AssetStatus::VISIBLE) {
@@ -429,6 +453,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             'skipped' => count($results['skipped']),
             'skipped_reasons' => array_column($results['skipped'], 'reason'),
         ]);
+        \App\Services\UploadDiagnosticLogger::jobComplete('PopulateAutomaticMetadataJob', $asset->id, [
+            'written' => count($results['written']),
+            'skipped' => count($results['skipped']),
+        ]);
     }
 
     /**
@@ -556,7 +584,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
         }
     }

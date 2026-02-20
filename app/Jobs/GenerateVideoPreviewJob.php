@@ -35,6 +35,14 @@ class GenerateVideoPreviewJob implements ShouldQueue
     public $tries = 2; // Lower retries for preview (non-critical)
 
     /**
+     * Job timeout in seconds. FFmpeg video preview generation can take 5+ min for large files.
+     * Uses same config as thumbnail jobs for consistency.
+     *
+     * @var int
+     */
+    public $timeout;
+
+    /**
      * The number of seconds to wait before retrying the job.
      *
      * @var int
@@ -46,7 +54,9 @@ class GenerateVideoPreviewJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+    }
 
     /**
      * Execute the job.
@@ -56,6 +66,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
         Log::info('[GenerateVideoPreviewJob] Job started', [
             'asset_id' => $this->assetId,
         ]);
+        \App\Services\UploadDiagnosticLogger::jobStart('GenerateVideoPreviewJob', $this->assetId);
 
         try {
             $asset = Asset::findOrFail($this->assetId);
@@ -92,6 +103,9 @@ class GenerateVideoPreviewJob implements ShouldQueue
             if ($fileType !== 'video') {
                 Log::info('[GenerateVideoPreviewJob] Skipping - asset is not a video', [
                     'asset_id' => $asset->id,
+                    'file_type' => $fileType,
+                ]);
+                \App\Services\UploadDiagnosticLogger::jobSkip('GenerateVideoPreviewJob', $asset->id, 'not_a_video', [
                     'file_type' => $fileType,
                 ]);
                 
@@ -182,6 +196,9 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
             Log::info('[GenerateVideoPreviewJob] Preview generated and verified successfully', [
                 'asset_id' => $asset->id,
+                'preview_path' => $previewPath,
+            ]);
+            \App\Services\UploadDiagnosticLogger::jobComplete('GenerateVideoPreviewJob', $asset->id, [
                 'preview_path' => $previewPath,
             ]);
             

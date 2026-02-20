@@ -152,11 +152,27 @@ return [
         'max_retries' => env('THUMBNAIL_MAX_RETRIES', 3),
 
         /*
+         * Job timeout in seconds. Laravel queue workers kill jobs after this duration.
+         * Default 600 (10 min) allows large TIFF/AI/PDF/video files to complete.
+         * Horizon default is 90s — thumbnail jobs MUST override via this config.
+         * Rule: QUEUE_WORKER_TIMEOUT >= this value (worker must not kill job early).
+         */
+        'job_timeout_seconds' => (int) env('THUMBNAIL_JOB_TIMEOUT_SECONDS', 600),
+
+        /*
          * Timeout for thumbnail generation (minutes). Assets stuck in PROCESSING longer
          * than this are marked FAILED by ThumbnailTimeoutGuard.
-         * SVG/PDF use a longer timeout (svg_timeout_minutes) due to rasterization cost.
+         * Rule: THUMBNAIL_TIMEOUT_MINUTES >= job_timeout_seconds/60 (guard must not fire before job timeout).
+         * Staging/production: use 35 min so guard > 30 min job.
          */
-        'timeout_minutes' => env('THUMBNAIL_TIMEOUT_MINUTES', 5),
+        'timeout_minutes' => (int) env('THUMBNAIL_TIMEOUT_MINUTES', 5),
+
+        /*
+         * Max pixel area (width × height) before degraded thumbnail mode.
+         * Files exceeding this (e.g. 700MB TIFF) get only preview + thumb; medium/large are skipped.
+         * Prevents OOM, Imagick pixel cache overflow, swap thrashing.
+         */
+        'max_pixels' => (int) env('THUMBNAIL_MAX_PIXELS', 200_000_000),
         'svg_timeout_minutes' => env('THUMBNAIL_SVG_TIMEOUT_MINUTES', 12),
 
         /*

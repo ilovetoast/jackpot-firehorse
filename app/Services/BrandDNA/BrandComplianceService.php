@@ -1200,6 +1200,43 @@ class BrandComplianceService
     }
 
     /**
+     * Upsert brand compliance row for assets whose file type does not support thumbnails.
+     * Skips full scoring; creates a clear "not available" state for the UI.
+     */
+    public function upsertFileTypeUnsupported(Asset $asset, Brand $brand): void
+    {
+        if ($asset->brand_id !== $brand->id) {
+            return;
+        }
+
+        $brandModel = $brand->brandModel;
+        if (! $brandModel || ! $brandModel->is_enabled) {
+            return;
+        }
+
+        $reason = 'File type does not support visual analysis';
+        $this->upsertScore($asset, $brand, [
+            'overall_score' => null,
+            'color_score' => 0,
+            'typography_score' => 0,
+            'tone_score' => 0,
+            'imagery_score' => 0,
+            'breakdown_payload' => [
+                'color' => ['score' => null, 'weight' => 0, 'reason' => $reason, 'status' => 'file_type_unsupported'],
+                'typography' => ['score' => null, 'weight' => 0, 'reason' => $reason, 'status' => 'file_type_unsupported'],
+                'tone' => ['score' => null, 'weight' => 0, 'reason' => $reason, 'status' => 'file_type_unsupported'],
+                'imagery' => ['score' => null, 'weight' => 0, 'reason' => $reason, 'status' => 'file_type_unsupported'],
+            ],
+            'evaluation_status' => 'file_type_unsupported',
+        ]);
+
+        $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_FILE_TYPE_UNSUPPORTED, [
+            'evaluation_status' => 'file_type_unsupported',
+            'reason' => $reason,
+        ]);
+    }
+
+    /**
      * Log a brand compliance timeline event, with duplicate prevention.
      * If the latest event for this asset already has the same event_type, skip insertion.
      */
@@ -1213,6 +1250,7 @@ class BrandComplianceService
                     EventType::ASSET_BRAND_COMPLIANCE_EVALUATED,
                     EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE,
                     EventType::ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE,
+                    EventType::ASSET_BRAND_COMPLIANCE_FILE_TYPE_UNSUPPORTED,
                 ])
                 ->orderBy('created_at', 'desc')
                 ->first();

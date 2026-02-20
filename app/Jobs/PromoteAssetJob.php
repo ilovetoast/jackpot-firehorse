@@ -99,6 +99,7 @@ class PromoteAssetJob implements ShouldQueue
     public function handle(): void
     {
         $asset = Asset::findOrFail($this->assetId);
+        \App\Services\UploadDiagnosticLogger::jobStart('PromoteAssetJob', $asset->id);
 
         // Only promote assets with completed processing pipeline
         // Check processing completion state, not status (status is visibility only)
@@ -108,6 +109,7 @@ class PromoteAssetJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'processing_not_complete');
             return;
         }
 
@@ -127,6 +129,7 @@ class PromoteAssetJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'storage_root_path' => $asset->storage_root_path,
             ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'already_promoted');
             return;
         }
 
@@ -198,6 +201,9 @@ class PromoteAssetJob implements ShouldQueue
                 'source_path' => $sourcePath,
                 'canonical_path' => $canonicalPath,
                 'thumbnails_moved' => count($thumbnailMoves),
+            ]);
+            \App\Services\UploadDiagnosticLogger::jobComplete('PromoteAssetJob', $asset->id, [
+                'canonical_path' => $canonicalPath,
             ]);
 
             // Emit promotion event
@@ -632,7 +638,8 @@ class PromoteAssetJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
 
             Log::error('Asset promotion job failed after all retries', [

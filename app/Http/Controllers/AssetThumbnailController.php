@@ -936,9 +936,33 @@ class AssetThumbnailController extends Controller
             // Admin override: Check if user wants to force ImageMagick (bypass file type checks)
             $forceImageMagick = $request->input('force_imagick', false);
             
-            // Regenerate specific styles
+            // Regenerate specific styles (service returns data; controller persists)
             $thumbnailService = app(\App\Services\ThumbnailGenerationService::class);
-            $regenerated = $thumbnailService->regenerateThumbnailStyles($asset, $validStyles, $forceImageMagick);
+            $result = $thumbnailService->regenerateThumbnailStyles($asset, $validStyles, $forceImageMagick);
+            $regenerated = $result['regenerated'] ?? $result;
+
+            // Persist returned metadata to asset (ThumbnailGenerationService does not mutate Asset)
+            $metadata = $asset->metadata ?? [];
+            if (!empty($result['preview_thumbnails'])) {
+                $metadata['preview_thumbnails'] = array_merge(
+                    $metadata['preview_thumbnails'] ?? [],
+                    $result['preview_thumbnails']
+                );
+            }
+            if (!empty($result['thumbnails'])) {
+                $metadata['thumbnails'] = array_merge(
+                    $metadata['thumbnails'] ?? [],
+                    $result['thumbnails']
+                );
+                $metadata['thumbnails_generated_at'] = now()->toIso8601String();
+            }
+            if (!empty($result['thumbnail_dimensions'])) {
+                $metadata['thumbnail_dimensions'] = array_merge(
+                    $metadata['thumbnail_dimensions'] ?? [],
+                    $result['thumbnail_dimensions']
+                );
+            }
+            $asset->update(['metadata' => $metadata]);
 
             Log::info('[AssetThumbnailController] Thumbnail styles regenerated (admin)', [
                 'asset_id' => $asset->id,

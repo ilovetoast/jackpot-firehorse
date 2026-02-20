@@ -16,6 +16,10 @@ class ProcessAssetOnUpload implements ShouldQueue
      */
     public function handle(AssetUploaded $event): void
     {
-        ProcessAssetJob::dispatch($event->asset->id);
+        $asset = $event->asset;
+        \App\Services\UploadDiagnosticLogger::assetSnapshot($asset, 'ProcessAssetOnUpload DISPATCHING ProcessAssetJob', [
+            'version_id' => $asset->currentVersion?->id,
+        ]);
+        ProcessAssetJob::dispatch($asset->id);
     }
 }

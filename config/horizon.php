@@ -208,7 +208,9 @@ return [
             'maxJobs' => 1000,
             'memory' => 128,
             'tries' => 3,
-            'timeout' => 90,
+            // 5 min default — thumbnail/metadata jobs need time for large TIFF/AI/PDF/video
+            // GenerateThumbnailsJob overrides to 10 min via config
+            'timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
     ],

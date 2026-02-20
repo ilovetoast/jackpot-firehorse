@@ -36,6 +36,19 @@ class ComputedMetadataService
             'original_filename' => $asset->original_filename,
             'mime_type' => $asset->mime_type,
         ]);
+
+        // Skip unsupported file types (ZIP, archives, etc.) — no dimensions/color/orientation
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $mimeType = $asset->mime_type ?? null;
+        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        if ($fileTypeService->getUnsupportedReason($mimeType, $extension)) {
+            Log::info('[ComputedMetadataService] Skipping unsupported file type', [
+                'asset_id' => $asset->id,
+                'mime_type' => $mimeType,
+                'extension' => $extension,
+            ]);
+            return;
+        }
         
         // Process image assets (original dimensions) or thumbnail-derived metadata (fallback)
         if (!$this->isImageAsset($asset) && !$asset->visualMetadataReady()) {

@@ -48,14 +48,19 @@ class AssetProcessingFailureService
             ]);
         }
 
-        // Update asset metadata with failure information
+        // Update asset metadata with failure information for observability
+        // CRITICAL: When preserveVisibility=true, do NOT set processing_failed - it must never hide assets.
+        // All pipeline jobs use preserveVisibility=true; only catastrophic failures use false.
         $currentMetadata = $asset->metadata ?? [];
-        $currentMetadata['processing_failed'] = true;
         $currentMetadata['failure_reason'] = $failureReason;
         $currentMetadata['failed_job'] = $jobClass;
         $currentMetadata['failure_attempts'] = $attempts;
         $currentMetadata['failure_is_retryable'] = $isRetryable;
         $currentMetadata['failed_at'] = now()->toIso8601String();
+
+        if (! $preserveVisibility) {
+            $currentMetadata['processing_failed'] = true;
+        }
 
         $asset->update([
             'metadata' => $currentMetadata,

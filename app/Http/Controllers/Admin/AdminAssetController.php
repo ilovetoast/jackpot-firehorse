@@ -85,10 +85,15 @@ class AdminAssetController extends Controller
         $filters = $this->parseFilters($request);
         $query = $this->buildQuery($filters);
 
+        $sortColumn = $this->resolveSortColumn($filters['sort'] ?? 'created_at');
+        $sortDirection = in_array(strtolower($filters['sort_direction'] ?? 'desc'), ['asc', 'desc'], true)
+            ? strtolower($filters['sort_direction'])
+            : 'desc';
+
         $perPage = min((int) $request->get('per_page', 25), 100);
         $assets = $query
             ->with(['tenant:id,name,slug', 'brand:id,name', 'user:id,first_name,last_name,email'])
-            ->orderBy('created_at', 'desc')
+            ->orderBy($sortColumn, $sortDirection)
             ->paginate($perPage)
             ->withQueryString();
 
@@ -174,30 +179,29 @@ class AdminAssetController extends Controller
             ])
             ->all();
 
-        $versions = [];
+        // Always load versions for admin operations (debugging/troubleshooting regardless of plan)
+        $versions = $asset->versions()
+            ->with('uploadedBy:id,first_name,last_name')
+            ->orderByDesc('version_number')
+            ->limit(50)
+            ->get()
+            ->map(fn ($v) => [
+                'id' => $v->id,
+                'version_number' => $v->version_number,
+                'is_current' => $v->is_current,
+                'file_size' => $v->file_size,
+                'mime_type' => $v->mime_type,
+                'uploaded_by' => $v->uploadedBy ? ['id' => $v->uploadedBy->id, 'name' => $v->uploadedBy->name] : null,
+                'created_at' => $v->created_at?->toIso8601String(),
+                'pipeline_status' => $v->pipeline_status,
+                'storage_class' => $v->storage_class,
+                'change_note' => $v->change_note,
+                'restored_from_version_id' => $v->restored_from_version_id,
+            ])
+            ->values()
+            ->all();
+
         $planAllowsVersions = $asset->tenant && app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant);
-        if ($planAllowsVersions) {
-            $versions = $asset->versions()
-                ->with('uploadedBy:id,first_name,last_name')
-                ->orderByDesc('version_number')
-                ->limit(50)
-                ->get()
-                ->map(fn ($v) => [
-                    'id' => $v->id,
-                    'version_number' => $v->version_number,
-                    'is_current' => $v->is_current,
-                    'file_size' => $v->file_size,
-                    'mime_type' => $v->mime_type,
-                    'uploaded_by' => $v->uploadedBy ? ['id' => $v->uploadedBy->id, 'name' => $v->uploadedBy->name] : null,
-                    'created_at' => $v->created_at?->toIso8601String(),
-                    'pipeline_status' => $v->pipeline_status,
-                    'storage_class' => $v->storage_class,
-                    'change_note' => $v->change_note,
-                    'restored_from_version_id' => $v->restored_from_version_id,
-                ])
-                ->values()
-                ->all();
-        }
 
         return response()->json([
             'asset' => $this->formatAssetForDetail($asset),
@@ -526,6 +530,10 @@ class AdminAssetController extends Controller
         $search = trim($request->get('search', ''));
         $parsed = [
             'search' => $search,
+            'sort' => $request->filled('sort') ? trim($request->sort) : 'created_at',
+            'sort_direction' => in_array(strtolower($request->get('sort_direction', 'desc')), ['asc', 'desc'], true)
+                ? strtolower($request->get('sort_direction', 'desc'))
+                : 'desc',
             'asset_id' => $request->filled('asset_id') ? trim($request->asset_id) : null,
             'tenant_id' => $request->filled('tenant_id') ? (int) $request->tenant_id : null,
             'brand_id' => $request->filled('brand_id') ? (int) $request->brand_id : null,
@@ -612,6 +620,19 @@ class AdminAssetController extends Controller
                 }
             }
         }
+    }
+
+    protected function resolveSortColumn(?string $sort): string
+    {
+        $allowed = [
+            'created_at' => 'assets.created_at',
+            'filename' => 'assets.original_filename',
+            'title' => 'assets.title',
+            'analysis_status' => 'assets.analysis_status',
+            'thumbnail_status' => 'assets.thumbnail_status',
+        ];
+
+        return $allowed[$sort] ?? 'assets.created_at';
     }
 
     protected function buildQuery(array $filters): \Illuminate\Database\Eloquent\Builder

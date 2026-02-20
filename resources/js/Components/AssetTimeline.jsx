@@ -54,6 +54,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                 : 'Brand alignment evaluated',
             'asset.brand_compliance.incomplete': 'Brand alignment incomplete — missing required metadata',
             'asset.brand_compliance.not_applicable': 'Brand alignment not configured for this brand',
+            'asset.brand_compliance.file_type_unsupported': 'Brand alignment not available for this file type',
         }
         
         return eventMap[eventType] || eventType
@@ -83,7 +84,8 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             return allEvents.some(e => 
                 e.event_type === 'asset.brand_compliance.evaluated' ||
                 e.event_type === 'asset.brand_compliance.incomplete' ||
-                e.event_type === 'asset.brand_compliance.not_applicable'
+                e.event_type === 'asset.brand_compliance.not_applicable' ||
+                e.event_type === 'asset.brand_compliance.file_type_unsupported'
             )
         }
         return false
@@ -98,6 +100,9 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             return { icon: AlertCircle, color: 'text-amber-500', bgColor: 'bg-amber-50' }
         }
         if (eventType === 'asset.brand_compliance.not_applicable') {
+            return { icon: Slash, color: 'text-gray-500', bgColor: 'bg-gray-50' }
+        }
+        if (eventType === 'asset.brand_compliance.file_type_unsupported') {
             return { icon: Slash, color: 'text-gray-500', bgColor: 'bg-gray-50' }
         }
         if (eventType === 'asset.brand_compliance.requested') {

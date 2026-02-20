@@ -65,14 +65,14 @@ class AssetVersioningUploadTest extends TestCase
         app()->instance('brand', $this->brand);
     }
 
-    protected function createS3Mock(int $fileSize = 1024): S3Client
+    protected function createS3Mock(int $fileSize = 1024, string $contentType = 'image/jpeg'): S3Client
     {
         $s3Client = Mockery::mock(S3Client::class);
         $s3Client->shouldReceive('doesObjectExist')->andReturn(true);
 
         $headResult = Mockery::mock(Result::class);
         $headResult->shouldReceive('get')->with('ContentLength')->andReturn($fileSize);
-        $headResult->shouldReceive('get')->with('ContentType')->andReturn('image/jpeg');
+        $headResult->shouldReceive('get')->with('ContentType')->andReturn($contentType);
         $headResult->shouldReceive('get')->with('ContentDisposition')->andReturn(null);
         $headResult->shouldReceive('get')->with('Metadata')->andReturn([]);
         $headResult->shouldReceive('get')->with('ETag')->andReturn('"etag-abc123"');
@@ -590,5 +590,256 @@ class AssetVersioningUploadTest extends TestCase
         ]);
 
         app(\App\Services\AssetVersionService::class)->assertSingleCurrentVersion($asset);
+    }
+
+    /**
+     * TEST 1 — Starter Initial Upload Creates Version
+     * Starter plan: complete() with create mode creates v1.
+     */
+    public function test_starter_initial_upload_creates_version(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'starter']);
+
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = $this->completionService->complete(
+            $uploadSession,
+            'asset',
+            'photo.jpg',
+            'Test Photo',
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertNotNull($asset);
+        $this->assertDatabaseHas('asset_versions', [
+            'asset_id' => $asset->id,
+            'version_number' => 1,
+            'is_current' => true,
+        ]);
+    }
+
+    /**
+     * TEST 2 — Starter Replace Does NOT Create New Version
+     * Starter upload (v1 exists), replace. Version count stays 1, storage_root_path = currentVersion->file_path.
+     */
+    public function test_starter_replace_does_not_create_new_version(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'starter']);
+
+        // Initial upload creates v1
+        $uploadSession1 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+        $asset = $this->completionService->complete(
+            $uploadSession1,
+            'asset',
+            'original.jpg',
+            'Original',
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertCount(1, $asset->versions);
+        $this->assertTrue($asset->currentVersion->is_current);
+
+        // Replace
+        $s3Client = $this->createS3Mock(2048);
+        $this->completionService = new UploadCompletionService($s3Client);
+        $uploadSession2 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'mode' => 'replace',
+            'asset_id' => $asset->id,
+            'expected_size' => 2048,
+            'uploaded_size' => 2048,
+        ]);
+        $updatedAsset = $this->completionService->complete(
+            $uploadSession2,
+            null,
+            'replacement.jpg',
+            null,
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertCount(1, $updatedAsset->fresh()->versions);
+        $this->assertTrue($updatedAsset->fresh()->currentVersion->is_current);
+        $this->assertEquals(
+            $updatedAsset->storage_root_path,
+            $updatedAsset->currentVersion->file_path
+        );
+    }
+
+    /**
+     * TEST 4 — Pro Replace Creates New Version
+     * Pro upload, replace. v2 created, v2 is current.
+     */
+    public function test_pro_replace_creates_new_version(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'pro']);
+
+        // Initial upload creates v1
+        $uploadSession1 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+        $asset = $this->completionService->complete(
+            $uploadSession1,
+            'asset',
+            'original.jpg',
+            'Original',
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $s3Client = $this->createS3Mock(2048);
+        $this->completionService = new UploadCompletionService($s3Client);
+        $uploadSession2 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'mode' => 'replace',
+            'asset_id' => $asset->id,
+            'expected_size' => 2048,
+            'uploaded_size' => 2048,
+        ]);
+        $updatedAsset = $this->completionService->complete(
+            $uploadSession2,
+            null,
+            'replacement.jpg',
+            null,
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertCount(2, $updatedAsset->fresh()->versions);
+        $this->assertEquals(2, $updatedAsset->fresh()->currentVersion->version_number);
+    }
+
+    /**
+     * TEST 6 — Extension Change Starter Replace
+     * Upload JPG, replace with PNG. storage_root_path ends with .png, mime_type = image/png.
+     */
+    public function test_extension_change_starter_replace(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'starter']);
+
+        // Initial upload creates v1 (JPG)
+        $uploadSession1 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+        $asset = $this->completionService->complete(
+            $uploadSession1,
+            'asset',
+            'photo.jpg',
+            'Photo',
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertStringEndsWith('.jpg', $asset->storage_root_path);
+
+        // Replace with PNG - mock returns image/png
+        $s3Client = $this->createS3Mock(2048, 'image/png');
+        $this->completionService = new UploadCompletionService($s3Client);
+        $uploadSession2 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'mode' => 'replace',
+            'asset_id' => $asset->id,
+            'expected_size' => 2048,
+            'uploaded_size' => 2048,
+        ]);
+        $updatedAsset = $this->completionService->complete(
+            $uploadSession2,
+            null,
+            'photo.png',
+            null,
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertStringEndsWith('.png', $updatedAsset->storage_root_path);
+        $this->assertEquals('image/png', $updatedAsset->mime_type);
+    }
+
+    /**
+     * TEST 7 — No Legacy Path For Normal Starter Assets
+     * Upload normally (Starter), assert currentVersion exists.
+     */
+    public function test_no_legacy_path_for_normal_starter_assets(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'starter']);
+
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::UPLOADING,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = $this->completionService->complete(
+            $uploadSession,
+            'asset',
+            'photo.jpg',
+            'Photo',
+            null,
+            null,
+            [],
+            $this->user->id
+        );
+
+        $this->assertNotNull($asset->currentVersion);
     }
 }

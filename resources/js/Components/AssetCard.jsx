@@ -113,12 +113,13 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         thumbnailVersion,
     ])
     
-    // Phase 3.1E: Processing badge shows only when thumbnail state is 'PENDING'
-    // This ensures badge disappears when thumbnail becomes available after reconciliation
-    const isProcessing = thumbnailState.state === 'PENDING'
+    // Phase 3.1E: Processing = thumbnail PENDING or analysis not complete (e.g. ZIP "analysis still running")
+    // Orange dot shows for both thumbnail processing and analysis in progress
+    const analysisStatus = asset?.analysis_status ?? ''
+    const analysisComplete = analysisStatus === 'complete'
+    const isProcessing = thumbnailState.state === 'PENDING' || (analysisStatus && !analysisComplete)
 
     // Phase 7: Thumbnail integrity — complete but no thumbnail path = hidden corruption
-    const analysisStatus = asset?.analysis_status ?? ''
     const hasThumbnailPath = Boolean(asset?.final_thumbnail_url || asset?.thumbnail_url)
     const mimeType = asset?.mime_type || ''
     const showThumbnailIntegrityBadge = supportsThumbnail(mimeType, extLower)
@@ -252,6 +253,12 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     }
                 }}
             >
+                {/* Processing: orange dot indicator */}
+                {isProcessing && (
+                    <div className="absolute top-2 right-2 z-10 flex items-center justify-center" aria-hidden>
+                        <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" title="Processing" />
+                    </div>
+                )}
                 {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
                 {isVideo && isHovering && asset.video_preview_url && !isMobile && (
                     <video

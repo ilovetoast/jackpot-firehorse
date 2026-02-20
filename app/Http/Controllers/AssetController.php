@@ -258,8 +258,12 @@ class AssetController extends Controller
         }
 
         // Filter by category if provided (check metadata for category_id)
+        // Use same JSON extraction as count query to ensure count/grid parity (handles string vs int in metadata)
         if ($categoryId) {
-            $assetsQuery->where('metadata->category_id', (int) $categoryId);
+            $assetsQuery->whereRaw(
+                'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
+                [(int) $categoryId]
+            );
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
@@ -348,7 +352,7 @@ class AssetController extends Controller
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
         // Eager load relations used in the map to avoid N+1 and lazy-load errors on load_more (page 2+)
         $perPage = 36;
-        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy'])->paginate($perPage);
+        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
 
         // Build next_page_url from current request query so category, sort, filters, q, etc. are always preserved

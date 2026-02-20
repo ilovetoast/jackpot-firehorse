@@ -40,7 +40,7 @@ The queue worker runs as a dedicated Docker service:
 
 **Worker Settings** (in `compose.yaml`):
 - `--tries=3` - Maximum retry attempts per job
-- `--timeout=90` - Job timeout in seconds
+- `--timeout=300` - Default job timeout (thumbnail jobs override to 600s)
 - `--sleep=3` - Seconds to sleep when no jobs available
 - `--max-jobs=1000` - Restart worker after N jobs (prevents memory leaks)
 - `--max-time=3600` - Restart worker after 1 hour (prevents memory leaks)
@@ -142,7 +142,7 @@ The queue worker runs as a dedicated Docker service:
 **Common causes:**
 - Database connection errors → Ensure MySQL is running
 - Memory limits → Check PHP memory_limit in Dockerfile
-- Timeout errors → Jobs exceeding 90s timeout (check job logic)
+- Timeout errors → Jobs exceeding timeout (thumbnail jobs: 600s; default: 300s)
 
 ### Problem: Jobs Process But Thumbnails Don't Appear
 

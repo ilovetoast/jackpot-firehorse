@@ -124,6 +124,7 @@ class ThumbnailGenerationService
 
         // Download source file (same logic as generateThumbnails)
         $sourceS3Path = $asset->storage_root_path;
+        $outputBasePath = dirname($sourceS3Path);
         $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
         
         if (!file_exists($tempPath) || filesize($tempPath) === 0) {
@@ -131,11 +132,11 @@ class ThumbnailGenerationService
         }
 
         // Admin override: If forceImageMagick is true, bypass file type detection and use ImageMagick
-        $fileType = $forceImageMagick ? 'imagick_override' : $this->detectFileType($asset);
+        $fileType = $forceImageMagick ? 'imagick_override' : $this->detectFileType($asset, null);
         $regenerated = [];
         
         try {
-            // Generate only requested styles
+            // Generate only requested styles (no version - legacy path)
             foreach ($styles as $styleName => $styleConfig) {
                 try {
                     $thumbnailPath = $this->generateThumbnail(
@@ -148,13 +149,14 @@ class ThumbnailGenerationService
                     );
                     
                     if ($thumbnailPath && file_exists($thumbnailPath)) {
-                        // Upload to S3
+                        // Upload to S3 (no version - uses outputBasePath)
                         $s3ThumbnailPath = $this->uploadThumbnailToS3(
                             $bucket,
                             $asset,
                             $thumbnailPath,
                             $styleName,
-                            $outputBasePath
+                            $outputBasePath,
+                            null
                         );
                         
                         // Get metadata
@@ -180,52 +182,31 @@ class ThumbnailGenerationService
                 }
             }
             
-            // Update metadata with regenerated styles
-            $metadata = $asset->metadata ?? [];
-            
-            // Separate preview and final styles
+            // Build structured return (caller persists - no Asset mutation)
             $previewStyles = [];
             $finalStyles = [];
+            $thumbnailDimensions = [];
             
             foreach ($regenerated as $styleName => $styleData) {
                 if ($styleName === 'preview') {
                     $previewStyles[$styleName] = $styleData;
                 } else {
                     $finalStyles[$styleName] = $styleData;
+                    if (isset($styleData['width'], $styleData['height'])) {
+                        $thumbnailDimensions[$styleName] = [
+                            'width' => $styleData['width'],
+                            'height' => $styleData['height'],
+                        ];
+                    }
                 }
             }
             
-            // Merge with existing thumbnails
-            if (!empty($previewStyles)) {
-                $metadata['preview_thumbnails'] = array_merge(
-                    $metadata['preview_thumbnails'] ?? [],
-                    $previewStyles
-                );
-            }
-            
-            if (!empty($finalStyles)) {
-                $metadata['thumbnails'] = array_merge(
-                    $metadata['thumbnails'] ?? [],
-                    $finalStyles
-                );
-                $metadata['thumbnails_generated_at'] = now()->toIso8601String();
-                // Persist thumbnail_dimensions when medium was regenerated
-                if (isset($finalStyles['medium']['width'], $finalStyles['medium']['height'])) {
-                    $metadata['thumbnail_dimensions'] = array_merge(
-                        $metadata['thumbnail_dimensions'] ?? [],
-                        [
-                            'medium' => [
-                                'width' => $finalStyles['medium']['width'],
-                                'height' => $finalStyles['medium']['height'],
-                            ],
-                        ]
-                    );
-                }
-            }
-            
-            $asset->update(['metadata' => $metadata]);
-            
-            return $regenerated;
+            return [
+                'thumbnails' => $finalStyles,
+                'preview_thumbnails' => $previewStyles,
+                'thumbnail_dimensions' => $thumbnailDimensions,
+                'regenerated' => $regenerated,
+            ];
         } finally {
             // Clean up temporary file
             if (file_exists($tempPath)) {
@@ -316,21 +297,18 @@ class ThumbnailGenerationService
                 'file_type' => 'pdf',
             ]);
         } elseif ($fileType === 'tiff') {
-            // TIFF validation: Use Imagick to get dimensions
-            // TIFF files require Imagick for processing
+            // TIFF validation: Use Imagick pingImage (headers only, no pixel load) to get dimensions
+            // Avoids loading 700MB+ TIFF into memory just to read dimensions
             if (!extension_loaded('imagick')) {
                 throw new \RuntimeException('TIFF file processing requires Imagick PHP extension');
             }
             
             try {
                 $imagick = new \Imagick();
-                $imagick->readImage($tempPath);
+                $imagick->pingImage($tempPath);
                 $imagick->setIteratorIndex(0);
-                $imagick = $imagick->getImage();
-                
                 $sourceImageWidth = (int) $imagick->getImageWidth();
                 $sourceImageHeight = (int) $imagick->getImageHeight();
-                
                 $imagick->clear();
                 $imagick->destroy();
                 
@@ -350,21 +328,17 @@ class ThumbnailGenerationService
                 throw new \RuntimeException("Downloaded file is not a valid TIFF image: {$e->getMessage()}");
             }
         } elseif ($fileType === 'avif') {
-            // AVIF validation: Use Imagick to get dimensions
-            // AVIF files require Imagick for processing
+            // AVIF validation: Use Imagick pingImage (headers only) to get dimensions
             if (!extension_loaded('imagick')) {
                 throw new \RuntimeException('AVIF file processing requires Imagick PHP extension');
             }
             
             try {
                 $imagick = new \Imagick();
-                $imagick->readImage($tempPath);
+                $imagick->pingImage($tempPath);
                 $imagick->setIteratorIndex(0);
-                $imagick = $imagick->getImage();
-                
                 $sourceImageWidth = (int) $imagick->getImageWidth();
                 $sourceImageHeight = (int) $imagick->getImageHeight();
-                
                 $imagick->clear();
                 $imagick->destroy();
                 
@@ -482,7 +456,8 @@ class ThumbnailGenerationService
                             $asset,
                             $previewPath,
                             'preview',
-                            $outputBasePath
+                            $outputBasePath,
+                            $version
                         );
                         
                         // Get preview thumbnail metadata
@@ -521,10 +496,30 @@ class ThumbnailGenerationService
                 }
             }
             
+            // Degraded mode: skip medium/large for files exceeding pixel cap (prevents OOM on 700MB+ TIFFs)
+            $maxPixels = (int) config('assets.thumbnail.max_pixels', 200_000_000);
+            $degradedMode = $sourceImageWidth && $sourceImageHeight
+                && (($sourceImageWidth * $sourceImageHeight) > $maxPixels);
+            if ($degradedMode) {
+                Log::info('[ThumbnailGenerationService] Degraded mode: pixel area exceeds cap, skipping medium/large', [
+                    'asset_id' => $asset->id,
+                    'pixel_area' => $sourceImageWidth * $sourceImageHeight,
+                    'max_pixels' => $maxPixels,
+                ]);
+            }
+
             // Generate final thumbnails (thumb, medium, large) - exclude preview
             foreach ($styles as $styleName => $styleConfig) {
                 // Skip preview - already generated above
                 if ($styleName === 'preview') {
+                    continue;
+                }
+                // Degraded mode: only preview + thumb; skip medium and large
+                if ($degradedMode && in_array($styleName, ['medium', 'large'], true)) {
+                    Log::info('[ThumbnailGenerationService] Skipping style in degraded mode', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                    ]);
                     continue;
                 }
                 try {
@@ -544,7 +539,8 @@ class ThumbnailGenerationService
                             $asset,
                             $thumbnailPath,
                             $styleName,
-                            $outputBasePath
+                            $outputBasePath,
+                            $version
                         );
                         
                         // Get thumbnail metadata
@@ -571,25 +567,15 @@ class ThumbnailGenerationService
                 }
             }
             
-            // Step 6: Merge preview thumbnails with final thumbnails
-            // Preview thumbnails are stored separately in metadata but returned together
-            $allThumbnails = array_merge($previewThumbnails, $thumbnails);
-            
-            // Persist thumbnail_dimensions for ALL styles (thumb, medium, large) - required for visualMetadataReady
-            $metadata = $asset->metadata ?? [];
-            $metadataUpdated = false;
-            $thumbnailDimensions = $metadata['thumbnail_dimensions'] ?? [];
+            // Build thumbnail_dimensions from generated thumbnails
+            $thumbnailDimensions = [];
             foreach (['thumb', 'medium', 'large'] as $style) {
                 if (isset($thumbnails[$style]['width'], $thumbnails[$style]['height'])) {
                     $thumbnailDimensions[$style] = [
                         'width' => $thumbnails[$style]['width'],
                         'height' => $thumbnails[$style]['height'],
                     ];
-                    $metadataUpdated = true;
                 }
-            }
-            if ($metadataUpdated) {
-                $metadata['thumbnail_dimensions'] = $thumbnailDimensions;
             }
 
             // Guard: Low-resolution raster for SVG/PDF — report diagnostic, do NOT fail job
@@ -621,27 +607,23 @@ class ThumbnailGenerationService
                 }
             }
             
-            // Store source image dimensions in metadata ONLY for image file types
-            // These dimensions are from the ORIGINAL source file (not thumbnails)
-            // Only image file types have pixel dimensions - PDFs, videos, and other types do not
+            // Source image dimensions (raster types only)
             if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
-                $metadata['image_width'] = $sourceImageWidth;
-                $metadata['image_height'] = $sourceImageHeight;
-                $metadataUpdated = true;
-                
-                Log::info('[ThumbnailGenerationService] Stored original source image dimensions in metadata', [
+                Log::info('[ThumbnailGenerationService] Captured original source image dimensions', [
                     'asset_id' => $asset->id,
                     'source_image_width' => $sourceImageWidth,
                     'source_image_height' => $sourceImageHeight,
-                    'note' => 'Dimensions are from original source file, not thumbnails',
                 ]);
             }
-            
-            if ($metadataUpdated) {
-                $asset->update(['metadata' => $metadata]);
-            }
-            
-            return $allThumbnails;
+
+            return [
+                'thumbnails' => $thumbnails,
+                'preview_thumbnails' => $previewThumbnails,
+                'thumbnail_dimensions' => $thumbnailDimensions,
+                'image_width' => $sourceImageWidth,
+                'image_height' => $sourceImageHeight,
+                'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
+            ];
         } finally {
             // Clean up temporary file
             if (file_exists($tempPath)) {
@@ -719,11 +701,14 @@ class ThumbnailGenerationService
 
     /**
      * Upload thumbnail to S3.
+     * When version is present, base path is derived from version->file_path (never asset->storage_root_path).
      *
      * @param StorageBucket $bucket
      * @param Asset $asset
      * @param string $localThumbnailPath
      * @param string $styleName
+     * @param string|null $outputBasePath Base path for thumbnails. When version present, must be dirname(version->file_path).
+     * @param AssetVersion|null $version When provided, base path MUST come from version (outputBasePath or dirname(version->file_path))
      * @return string S3 key path for the thumbnail
      * @throws \RuntimeException If upload fails
      */
@@ -732,11 +717,14 @@ class ThumbnailGenerationService
         Asset $asset,
         string $localThumbnailPath,
         string $styleName,
-        ?string $outputBasePath = null
+        ?string $outputBasePath = null,
+        ?AssetVersion $version = null
     ): string {
-        // Generate S3 path for thumbnail
-        // Pattern: {asset_path_base}/thumbnails/{style}/{filename_with_ext}
-        $basePath = $outputBasePath ?? pathinfo($asset->storage_root_path, PATHINFO_DIRNAME);
+        // Generate S3 path for thumbnail. Pattern: {base_path}/thumbnails/{style}/{filename}
+        // When version present: base from version->file_path. Never use asset->storage_root_path.
+        $basePath = $version && $version->file_path
+            ? dirname($version->file_path)
+            : ($outputBasePath ?? pathinfo($asset->storage_root_path ?? '', PATHINFO_DIRNAME));
         $extension = pathinfo($localThumbnailPath, PATHINFO_EXTENSION) ?: 'jpg';
         $thumbnailFilename = "{$styleName}.{$extension}";
         $s3ThumbnailPath = "{$basePath}/thumbnails/{$styleName}/{$thumbnailFilename}";
@@ -1124,8 +1112,9 @@ class ThumbnailGenerationService
 
         try {
             $imagick = new \Imagick();
-            
-            // Read the TIFF file
+            // Limit resolution BEFORE reading to avoid loading 700MB+ at full res
+            $imagick->setResolution(72, 72);
+            $imagick->setOption('tiff:tile-geometry', '256x256');
             $imagick->readImage($sourcePath);
             
             // Get first image if multi-page TIFF
@@ -2433,34 +2422,31 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Detect file type from mime type and filename.
-     * When version is provided, uses version->mime_type (from FileInspectionService).
+     * Detect file type from mime type and extension.
+     * Version-pure: when version is provided, use ONLY version (never asset).
      *
-     * @param Asset $asset
-     * @param AssetVersion|null $version When provided, use version->mime_type for detection
+     * @param Asset $asset Used only when version is null (legacy path)
+     * @param AssetVersion|null $version When provided, use ONLY version->mime_type and version->file_path
      * @return string File type: image, pdf, tiff, psd, ai, office, video, or unknown
      */
     protected function detectFileType(Asset $asset, ?AssetVersion $version = null): string
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        $mime = $version ? $version->mime_type : $asset->mime_type;
-        // When version is provided, use extension from version->file_path (authoritative for replace).
-        // asset.original_filename can be stale after replace (e.g. wrong ext from previous file).
-        // Prefer version->file_path when available (authoritative for replace); fallback to original_filename, then storage_root_path
-        $ext = $version && $version->file_path
-            ? pathinfo($version->file_path, PATHINFO_EXTENSION)
-            : pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
-        if (empty($ext) && $asset->storage_root_path) {
-            $ext = pathinfo($asset->storage_root_path, PATHINFO_EXTENSION);
+
+        if ($version) {
+            // Version-pure: use ONLY version. Ignore asset completely.
+            $mime = $version->mime_type;
+            $ext = $version->file_path
+                ? strtolower(pathinfo($version->file_path, PATHINFO_EXTENSION))
+                : '';
+        } else {
+            // Legacy (Starter): use asset only. No mixed fallback.
+            $mime = $asset->mime_type;
+            $ext = $asset->storage_root_path
+                ? strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION))
+                : '';
         }
-        // After replace: storage_root_path may be correct while original_filename is stale (e.g. still .jpg)
-        if (!$version && $asset->storage_root_path) {
-            $pathExt = strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION));
-            if ($pathExt === 'svg') {
-                $ext = 'svg';
-            }
-        }
-        $ext = $ext ? strtolower($ext) : '';
+        $ext = $ext ?: '';
         $fileType = $fileTypeService->detectFileType($mime, $ext);
 
         // TIFF fallback: GD getimagesize() does not support TIFF. When MIME is wrong (e.g. from S3)

@@ -54,7 +54,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
-        ...(plan_allows_versions ? [{ id: 'versions', label: `Versions (${versions?.length ?? 0})` }] : []),
+        ...(versions?.length ? [{ id: 'versions', label: `Versions (${versions.length})` }] : []),
         { id: 'metadata', label: 'Metadata JSON' },
         { id: 'pipeline', label: 'Pipeline State' },
         { id: 'incidents', label: 'Incidents' },

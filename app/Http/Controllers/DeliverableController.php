@@ -254,8 +254,12 @@ class DeliverableController extends Controller
         }
 
         // Filter by category if provided
+        // Use same JSON extraction as count query to ensure count/grid parity (handles string vs int in metadata)
         if ($categoryId) {
-            $assetsQuery->where('metadata->category_id', (int) $categoryId);
+            $assetsQuery->whereRaw(
+                'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
+                [(int) $categoryId]
+            );
         }
 
         $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);

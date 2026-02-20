@@ -42,6 +42,7 @@ class AssetVersion extends Model
         'is_current',
         'restored_from_version_id',
         'storage_class',
+        'metadata',
     ];
 
     protected function casts(): array
@@ -53,6 +54,7 @@ class AssetVersion extends Model
             'version_number' => 'integer',
             'is_current' => 'boolean',
             'storage_class' => 'string',
+            'metadata' => 'array',
         ];
     }
 

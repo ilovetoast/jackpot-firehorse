@@ -54,6 +54,7 @@ class ExtractMetadataJob implements ShouldQueue
             'asset_id' => $this->assetId,
             'version_id' => $this->versionId,
         ]);
+        \App\Services\UploadDiagnosticLogger::jobStart('ExtractMetadataJob', $this->assetId, $this->versionId);
 
         $asset = Asset::findOrFail($this->assetId);
         $version = $this->versionId ? AssetVersion::find($this->versionId) : null;
@@ -70,6 +71,7 @@ class ExtractMetadataJob implements ShouldQueue
                 Log::info('[ExtractMetadataJob] Metadata extraction skipped - already extracted', [
                     'asset_id' => $asset->id,
                 ]);
+                \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'already_extracted');
                 return;
             }
         }
@@ -78,6 +80,9 @@ class ExtractMetadataJob implements ShouldQueue
         if ($asset->status !== AssetStatus::VISIBLE) {
             Log::warning('Metadata extraction skipped - asset is not visible', [
                 'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'asset_not_visible', [
                 'status' => $asset->status->value,
             ]);
             return;
@@ -112,6 +117,9 @@ class ExtractMetadataJob implements ShouldQueue
 
         Log::info('Metadata extracted', [
             'asset_id' => $asset->id,
+            'metadata_keys' => array_keys($metadata),
+        ]);
+        \App\Services\UploadDiagnosticLogger::jobComplete('ExtractMetadataJob', $asset->id, [
             'metadata_keys' => array_keys($metadata),
         ]);
 
@@ -391,7 +399,8 @@ class ExtractMetadataJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
         }
     }

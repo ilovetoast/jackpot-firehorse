@@ -219,7 +219,10 @@ class AiMetadataGenerationJob implements ShouldQueue
             ]);
 
             // 10. Trigger Brand Compliance scoring (if Brand DNA enabled)
-            \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+            // Skip for file types that don't support thumbnails — FinalizeAssetJob creates file_type_unsupported row
+            if ($asset->thumbnail_status !== \App\Enums\ThumbnailStatus::SKIPPED) {
+                \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+            }
 
         } catch (PlanLimitExceededException $e) {
             // Already handled above, but catch here for safety

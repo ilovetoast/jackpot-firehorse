@@ -79,6 +79,15 @@ class GenerateThumbnailsJob implements ShouldQueue
     public $tries = 3; // Maximum retry attempts (enforced by AssetProcessingFailureService)
 
     /**
+     * Job timeout in seconds. Queue workers (Horizon default 90s) kill jobs after this.
+     * Thumbnail generation for large TIFF/AI/PDF/video can take 2–5+ minutes.
+     * Configurable via config('assets.thumbnail.job_timeout_seconds') or THUMBNAIL_JOB_TIMEOUT_SECONDS.
+     *
+     * @var int
+     */
+    public $timeout;
+
+    /**
      * The number of seconds to wait before retrying the job.
      *
      * @var int
@@ -88,10 +97,16 @@ class GenerateThumbnailsJob implements ShouldQueue
     /**
      * Create a new job instance.
      * Phase 3A: Accepts assetVersionId. Falls back to legacy (asset ID) when version not found.
+     *
+     * @param string $assetVersionId Version ID (or asset ID when legacy)
+     * @param bool $force If true, regenerate even when thumbnails already exist
      */
     public function __construct(
-        public readonly string $assetVersionId
-    ) {}
+        public readonly string $assetVersionId,
+        public readonly bool $force = false
+    ) {
+        $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+    }
 
     /**
      * Execute the job.
@@ -114,6 +129,12 @@ class GenerateThumbnailsJob implements ShouldQueue
             'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
+        $assetForDiag = AssetVersion::find($this->assetVersionId)?->asset ?? Asset::find($this->assetVersionId);
+        if ($assetForDiag) {
+            \App\Services\UploadDiagnosticLogger::jobStart('GenerateThumbnailsJob', $assetForDiag->id, null, [
+                'asset_version_id' => $this->assetVersionId,
+            ]);
+        }
 
         // TASK 2: Guarantee thumbnail job NEVER leaves PROCESSING
         // Wrap all thumbnail logic in try/catch and enforce a terminal state
@@ -124,6 +145,27 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // Phase 7: Idempotent - skip if version already failed
                 if ($version->pipeline_status === 'failed') {
                     Log::info('[GenerateThumbnailsJob] Skipping - version pipeline_status is failed', [
+                        'version_id' => $version->id,
+                        'asset_id' => $version->asset_id,
+                    ]);
+                    return;
+                }
+
+                // Glacier: skip if archived (getObject would fail or trigger restore)
+                $archived = in_array($version->storage_class ?? '', ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'], true);
+                if ($archived) {
+                    Log::info('[GenerateThumbnailsJob] Skipping - version is archived in Glacier', [
+                        'version_id' => $version->id,
+                        'storage_class' => $version->storage_class,
+                    ]);
+                    return;
+                }
+
+                // Idempotency: skip if thumbnails already exist and force not requested
+                $versionMeta = $version->metadata ?? [];
+                $hasThumbnails = !empty($versionMeta['thumbnails']);
+                if ($hasThumbnails && !$this->force) {
+                    Log::info('[GenerateThumbnailsJob] Skipping - thumbnails already exist (use force to regenerate)', [
                         'version_id' => $version->id,
                         'asset_id' => $version->asset_id,
                     ]);
@@ -272,6 +314,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'skip_reason' => $skipReason,
                 'skip_message' => $skipMessage,
             ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('GenerateThumbnailsJob', $asset->id, $skipReason, [
+                'skip_message' => $skipMessage,
+            ]);
             
             // Log skipped event (truthful - work never happened)
             try {
@@ -297,6 +342,19 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'extension' => $extension,
                 'skip_reason' => $skipReason,
             ]);
+
+            // Version path: set pipeline_status=complete so FinalizeAssetJob can run (ZIP, ICO, etc.)
+            // Without this, version stays at 'processing' and analysis_status never reaches 'complete'
+            if ($version) {
+                $version->update([
+                    'metadata' => array_merge($version->metadata ?? [], [
+                        'thumbnail_skip_reason' => $skipReason,
+                        'thumbnail_skip_message' => $skipMessage,
+                        'thumbnails_generated' => false,
+                    ]),
+                    'pipeline_status' => 'complete',
+                ]);
+            }
             return;
         }
 
@@ -385,36 +443,17 @@ class GenerateThumbnailsJob implements ShouldQueue
         PipelineLogger::warning('THUMBNAILS: CALLING generateThumbnails', [
             'asset_id' => $asset->id,
         ]);
-        $thumbnails = $version
+        $result = $version
             ? $thumbnailService->generateThumbnailsForVersion($version)
             : $thumbnailService->generateThumbnails($asset);
 
-            // Step 6: Separate preview thumbnails from final thumbnails
-            // Preview thumbnails are stored separately and do NOT affect COMPLETED status
-            $previewThumbnails = [];
-            $finalThumbnails = [];
+            // Service returns structured array: thumbnails, preview_thumbnails, thumbnail_dimensions, image_width, image_height
+            $previewThumbnails = $result['preview_thumbnails'] ?? [];
+            $finalThumbnails = $result['thumbnails'] ?? [];
+            $thumbnailDimensions = $result['thumbnail_dimensions'] ?? [];
+            $imageWidth = $result['image_width'] ?? null;
+            $imageHeight = $result['image_height'] ?? null;
             
-            foreach ($thumbnails as $styleName => $thumbnailData) {
-                if ($styleName === 'preview') {
-                    $previewThumbnails[$styleName] = $thumbnailData;
-                } else {
-                    $finalThumbnails[$styleName] = $thumbnailData;
-                }
-            }
-            
-            // Step 6: Store preview thumbnails in metadata immediately (for early UI feedback)
-            // Preview existence does NOT mark COMPLETED - final thumbnails control completion
-            if (!empty($previewThumbnails)) {
-                $metadata = $asset->metadata ?? [];
-                $metadata['preview_thumbnails'] = $previewThumbnails;
-                $asset->update(['metadata' => $metadata]);
-                
-                Log::info('Preview thumbnails generated and stored', [
-                    'asset_id' => $asset->id,
-                    'preview_count' => count($previewThumbnails),
-                ]);
-            }
-
             // CRITICAL: If NO final thumbnails were generated, mark as FAILED immediately
             // This prevents marking as COMPLETED when all thumbnail generation failed
             // (e.g., PDF conversion failed, all styles failed, etc.)
@@ -423,7 +462,6 @@ class GenerateThumbnailsJob implements ShouldQueue
                 
                 Log::error('Thumbnail generation failed - no final thumbnails generated', [
                     'asset_id' => $asset->id,
-                    'total_thumbnails_returned' => count($thumbnails),
                     'preview_thumbnails' => count($previewThumbnails),
                     'final_thumbnails' => count($finalThumbnails),
                 ]);
@@ -458,16 +496,23 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
                 }
                 
-                // Update metadata to record failure
-                // Step 6: Preserve preview thumbnails even if final generation fails
-                $currentMetadata = $asset->metadata ?? [];
-                $currentMetadata['thumbnail_generation_failed'] = true;
-                $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
-                $currentMetadata['thumbnail_generation_error'] = $errorMessage;
-                // Preview thumbnails remain in metadata (if they were generated)
-                $asset->update(['metadata' => $currentMetadata]);
+                // Record failure: version gets metadata; asset gets status only
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_generation_failed' => true,
+                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
+                            'thumbnail_generation_error' => $errorMessage,
+                        ]),
+                    ]);
+                } else {
+                    $currentMetadata = $asset->metadata ?? [];
+                    $currentMetadata['thumbnail_generation_failed'] = true;
+                    $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
+                    $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+                    $asset->update(['metadata' => $currentMetadata]);
+                }
                 
-                // Throw exception to prevent "completed" event logging below
                 throw new \RuntimeException($errorMessage);
             }
 
@@ -561,7 +606,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 
                 Log::error('Thumbnail generation failed - verification failed', [
                     'asset_id' => $asset->id,
-                    'thumbnail_count' => count($thumbnails),
+                    'thumbnail_count' => count($finalThumbnails),
                     'errors' => $verificationErrors,
                 ]);
                 
@@ -595,89 +640,102 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
                 }
                 
-                // Update metadata to record failure
-                // Step 6: Preserve preview thumbnails even if final generation fails
-                $currentMetadata = $asset->metadata ?? [];
-                $currentMetadata['thumbnail_generation_failed'] = true;
-                $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
-                $currentMetadata['thumbnail_generation_error'] = $errorMessage;
-                // Preview thumbnails remain in metadata (if they were generated)
-                $asset->update(['metadata' => $currentMetadata]);
+                // Record failure: version gets metadata; asset gets status only
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_generation_failed' => true,
+                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
+                            'thumbnail_generation_error' => $errorMessage,
+                        ]),
+                    ]);
+                } else {
+                    $currentMetadata = $asset->metadata ?? [];
+                    $currentMetadata['thumbnail_generation_failed'] = true;
+                    $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
+                    $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+                    $asset->update(['metadata' => $currentMetadata]);
+                }
                 
-                // Throw exception to prevent "completed" event logging below
                 throw new \RuntimeException($errorMessage);
             }
             
-            // Step 6: All FINAL thumbnails are valid - update metadata and mark as completed
-            // P5: Clear failure state - thumbnail success must clear timeout/error flags
-            // Preview thumbnails are already stored separately above and remain in metadata
-            $currentMetadata = $asset->metadata ?? [];
-            $currentMetadata['thumbnails_generated'] = true;
-            $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
-            $currentMetadata['thumbnails'] = $finalThumbnails; // Only final thumbnails (exclude preview)
-            $currentMetadata['thumbnail_timeout'] = false;
-            $currentMetadata['thumbnail_timeout_reason'] = null;
+            // Step 6: Persist metadata - version only when version exists; asset for legacy
+            $thumbnailMetadata = [
+                'thumbnails' => $finalThumbnails,
+                'preview_thumbnails' => $previewThumbnails,
+                'thumbnail_dimensions' => $thumbnailDimensions,
+                'image_width' => $imageWidth,
+                'image_height' => $imageHeight,
+                'thumbnails_generated' => true,
+                'thumbnails_generated_at' => now()->toIso8601String(),
+                'thumbnail_timeout' => false,
+                'thumbnail_timeout_reason' => null,
+            ];
+            if (!empty($result['thumbnail_quality'])) {
+                $thumbnailMetadata['thumbnail_quality'] = $result['thumbnail_quality'];
+            }
 
-            // Phase V-1: For video assets, store poster URL from thumbnail
-            // 2. When thumbnails complete: set analysis_status = 'extracting_metadata'
-            // CRITICAL: Always persist metadata and thumbnail_status - never drop on analysis_status mismatch.
-            // Losing thumbnails_generated causes pipeline_completed but thumbnails_generated=false in admin.
+            if ($version) {
+                // Version path: persist metadata onto version
+                $version->update([
+                    'metadata' => array_merge($version->metadata ?? [], $thumbnailMetadata),
+                    'pipeline_status' => 'complete',
+                ]);
+                // CRITICAL: Also sync thumbnail metadata to asset so thumbnailPathForStyle, batch endpoint, and UI work.
+                // Asset is the display entity; version stores source. Thumbnails must be readable from asset.
+                $currentMetadata = $asset->metadata ?? [];
+                $currentMetadata = array_merge($currentMetadata, $thumbnailMetadata);
+                $asset->update(['metadata' => $currentMetadata]);
+            } else {
+                // Legacy path: persist to asset metadata
+                $currentMetadata = $asset->metadata ?? [];
+                $currentMetadata = array_merge($currentMetadata, $thumbnailMetadata);
+            }
+
+            // Asset pipeline state (thumbnail_status, analysis_status) - always updated for pipeline progression
             $updateData = [
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'thumbnail_error' => null,
-                'thumbnail_started_at' => null, // Clear start time on completion
-                'metadata' => $currentMetadata,
+                'thumbnail_started_at' => null,
             ];
+            if (!$version) {
+                $updateData['metadata'] = $currentMetadata ?? $asset->metadata;
+            }
 
-            // Guard: only mutate analysis_status when in expected previous state (avoids overwriting later stages)
             $expectedStatus = 'generating_thumbnails';
             $currentStatus = $asset->analysis_status ?? 'uploading';
             if ($currentStatus === $expectedStatus) {
                 $updateData['analysis_status'] = 'extracting_metadata';
             } else {
-                Log::warning('[GenerateThumbnailsJob] Skipping analysis_status transition (metadata still persisted)', [
+                Log::warning('[GenerateThumbnailsJob] Skipping analysis_status transition', [
                     'asset_id' => $asset->id,
                     'expected' => $expectedStatus,
                     'actual' => $currentStatus,
                 ]);
             }
-            
-            // Check if asset is a video and set poster path
-            // Store S3 path (not presigned URL) - URLs are generated on-demand via AssetThumbnailController
-            // AWS S3 presigned URLs have a maximum expiration of 7 days, so we can't store long-lived URLs
+
             $fileTypeService = app(\App\Services\FileTypeService::class);
             $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
             if ($fileType === 'video' && isset($finalThumbnails['thumb'])) {
-                // Store poster path (S3 key) - use thumb style for grid display
-                // The path will be used to generate URLs on-demand via thumbnail controller
                 $posterPath = $finalThumbnails['thumb']['path'] ?? null;
                 if ($posterPath) {
-                    // Store the S3 path, not a presigned URL
-                    // URLs will be generated on-demand when needed (via AssetThumbnailController or Asset accessor)
                     $updateData['video_poster_url'] = $posterPath;
                 }
             }
 
-            // CRITICAL: Asset.status represents visibility and must remain UPLOADED
-            // Processing jobs (thumbnails, metadata, previews) must NOT mutate Asset.status
-            // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
-            // AssetController queries only status = UPLOADED, so changing status hides assets from the grid
-            // Step 4: Only mark as COMPLETED after verification passes
-            // Clear thumbnail_started_at when completed (no longer needed)
             $asset->update($updateData);
-            // Phase 3A: Update version pipeline_status when version-aware
-            if (isset($version)) {
-                $version->update(['pipeline_status' => 'complete']);
-            }
             if (isset($updateData['analysis_status'])) {
                 \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
             }
 
-            // Refresh asset to ensure metadata is loaded correctly
             $asset->refresh();
-            
+            if ($version) {
+                $version->refresh();
+            }
+
             // Verify metadata was saved correctly (defensive check)
-            $savedMetadata = $asset->metadata ?? [];
+            $savedMetadata = $version ? ($version->metadata ?? []) : ($asset->metadata ?? []);
             $savedThumbnails = $savedMetadata['thumbnails'] ?? [];
             $thumbPath = $asset->thumbnailPathForStyle('thumb');
             
@@ -687,6 +745,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'saved_thumbnail_styles' => array_keys($savedThumbnails),
                 'thumb_path_exists' => $thumbPath !== null,
                 'thumb_path' => $thumbPath,
+            ]);
+            \App\Services\UploadDiagnosticLogger::jobComplete('GenerateThumbnailsJob', $asset->id, [
+                'thumbnail_styles' => array_keys($finalThumbnails),
+                'thumbnail_quality' => $result['thumbnail_quality'] ?? null,
             ]);
             
             // If metadata wasn't saved correctly, log warning (but don't fail - status is already set)
@@ -708,8 +770,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'event_type' => 'asset.thumbnails.generated',
                 'metadata' => [
                     'job' => 'GenerateThumbnailsJob',
-                    'thumbnail_count' => count($thumbnails),
-                    'styles' => array_keys($thumbnails),
+                    'thumbnail_count' => count($finalThumbnails),
+                    'styles' => array_keys($finalThumbnails),
                 ],
                 'created_at' => now(),
             ]);
@@ -737,8 +799,8 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             Log::info('[GenerateThumbnailsJob] Thumbnails generated successfully', [
                 'asset_id' => $asset->id,
-                'thumbnail_count' => count($thumbnails),
-                'styles' => array_keys($thumbnails),
+                'thumbnail_count' => count($finalThumbnails),
+                'styles' => array_keys($finalThumbnails),
             ]);
             
             Log::info('[GenerateThumbnailsJob] Job completed successfully', [
@@ -860,6 +922,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'error' => $fullErrorMessage,
                     'user_friendly_error' => $userFriendlyError,
+                    'exception_class' => get_class($e),
+                ]);
+                \App\Services\UploadDiagnosticLogger::jobFail('GenerateThumbnailsJob', $asset->id, $userFriendlyError, [
                     'exception_class' => get_class($e),
                 ]);
 

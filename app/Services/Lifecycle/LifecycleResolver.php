@@ -239,11 +239,11 @@ class LifecycleResolver
                 'is_approver' => $isTenantOwnerOrAdmin || $isBrandManager,
             ]);
         } elseif ($state === 'unpublished') {
-            // Unpublished filter: Show all unpublished assets (both VISIBLE and HIDDEN status)
+            // Unpublished filter: Show all unpublished assets (VISIBLE, HIDDEN, FAILED)
             // Permission check already done in validateAndNormalizeState - if we get here, user has permission
             // CRITICAL: Use withoutGlobalScopes() to ensure no global scope interferes
             // This is defensive - if a global scope exists, it will be bypassed
-            $query->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+            $query->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN, AssetStatus::FAILED])
                 ->whereNull('published_at');
             
             Log::info('[LifecycleResolver] Applied unpublished lifecycle filter', [
@@ -279,14 +279,15 @@ class LifecycleResolver
             // Default visibility rules (no lifecycle filter active)
             // CRITICAL: Unpublished assets should NEVER show unless filter is explicitly active
             // Even users with permissions should not see unpublished assets by default
+            // RULE: Uploaded assets must NEVER disappear from grid - only hide if: unpublished, archived, deleted, pending approval
+            // FAILED assets (processing errors) must remain visible so users can see, retry, or download originals
             if ($canSeeUnpublished) {
-                // Users with permissions can see HIDDEN assets (pending approval) that are published
-                // But still exclude unpublished assets unless filter is active
-                $query->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                // Users with permissions can see HIDDEN and FAILED assets (pending approval, processing errors) that are published
+                $query->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN, AssetStatus::FAILED])
                     ->whereNotNull('published_at'); // Always exclude unpublished in default view
             } else {
-                // Regular users only see VISIBLE, published assets
-                $query->where('status', AssetStatus::VISIBLE)
+                // Regular users see VISIBLE and FAILED (failed assets must never disappear)
+                $query->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::FAILED])
                     ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
             }
         }

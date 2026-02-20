@@ -373,6 +373,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         )}
                     </div>
                 )}
+                {analysisStatus === 'complete' && evaluationStatus === 'file_type_unsupported' && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic">Brand alignment not available for this file type.</p>
+                    </div>
+                )}
                 {analysisStatus === 'complete' && (evaluationStatus === 'not_applicable' || evaluationStatus === 'not_configured') && (
                     <div className="mb-3">
                         <p className="text-xs text-gray-500 italic">Brand DNA not configured.</p>

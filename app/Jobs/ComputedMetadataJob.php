@@ -54,15 +54,18 @@ class ComputedMetadataJob implements ShouldQueue
     public function handle(ComputedMetadataService $service): void
     {
         $asset = Asset::findOrFail($this->assetId);
+        \App\Services\UploadDiagnosticLogger::jobStart('ComputedMetadataJob', $this->assetId);
 
         // Skip if asset is not visible
         if ($asset->status !== AssetStatus::VISIBLE) {
+            \App\Services\UploadDiagnosticLogger::jobSkip('ComputedMetadataJob', $asset->id, 'asset_not_visible');
             return;
         }
 
         // Idempotency: Check if already computed
         $metadata = $asset->metadata ?? [];
         if (isset($metadata['computed_metadata_completed']) && $metadata['computed_metadata_completed'] === true) {
+            \App\Services\UploadDiagnosticLogger::jobSkip('ComputedMetadataJob', $asset->id, 'already_computed');
             return;
         }
 
@@ -80,6 +83,7 @@ class ComputedMetadataJob implements ShouldQueue
                 'job' => 'ComputedMetadataJob',
                 'fields' => ['orientation', 'color_space', 'resolution_class'],
             ]);
+            \App\Services\UploadDiagnosticLogger::jobComplete('ComputedMetadataJob', $asset->id);
         } catch (\Throwable $e) {
             Log::error('[ComputedMetadataJob] System metadata generation failed', [
                 'asset_id' => $asset->id,
@@ -111,7 +115,8 @@ class ComputedMetadataJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
         }
     }

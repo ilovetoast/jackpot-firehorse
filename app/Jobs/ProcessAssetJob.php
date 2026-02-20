@@ -16,6 +16,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ProcessAssetJob implements ShouldQueue
@@ -127,11 +128,12 @@ class ProcessAssetJob implements ShouldQueue
     public function handle(): void
     {
         // Resolve version-aware or legacy: accept version ID or asset ID
-        $version = AssetVersion::find($this->assetId);
+        // Version path: load with lockForUpdate() for race safety
+        $version = DB::transaction(fn () => AssetVersion::where('id', $this->assetId)->lockForUpdate()->first());
         $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
         // When asset ID was passed (e.g. from ProcessAssetOnUpload), resolve current version for pipeline_status updates
         if (!$version && $asset->currentVersion) {
-            $version = $asset->currentVersion;
+            $version = DB::transaction(fn () => AssetVersion::where('id', $asset->currentVersion->id)->lockForUpdate()->first());
         }
         $thumbnailJobId = $version ? $version->id : $asset->id;
 
@@ -148,6 +150,10 @@ class ProcessAssetJob implements ShouldQueue
             'asset_id' => $asset->id,
             'version_id' => $version?->id,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+        ]);
+        \App\Services\UploadDiagnosticLogger::assetSnapshot($asset, 'ProcessAssetJob START', [
+            'version_id' => $version?->id,
+            'chain_will_dispatch' => true,
         ]);
 
         try {
@@ -174,6 +180,18 @@ class ProcessAssetJob implements ShouldQueue
             $version->update($versionUpdate);
         }
 
+        // ZIP/archive short-circuit: never run full pipeline — complete immediately to avoid indefinite processing
+        // These types cannot generate thumbnails, previews, or image-derived metadata; running the chain wastes
+        // queue capacity and can cause stuck states if any job fails or retries indefinitely.
+        $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
+        $extForCheck = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $unsupported = $fileTypeService->getUnsupportedReason($mimeForCheck, $extForCheck);
+        if ($unsupported) {
+            $this->shortCircuitUnsupportedType($asset, $version, $unsupported);
+            return;
+        }
+
         // Skip if failed (don't reprocess failed assets automatically)
         if ($asset->status === AssetStatus::FAILED) {
             Log::warning('Asset processing skipped - asset is in failed state', [
@@ -195,23 +213,12 @@ class ProcessAssetJob implements ShouldQueue
         }
 
         // Idempotency: Check if processing has already started (via metadata)
-        // Individual jobs in the chain have their own idempotency checks
-        $metadata = $asset->metadata ?? [];
-        if (isset($metadata['processing_started'])) {
+        // Version path: use version metadata. Legacy (Starter): use asset metadata.
+        $existingMetadata = $version ? ($version->metadata ?? []) : ($asset->metadata ?? []);
+        if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
             Log::info('Asset processing skipped - processing already started', [
                 'asset_id' => $asset->id,
-            ]);
-            return;
-        }
-        
-        // Check if processing has already been started
-        // If thumbnails are completed but other jobs haven't run, we should still run the chain
-        // Only skip if processing_started flag exists (prevents duplicate chains)
-        $existingMetadata = $asset->metadata ?? [];
-        if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
-            PipelineLogger::info('[ProcessAssetJob] Processing already started - skipping to prevent duplicate chain', [
-                'asset_id' => $asset->id,
-                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                'version_id' => $version?->id,
             ]);
             return;
         }
@@ -233,17 +240,20 @@ class ProcessAssetJob implements ShouldQueue
         AnalysisStatusLogger::log($asset, 'uploading', 'generating_thumbnails', 'ProcessAssetJob');
 
         // Mark processing as started in metadata (for idempotency)
-        // IMPORTANT: Asset.status must NOT be mutated here.
-        // Asset.status represents VISIBILITY (UPLOADED = visible in grid, COMPLETED = visible in dashboard),
-        // not processing progress. Mutating status would cause assets to disappear from the asset grid
-        // (AssetController queries status = UPLOADED). Processing progress is tracked via:
-        // - thumbnail_status (for thumbnail generation)
-        // - metadata flags (processing_started, metadata_extracted, thumbnails_generated, etc.)
-        // - activity events (asset.processing.started, etc.)
-        // Only FinalizeAssetJob is authorized to change status from UPLOADED to COMPLETED.
-        $metadata['processing_started'] = true;
-        $metadata['processing_started_at'] = now()->toIso8601String();
-        $asset->update(['metadata' => $metadata]);
+        // Version path: persist to version only. Legacy (Starter): persist to asset.
+        $processingStarted = [
+            'processing_started' => true,
+            'processing_started_at' => now()->toIso8601String(),
+        ];
+        if ($version) {
+            $version->update([
+                'metadata' => array_merge($version->metadata ?? [], $processingStarted),
+            ]);
+        } else {
+            $asset->update([
+                'metadata' => array_merge($asset->metadata ?? [], $processingStarted),
+            ]);
+        }
 
         // Emit processing started event
         AssetEvent::create([
@@ -280,7 +290,7 @@ class ProcessAssetJob implements ShouldQueue
         //    (runs after thumbnail generation, requires COMPLETED status)
         
         // Check if asset is a video to conditionally add video preview job
-        // Use version->mime_type when available (from FileInspectionService); otherwise asset
+        // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $mimeForType = $version ? $version->mime_type : $asset->mime_type;
         $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
@@ -330,10 +340,7 @@ class ProcessAssetJob implements ShouldQueue
             'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
         ]);
 
-        // Phase 8: Update version pipeline_status = complete (version-aware only)
-        if ($version) {
-            $version->update(['pipeline_status' => 'complete']);
-        }
+        // pipeline_status = 'complete' is set by chain jobs (e.g. GenerateThumbnailsJob) when they finish
 
         PipelineLogger::error('PROCESS ASSET: HANDLE END', [
             'asset_id' => $asset->id,
@@ -346,10 +353,9 @@ class ProcessAssetJob implements ShouldQueue
                 'trace' => collect($e->getTrace())->take(5),
             ]);
 
-            // Phase 7: On failure, only mark failed if still processing (idempotent)
-            $failedVersion = AssetVersion::find($this->assetId);
-            if ($failedVersion && $failedVersion->pipeline_status === 'processing') {
-                $failedVersion->update(['pipeline_status' => 'failed']);
+            // On failure: pipeline_status changes apply to version only
+            if ($version && $version->pipeline_status === 'processing') {
+                $version->update(['pipeline_status' => 'failed']);
             }
 
             Log::error('[ProcessAssetJob] Job failed with exception', [
@@ -361,6 +367,62 @@ class ProcessAssetJob implements ShouldQueue
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Short-circuit for ZIP, archives, and other unsupported types.
+     * Marks thumbnail as SKIPPED, sets pipeline complete, and dispatches FinalizeAssetJob directly.
+     * Prevents indefinite processing and queue waste.
+     */
+    protected function shortCircuitUnsupportedType(Asset $asset, ?AssetVersion $version, array $unsupported): void
+    {
+        $skipReason = $unsupported['skip_reason'] ?? 'unsupported_file_type';
+        $skipMessage = $unsupported['message'] ?? 'Thumbnail generation is not supported for this file type.';
+
+        Log::info('[ProcessAssetJob] Short-circuiting unsupported file type (ZIP/archive) — completing immediately', [
+            'asset_id' => $asset->id,
+            'version_id' => $version?->id,
+            'skip_reason' => $skipReason,
+            'mime_type' => $version ? $version->mime_type : $asset->mime_type,
+        ]);
+        PipelineLogger::warning('PROCESS ASSET: SHORT_CIRCUIT_UNSUPPORTED', [
+            'asset_id' => $asset->id,
+            'skip_reason' => $skipReason,
+        ]);
+
+        $assetMetadata = $asset->metadata ?? [];
+        $assetMetadata['thumbnail_skip_reason'] = $skipReason;
+        $assetMetadata['thumbnail_skip_message'] = $skipMessage;
+        $assetMetadata['thumbnails_generated'] = false;
+        $assetMetadata['metadata_extracted'] = true;
+        $assetMetadata['preview_generated'] = false;
+        $assetMetadata['preview_skipped'] = true;
+        $assetMetadata['preview_skipped_reason'] = 'unsupported_file_type';
+        $assetMetadata['ai_tagging_completed'] = true;
+
+        $asset->update([
+            'thumbnail_status' => \App\Enums\ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => $skipMessage,
+            'thumbnail_started_at' => null,
+            'metadata' => $assetMetadata,
+        ]);
+
+        if ($version) {
+            $versionMetadata = $version->metadata ?? [];
+            $versionMetadata['thumbnail_skip_reason'] = $skipReason;
+            $versionMetadata['thumbnail_skip_message'] = $skipMessage;
+            $versionMetadata['thumbnails_generated'] = false;
+            $version->update([
+                'metadata' => $versionMetadata,
+                'pipeline_status' => 'complete',
+            ]);
+        }
+
+        FinalizeAssetJob::dispatch($asset->id);
+
+        PipelineLogger::info('[ProcessAssetJob] Short-circuit complete — FinalizeAssetJob dispatched', [
+            'asset_id' => $asset->id,
+        ]);
     }
 
     /**
@@ -377,7 +439,8 @@ class ProcessAssetJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
         }
     }

@@ -57,6 +57,7 @@ class ResolveMetadataCandidatesJob implements ShouldQueue
     public function handle(MetadataResolutionService $resolver): void
     {
         $asset = Asset::findOrFail($this->assetId);
+        \App\Services\UploadDiagnosticLogger::jobStart('ResolveMetadataCandidatesJob', $asset->id);
 
         // Skip if asset is not visible
         if ($asset->status !== AssetStatus::VISIBLE) {
@@ -64,6 +65,7 @@ class ResolveMetadataCandidatesJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('ResolveMetadataCandidatesJob', $asset->id, 'asset_not_visible');
             return;
         }
 
@@ -75,6 +77,9 @@ class ResolveMetadataCandidatesJob implements ShouldQueue
             'resolved' => count($results['resolved']),
             'skipped' => count($results['skipped']),
             'skipped_reasons' => array_column($results['skipped'], 'reason'),
+        ]);
+        \App\Services\UploadDiagnosticLogger::jobComplete('ResolveMetadataCandidatesJob', $asset->id, [
+            'resolved' => count($results['resolved']),
         ]);
     }
 
@@ -90,7 +95,8 @@ class ResolveMetadataCandidatesJob implements ShouldQueue
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility: uploaded assets must never disappear from grid
             );
         }
     }

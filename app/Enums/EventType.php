@@ -150,6 +150,7 @@ class EventType
     public const ASSET_BRAND_COMPLIANCE_EVALUATED = 'asset.brand_compliance.evaluated';
     public const ASSET_BRAND_COMPLIANCE_INCOMPLETE = 'asset.brand_compliance.incomplete';
     public const ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE = 'asset.brand_compliance.not_applicable';
+    public const ASSET_BRAND_COMPLIANCE_FILE_TYPE_UNSUPPORTED = 'asset.brand_compliance.file_type_unsupported';
 
     // Asset download events (explicit logging required)
     public const ASSET_DOWNLOAD_CREATED = 'asset.download.created';
