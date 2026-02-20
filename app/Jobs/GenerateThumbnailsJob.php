@@ -234,27 +234,43 @@ class GenerateThumbnailsJob implements ShouldQueue
         $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
         $extForCheck = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
         if (!$this->supportsThumbnailGeneration($asset, $version)) {
-            // Determine skip reason based on file type
+            // Determine skip reason and user-facing message based on file type
             $mimeType = strtolower($mimeForCheck ?? '');
             $extension = strtolower($extForCheck);
             $skipReason = $this->determineSkipReason($mimeType, $extension);
+            $skipMessage = $this->getThumbnailSkipMessage($mimeType, $extension);
             
-            // Store skip reason in metadata for UI display
+            // Store skip reason and user-facing message in metadata for UI display
             $metadata = $asset->metadata ?? [];
             $metadata['thumbnail_skip_reason'] = $skipReason;
+            $metadata['thumbnail_skip_message'] = $skipMessage;
+            $metadata['thumbnails_generated'] = false;
+            
+            // Guard: only mutate analysis_status when in expected previous state
+            $expectedStatus = 'generating_thumbnails';
+            $currentStatus = $asset->analysis_status ?? 'uploading';
+            $updateData = [
+                'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                'thumbnail_error' => $skipMessage,
+                'thumbnail_started_at' => null, // SKIPPED never started, so no start time
+                'metadata' => $metadata,
+            ];
+            if ($currentStatus === $expectedStatus) {
+                $updateData['analysis_status'] = 'extracting_metadata';
+            }
             
             // Mark as skipped with clear error message
             // SKIPPED assets never started processing, so no thumbnail_started_at needed
-            $asset->update([
-                'thumbnail_status' => ThumbnailStatus::SKIPPED,
-                'thumbnail_error' => "Thumbnail generation skipped: {$skipReason}",
-                'thumbnail_started_at' => null, // SKIPPED never started, so no start time
-                'metadata' => $metadata,
-            ]);
+            $asset->update($updateData);
+            
+            if ($currentStatus === $expectedStatus) {
+                \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+            }
             
             Log::info('[GenerateThumbnailsJob] Marked asset as SKIPPED', [
                 'asset_id' => $asset->id,
                 'skip_reason' => $skipReason,
+                'skip_message' => $skipMessage,
             ]);
             
             // Log skipped event (truthful - work never happened)
@@ -1302,6 +1318,24 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         // Generic fallback
         return 'unsupported_file_type';
+    }
+
+    /**
+     * Get user-facing message for thumbnail skip (for UI display).
+     *
+     * @param string $mimeType
+     * @param string $extension
+     * @return string User-friendly message (e.g., "Thumbnail generation is not supported for this file type.")
+     */
+    protected function getThumbnailSkipMessage(string $mimeType, string $extension): string
+    {
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $unsupported = $fileTypeService->getUnsupportedReason($mimeType, $extension);
+        if ($unsupported && !empty($unsupported['message'])) {
+            return $unsupported['message'];
+        }
+
+        return config('file_types.global_errors.unknown_type', 'Thumbnail generation is not supported for this file type.');
     }
 
     /**

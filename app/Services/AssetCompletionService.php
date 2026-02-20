@@ -47,10 +47,10 @@ class AssetCompletionService
      * Evaluate if asset meets all completion criteria.
      *
      * Completion Criteria (all must be met):
-     * 1. thumbnail_status === COMPLETED
+     * 1. thumbnail_status === COMPLETED or SKIPPED (SKIPPED = unsupported type, terminal state)
      * 2. metadata['ai_tagging_completed'] === true
      * 3. metadata['metadata_extracted'] === true (if applicable)
-     * 4. metadata['preview_generated'] === true (optional / future-safe)
+     * 4. metadata['preview_generated'] === true OR preview_skipped (optional / future-safe)
      *
      * @param Asset $asset
      * @return bool True if all criteria are met
@@ -59,12 +59,14 @@ class AssetCompletionService
     {
         $metadata = $asset->metadata ?? [];
 
-        // Rule 1: Thumbnail generation complete
-        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+        // Rule 1: Thumbnail generation complete or intentionally skipped (unsupported type)
+        // SKIPPED is terminal - no thumbnails will be generated; asset is still valid
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED
+            && $asset->thumbnail_status !== ThumbnailStatus::SKIPPED) {
             return false;
         }
 
-        // Rule 2: AI tagging complete
+        // Rule 2: AI tagging complete (skipped for non-image assets when no thumbnails)
         if (empty($metadata['ai_tagging_completed'])) {
             return false;
         }
@@ -74,9 +76,10 @@ class AssetCompletionService
             return false;
         }
 
-        // Rule 4: Preview generated (optional / future-safe)
-        // If key exists, it must be true. If key doesn't exist, assume not required.
-        if (isset($metadata['preview_generated']) && !$metadata['preview_generated']) {
+        // Rule 4: Preview generated or skipped (when thumbnails skipped, preview is skipped too)
+        // If preview_generated is explicitly false and not skipped, fail
+        if (isset($metadata['preview_generated']) && !$metadata['preview_generated']
+            && empty($metadata['preview_skipped'])) {
             return false;
         }
 

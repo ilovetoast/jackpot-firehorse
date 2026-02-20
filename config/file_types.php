@@ -409,9 +409,51 @@ return [
             'mime_types' => ['image/bmp'],
             'extensions' => ['bmp'],
             'skip_reason' => 'unsupported_format:bmp',
-            'message' => 'BMP format is not supported. GD library has limited BMP support.',
+            'message' => 'Thumbnail generation is not supported for this file type.',
             'disable_upload_reason' => 'BMP format is not supported for thumbnail generation.',
         ],
+        'ico' => [
+            'mime_types' => ['image/x-icon', 'image/vnd.microsoft.icon'],
+            'extensions' => ['ico'],
+            'skip_reason' => 'unsupported_format:ico',
+            'message' => 'Thumbnail generation is not supported for this file type.',
+            'disable_upload_reason' => null,
+        ],
+        'zip' => [
+            'mime_types' => ['application/zip', 'application/x-zip-compressed'],
+            'extensions' => ['zip'],
+            'skip_reason' => 'unsupported_format:zip',
+            'message' => 'Thumbnail generation is not supported for this file type.',
+            'disable_upload_reason' => null,
+        ],
+        'archive' => [
+            'mime_types' => [
+                'application/x-tar',
+                'application/gzip',
+                'application/x-gzip',
+                'application/x-rar-compressed',
+                'application/x-7z-compressed',
+            ],
+            'extensions' => ['tar', 'gz', 'rar', '7z'],
+            'skip_reason' => 'unsupported_format:archive',
+            'message' => 'Thumbnail generation is not supported for this file type.',
+            'disable_upload_reason' => null,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Supported Thumbnail File Types (Reference)
+    |--------------------------------------------------------------------------
+    |
+    | Extensions that support thumbnail generation. Derived from types with
+    | capability thumbnail=true. Used for early skip checks and UI hints.
+    |
+    */
+    'supported_thumbnail_extensions' => [
+        'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'avif', 'pdf',
+        'psd', 'psb', 'ai', 'eps', 'svg', 'doc', 'docx', 'xls', 'xlsx',
+        'ppt', 'pptx', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
     ],
 
     /*

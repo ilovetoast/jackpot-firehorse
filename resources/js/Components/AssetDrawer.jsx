@@ -2511,18 +2511,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </p>
                                 {/* Show skip reason if available in metadata */}
                                 {/* Use displayAsset (with live updates) instead of prop asset */}
-                                {displayAsset.metadata?.thumbnail_skip_reason && (
+                                {(displayAsset.metadata?.thumbnail_skip_reason || displayAsset.metadata?.thumbnail_skip_message) && (
                                     <>
                                         <p className="text-xs text-blue-600 mt-1">
-                                            Reason: {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
-                                                ? 'Unsupported file type (TIFF)' 
-                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
-                                                ? 'Unsupported file type (AVIF)'
-                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
-                                                ? 'Unsupported file type (BMP)'
-                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
-                                                ? 'Unsupported file type (SVG)'
-                                                : 'Unsupported file type'}
+                                            {displayAsset.metadata?.thumbnail_skip_message
+                                                || (displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
+                                                    ? 'Unsupported file type (TIFF)' 
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
+                                                    ? 'Unsupported file type (AVIF)'
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
+                                                    ? 'Unsupported file type (BMP)'
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
+                                                    ? 'Unsupported file type (SVG)'
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:ico'
+                                                    ? 'Thumbnail generation is not supported for this file type.'
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:zip'
+                                                    ? 'Thumbnail generation is not supported for this file type.'
+                                                    : 'Unsupported file type')}
                                         </p>
                                         {/* Show regeneration option for TIFF/AVIF/SVG if retry is allowed */}
                                         {(displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' || 

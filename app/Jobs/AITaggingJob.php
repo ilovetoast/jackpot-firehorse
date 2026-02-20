@@ -90,6 +90,8 @@ class AITaggingJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
+            // Mark as skipped AND set ai_tagging_completed so pipeline can complete
+            // (SKIPPED/FAILED thumbnails = unsupported type; no AI tagging possible)
             $this->markAsSkipped($asset, 'thumbnail_unavailable');
             return;
         }
@@ -143,6 +145,9 @@ class AITaggingJob implements ShouldQueue
         $metadata['_ai_tagging_skip_reason'] = $reason;
         $metadata['_ai_tagging_skipped_at'] = now()->toIso8601String();
         $metadata['_ai_tagging_status'] = "skipped:{$reason}"; // Explicit status for debugging
+        // Set ai_tagging_completed so pipeline can complete (no thumbnails = no AI tags, but step is done)
+        $metadata['ai_tagging_completed'] = true;
+        $metadata['ai_tagging_completed_at'] = now()->toIso8601String();
         $asset->update(['metadata' => $metadata]);
     }
 

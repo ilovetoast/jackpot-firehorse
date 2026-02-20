@@ -142,6 +142,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         // NOTE: Each release() increments attempts — we cap retries to avoid MaxAttemptsExceededException.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
             // Thumbnails failed or skipped — never retry, allow chain to continue
+            // CRITICAL: Advance analysis_status to 'scoring' so pipeline can complete.
+            // Dominant color and image-derived metadata are skipped (require thumbnails).
             if ($asset->thumbnail_status === ThumbnailStatus::FAILED || $asset->thumbnail_status === ThumbnailStatus::SKIPPED) {
                 PipelineLogger::warning('[PopulateAutomaticMetadataJob] EARLY_RETURN', [
                     'asset_id' => $asset->id,
@@ -152,6 +154,9 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
                 ]);
+                // Advance to scoring so chain continues; dominant colors skipped
+                $asset->update(['analysis_status' => 'scoring']);
+                \App\Services\AnalysisStatusLogger::log($asset, 'extracting_metadata', 'scoring', 'PopulateAutomaticMetadataJob');
                 return;
             }
 

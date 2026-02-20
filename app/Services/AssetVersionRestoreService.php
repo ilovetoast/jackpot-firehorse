@@ -52,7 +52,7 @@ class AssetVersionRestoreService
             if (!$bucket) {
                 throw new \RuntimeException("Asset has no storage bucket - cannot restore version.");
             }
-            $s3Client = $this->createS3Client();
+            $s3Client = app()->bound(S3Client::class) ? app(S3Client::class) : $this->createS3Client();
             $s3Client->copyObject([
                 'Bucket' => $bucket->name,
                 'CopySource' => rawurlencode($bucket->name . '/' . $sourceVersion->file_path),
@@ -101,9 +101,19 @@ class AssetVersionRestoreService
                 }
             }
 
-            // Update asset compatibility pointer
+            // Update asset compatibility pointer and file metadata so downloads, ZIP builds, and UI show correct file
+            $baseName = $asset->original_filename
+                ? pathinfo($asset->original_filename, PATHINFO_FILENAME)
+                : ($asset->title ?: 'asset');
+            $newOriginalFilename = $baseName . '.' . ($extension ?: 'file');
+
             $asset->update([
-                'storage_root_path' => $newPath
+                'storage_root_path' => $newPath,
+                'original_filename' => $newOriginalFilename,
+                'mime_type' => $sourceVersion->mime_type,
+                'size_bytes' => $sourceVersion->file_size,
+                'width' => $sourceVersion->width,
+                'height' => $sourceVersion->height,
             ]);
 
             // Optional: rerun full pipeline (FileInspection + thumbnails + metadata + AI + finalize)
