@@ -23,6 +23,18 @@ import {
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
+// Pipeline flags: 'good' = green when value matches expected, 'bad' = red when value is problematic, 'invert' = good when false
+const PIPELINE_FLAG_SEMANTICS = {
+    visible_in_grid: 'good',         // true = good
+    processing_failed: 'invert',     // false = good
+    pipeline_completed: 'good',      // true = good
+    metadata_extracted: 'good',     // true = good
+    thumbnails_generated: 'good',    // true = good
+    thumbnail_timeout: 'invert',     // false = good (no timeout)
+    stuck_state_detected: 'invert',  // false = good (not stuck)
+    auto_recover_attempted: 'warn', // true = amber (recovery was attempted)
+}
+
 const STATUS_COLORS = {
     complete: 'bg-emerald-100 text-emerald-800',
     completed: 'bg-emerald-100 text-emerald-800',
@@ -107,12 +119,35 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                     </div>
                                 </div>
                             )}
+                            {asset?.visibility && !asset.visibility.visible && (
+                                <div className="rounded-lg border-2 border-amber-500 bg-amber-50 p-4">
+                                    <div className="flex items-start gap-2">
+                                        <span className="rounded px-2 py-1 text-sm font-bold uppercase tracking-wide bg-amber-600 text-white shrink-0">
+                                            Not visible
+                                        </span>
+                                        <div>
+                                            <p className="text-sm font-medium text-amber-900">{asset.visibility.reason}</p>
+                                            {asset.visibility.recommended_action && (
+                                                <p className="mt-1 text-sm text-amber-800">{asset.visibility.recommended_action}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div><span className="text-slate-500">ID</span><br />{asset?.id}</div>
                                 <div><span className="text-slate-500">Tenant</span><br />{asset?.tenant?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Brand</span><br />{asset?.brand?.name ?? '—'}</div>
+                                <div><span className="text-slate-500">Asset type</span><br />{asset?.asset_type?.label ?? '—'}</div>
                                 <div><span className="text-slate-500">Category</span><br />{asset?.category?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Created by</span><br />{asset?.created_by?.name ?? '—'}</div>
+                                <div><span className="text-slate-500">Visible in grid</span><br />
+                                    {asset?.visibility?.visible ? (
+                                        <span className="rounded px-2 py-0.5 text-xs bg-emerald-100 text-emerald-800">Yes</span>
+                                    ) : (
+                                        <span className="rounded px-2 py-0.5 text-xs bg-red-100 text-red-800">No</span>
+                                    )}
+                                </div>
                                 <div><span className="text-slate-500">Analysis</span><br />
                                     <span
                                         className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${STATUS_COLORS[asset?.analysis_status] || ''}`}
@@ -162,7 +197,12 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                 </button>
                                 <button
                                     onClick={() => onAction(asset.id, 'retry-pipeline')}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
+                                    className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm ${
+                                        asset?.visibility?.action_key === 'retry-pipeline'
+                                            ? 'border-2 border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100 font-medium'
+                                            : 'border border-slate-300 hover:bg-slate-50'
+                                    }`}
+                                    title={asset?.visibility?.action_key === 'retry-pipeline' ? asset.visibility.recommended_action : undefined}
                                 >
                                     <ArrowPathIcon className="h-4 w-4" />
                                     Retry Pipeline
@@ -180,7 +220,11 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                 {asset?.deleted_at && (
                                     <button
                                         onClick={() => onAction(asset.id, 'restore')}
-                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
+                                        className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm ${
+                                            asset?.visibility?.action_key === 'restore'
+                                                ? 'border-2 border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100 font-medium'
+                                                : 'border border-slate-300 hover:bg-slate-50'
+                                        }`}
                                     >
                                         <ArrowUturnLeftIcon className="h-4 w-4" />
                                         Restore
@@ -262,12 +306,24 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                     )}
                     {tab === 'pipeline' && (
                         <div className="space-y-2 text-sm">
-                            {pipeline_flags && Object.entries(pipeline_flags).map(([k, v]) => (
-                                <div key={k} className="flex justify-between">
-                                    <span className="text-slate-500">{k}</span>
-                                    <span>{String(v)}</span>
-                                </div>
-                            ))}
+                            {pipeline_flags && Object.entries(pipeline_flags).map(([k, v]) => {
+                                const semantic = PIPELINE_FLAG_SEMANTICS[k]
+                                const val = Boolean(v)
+                                let badgeClass = 'bg-slate-100 text-slate-700'
+                                if (semantic === 'good') {
+                                    badgeClass = val ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                                } else if (semantic === 'invert') {
+                                    badgeClass = !val ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                                } else if (semantic === 'warn' && val) {
+                                    badgeClass = 'bg-amber-100 text-amber-800'
+                                }
+                                return (
+                                    <div key={k} className="flex justify-between items-center">
+                                        <span className="text-slate-500">{k}</span>
+                                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${badgeClass}`}>{String(v)}</span>
+                                    </div>
+                                )
+                            })}
                         </div>
                     )}
                     {tab === 'incidents' && (

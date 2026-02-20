@@ -103,6 +103,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    const userClosedDrawerRef = useRef(false)
+    const lastOpenedFromUrlRef = useRef(null)
     
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
@@ -152,6 +154,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // useEffect handle category changes by replacing (not merging) when category changed.
     useEffect(() => {
         setActiveAssetId(null)
+        userClosedDrawerRef.current = false
+        lastOpenedFromUrlRef.current = null
         
         // Clear staleness flag when category changes (view is synced with new category)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -181,9 +185,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             if (assetId && safeAssetsList.length > 0) {
                 const asset = safeAssetsList.find(a => a?.id === assetId)
                 if (asset) {
+                    if (userClosedDrawerRef.current && assetId === lastOpenedFromUrlRef.current) return
                     setActiveAssetId(assetId)
-                    // If edit_metadata param is present, the drawer will handle it
-                    // (AssetDrawer or AssetMetadataDisplay should read this)
+                    lastOpenedFromUrlRef.current = assetId
+                    userClosedDrawerRef.current = false
                 }
             }
         }
@@ -1009,7 +1014,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
                             <AssetDrawer
                                 asset={activeAsset}
-                                onClose={() => setActiveAssetId(null)}
+                                onClose={() => {
+                                    userClosedDrawerRef.current = true
+                                    setActiveAssetId(null)
+                                }}
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
@@ -1029,11 +1037,14 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
                     <div className="md:hidden fixed inset-0 z-50">
-                        <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
+                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                             asset={activeAsset} // May be undefined temporarily during async updates
-                            onClose={() => setActiveAssetId(null)}
+                            onClose={() => {
+                                userClosedDrawerRef.current = true
+                                setActiveAssetId(null)
+                            }}
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}

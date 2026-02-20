@@ -119,6 +119,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    // Prevent URL/search effect from re-opening drawer after user explicitly closes it
+    const userClosedDrawerRef = useRef(false)
+    const lastOpenedFromUrlRef = useRef(null)
     
     // Phase 2 – Step 7: Bulk selection state
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
@@ -193,6 +196,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
     useEffect(() => {
         setActiveAssetId(null)
+        userClosedDrawerRef.current = false
+        lastOpenedFromUrlRef.current = null
         
         // Clear staleness flag when category changes (view is synced with new category)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -206,6 +211,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Open drawer from URL query parameter (e.g., ?asset={id}&edit_metadata={field_id})
     // Also when ?q=uuid (asset ID search): open drawer if the asset is in results
     // Also clear staleness flag on mount (navigation to /app/assets completes)
+    // CRITICAL: Do NOT re-open when user has explicitly closed the drawer (X button)
     useEffect(() => {
         // Clear staleness flag when navigating to assets page (view is synced)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -228,11 +234,17 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             if (assetId) {
                 const asset = safeAssetsList.find(a => a?.id === assetId)
                 if (asset) {
+                    // Respect user's explicit close: don't re-open same asset from URL/search
+                    if (userClosedDrawerRef.current && assetId === lastOpenedFromUrlRef.current) {
+                        return
+                    }
                     setActiveAssetId(assetId)
+                    lastOpenedFromUrlRef.current = assetId
+                    userClosedDrawerRef.current = false
                 }
             }
         }
-    }, [safeAssetsList, searchQuery]) // Re-check when assets load or search changes
+    }, [safeAssetsList, searchQuery])
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
@@ -1161,7 +1173,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             <AssetDrawer
                                 key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                                 asset={activeAsset} // May be undefined temporarily during async updates
-                                onClose={() => setActiveAssetId(null)}
+                                onClose={() => {
+                                    userClosedDrawerRef.current = true
+                                    setActiveAssetId(null)
+                                }}
                                 assets={assetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
@@ -1179,11 +1194,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
                     <div className="md:hidden fixed inset-0 z-50">
-                        <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
+                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                             asset={activeAsset} // May be undefined temporarily during async updates
-                            onClose={() => setActiveAssetId(null)}
+                            onClose={() => {
+                                userClosedDrawerRef.current = true
+                                setActiveAssetId(null)
+                            }}
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
