@@ -170,6 +170,22 @@ export default function ThumbnailPreview({
         return getThumbnailState(asset, retryCount)
     }, [asset?.id, retryCount])
 
+    // Small thumbnails (<100px): center image as-is, don't use cover (avoids blurry upscale in container)
+    const isSmallThumbnail = useMemo(() => {
+        const dims = asset?.metadata?.thumbnail_dimensions
+        const thumb = dims?.thumb
+        const medium = dims?.medium
+        return (thumb && (thumb.width < 100 || thumb.height < 100)) ||
+               (medium && (medium.width < 100 || medium.height < 100))
+    }, [asset?.metadata?.thumbnail_dimensions])
+
+    const objectFitClass = useMemo(() => {
+        if (forceObjectFit) return `object-${forceObjectFit}`
+        if (isSmallThumbnail) return 'object-contain object-center'
+        if (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics') return 'object-contain'
+        return 'object-cover'
+    }, [forceObjectFit, isSmallThumbnail, asset?.category?.slug])
+
     // Check thumbnail status - if FAILED, show icon immediately
     const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
     const isFailed = thumbnailStatus === 'FAILED' || thumbnailStatus === 'failed' || state === 'FAILED'
@@ -276,13 +292,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${
-                        forceObjectFit 
-                            ? `object-${forceObjectFit}`
-                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                                ? 'object-contain' 
-                                : 'object-cover')
-                    }`}
+                    className={`w-full h-full ${objectFitClass}`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0,
@@ -333,13 +343,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${
-                        forceObjectFit 
-                            ? `object-${forceObjectFit}`
-                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                                ? 'object-contain' 
-                                : 'object-cover')
-                    }`}
+                    className={`w-full h-full ${objectFitClass}`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,
@@ -437,13 +441,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${
-                        forceObjectFit 
-                            ? `object-${forceObjectFit}`
-                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                                ? 'object-contain' 
-                                : 'object-cover')
-                    }`}
+                    className={`w-full h-full ${objectFitClass}`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,

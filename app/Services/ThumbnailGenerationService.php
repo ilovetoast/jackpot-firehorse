@@ -1026,8 +1026,9 @@ class ThumbnailGenerationService
                 imagefill($thumbImage, 0, 0, $white);
             }
             
-            // Resize image
-            imagecopyresampled(
+            // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
+            $resizeFn(
                 $thumbImage,
                 $sourceImage,
                 0, 0, 0, 0,
@@ -1148,8 +1149,9 @@ class ThumbnailGenerationService
                 $fit
             );
 
-            // Resize image using high-quality Lanczos filter
-            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails (LQIP effect)
             if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
@@ -1274,8 +1276,9 @@ class ThumbnailGenerationService
                 $fit
             );
 
-            // Resize image using high-quality Lanczos filter
-            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails (LQIP effect)
             if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
@@ -1623,8 +1626,9 @@ class ThumbnailGenerationService
                     imagefill($thumbImage, 0, 0, $white);
                 }
 
-                // Resize image
-                imagecopyresampled(
+                // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+                $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
+                $resizeFn(
                     $thumbImage,
                     $sourceImage,
                     0, 0, 0, 0,
@@ -1774,8 +1778,9 @@ class ThumbnailGenerationService
                 $fit
             );
 
-            // Resize image
-            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails if configured
             if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
@@ -1917,7 +1922,9 @@ class ThumbnailGenerationService
                 $fit
             );
 
-            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2);
@@ -2022,8 +2029,9 @@ class ThumbnailGenerationService
                 $fit
             );
             
-            // Resize image
-            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
             
             // Apply blur for preview thumbnails if configured
             if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
@@ -2253,8 +2261,9 @@ class ThumbnailGenerationService
                 $white = imagecolorallocate($thumbImage, 255, 255, 255);
                 imagefill($thumbImage, 0, 0, $white);
 
-                // Resize image
-                imagecopyresampled(
+                // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+                $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
+                $resizeFn(
                     $thumbImage,
                     $sourceImage,
                     0, 0, 0, 0,
@@ -2467,7 +2476,18 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Whether the source image is small (either dimension < 100px).
+     * Small images (icons, favicons) use nearest-neighbor interpolation for crisp upscaling.
+     */
+    protected function isSmallSource(int $sourceWidth, int $sourceHeight): bool
+    {
+        return $sourceWidth < 100 || $sourceHeight < 100;
+    }
+
+    /**
      * Calculate thumbnail dimensions maintaining aspect ratio.
+     * For small images (either dimension < 100px, e.g. icons/favicons), never upscale —
+     * output is capped at source to prevent blurriness. Normal images use cover/contain as-is.
      *
      * @param int $sourceWidth
      * @param int $sourceHeight
@@ -2485,37 +2505,42 @@ class ThumbnailGenerationService
     ): array {
         $sourceRatio = $sourceWidth / $sourceHeight;
         $targetRatio = $targetWidth / $targetHeight;
-        
+
         switch ($fit) {
             case 'cover':
-                // Fill entire target area, may crop
                 if ($sourceRatio > $targetRatio) {
-                    // Source is wider, fit to height
-                    return [$targetHeight * $sourceRatio, $targetHeight];
+                    $w = (int) ($targetHeight * $sourceRatio);
+                    $h = $targetHeight;
                 } else {
-                    // Source is taller, fit to width
-                    return [$targetWidth, $targetWidth / $sourceRatio];
+                    $w = $targetWidth;
+                    $h = (int) ($targetWidth / $sourceRatio);
                 }
-            
+                break;
             case 'width':
-                // Fit to target width
-                return [$targetWidth, (int) ($targetWidth / $sourceRatio)];
-            
+                $w = $targetWidth;
+                $h = (int) ($targetWidth / $sourceRatio);
+                break;
             case 'height':
-                // Fit to target height
-                return [(int) ($targetHeight * $sourceRatio), $targetHeight];
-            
+                $w = (int) ($targetHeight * $sourceRatio);
+                $h = $targetHeight;
+                break;
             case 'contain':
             default:
-                // Fit within target dimensions (default)
                 if ($sourceRatio > $targetRatio) {
-                    // Source is wider, fit to width
-                    return [$targetWidth, (int) ($targetWidth / $sourceRatio)];
+                    $w = $targetWidth;
+                    $h = (int) ($targetWidth / $sourceRatio);
                 } else {
-                    // Source is taller, fit to height
-                    return [(int) ($targetHeight * $sourceRatio), $targetHeight];
+                    $w = (int) ($targetHeight * $sourceRatio);
+                    $h = $targetHeight;
                 }
+                break;
         }
+
+        // Small images (icons, favicons under 100px): we now upscale with nearest-neighbor
+        // (see isSmallSource + FILTER_POINT / imagecopyresized) for crisp pixel art.
+        // No dimension cap — output follows target; interpolation handles quality.
+
+        return [$w, $h];
     }
 
     /**
