@@ -120,8 +120,13 @@ class AssetVersionRestoreService
                 dispatch(new \App\Jobs\ProcessAssetJob($newVersion->id));
             } else {
                 // Without rerun: copy thumbnails from source version to new version path
-                // so the UI shows the correct thumbnail for the restored file
-                $this->copyThumbnailsToNewVersion($asset, $sourceVersion, $newVersion);
+                // so the UI shows the correct thumbnail for the restored file.
+                // Dispatch to worker so it runs with S3 ListBucket permission (web has restricted perms).
+                \App\Jobs\CopyThumbnailsForRestoredVersionJob::dispatch(
+                    $asset->id,
+                    $sourceVersion->id,
+                    $newVersion->id
+                );
             }
 
             app(AssetVersionService::class)->assertSingleCurrentVersion($asset);
@@ -136,101 +141,6 @@ class AssetVersionRestoreService
 
             return $newVersion;
         });
-    }
-
-    /**
-     * Copy thumbnails from source version to new version path and update asset metadata.
-     * Uses the asset's storage bucket (not default disk) so thumbnails are in the correct bucket.
-     */
-    protected function copyThumbnailsToNewVersion(Asset $asset, AssetVersion $sourceVersion, AssetVersion $newVersion): void
-    {
-        $bucket = $asset->storageBucket;
-        if (!$bucket) {
-            Log::warning('[AssetVersionRestoreService] Cannot copy thumbnails - asset has no storage bucket', [
-                'asset_id' => $asset->id,
-            ]);
-            return;
-        }
-
-        $sourceBase = dirname($sourceVersion->file_path);
-        $newBase = dirname($newVersion->file_path);
-
-        if ($sourceBase === $newBase) {
-            return;
-        }
-
-        $thumbnailsPrefix = $sourceBase . '/thumbnails/';
-        $s3Client = $this->createS3Client();
-
-        $files = [];
-        $continuationToken = null;
-        do {
-            $params = ['Bucket' => $bucket->name, 'Prefix' => $thumbnailsPrefix];
-            if ($continuationToken) {
-                $params['ContinuationToken'] = $continuationToken;
-            }
-            $result = $s3Client->listObjectsV2($params);
-            $contents = $result['Contents'] ?? [];
-            foreach ($contents as $obj) {
-                $key = $obj['Key'] ?? null;
-                if ($key) {
-                    $files[] = $key;
-                }
-            }
-            $continuationToken = $result['IsTruncated'] ? ($result['NextContinuationToken'] ?? null) : null;
-        } while ($continuationToken);
-
-        if (empty($files)) {
-            return;
-        }
-
-        $copiedThumbnails = [];
-        $copiedPreview = [];
-
-        foreach ($files as $path) {
-            $relPath = substr($path, strlen($thumbnailsPrefix));
-            $parts = explode('/', $relPath, 2);
-            $style = $parts[0] ?? null;
-            if (!$style) {
-                continue;
-            }
-            $newPath = $newBase . '/thumbnails/' . $relPath;
-
-            try {
-                $s3Client->copyObject([
-                    'Bucket' => $bucket->name,
-                    'CopySource' => rawurlencode($bucket->name . '/' . $path),
-                    'Key' => $newPath,
-                ]);
-            } catch (\Throwable $e) {
-                Log::warning('[AssetVersionRestoreService] Failed to copy thumbnail', [
-                    'asset_id' => $asset->id,
-                    'source' => $path,
-                    'dest' => $newPath,
-                    'error' => $e->getMessage(),
-                ]);
-                continue;
-            }
-
-            $entry = ['path' => $newPath];
-            if ($style === 'preview') {
-                $copiedPreview[$style] = $entry;
-            } else {
-                $copiedThumbnails[$style] = $entry;
-            }
-        }
-
-        if (!empty($copiedThumbnails) || !empty($copiedPreview)) {
-            $meta = $asset->metadata ?? [];
-            $meta['thumbnails'] = $copiedThumbnails;
-            $meta['preview_thumbnails'] = $copiedPreview;
-            $meta['thumbnails_generated'] = true;
-            $meta['thumbnails_generated_at'] = now()->toIso8601String();
-            $asset->update([
-                'metadata' => $meta,
-                'thumbnail_status' => \App\Enums\ThumbnailStatus::COMPLETED,
-            ]);
-        }
     }
 
     protected function createS3Client(): S3Client

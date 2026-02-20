@@ -464,7 +464,7 @@ class UploadCompletionService
                 'height' => null,
                 'checksum' => $fileInfo['checksum'] ?? hash('sha256', $uploadSession->id . $fileInfo['size_bytes']),
             ];
-            $versionService->createVersion($asset, $fileMeta, null, null, null);
+            $versionService->createVersion($asset, $fileMeta, $userId ? (string) $userId : null, null, null);
             $asset->update(['storage_root_path' => $versionedPath]);
             
             // 🚨 GUARDRAIL: Verify category_id persisted if it was provided
@@ -1421,7 +1421,7 @@ class UploadCompletionService
             'height' => null,
             'checksum' => $fileInfo['checksum'] ?? hash('sha256', $uploadSession->id . $fileInfo['size_bytes']),
         ];
-        $newVersion = $versionService->createVersion($asset, $fileMeta, null, $comment, null);
+        $newVersion = $versionService->createVersion($asset, $fileMeta, $userId ? (string) $userId : null, $comment, null);
 
         // Minimal asset updates: reset processing state. Do NOT set mime_type/width/height (derive from currentVersion).
         // Do NOT mutate storage_root_path during processing (ProcessAssetJob); set here for legacy/display.
