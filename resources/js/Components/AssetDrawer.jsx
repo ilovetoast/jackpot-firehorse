@@ -3026,6 +3026,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
                     onReprocessAsset={canRetryThumbnails ? handleReprocessAsset : undefined}
                     reprocessLoading={reprocessLoading}
+                    onToast={(msg, type) => {
+                        setToastMessage(msg ?? null)
+                        setToastType(type || 'success')
+                        if (msg) setTimeout(() => setToastMessage(null), 3000)
+                    }}
                     primaryColor={brandPrimary}
                 />
             )}

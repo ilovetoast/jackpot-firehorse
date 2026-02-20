@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Models\AssetVersion;
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
@@ -14,7 +15,9 @@ use App\Services\Reliability\ReliabilityEngine;
 use App\Services\ThumbnailGenerationService;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
+use GuzzleHttp\Exception\ClientException;
 use Illuminate\Bus\Queueable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -84,9 +87,10 @@ class GenerateThumbnailsJob implements ShouldQueue
 
     /**
      * Create a new job instance.
+     * Phase 3A: Accepts assetVersionId. Falls back to legacy (asset ID) when version not found.
      */
     public function __construct(
-        public readonly string $assetId
+        public readonly string $assetVersionId
     ) {}
 
     /**
@@ -100,22 +104,48 @@ class GenerateThumbnailsJob implements ShouldQueue
         // TASK 1: Prove whether GenerateThumbnailsJob runs at all
         // This log MUST appear if the job is dispatched
         PipelineLogger::warning('THUMBNAILS: HANDLE START', [
-            'asset_id' => $this->assetId,
+            'asset_version_id' => $this->assetVersionId,
             'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
 
         Log::info('[GenerateThumbnailsJob] Job started', [
-            'asset_id' => $this->assetId,
+            'asset_version_id' => $this->assetVersionId,
             'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
 
         // TASK 2: Guarantee thumbnail job NEVER leaves PROCESSING
         // Wrap all thumbnail logic in try/catch and enforce a terminal state
-        // After this change, no asset may remain in PROCESSING forever
+        // Phase 3A: Load version first, fallback to legacy (asset ID) when version not found
         try {
-            $asset = Asset::findOrFail($this->assetId);
+            $version = AssetVersion::find($this->assetVersionId);
+            if ($version) {
+                $asset = $version->asset;
+                $sourcePath = $version->file_path;
+
+                // Phase 7: Delete existing thumbnails for this version (idempotent rerun)
+                $thumbnailsPrefix = dirname($version->file_path) . '/thumbnails/';
+                if ($asset->storageBucket) {
+                    $s3Client = $this->createS3Client();
+                    $this->deleteS3Prefix($s3Client, $asset->storageBucket->name, $thumbnailsPrefix);
+                }
+
+                Log::info('[GenerateThumbnailsJob] Version-aware mode', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version->id,
+                    'version_number' => $version->version_number,
+                    'source_path' => $sourcePath,
+                ]);
+            } else {
+                // Legacy fallback: treat ID as asset ID
+                $asset = Asset::findOrFail($this->assetVersionId);
+                $sourcePath = $asset->storage_root_path;
+                Log::info('[GenerateThumbnailsJob] Legacy mode (no version)', [
+                    'asset_id' => $asset->id,
+                    'source_path' => $sourcePath,
+                ]);
+            }
             
             // Log asset state at start (after asset lookup)
             PipelineLogger::warning('THUMBNAILS: ASSET LOADED', [
@@ -126,14 +156,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'storage_root_path' => $asset->storage_root_path,
             ]);
 
-            // Idempotency: Check if thumbnails already completed
-            // NULL or PENDING means thumbnails haven't been attempted or are pending
-            if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+            // Idempotency: Skip only for legacy path; version-aware always regenerates (Phase 5)
+            if (!$version && $asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
                 Log::info('[GenerateThumbnailsJob] Thumbnail generation skipped - already completed', [
                     'asset_id' => $asset->id,
                 ]);
-                // Job chaining is handled by Bus::chain() in ProcessAssetJob
-                // Chain will continue to next job automatically
                 return;
             }
             
@@ -194,12 +221,13 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
 
         // Step 5: Defensive check - Skip if file type doesn't support thumbnails
-        // This prevents false "started" events for unsupported formats
-        // (e.g., TIFF, AVIF, BMP, SVG - GD library does not support these)
-        if (!$this->supportsThumbnailGeneration($asset)) {
+        // Use version->mime_type when version-aware (from FileInspectionService)
+        $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
+        $extForCheck = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        if (!$this->supportsThumbnailGeneration($asset, $version)) {
             // Determine skip reason based on file type
-            $mimeType = strtolower($asset->mime_type ?? '');
-            $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            $mimeType = strtolower($mimeForCheck ?? '');
+            $extension = strtolower($extForCheck);
             $skipReason = $this->determineSkipReason($mimeType, $extension);
             
             // Store skip reason in metadata for UI display
@@ -325,12 +353,16 @@ class GenerateThumbnailsJob implements ShouldQueue
         }
 
         // Step 6: Generate all thumbnail styles atomically (includes preview + final)
+        // Phase 3A: Version-aware path via generateThumbnailsForVersion (no model mutation)
+        // Legacy: generateThumbnails($asset) uses asset.storage_root_path
         // Note: Thumbnail generation errors are caught by outer catch block
         // TASK 2: If this throws, catch block MUST set terminal state (FAILED)
         PipelineLogger::warning('THUMBNAILS: CALLING generateThumbnails', [
             'asset_id' => $asset->id,
         ]);
-        $thumbnails = $thumbnailService->generateThumbnails($asset);
+        $thumbnails = $version
+            ? $thumbnailService->generateThumbnailsForVersion($version)
+            : $thumbnailService->generateThumbnails($asset);
 
             // Step 6: Separate preview thumbnails from final thumbnails
             // Preview thumbnails are stored separately and do NOT affect COMPLETED status
@@ -606,6 +638,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Step 4: Only mark as COMPLETED after verification passes
             // Clear thumbnail_started_at when completed (no longer needed)
             $asset->update($updateData);
+            // Phase 3A: Update version pipeline_status when version-aware
+            if (isset($version)) {
+                $version->update(['pipeline_status' => 'complete']);
+            }
             \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
 
             // Refresh asset to ensure metadata is loaded correctly
@@ -694,13 +730,13 @@ class GenerateThumbnailsJob implements ShouldQueue
             // This catch block MUST set a terminal state (FAILED) to prevent PROCESSING forever
             // The catch block below will update thumbnail_status to FAILED
             PipelineLogger::error('THUMBNAILS: FAILED', [
-                'asset_id' => $this->assetId,
+                'asset_version_id' => $this->assetVersionId,
                 'error' => $e->getMessage(),
                 'exception_class' => get_class($e),
                 'attempt' => $this->attempts(),
             ]);
             Log::channel('admin_worker')->error('Thumbnail generation failed', [
-                'asset_id' => $this->assetId,
+                'asset_version_id' => $this->assetVersionId,
                 'job' => self::class,
                 'attempt' => $this->attempts(),
                 'exception' => get_class($e),
@@ -710,13 +746,13 @@ class GenerateThumbnailsJob implements ShouldQueue
             AdminLogStream::push('worker', [
                 'level' => 'error',
                 'message' => 'Thumbnail generation failed',
-                'asset_id' => $this->assetId,
+                'asset_version_id' => $this->assetVersionId,
                 'job' => self::class,
                 'attempt' => $this->attempts(),
             ]);
 
             Log::error('[GenerateThumbnailsJob] Job failed with exception', [
-                'asset_id' => $this->assetId,
+                'asset_version_id' => $this->assetVersionId,
                 'job_id' => $this->job?->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
                 'exception' => get_class($e),
@@ -742,9 +778,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             
             // TASK 2: Terminal state guarantee - ensure asset is loaded
             // $asset may not be defined if exception occurred before findOrFail
-            // We MUST load it to set terminal state
+            // Phase 3A: Resolve asset from version or legacy
             if (!isset($asset)) {
-                $asset = Asset::find($this->assetId);
+                $v = AssetVersion::find($this->assetVersionId);
+                $asset = $v ? $v->asset : Asset::find($this->assetVersionId);
             }
 
             if ($asset) {
@@ -898,7 +935,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // TASK 2: Even if asset not found, we've logged the failure
                 // The failed() method will be called after retries exhausted
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed - asset not found', [
-                    'asset_id' => $this->assetId,
+                    'asset_version_id' => $this->assetVersionId,
                     'error' => $errorMessage,
                     'exception_class' => get_class($e),
                     'attempt' => $this->attempts(),
@@ -907,7 +944,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 try {
                     app(ReliabilityEngine::class)->report([
                         'source_type' => 'job',
-                        'source_id' => $this->assetId,
+                        'source_id' => $this->assetVersionId,
                         'tenant_id' => null,
                         'severity' => 'error',
                         'title' => 'Thumbnail generation failed',
@@ -920,8 +957,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                         ],
                     ]);
                 } catch (\Throwable $t2Ex) {
-                    Log::warning('[GenerateThumbnailsJob] ReliabilityEngine recording failed (asset not found)', [
-                        'asset_id' => $this->assetId,
+                Log::warning('[GenerateThumbnailsJob] ReliabilityEngine recording failed (asset not found)', [
+                    'asset_version_id' => $this->assetVersionId,
                         'error' => $t2Ex->getMessage(),
                     ]);
                 }
@@ -948,6 +985,17 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
             }
             
+            // Fail immediately for non-retryable exceptions (asset deleted, 4xx client errors)
+            // Prevents wasted retries and MaxAttemptsExceededException spam
+            if ($this->isNonRetryableException($e)) {
+                Log::info('[GenerateThumbnailsJob] Failing immediately (non-retryable)', [
+                    'asset_version_id' => $this->assetVersionId,
+                'exception_class' => get_class($e),
+                ]);
+                $this->fail($e);
+                return;
+            }
+
             // Re-throw to trigger job retry mechanism
             // After all retries exhausted, failed() method will be called
             throw $e;
@@ -958,6 +1006,29 @@ class GenerateThumbnailsJob implements ShouldQueue
     }
 
     /**
+     * Whether the exception is non-retryable (retrying would never succeed).
+     * These jobs should fail immediately to avoid MaxAttemptsExceededException spam.
+     */
+    protected function isNonRetryableException(\Throwable $e): bool
+    {
+        if ($e instanceof ModelNotFoundException) {
+            return true; // Asset was deleted
+        }
+        if ($e instanceof ClientException) {
+            return true; // 4xx client errors (bad request, not found, etc.)
+        }
+        // Check for nested Guzzle ClientException (e.g. wrapped by AWS SDK)
+        $current = $e;
+        while ($current) {
+            if ($current instanceof ClientException) {
+                return true;
+            }
+            $current = $current->getPrevious();
+        }
+        return false;
+    }
+
+    /**
      * Handle a job failure after all retries exhausted.
      *
      * Records the failure but asset remains usable.
@@ -965,9 +1036,9 @@ class GenerateThumbnailsJob implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         // TASK 2: Final safety net - ensure terminal state is set after all retries exhausted
-        // This method is called by Laravel when job fails after all retries
-        // It MUST set a terminal state (FAILED) to prevent PROCESSING forever
-        $asset = Asset::find($this->assetId);
+        // Phase 3A: Resolve asset from version or legacy (asset ID)
+        $version = AssetVersion::find($this->assetVersionId);
+        $asset = $version ? $version->asset : Asset::find($this->assetVersionId);
 
         if ($asset) {
             // Sanitize error message for user display
@@ -1052,56 +1123,67 @@ class GenerateThumbnailsJob implements ShouldQueue
     }
 
     /**
+     * Delete all S3 objects with the given prefix (Phase 7: idempotent rerun).
+     */
+    protected function deleteS3Prefix(S3Client $s3Client, string $bucket, string $prefix): void
+    {
+        try {
+            $continuationToken = null;
+            do {
+                $params = ['Bucket' => $bucket, 'Prefix' => $prefix];
+                if ($continuationToken) {
+                    $params['ContinuationToken'] = $continuationToken;
+                }
+                $result = $s3Client->listObjectsV2($params);
+                $contents = $result['Contents'] ?? [];
+                if (!empty($contents)) {
+                    $objects = array_map(fn ($o) => ['Key' => $o['Key']], $contents);
+                    $s3Client->deleteObjects(['Bucket' => $bucket, 'Delete' => ['Objects' => $objects]]);
+                }
+                $continuationToken = $result['IsTruncated'] ? ($result['NextContinuationToken'] ?? null) : null;
+            } while ($continuationToken);
+        } catch (S3Exception $e) {
+            Log::warning('[GenerateThumbnailsJob] Failed to delete existing thumbnails prefix', [
+                'bucket' => $bucket,
+                'prefix' => $prefix,
+                'error' => $e->getMessage(),
+            ]);
+            // Don't throw - proceed with generation; old thumbnails may be overwritten
+        }
+    }
+
+    /**
      * Check if thumbnail generation is supported for an asset.
-     * 
-     * Supports both image types (via GD library) and PDFs (via spatie/pdf-to-image).
-     * This is the central authority for thumbnail support - used by both jobs and retry service.
-     * 
-     * IMPORTANT: PDF support is additive - does not modify existing image processing logic.
-     * 
+     *
+     * When version is provided, uses version->mime_type (from FileInspectionService).
+     *
      * @param Asset $asset
+     * @param AssetVersion|null $version When provided, uses version->mime_type for file type detection
      * @return bool True if thumbnail generation is supported
      */
-    protected function supportsThumbnailGeneration(Asset $asset): bool
+    protected function supportsThumbnailGeneration(Asset $asset, ?AssetVersion $version = null): bool
     {
-        // Use FileTypeService as the single source of truth for file type support
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        
-        // Detect file type
-        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        $mime = $version ? $version->mime_type : $asset->mime_type;
+        $ext = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        $fileType = $fileTypeService->detectFileType($mime, $ext);
         
         if (!$fileType) {
-            // Unknown file type - not supported
             return false;
         }
-        
-        // Check if file type supports thumbnail generation
         if (!$fileTypeService->supportsCapability($fileType, 'thumbnail')) {
             return false;
         }
-        
-        // Check if requirements are met (PHP extensions, packages, external tools)
         $requirements = $fileTypeService->checkRequirements($fileType);
         if (!$requirements['met']) {
             Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
                 'asset_id' => $asset->id,
                 'file_type' => $fileType,
                 'missing' => $requirements['missing'],
-                'mime_type' => $asset->mime_type,
+                'mime_type' => $mime,
                 'filename' => $asset->original_filename,
             ]);
             return false;
-        }
-        
-        // Additional logging for video files to help diagnose issues
-        if ($fileType === 'video') {
-            Log::info('[GenerateThumbnailsJob] Video thumbnail generation supported', [
-                'asset_id' => $asset->id,
-                'file_type' => $fileType,
-                'mime_type' => $asset->mime_type,
-                'filename' => $asset->original_filename,
-                'requirements_met' => true,
-            ]);
         }
         
         return true;

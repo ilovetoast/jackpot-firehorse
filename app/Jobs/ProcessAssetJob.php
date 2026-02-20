@@ -5,8 +5,10 @@ namespace App\Jobs;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Models\AssetVersion;
 use App\Services\AnalysisStatusLogger;
 use App\Services\AssetProcessingFailureService;
+use App\Services\FileInspectionService;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -37,6 +39,9 @@ class ProcessAssetJob implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * Accepts either asset ID (legacy) or version ID (version-aware).
+     * When version ID: resolves to version, uses version->asset, passes version ID to GenerateThumbnailsJob.
      */
     public function __construct(
         public readonly string $assetId
@@ -121,14 +126,36 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $assetAtStart = Asset::find($this->assetId);
+        // Resolve version-aware or legacy: accept version ID or asset ID
+        $version = AssetVersion::find($this->assetId);
+        $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
+        $thumbnailJobId = $version ? $version->id : $asset->id;
+
         PipelineLogger::error('PROCESS ASSET: HANDLE START', [
-            'asset_id' => $this->assetId,
-            'thumbnail_status' => $assetAtStart?->thumbnail_status?->value ?? null,
+            'asset_id' => $asset->id,
+            'version_id' => $version?->id,
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
         ]);
 
         try {
-            $asset = Asset::findOrFail($this->assetId);
+        // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
+        if ($version) {
+            $bucket = $asset->storageBucket; // null = use default s3 disk (legacy)
+            $inspection = app(FileInspectionService::class)->inspect($version->file_path, $bucket);
+            Log::info('[ProcessAssetJob] Version MIME from FileInspectionService', [
+                'version_id' => $version->id,
+                'mime' => $inspection['mime_type'],
+                'file_size' => $inspection['file_size'],
+                'is_image' => $inspection['is_image'] ?? null,
+            ]);
+            $version->update([
+                'mime_type' => $inspection['mime_type'],
+                'file_size' => $inspection['file_size'],
+                'width' => $inspection['width'],
+                'height' => $inspection['height'],
+                'pipeline_status' => 'processing',
+            ]);
+        }
 
         // Skip if failed (don't reprocess failed assets automatically)
         if ($asset->status === AssetStatus::FAILED) {
@@ -236,8 +263,11 @@ class ProcessAssetJob implements ShouldQueue
         //    (runs after thumbnail generation, requires COMPLETED status)
         
         // Check if asset is a video to conditionally add video preview job
+        // Use version->mime_type when available (from FileInspectionService); otherwise asset
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        $mimeForType = $version ? $version->mime_type : $asset->mime_type;
+        $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
         $isVideo = $fileType === 'video';
         
         // TASK 4: Prove job dispatch chain is intact
@@ -251,8 +281,8 @@ class ProcessAssetJob implements ShouldQueue
         ]);
 
         $chainJobs = [
-            new ExtractMetadataJob($asset->id),
-            new GenerateThumbnailsJob($asset->id),
+            new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
+            new GenerateThumbnailsJob($thumbnailJobId), // Version ID when version-aware
             new GeneratePreviewJob($asset->id),
         ];
         
@@ -283,6 +313,11 @@ class ProcessAssetJob implements ShouldQueue
             'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
         ]);
 
+        // Phase 8: Update version pipeline_status = complete (version-aware only)
+        if ($version) {
+            $version->update(['pipeline_status' => 'complete']);
+        }
+
         PipelineLogger::error('PROCESS ASSET: HANDLE END', [
             'asset_id' => $asset->id,
         ]);
@@ -293,6 +328,12 @@ class ProcessAssetJob implements ShouldQueue
                 'class' => get_class($e),
                 'trace' => collect($e->getTrace())->take(5),
             ]);
+
+            // Phase 8: On failure, update version pipeline_status = failed
+            $failedVersion = AssetVersion::find($this->assetId);
+            if ($failedVersion) {
+                $failedVersion->update(['pipeline_status' => 'failed']);
+            }
 
             Log::error('[ProcessAssetJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
@@ -310,7 +351,8 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
-        $asset = Asset::find($this->assetId);
+        $version = AssetVersion::find($this->assetId);
+        $asset = $version ? $version->asset : Asset::find($this->assetId);
 
         if ($asset) {
             // Use centralized failure recording service

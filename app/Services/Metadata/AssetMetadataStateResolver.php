@@ -11,6 +11,9 @@ use Illuminate\Support\Facades\DB;
  * Provides a single source of truth for metadata state resolution per asset.
  * Resolves approved and pending metadata rows according to business rules.
  * 
+ * Phase 3B: Version-bound metadata. When asset has currentVersion, reads from
+ * $asset->currentVersion->metadata (asset_version_id). Legacy assets use asset_id.
+ * 
  * This resolver is read-only and does not apply permissions or visibility rules.
  * It purely resolves the canonical state from asset_metadata rows.
  */
@@ -20,19 +23,28 @@ class AssetMetadataStateResolver
      * Resolve canonical metadata state for an asset.
      * 
      * Returns the effective approved row and pending proposal (if any) for each field.
+     * Version-bound: uses currentVersion when available.
      * 
      * @param Asset $asset
      * @return array Shape: [metadata_field_id => ['approved' => ?AssetMetadata, 'pending' => ?AssetMetadata, 'has_pending' => bool]]
      */
     public function resolve(Asset $asset): array
     {
-        // Load all asset_metadata rows for this asset in one query
-        // Exclude rejected rows (they are not part of active state)
-        // Join with metadata_fields to get field information
-        $allRows = DB::table('asset_metadata')
+        $version = $asset->currentVersion;
+
+        // Phase 3B: Version-bound metadata. When currentVersion exists, filter by asset_version_id.
+        // Legacy assets (no versions) fall back to asset_id.
+        $query = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected']);
+
+        if ($version) {
+            $query->where('asset_metadata.asset_version_id', $version->id);
+        } else {
+            $query->where('asset_metadata.asset_id', $asset->id);
+        }
+
+        $allRows = $query
             ->select(
                 'asset_metadata.*',
                 'metadata_fields.key',

@@ -69,9 +69,16 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $headResult->shouldReceive('get')
             ->with('Metadata')
             ->andReturn([]);
-        
+        $headResult->shouldReceive('get')
+            ->with('ETag')
+            ->andReturn('"etag-test"');
+
         $s3Client->shouldReceive('headObject')
             ->andReturn($headResult);
+        $s3Client->shouldReceive('copyObject')
+            ->andReturn(new Result());
+        $s3Client->shouldReceive('doesObjectExist')
+            ->andReturn(true);
 
         $this->completionService = new UploadCompletionService($s3Client);
 

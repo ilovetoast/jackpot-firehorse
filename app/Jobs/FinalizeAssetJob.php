@@ -65,7 +65,17 @@ class FinalizeAssetJob implements ShouldQueue
         $isComplete = $completionService->isComplete($asset);
 
         if ($isComplete) {
-            // Asset meets all completion criteria
+            $currentVersion = $asset->versions()->where('is_current', true)->first();
+            // Sync asset from currentVersion (derived fields from FileInspectionService)
+            if ($currentVersion && $currentVersion->pipeline_status === 'complete') {
+                $asset->mime_type = $currentVersion->mime_type;
+                $asset->width = $currentVersion->width;
+                $asset->height = $currentVersion->height;
+                $asset->size_bytes = $currentVersion->file_size;
+                $asset->storage_root_path = $currentVersion->file_path;
+                $asset->save();
+            }
+
             // Mark pipeline as completed in metadata (do NOT mutate status)
             $metadata = $asset->metadata ?? [];
             $metadata['pipeline_completed_at'] = now()->toIso8601String();
@@ -73,8 +83,8 @@ class FinalizeAssetJob implements ShouldQueue
             $updates = ['metadata' => $metadata];
 
             // For non-image assets (PDF, video, etc.): advance analysis_status to complete.
-            // Embedding job is only dispatched for images; without it, status stays stuck at generating_embedding.
-            if (!ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+            $mimeForEmbedding = $currentVersion?->mime_type ?? $asset->mime_type;
+            if (!ImageEmbeddingService::isImageMimeType($mimeForEmbedding)) {
                 $updates['analysis_status'] = 'complete';
             }
 
@@ -98,7 +108,7 @@ class FinalizeAssetJob implements ShouldQueue
                 'original_filename' => $asset->original_filename,
             ]);
 
-            if (ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+            if (ImageEmbeddingService::isImageMimeType($mimeForEmbedding ?? $asset->mime_type)) {
                 GenerateAssetEmbeddingJob::dispatch($asset->id);
             }
         } else {

@@ -19,6 +19,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -46,10 +47,11 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
      * Higher than default because we use release() when thumbnails aren't ready —
      * each release counts as an attempt. Slow assets (large TIFFs, etc.) may need
      * several minutes for thumbnail generation.
+     * Capped at 6 to avoid MaxAttemptsExceededException spam when failures are non-transient.
      *
      * @var int
      */
-    public $tries = 10;
+    public $tries = 6;
 
     /**
      * The number of seconds to wait before retrying the job.
@@ -74,7 +76,14 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         ColorAnalysisService $colorService,
         DominantColorsExtractor $dominantColorsExtractor
     ): void {
-        $asset = Asset::findOrFail($this->assetId);
+        $asset = Asset::find($this->assetId);
+        if (!$asset) {
+            Log::warning('[PopulateAutomaticMetadataJob] Asset not found - failing immediately (no retry)', [
+                'asset_id' => $this->assetId,
+            ]);
+            $this->fail(new ModelNotFoundException('Asset not found'));
+            return;
+        }
         
         // Structured logging at entry
         $assetType = $this->determineAssetType($asset);

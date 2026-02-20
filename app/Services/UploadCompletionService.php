@@ -10,8 +10,10 @@ use App\Events\AssetProcessingCompleteEvent;
 use App\Events\AssetUploaded;
 use App\Jobs\ExtractMetadataJob;
 use App\Models\Asset;
+use App\Models\AssetVersion;
 use App\Models\Category;
 use App\Models\UploadSession;
+use App\Services\AssetVersionService;
 use App\Services\MetadataPersistenceService;
 use App\Services\UploadMetadataSchemaResolver;
 use Aws\S3\Exception\S3Exception;
@@ -115,7 +117,7 @@ class UploadCompletionService
             if (is_array($metadata) && isset($metadata['comment'])) {
                 $comment = $metadata['comment'];
             }
-            return $this->completeReplace($uploadSession, $s3Key, $userId, $comment);
+            return $this->completeReplace($uploadSession, $s3Key, $userId, $comment, $filename);
         }
 
         // IDEMPOTENT CHECK: If upload session is already COMPLETED, check for existing asset
@@ -440,6 +442,24 @@ class UploadCompletionService
             
             // Refresh asset to get latest state
             $asset->refresh();
+
+            // Phase 2B: Copy to versioned path and create version 1 (new asset)
+            $versionService = app(AssetVersionService::class);
+            $nextVersion = $versionService->getNextVersionNumber($asset);
+            $extension = pathinfo($finalFilename ?? $fileInfo['original_filename'], PATHINFO_EXTENSION);
+            $extension = $extension ? strtolower($extension) : 'file';
+            $versionedPath = "assets/{$asset->id}/v{$nextVersion}/original.{$extension}";
+            $this->copyTempToVersionedPath($uploadSession, $versionedPath);
+            $fileMeta = [
+                'file_path' => $versionedPath,
+                'file_size' => $fileInfo['size_bytes'],
+                'mime_type' => $fileInfo['mime_type'],
+                'width' => null,
+                'height' => null,
+                'checksum' => $fileInfo['checksum'] ?? hash('sha256', $uploadSession->id . $fileInfo['size_bytes']),
+            ];
+            $versionService->createVersion($asset, $fileMeta, null, null, null);
+            $asset->update(['storage_root_path' => $versionedPath]);
             
             // 🚨 GUARDRAIL: Verify category_id persisted if it was provided
             // Note: In race condition (duplicate asset), the other request may have different metadata,
@@ -1068,10 +1088,14 @@ class UploadCompletionService
                 'mime_type' => $mimeType,
             ]);
 
+            $etag = $headResult->get('ETag');
+            $checksum = $etag ? trim($etag, '"') : hash('sha256', $uploadSession->id . $actualSize);
+
             return [
                 'original_filename' => $originalFilename,
                 'mime_type' => $mimeType,
                 'size_bytes' => $actualSize,
+                'checksum' => $checksum,
             ];
         } catch (S3Exception $e) {
             Log::error('S3 verification failed', [
@@ -1087,6 +1111,52 @@ class UploadCompletionService
                 0,
                 $e
             );
+        }
+    }
+
+    /**
+     * Copy file from temp upload location to versioned path.
+     * Phase 2B: assets/{asset_id}/v{n}/original.{ext}
+     *
+     * @param UploadSession $uploadSession
+     * @param string $versionedPath Destination S3 key
+     * @throws \RuntimeException If copy fails
+     */
+    protected function copyTempToVersionedPath(UploadSession $uploadSession, string $versionedPath): void
+    {
+        $bucket = $uploadSession->storageBucket;
+        if (!$bucket) {
+            throw new \RuntimeException('Storage bucket not found for upload session.');
+        }
+
+        $tempPath = $this->generateTempUploadPath($uploadSession);
+        $bucketName = $bucket->name;
+        $copySource = "{$bucketName}/{$tempPath}";
+
+        try {
+            $this->s3Client->copyObject([
+                'Bucket' => $bucketName,
+                'CopySource' => $copySource,
+                'Key' => $versionedPath,
+            ]);
+
+            if (!$this->s3Client->doesObjectExist($bucketName, $versionedPath)) {
+                throw new \RuntimeException('Copy verification failed: destination object not found');
+            }
+
+            Log::info('[UploadCompletionService] File copied to versioned path', [
+                'upload_session_id' => $uploadSession->id,
+                'from' => $tempPath,
+                'to' => $versionedPath,
+            ]);
+        } catch (S3Exception $e) {
+            Log::error('[UploadCompletionService] Failed to copy to versioned path', [
+                'upload_session_id' => $uploadSession->id,
+                'from' => $tempPath,
+                'to' => $versionedPath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Failed to copy file to versioned path: {$e->getMessage()}", 0, $e);
         }
     }
 
@@ -1273,6 +1343,7 @@ class UploadCompletionService
      * @param string|null $s3Key Optional S3 key if known
      * @param int|null $userId User ID performing the replacement
      * @param string|null $comment Optional comment for resubmission
+     * @param string|null $resolvedFilename Optional filename from client (resolved_filename from manifest)
      * @return Asset The updated asset
      * @throws \Exception
      */
@@ -1280,7 +1351,8 @@ class UploadCompletionService
         UploadSession $uploadSession,
         ?string $s3Key = null,
         ?int $userId = null,
-        ?string $comment = null
+        ?string $comment = null,
+        ?string $resolvedFilename = null
     ): Asset {
         Log::info('[UploadCompletionService] Starting replace file completion', [
             'upload_session_id' => $uploadSession->id,
@@ -1321,121 +1393,70 @@ class UploadCompletionService
             }
         }
 
-        // Get file info from S3 (temp upload location)
+        // Get file info from S3 (temp upload location) - size only; do NOT trust S3 Content-Type
         $tempS3Key = $s3Key ?? $this->generateTempUploadPath($uploadSession);
-        $fileInfo = $this->getFileInfoFromS3($uploadSession, $tempS3Key, null);
+        $fileInfo = $this->getFileInfoFromS3($uploadSession, $tempS3Key, $resolvedFilename);
 
-        // Get S3 client and bucket
-        $bucket = $uploadSession->storageBucket;
-        if (!$bucket) {
-            throw new \RuntimeException('Storage bucket not found for upload session');
-        }
-        $s3Client = $this->createS3Client();
-        $bucketName = $bucket->name;
+        // Resolve filename for path: client > S3 metadata > existing asset (extension only, no MIME inference)
+        $newFilename = $resolvedFilename ?? ($fileInfo['original_filename'] !== 'unknown' ? $fileInfo['original_filename'] : null) ?? $asset->original_filename;
 
-        // Get the asset's current S3 path
-        $assetS3Key = $asset->storage_root_path;
+        // Phase 2B: Copy to versioned path and create new version (existing asset)
+        $versionService = app(AssetVersionService::class);
+        $nextVersion = $versionService->getNextVersionNumber($asset);
+        $extension = pathinfo($newFilename ?? 'file', PATHINFO_EXTENSION);
+        $extension = $extension ? strtolower($extension) : 'file';
+        $versionedPath = "assets/{$asset->id}/v{$nextVersion}/original.{$extension}";
+        $this->copyTempToVersionedPath($uploadSession, $versionedPath);
 
-        // Replace the file: Copy from temp location to asset's permanent location
-        // This overwrites the existing file at the asset's storage path
-        try {
-            // CopySource must be a string in format "bucket/key" for AWS SDK
-            $copySource = $bucketName . '/' . $tempS3Key;
-            
-            $s3Client->copyObject([
-                'Bucket' => $bucketName,
-                'CopySource' => $copySource,
-                'Key' => $assetS3Key,
-                'MetadataDirective' => 'REPLACE',
-                'ContentType' => $fileInfo['mime_type'],
-            ]);
+        // Version creation: minimal fields. mime_type placeholder required (DB NOT NULL); FileInspectionService overwrites in ProcessAssetJob.
+        $fileMeta = [
+            'file_path' => $versionedPath,
+            'file_size' => $fileInfo['size_bytes'],
+            'mime_type' => 'application/octet-stream', // Placeholder; FileInspectionService sets actual MIME
+            'width' => null,
+            'height' => null,
+            'checksum' => $fileInfo['checksum'] ?? hash('sha256', $uploadSession->id . $fileInfo['size_bytes']),
+        ];
+        $newVersion = $versionService->createVersion($asset, $fileMeta, null, $comment, null);
 
-            Log::info('[UploadCompletionService] File replaced in S3', [
-                'asset_id' => $asset->id,
-                'from_path' => $tempS3Key,
-                'to_path' => $assetS3Key,
-                'new_size' => $fileInfo['size_bytes'],
-                'new_mime_type' => $fileInfo['mime_type'],
-            ]);
-        } catch (S3Exception $e) {
-            Log::error('[UploadCompletionService] Failed to replace file in S3', [
-                'asset_id' => $asset->id,
-                'from_path' => $tempS3Key,
-                'to_path' => $assetS3Key,
-                'error' => $e->getMessage(),
-            ]);
-            throw new \RuntimeException("Failed to replace file in S3: {$e->getMessage()}", 0, $e);
-        }
-
-        // Update asset file properties (file size, mime type, dimensions if available)
-        // DO NOT touch metadata, title, category, or any other properties
-        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId) {
-            // Update file properties
+        // Minimal asset updates: reset processing state. Do NOT set mime_type/width/height (derive from currentVersion).
+        // Do NOT mutate storage_root_path during processing (ProcessAssetJob); set here for legacy/display.
+        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId, $versionedPath, $newFilename) {
             $asset->size_bytes = $fileInfo['size_bytes'];
-            $asset->mime_type = $fileInfo['mime_type'];
-            
-            // Update dimensions if available in fileInfo
-            if (isset($fileInfo['width']) && isset($fileInfo['height'])) {
-                $asset->width = $fileInfo['width'];
-                $asset->height = $fileInfo['height'];
+            $asset->storage_root_path = $versionedPath;
+            if ($newFilename) {
+                $asset->original_filename = $newFilename;
             }
 
-            // Reset approval status to pending (asset re-enters review queue)
-            $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
-            $asset->rejected_at = null;
-            $asset->rejection_reason = null;
-            
-            // Keep unpublished until approved
-            $asset->published_at = null;
-            $asset->published_by_id = null;
-            
-            // Reset thumbnail status to pending (new file needs new thumbnails)
-            // Also clear old thumbnail paths from metadata to prevent 404 errors
-            // Phase J.3.1: Check if file type supports thumbnails (not just images)
-            $fileTypeService = app(\App\Services\FileTypeService::class);
-            $fileType = $fileTypeService->detectFileType($fileInfo['mime_type'] ?? '', pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-            $supportsThumbnails = $fileType && $fileTypeService->supportsCapability($fileType, 'thumbnail');
-            
-            if ($supportsThumbnails) {
-                $asset->thumbnail_status = \App\Enums\ThumbnailStatus::PENDING;
-                
-                // Clear old thumbnail paths from metadata (prevents frontend from trying to load non-existent thumbnails)
-                $metadata = $asset->metadata ?? [];
-                if (isset($metadata['thumbnails'])) {
-                    unset($metadata['thumbnails']);
-                }
-                if (isset($metadata['preview_thumbnails'])) {
-                    unset($metadata['preview_thumbnails']);
-                }
-                
-                // Phase J.3.1: Clear processing flags to allow ProcessAssetJob to run again
-                // This is critical - without clearing these, ProcessAssetJob will skip the asset
-                // and thumbnails will never be regenerated, causing infinite polling loops
-                if (isset($metadata['processing_started'])) {
-                    unset($metadata['processing_started']);
-                }
-                if (isset($metadata['processing_started_at'])) {
-                    unset($metadata['processing_started_at']);
-                }
-                // Clear other processing flags that might prevent reprocessing
-                if (isset($metadata['thumbnails_generated'])) {
-                    unset($metadata['thumbnails_generated']);
-                }
-                if (isset($metadata['thumbnails_generated_at'])) {
-                    unset($metadata['thumbnails_generated_at']);
-                }
-                if (isset($metadata['metadata_extracted'])) {
-                    unset($metadata['metadata_extracted']);
-                }
-                
-                $asset->metadata = $metadata;
-                
-                Log::info('[UploadCompletionService] Reset thumbnail status to PENDING for replaced file', [
-                    'asset_id' => $asset->id,
-                    'file_type' => $fileType,
-                    'mime_type' => $fileInfo['mime_type'] ?? 'unknown',
-                ]);
+            // Optionally set approval_status to pending if approval is required.
+            // Do NOT unpublish - asset remains published until explicitly unpublished (enterprise DAM behavior).
+            $featureGate = app(\App\Services\FeatureGate::class);
+            $approvalsEnabled = $asset->tenant && $featureGate->approvalsEnabled($asset->tenant);
+            $categoryId = $asset->metadata['category_id'] ?? null;
+            $category = $categoryId ? Category::find($categoryId) : null;
+            $requiresApproval = $approvalsEnabled && (
+                ($asset->brand && $asset->brand->requiresContributorApproval()) ||
+                ($category && $category->requiresApproval())
+            );
+            if ($requiresApproval) {
+                $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
+                $asset->rejected_at = null;
+                $asset->rejection_reason = null;
             }
+            // DO NOT touch published_at or published_by_id - asset stays published
+
+            // Reset analysis_status so ProcessAssetJob will run (it requires 'uploading')
+            $asset->analysis_status = 'uploading';
+
+            // Reset thumbnail status and clear processing flags (full rebuild; no MIME/extension guessing)
+            $asset->thumbnail_status = \App\Enums\ThumbnailStatus::PENDING;
+            $metadata = $asset->metadata ?? [];
+            foreach (['thumbnails', 'preview_thumbnails', 'processing_started', 'processing_started_at', 'thumbnails_generated', 'thumbnails_generated_at', 'metadata_extracted', 'metadata_extracted_at'] as $key) {
+                if (isset($metadata[$key])) {
+                    unset($metadata[$key]);
+                }
+            }
+            $asset->metadata = $metadata;
 
             $asset->save();
 
@@ -1464,7 +1485,7 @@ class UploadCompletionService
                 'upload_session_id' => $uploadSession->id,
                 'new_size' => $asset->size_bytes,
                 'new_mime_type' => $asset->mime_type,
-                'approval_status' => 'pending',
+                'approval_status' => $asset->approval_status?->value ?? 'unchanged',
             ]);
         });
 
@@ -1495,15 +1516,13 @@ class UploadCompletionService
             }
         }
 
-        // Emit events for processing (thumbnails, metadata extraction, etc.)
-        // The new file needs to be processed just like a new upload
-        Log::info('[UploadCompletionService] Dispatching AssetUploaded event for replaced file', [
+        // Dispatch version-aware pipeline (ProcessAssetJob with version ID).
+        // Do NOT fire AssetUploaded - that would dispatch with asset ID (legacy) and skip version-aware path.
+        Log::info('[UploadCompletionService] Dispatching ProcessAssetJob for replaced file (version-aware)', [
             'asset_id' => $asset->id,
-            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
-            'processing_started_cleared' => !isset($asset->metadata['processing_started']),
+            'version_id' => $newVersion->id,
         ]);
-        event(new AssetUploaded($asset));
-        event(new AssetProcessingCompleteEvent($asset));
+        \App\Jobs\ProcessAssetJob::dispatch($newVersion->id);
 
         return $asset;
     }

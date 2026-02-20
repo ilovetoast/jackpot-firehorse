@@ -408,6 +408,22 @@ class Asset extends Model
     }
 
     /**
+     * Get the versions for this asset (Phase 1A).
+     */
+    public function versions(): HasMany
+    {
+        return $this->hasMany(AssetVersion::class);
+    }
+
+    /**
+     * Get the current version (is_current = true). Phase 3B.
+     */
+    public function currentVersion(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(AssetVersion::class)->where('is_current', true);
+    }
+
+    /**
      * Get the embedding for this asset (imagery similarity scoring).
      */
     public function embedding(): \Illuminate\Database\Eloquent\Relations\HasOne

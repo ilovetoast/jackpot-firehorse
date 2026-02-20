@@ -5,6 +5,8 @@ namespace App\Jobs;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Models\AssetMetadata;
+use App\Models\AssetVersion;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -34,9 +36,13 @@ class ExtractMetadataJob implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param string $assetId Asset ID
+     * @param string|null $versionId Optional version ID for version-aware extraction (uses version->file_path)
      */
     public function __construct(
-        public readonly string $assetId
+        public readonly string $assetId,
+        public readonly ?string $versionId = null
     ) {}
 
     /**
@@ -46,24 +52,29 @@ class ExtractMetadataJob implements ShouldQueue
     {
         Log::info('[ExtractMetadataJob] Job started', [
             'asset_id' => $this->assetId,
+            'version_id' => $this->versionId,
         ]);
-        
-        $asset = Asset::findOrFail($this->assetId);
 
-        // Idempotency: Check if metadata already extracted
-        $existingMetadata = $asset->metadata ?? [];
-        if (isset($existingMetadata['metadata_extracted']) && $existingMetadata['metadata_extracted'] === true) {
-            Log::info('[ExtractMetadataJob] Metadata extraction skipped - already extracted', [
-                'asset_id' => $asset->id,
-            ]);
-            // Job chaining is handled by Bus::chain() in ProcessAssetJob
-            // Chain will continue to next job automatically
-            return;
+        $asset = Asset::findOrFail($this->assetId);
+        $version = $this->versionId ? AssetVersion::find($this->versionId) : null;
+
+        // Phase 7: When version-aware, delete existing metadata for this version (idempotent rerun)
+        if ($version) {
+            AssetMetadata::where('asset_version_id', $version->id)->delete();
+        }
+
+        // Idempotency: Skip only for legacy path (no version); version path always re-extracts
+        if (!$version) {
+            $existingMetadata = $asset->metadata ?? [];
+            if (isset($existingMetadata['metadata_extracted']) && $existingMetadata['metadata_extracted'] === true) {
+                Log::info('[ExtractMetadataJob] Metadata extraction skipped - already extracted', [
+                    'asset_id' => $asset->id,
+                ]);
+                return;
+            }
         }
 
         // Ensure asset is VISIBLE (not hidden or failed)
-        // Asset.status represents VISIBILITY, not processing progress
-        // Processing jobs must NOT mutate Asset.status (assets must remain visible in grid)
         if ($asset->status !== AssetStatus::VISIBLE) {
             Log::warning('Metadata extraction skipped - asset is not visible', [
                 'asset_id' => $asset->id,
@@ -72,8 +83,8 @@ class ExtractMetadataJob implements ShouldQueue
             return;
         }
 
-        // Extract metadata (stub implementation)
-        $metadata = $this->extractMetadata($asset);
+        // Extract metadata: use version->file_path when version-aware
+        $metadata = $this->extractMetadata($asset, $version);
 
         // Update asset metadata
         $currentMetadata = $asset->metadata ?? [];
@@ -112,24 +123,27 @@ class ExtractMetadataJob implements ShouldQueue
      * Extract metadata from asset.
      *
      * @param Asset $asset
+     * @param AssetVersion|null $version When provided, uses version->file_path and version-derived fields
      * @return array
      */
-    protected function extractMetadata(Asset $asset): array
+    protected function extractMetadata(Asset $asset, ?AssetVersion $version = null): array
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        $mimeForType = $version ? $version->mime_type : $asset->mime_type;
+        $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
 
-        // Basic metadata for all file types
+        // Basic metadata: use version-derived fields when version-aware
         $metadata = [
             'original_filename' => $asset->original_filename,
-            'size_bytes' => $asset->size_bytes,
-            'mime_type' => $asset->mime_type,
+            'size_bytes' => $version ? $version->file_size : $asset->size_bytes,
+            'mime_type' => $version ? $version->mime_type : $asset->mime_type,
             'extracted_by' => 'extract_metadata_job',
         ];
 
-        // Video-specific metadata extraction
+        // Video-specific metadata extraction (uses version->file_path when version-aware)
         if ($fileType === 'video') {
-            $videoMetadata = $this->extractVideoMetadata($asset);
+            $videoMetadata = $this->extractVideoMetadata($asset, $version);
             $metadata = array_merge($metadata, $videoMetadata);
         }
 
@@ -140,11 +154,13 @@ class ExtractMetadataJob implements ShouldQueue
      * Extract video metadata (duration, width, height).
      *
      * @param Asset $asset
+     * @param AssetVersion|null $version When provided, uses version->file_path
      * @return array
      */
-    protected function extractVideoMetadata(Asset $asset): array
+    protected function extractVideoMetadata(Asset $asset, ?AssetVersion $version = null): array
     {
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        $sourceS3Path = $version ? $version->file_path : $asset->storage_root_path;
+        if (!$sourceS3Path || !$asset->storageBucket) {
             Log::warning('[ExtractMetadataJob] Cannot extract video metadata - missing storage path or bucket', [
                 'asset_id' => $asset->id,
             ]);
@@ -152,7 +168,6 @@ class ExtractMetadataJob implements ShouldQueue
         }
 
         $bucket = $asset->storageBucket;
-        $sourceS3Path = $asset->storage_root_path;
 
         Log::info('[ExtractMetadataJob] Extracting video metadata', [
             'asset_id' => $asset->id,

@@ -106,7 +106,7 @@ class AssetArchiveService
     public function restore(Asset $asset, User $actor): void
     {
         // Check permission via policy
-        Gate::forUser($actor)->authorize('restore', $asset);
+        Gate::forUser($actor)->authorize('restoreArchive', $asset);
 
         // Guard: Cannot restore failed assets
         if ($asset->status === AssetStatus::FAILED) {

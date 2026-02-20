@@ -411,6 +411,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
+            Route::get('/assets/{asset}/versions', [\App\Http\Controllers\AssetVersionController::class, 'index'])->name('assets.versions.index');
+            Route::post('/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\AssetVersionController::class, 'restore'])->name('assets.versions.restore');
             Route::get('/assets/{asset}/collections', [\App\Http\Controllers\CollectionController::class, 'assetCollections'])->name('assets.collections.index');
             
             // AI metadata generation (Phase I)

@@ -20,6 +20,7 @@ use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use App\Services\UploadInitiationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,7 +43,8 @@ class AssetController extends Controller
         protected AiMetadataConfidenceService $confidenceService,
         protected LifecycleResolver $lifecycleResolver,
         protected AssetSearchService $assetSearchService,
-        protected AssetSortService $assetSortService
+        protected AssetSortService $assetSortService,
+        protected UploadInitiationService $uploadInitiationService
     ) {
     }
 
@@ -1960,6 +1962,78 @@ class AssetController extends Controller
             'message' => 'Filename updated',
             'original_filename' => $asset->original_filename,
         ], 200);
+    }
+
+    /**
+     * Initiate a replace-file upload session.
+     *
+     * Phase J.3.1: File replacement for rejected contributor assets.
+     * Also used for "Upload New Version" in the Versions tab.
+     *
+     * POST /assets/{asset}/replace-file
+     *
+     * Returns upload_session_id, upload_type, upload_url, chunk_size for the client
+     * to upload the file, then finalize via POST /uploads/finalize.
+     */
+    public function initiateReplaceFile(Request $request, Asset $asset): JsonResponse
+    {
+        Gate::authorize('view', $asset);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = auth()->user();
+
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['error' => 'Asset not found'], 404);
+        }
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json(['error' => 'You do not have permission to replace files.'], 403);
+        }
+
+        $targetBrand = $asset->brand_id ? $asset->brand : ($brand ?? $tenant->defaultBrand);
+        if (! $targetBrand) {
+            return response()->json(['error' => 'No brand context available for this asset.'], 403);
+        }
+
+        $validated = $request->validate([
+            'file_name' => 'required|string|max:255',
+            'file_size' => 'required|integer|min:1',
+            'mime_type' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $result = $this->uploadInitiationService->initiateReplace(
+                $tenant,
+                $targetBrand,
+                $asset,
+                $validated['file_name'],
+                $validated['file_size'],
+                $validated['mime_type'] ?? null,
+                null
+            );
+
+            return response()->json([
+                'upload_session_id' => $result['upload_session_id'],
+                'upload_type' => $result['upload_type'],
+                'upload_url' => $result['upload_url'],
+                'chunk_size' => $result['chunk_size'],
+                'expires_at' => $result['expires_at'],
+            ], 201);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            $message = $e->limitType === 'storage'
+                ? 'Storage limit exceeded for your plan.'
+                : $e->getMessage();
+            return response()->json(['error' => $message], 403);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::initiateReplaceFile]', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     /**

@@ -15,6 +15,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
     const [comment, setComment] = useState('')
     const [uploading, setUploading] = useState(false)
     const [uploadProgress, setUploadProgress] = useState(0)
+    const [error, setError] = useState(null)
     const fileInputRef = useRef(null)
 
     if (!isOpen || !asset) return null
@@ -23,6 +24,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
         const file = e.target.files?.[0]
         if (file) {
             setSelectedFile(file)
+            setError(null)
         }
     }
 
@@ -31,6 +33,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
 
         setUploading(true)
         setUploadProgress(0)
+        setError(null)
 
         try {
             // Step 1: Initiate replace upload session
@@ -75,6 +78,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                     {
                         upload_key: `temp/uploads/${upload_session_id}/original`,
                         expected_size: selectedFile.size,
+                        resolved_filename: selectedFile.name,
                         comment: comment.trim() || null,
                     },
                 ],

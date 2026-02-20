@@ -373,55 +373,29 @@ class AssetPolicy
     }
 
     /**
-     * Determine if the user can restore the asset.
+     * Determine if the user can restore a previous file version as a new current version.
      *
-     * Phase L.3 — Asset Archive & Restore
-     * Users can restore assets if they:
-     * - Belong to the tenant
-     * - Have 'asset.restore' permission for the tenant
-     * - Asset is not failed
+     * Phase 5D — Version Restore: Tenant admin/owner only (same as other admin actions).
      */
-    public function restore(User $user, Asset $asset): bool
+    public function restoreVersion(User $user, Asset $asset): bool
     {
-        // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (!$this->view($user, $asset)) {
             return false;
         }
-
-        // Check permission for restoring assets
         $tenant = $asset->tenant;
-        
-        // Check tenant-level permission first
-        $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.restore');
-        
-        // If no tenant permission, check brand-level permission (if asset has a brand)
-        if (!$hasTenantPermission && $asset->brand_id) {
-            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.restore');
-        }
-        
-        if (!$hasTenantPermission) {
-            return false;
-        }
+        $tenantRole = $user->getRoleForTenant($tenant);
 
-        // Cannot restore failed assets
-        if ($asset->status === \App\Enums\AssetStatus::FAILED) {
-            return false;
-        }
+        return in_array($tenantRole, ['admin', 'owner']);
+    }
 
-        // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
-            $tenantRole = $user->getRoleForTenant($tenant);
-            
-            // Tenant admins/owners have access to all brands
-            if (!in_array($tenantRole, ['admin', 'owner'])) {
-                // Phase MI-1: Check active brand membership
-                if (!$user->activeBrandMembership($asset->brand)) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
+    /**
+     * Determine if the user can restore an archived asset.
+     *
+     * Phase L.3 — Archive Restore: Editor+ (asset.restore permission).
+     * Note: Use asset.update when that permission exists for finer-grained control.
+     */
+    public function restoreArchive(User $user, Asset $asset): bool
+    {
+        return $user->can('asset.restore');
     }
 }

@@ -31,6 +31,8 @@ import {
     PencilIcon,
     ArrowsPointingOutIcon,
     ArrowsPointingInIcon,
+    CheckIcon,
+    CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
@@ -71,6 +73,7 @@ export default function AssetDetailPanel({
     onDelete = null,
     onReprocessAsset = null,
     reprocessLoading = false,
+    onToast = null,
     primaryColor,
     fullPage = false,
 }) {
@@ -103,6 +106,7 @@ export default function AssetDetailPanel({
     const canUnpublishWithFallback = canUnpublish || isOwnerOrAdmin
     const canArchiveWithFallback = (canArchive || isOwnerOrAdmin) && !contributorBlocked
     const canRestoreWithFallback = canRestore || isOwnerOrAdmin
+    const canRestoreVersion = tenantRole === 'admin' || tenantRole === 'owner'
 
     const showDownloadHistory =
         ['owner', 'admin'].includes((tenantRole || '').toLowerCase()) ||
@@ -118,6 +122,13 @@ export default function AssetDetailPanel({
     const [syncCollectionsLoading, setSyncCollectionsLoading] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
+    const [versions, setVersions] = useState([])
+    const [versionsLoading, setVersionsLoading] = useState(false)
+    const [showRestoreModal, setShowRestoreModal] = useState(false)
+    const [restoreVersion, setRestoreVersion] = useState(null)
+    const [restorePreserveMetadata, setRestorePreserveMetadata] = useState(true)
+    const [restoreRerunPipeline, setRestoreRerunPipeline] = useState(false)
+    const [restoreLoading, setRestoreLoading] = useState(false)
 
     const [showActionsDropdown, setShowActionsDropdown] = useState(false)
     const actionsDropdownRef = useRef(null)
@@ -230,6 +241,48 @@ export default function AssetDetailPanel({
             .catch(() => setActivityEvents([]))
             .finally(() => setActivityLoading(false))
     }, [isOpen, asset?.id, externalActivityEvents, externalActivityLoading])
+
+    const planAllowsVersions = auth?.plan_allows_versions ?? false
+    const fetchVersions = () => {
+        if (!asset?.id || !planAllowsVersions) return
+        setVersionsLoading(true)
+        window.axios
+            .get(`/app/assets/${asset.id}/versions`)
+            .then((res) => {
+                const data = res.data
+                setVersions(Array.isArray(data) ? data : (data?.data ?? []))
+            })
+            .catch(() => setVersions([]))
+            .finally(() => setVersionsLoading(false))
+    }
+    useEffect(() => {
+        if (!isOpen || !asset?.id || !planAllowsVersions) {
+            setVersions([])
+            return
+        }
+        fetchVersions()
+    }, [isOpen, asset?.id, planAllowsVersions])
+
+    const handleRestoreVersion = async () => {
+        if (!restoreVersion || !asset?.id || restoreLoading) return
+        setRestoreLoading(true)
+        try {
+            await window.axios.post(`/app/assets/${asset.id}/versions/${restoreVersion.id}/restore`, {
+                preserve_metadata: restorePreserveMetadata,
+                rerun_pipeline: restoreRerunPipeline,
+            })
+            setShowRestoreModal(false)
+            setRestoreVersion(null)
+            setRestorePreserveMetadata(true)
+            setRestoreRerunPipeline(false)
+            fetchVersions()
+            onToast?.('Version restored', 'success')
+        } catch (err) {
+            onToast?.(err.response?.data?.message || 'Failed to restore version', 'error')
+        } finally {
+            setRestoreLoading(false)
+        }
+    }
 
     const fetchMetadata = async () => {
         if (!asset?.id) return
@@ -1437,16 +1490,118 @@ export default function AssetDetailPanel({
                             </CollapsibleSection>
                         </section>
 
-                        {/* Section 5 — Versions (stub, collapsed by default) */}
-                        <PermissionGate permission="asset.view">
-                            <section className="border-t border-gray-200 mb-6" aria-labelledby="section-versions">
-                                <CollapsibleSection title="Versions" defaultExpanded={false}>
-                                    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                        <p className="text-sm text-gray-500">Coming soon.</p>
-                                    </div>
-                                </CollapsibleSection>
-                            </section>
-                        </PermissionGate>
+                        {/* Section 5 — Versions (Phase 4B: plan-gated, collapsed by default) */}
+                        {planAllowsVersions && (
+                            <PermissionGate permission="asset.view">
+                                <section className="border-t border-gray-200 mb-6" aria-labelledby="section-versions">
+                                    <CollapsibleSection
+                                        title={
+                                            versionsLoading ? (
+                                                'Versions'
+                                            ) : versions.length > 0 ? (
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    Versions
+                                                    <span className="text-gray-400 font-normal">({versions.length})</span>
+                                                </span>
+                                            ) : (
+                                                'Versions'
+                                            )
+                                        }
+                                        defaultExpanded={false}
+                                    >
+                                        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+                                            {onReplaceFile && (
+                                                <div className="flex justify-end mb-4">
+                                                    <button
+                                                        type="button"
+                                                        onClick={onReplaceFile}
+                                                        className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 rounded"
+                                                    >
+                                                        <CloudArrowUpIcon className="h-4 w-4 mr-2" />
+                                                        Upload New Version
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {versionsLoading ? (
+                                                <div className="animate-pulse space-y-3">
+                                                    {[1, 2, 3].map((i) => (
+                                                        <div key={i} className="h-10 bg-gray-200 rounded" />
+                                                    ))}
+                                                </div>
+                                            ) : versions.length === 0 ? (
+                                                <p className="text-sm text-gray-500">No previous versions</p>
+                                            ) : (
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full divide-y divide-gray-200">
+                                                        <thead>
+                                                            <tr>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Uploaded</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current</th>
+                                                                {canRestoreVersion && <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-200">
+                                                            {versions.map((v) => {
+                                                                const status = (v.pipeline_status || 'pending').toLowerCase()
+                                                                const statusPillClass = status === 'complete' ? 'bg-green-100 text-green-800' : status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                                                const fmtSize = (b) => (!b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`)
+                                                                const fmtDate = (d) => (!d ? '—' : (() => { try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) } catch { return '—' } })())
+                                                                return (
+                                                                    <tr key={v.id}>
+                                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">v{v.version_number}</td>
+                                                                        <td className="px-4 py-3 text-sm">
+                                                                            <span
+                                                                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusPillClass}`}
+                                                                                title={v.pipeline_status || 'Pipeline status'}
+                                                                            >
+                                                                                {status}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-4 py-3 text-sm text-gray-700">{fmtSize(v.file_size)}</td>
+                                                                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(v.created_at)}</td>
+                                                                        <td className="px-4 py-3 text-sm text-gray-700">{v.uploaded_by?.name ?? '—'}</td>
+                                                                        <td className="px-4 py-3 text-sm">
+                                                                            {v.is_current && (
+                                                                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800" title="Current version">
+                                                                                    <CheckIcon className="h-3.5 w-3.5 mr-0.5" aria-hidden />
+                                                                                    Current
+                                                                                </span>
+                                                                            )}
+                                                                        </td>
+                                                                        {canRestoreVersion && (
+                                                                            <td className="px-4 py-3 text-sm">
+                                                                                {!v.is_current && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            setRestoreVersion(v)
+                                                                                            setRestorePreserveMetadata(true)
+                                                                                            setRestoreRerunPipeline(false)
+                                                                                            setShowRestoreModal(true)
+                                                                                        }}
+                                                                                        className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                                    >
+                                                                                        Restore
+                                                                                    </button>
+                                                                                )}
+                                                                            </td>
+                                                                        )}
+                                                                    </tr>
+                                                                )
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CollapsibleSection>
+                                </section>
+                            </PermissionGate>
+                        )}
 
                         {/* Section 6 — Approval Workflow (stub, collapsed by default) */}
                         <PermissionGate permission="asset.view">
@@ -1470,6 +1625,58 @@ export default function AssetDetailPanel({
                             </section>
                         )}
                     </div>
+
+                    {/* Phase 5C: Restore Version Modal */}
+                    {showRestoreModal && restoreVersion && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto">
+                            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => !restoreLoading && setShowRestoreModal(false)} />
+                                <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
+                                        Restore v{restoreVersion.version_number}?
+                                    </h3>
+                                    <div className="space-y-3 mb-6">
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={restorePreserveMetadata}
+                                                onChange={(e) => setRestorePreserveMetadata(e.target.checked)}
+                                                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-sm text-gray-700">Preserve historical metadata (recommended)</span>
+                                        </label>
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={restoreRerunPipeline}
+                                                onChange={(e) => setRestoreRerunPipeline(e.target.checked)}
+                                                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-sm text-gray-700">Reprocess with current pipeline</span>
+                                        </label>
+                                    </div>
+                                    <div className="flex justify-end gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => !restoreLoading && setShowRestoreModal(false)}
+                                            disabled={restoreLoading}
+                                            className="rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleRestoreVersion}
+                                            disabled={restoreLoading}
+                                            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                        >
+                                            {restoreLoading ? 'Restoring…' : 'Restore'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Tags at bottom */}
                     {!loading && asset?.id && (

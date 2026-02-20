@@ -117,6 +117,33 @@ class PlanService
     }
 
     /**
+     * Get the plan config for a tenant.
+     */
+    protected function getPlanConfig(Tenant $tenant): array
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        return config("plans.{$planName}", config('plans.free'));
+    }
+
+    /**
+     * Get the maximum number of versions allowed per asset for the tenant's plan.
+     */
+    public function maxVersionsPerAsset(Tenant $tenant): int
+    {
+        $plan = $this->getPlanConfig($tenant);
+        return $plan['max_versions_per_asset'] ?? 1;
+    }
+
+    /**
+     * Check if the tenant's plan allows asset versioning (versions tab, replace file, etc.).
+     */
+    public function planAllowsVersions(Tenant $tenant): bool
+    {
+        $plan = $this->getPlanConfig($tenant);
+        return (bool) ($plan['versions_enabled'] ?? false);
+    }
+
+    /**
      * Check if tenant can create a brand.
      */
     public function canCreateBrand(Tenant $tenant): bool

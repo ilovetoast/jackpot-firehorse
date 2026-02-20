@@ -86,6 +86,8 @@ return [
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
+        'versions_enabled' => false,
+        'max_versions_per_asset' => 1,
         'notes' => [
             '"All" button in Assets/Executions category sidebar to view all assets across categories',
             'Download links limited to 200 per month',
@@ -120,6 +122,8 @@ return [
             'access_to_more_roles',
             'edit_system_categories',
         ],
+        'versions_enabled' => true,
+        'max_versions_per_asset' => 25,
         'approval_features' => [
             'approvals.enabled' => true,
             'notifications.enabled' => true,
@@ -168,6 +172,8 @@ return [
             'access_to_more_roles',
             'edit_system_categories',
         ],
+        'versions_enabled' => true,
+        'max_versions_per_asset' => 250,
         'approval_features' => [
             'approvals.enabled' => true,
             'notifications.enabled' => true,

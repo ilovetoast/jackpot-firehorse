@@ -440,6 +440,8 @@ class HandleInertiaRequests extends Middleware
                 })() : [
                     'metadata_approval_enabled' => false,
                 ],
+                // Phase 4B: Asset versioning (Pro/Enterprise only)
+                'plan_allows_versions' => $tenant ? app(PlanService::class)->planAllowsVersions($tenant) : false,
             ],
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
             // Phase D1: Download bucket count (session-based) for sticky bar

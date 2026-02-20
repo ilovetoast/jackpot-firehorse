@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\AssetVersion;
 use App\Models\StorageBucket;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
@@ -152,7 +153,8 @@ class ThumbnailGenerationService
                             $bucket,
                             $asset,
                             $thumbnailPath,
-                            $styleName
+                            $styleName,
+                            $outputBasePath
                         );
                         
                         // Get metadata
@@ -233,19 +235,40 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Generate thumbnails for a version (Phase 3A). No model mutation.
+     *
+     * @param AssetVersion $version The version to generate thumbnails for
+     * @return array Array of thumbnail metadata
+     */
+    public function generateThumbnailsForVersion(AssetVersion $version): array
+    {
+        return $this->generateThumbnails(
+            $version->asset,
+            $version->file_path,
+            dirname($version->file_path),
+            $version
+        );
+    }
+
+    /**
      * Generate all thumbnail styles for an asset atomically.
      *
      * Downloads the asset from S3, generates all configured thumbnail styles,
      * uploads thumbnails to S3, and returns metadata about generated thumbnails.
      *
      * @param Asset $asset The asset to generate thumbnails for
+     * @param string|null $sourceS3Path Override source path (default: asset->storage_root_path)
+     * @param string|null $outputBasePath Override output base for thumbnails (default: dirname of source)
+     * @param AssetVersion|null $version When provided, use version->mime_type for file type detection (version-aware)
      * @return array Array of thumbnail metadata with keys: thumb, medium, large
-     *               Each entry contains: path, width, height, size_bytes, generated_at
      * @throws \RuntimeException If thumbnail generation fails
      */
-    public function generateThumbnails(Asset $asset): array
+    public function generateThumbnails(Asset $asset, ?string $sourceS3Path = null, ?string $outputBasePath = null, ?AssetVersion $version = null): array
     {
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
+        $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
+
+        if (!$sourceS3Path || !$asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage path or bucket');
         }
 
@@ -254,36 +277,6 @@ class ThumbnailGenerationService
         
         if (empty($styles)) {
             throw new \RuntimeException('No thumbnail styles configured');
-        }
-
-        // CRITICAL: Use the correct source path for thumbnail generation
-        // For newly uploaded assets, storage_root_path points to temp upload location
-        // This is the SAME source used for metadata extraction
-        // 
-        // IMPORTANT: Preview thumbnails MUST be generated from the REAL uploaded file,
-        // not from a placeholder or corrupted file. The source must be the actual
-        // image file that was uploaded (stored at temp/uploads/{upload_session_id}/original).
-        $sourceS3Path = $asset->storage_root_path;
-        
-        // If asset has upload_session_id, verify we're using the temp upload path
-        // This ensures previews are generated from the same source as metadata extraction
-        if ($asset->upload_session_id) {
-            $expectedTempPath = "temp/uploads/{$asset->upload_session_id}/original";
-            if ($sourceS3Path !== $expectedTempPath) {
-                Log::warning('[ThumbnailGenerationService] Source path mismatch - using storage_root_path', [
-                    'asset_id' => $asset->id,
-                    'storage_root_path' => $sourceS3Path,
-                    'expected_temp_path' => $expectedTempPath,
-                    'upload_session_id' => $asset->upload_session_id,
-                ]);
-                // Continue with storage_root_path (may have been promoted already)
-            } else {
-                Log::info('[ThumbnailGenerationService] Using temp upload path for thumbnail generation', [
-                    'asset_id' => $asset->id,
-                    'source_s3_path' => $sourceS3Path,
-                    'upload_session_id' => $asset->upload_session_id,
-                ]);
-            }
         }
         
         Log::info('[ThumbnailGenerationService] Generating thumbnails from source', [
@@ -303,9 +296,8 @@ class ThumbnailGenerationService
         
         $sourceFileSize = filesize($tempPath);
         
-        // Detect file type to determine validation approach
-        // IMPORTANT: PDF support is additive - image validation remains unchanged
-        $fileType = $this->detectFileType($asset);
+        // Detect file type: use version->mime_type when version-aware (from FileInspectionService)
+        $fileType = $this->detectFileType($asset, $version);
         
         // Capture source image dimensions ONLY for image file types (not PDFs, videos, or other types)
         // Dimensions are read from the ORIGINAL source file, not from thumbnails
@@ -479,7 +471,8 @@ class ThumbnailGenerationService
                             $bucket,
                             $asset,
                             $previewPath,
-                            'preview'
+                            'preview',
+                            $outputBasePath
                         );
                         
                         // Get preview thumbnail metadata
@@ -540,7 +533,8 @@ class ThumbnailGenerationService
                             $bucket,
                             $asset,
                             $thumbnailPath,
-                            $styleName
+                            $styleName,
+                            $outputBasePath
                         );
                         
                         // Get thumbnail metadata
@@ -727,14 +721,15 @@ class ThumbnailGenerationService
         StorageBucket $bucket,
         Asset $asset,
         string $localThumbnailPath,
-        string $styleName
+        string $styleName,
+        ?string $outputBasePath = null
     ): string {
         // Generate S3 path for thumbnail
         // Pattern: {asset_path_base}/thumbnails/{style}/{filename_with_ext}
-        $assetPathInfo = pathinfo($asset->storage_root_path);
+        $basePath = $outputBasePath ?? pathinfo($asset->storage_root_path, PATHINFO_DIRNAME);
         $extension = pathinfo($localThumbnailPath, PATHINFO_EXTENSION) ?: 'jpg';
         $thumbnailFilename = "{$styleName}.{$extension}";
-        $s3ThumbnailPath = "{$assetPathInfo['dirname']}/thumbnails/{$styleName}/{$thumbnailFilename}";
+        $s3ThumbnailPath = "{$basePath}/thumbnails/{$styleName}/{$thumbnailFilename}";
         
         try {
             $this->s3Client->putObject([
@@ -2428,17 +2423,30 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Detect file type from asset mime type and filename.
+     * Detect file type from mime type and filename.
+     * When version is provided, uses version->mime_type (from FileInspectionService).
      *
      * @param Asset $asset
-     * @return string File type: image, pdf, psd, ai, office, video, or unknown
+     * @param AssetVersion|null $version When provided, use version->mime_type for detection
+     * @return string File type: image, pdf, tiff, psd, ai, office, video, or unknown
      */
-    protected function detectFileType(Asset $asset): string
+    protected function detectFileType(Asset $asset, ?AssetVersion $version = null): string
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
-        
-        return $fileType ?? 'unknown';
+        $mime = $version ? $version->mime_type : $asset->mime_type;
+        $ext = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+        $ext = $ext ? strtolower($ext) : '';
+        $fileType = $fileTypeService->detectFileType($mime, $ext);
+
+        // TIFF fallback: GD getimagesize() does not support TIFF. When MIME is wrong (e.g. from S3)
+        // or application/octet-stream, we may get 'image' or 'unknown'. For .tif/.tiff extension,
+        // route to tiff (Imagick) to avoid "Downloaded file is not a valid image" errors.
+        $resolved = $fileType ?? 'unknown';
+        if (in_array($ext, ['tif', 'tiff'], true) && in_array($resolved, ['image', 'unknown'], true)) {
+            return 'tiff';
+        }
+
+        return $resolved;
     }
 
     /**

@@ -411,18 +411,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 )}
                 {analysisStatus === 'complete' && evaluationStatus === 'incomplete' && (
                     <div className="mb-3">
-                        {metadataHealth?.is_svg ? (
-                            <>
-                                <p className="text-xs text-amber-600 font-medium">⚠ SVG format does not support brand scoring.</p>
-                                <p className="mt-0.5 text-[11px] text-gray-500">Dominant colors and visual embedding require raster image analysis. SVG is a vector format and cannot be processed for brand compliance scoring.</p>
-                            </>
-                        ) : (
-                            <>
-                                <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
-                                <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
-                            </>
-                        )}
-                        {metadataHealth && !metadataHealth.is_complete && !metadataHealth.is_svg && (
+                        <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
+                        <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
+                        {metadataHealth && !metadataHealth.is_complete && (
                             <div className="mt-2 rounded border border-amber-200 bg-amber-50/80 p-2 text-[11px] text-amber-800">
                                 <p className="font-medium mb-1">Missing for scoring:</p>
                                 <ul className="list-disc list-inside space-y-0.5">
@@ -438,7 +429,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             </div>
                         )}
                         <div className="mt-2 flex flex-wrap gap-2">
-                            {!metadataHealth?.is_complete && !metadataHealth?.is_svg && (
+                            {!metadataHealth?.is_complete && (
                                 <button
                                     type="button"
                                     onClick={handleReanalyze}
@@ -448,7 +439,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                     {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
                                 </button>
                             )}
-                            {brandDnaEnabled && !metadataHealth?.is_svg && (
+                            {brandDnaEnabled && (
                                 <button
                                     type="button"
                                     onClick={async () => {

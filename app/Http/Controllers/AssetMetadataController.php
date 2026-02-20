@@ -1068,9 +1068,10 @@ class AssetMetadataController extends Controller
         $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding
             && $thumbnailComplete && $hasAiTaggingCompleted && $hasMetadataExtracted && $hasPreviewGenerated;
 
-        // SVG: vector format does not support dominant color extraction or visual embedding (pixel-based analysis)
-        $metadataHealth['is_svg'] = $asset->mime_type === 'image/svg+xml'
-            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+        // SVG detection: use current version's mime when available (asset.mime_type can be stale after replace)
+        $effectiveMime = $asset->currentVersion?->mime_type ?? $asset->mime_type;
+        $ext = strtolower(pathinfo($asset->original_filename ?? $asset->currentVersion?->file_path ?? '', PATHINFO_EXTENSION));
+        $metadataHealth['is_svg'] = $effectiveMime === 'image/svg+xml' || $ext === 'svg';
 
         // Visual metadata ready: thumbnail_status=completed, dimensions valid, no timeout
         // When false but thumbnail_status=completed → "Visual metadata invalid" (not "analysis still running")
@@ -1836,10 +1837,17 @@ class AssetMetadataController extends Controller
         // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
         // This prevents someone from "optimizing" it away later.
         // For users who can approve, also include pending metadata (approved_at IS NULL) so they can see what needs approval
-        $currentMetadataRows = DB::table('asset_metadata')
+        // Phase 3B: Version-bound metadata — use currentVersion when available
+        $version = $asset->currentVersion;
+        $metadataQuery = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected']);
+        if ($version) {
+            $metadataQuery->where('asset_metadata.asset_version_id', $version->id);
+        } else {
+            $metadataQuery->where('asset_metadata.asset_id', $asset->id);
+        }
+        $currentMetadataRows = $metadataQuery
             ->where(function($query) use ($automaticFieldIds, $canApprove) {
                 // Automatic fields: include if value exists (no approval required)
                 if (!empty($automaticFieldIds)) {
@@ -1914,10 +1922,16 @@ class AssetMetadataController extends Controller
         // Phase 8: Check for pending metadata per field
         // Include both AI fields and user-added metadata that requires approval
         // Automatic/system fields never require approval and must be excluded
-        $pendingMetadata = DB::table('asset_metadata')
+        // Phase 3B: Version-bound — same version scope as currentMetadataRows
+        $pendingMetadataQuery = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNull('asset_metadata.approved_at')
+            ->whereNull('asset_metadata.approved_at');
+        if ($version) {
+            $pendingMetadataQuery->where('asset_metadata.asset_version_id', $version->id);
+        } else {
+            $pendingMetadataQuery->where('asset_metadata.asset_id', $asset->id);
+        }
+        $pendingMetadata = $pendingMetadataQuery
             ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
             ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
             ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields

@@ -1299,11 +1299,14 @@ class AssetThumbnailController extends Controller
                     'bucket' => $bucket->name,
                 ]);
                 
-                // Phase 3.1E: Downgrade thumbnail_status if file doesn't exist
-                // Prevents false "completed" state when file is missing
+                // Downgrade to PENDING so user can trigger Re-run Analysis to regenerate
                 if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
-                    $asset->thumbnail_status = \App\Enums\ThumbnailStatus::FAILED;
-                    $asset->save();
+                    $meta = $asset->metadata ?? [];
+                    unset($meta['thumbnails'], $meta['preview_thumbnails'], $meta['thumbnails_generated'], $meta['thumbnails_generated_at']);
+                    $asset->update([
+                        'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
+                        'metadata' => $meta,
+                    ]);
                 }
                 
                 throw new \RuntimeException('Thumbnail not found in storage');

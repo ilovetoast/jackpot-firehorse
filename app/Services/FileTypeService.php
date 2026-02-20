@@ -30,13 +30,11 @@ class FileTypeService
         $mimeType = $mimeType ? strtolower($mimeType) : null;
         $extension = $extension ? strtolower($extension) : null;
 
+        // MIME and extension from FileInspectionService / version; no extension-based MIME inference
         foreach ($types as $typeKey => $typeConfig) {
-            // Check MIME type
             if ($mimeType && in_array($mimeType, $typeConfig['mime_types'] ?? [])) {
                 return $typeKey;
             }
-
-            // Check extension
             if ($extension && in_array($extension, $typeConfig['extensions'] ?? [])) {
                 return $typeKey;
             }

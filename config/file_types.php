@@ -75,7 +75,7 @@ return [
             'name' => 'TIFF',
             'description' => 'TIFF image format (requires Imagick)',
             
-            'mime_types' => ['image/tiff', 'image/tif'],
+            'mime_types' => ['image/tiff', 'image/tif', 'image/x-tiff'],
             'extensions' => ['tiff', 'tif'],
             
             'capabilities' => [

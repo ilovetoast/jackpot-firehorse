@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PlanService;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -200,6 +201,14 @@ class Tenant extends Model
     public function agencyPartnerReferrals(): HasMany
     {
         return $this->hasMany(AgencyPartnerReferral::class, 'agency_tenant_id');
+    }
+
+    /**
+     * Check if the tenant's plan allows asset versioning.
+     */
+    public function getPlanAllowsVersionsAttribute(): bool
+    {
+        return app(PlanService::class)->planAllowsVersions($this);
     }
 
     /**
