@@ -111,6 +111,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                 <div><span className="text-slate-500">ID</span><br />{asset?.id}</div>
                                 <div><span className="text-slate-500">Tenant</span><br />{asset?.tenant?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Brand</span><br />{asset?.brand?.name ?? '—'}</div>
+                                <div><span className="text-slate-500">Category</span><br />{asset?.category?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Created by</span><br />{asset?.created_by?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Analysis</span><br />
                                     <span

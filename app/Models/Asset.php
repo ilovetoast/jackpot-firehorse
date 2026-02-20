@@ -205,6 +205,8 @@ class Asset extends Model
         'title',
         'original_filename',
         'mime_type',
+        'width',
+        'height',
         'size_bytes',
         'storage_root_path',
         'metadata',

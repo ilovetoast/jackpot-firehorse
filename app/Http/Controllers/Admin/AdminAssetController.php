@@ -15,6 +15,7 @@ use App\Models\ActivityEvent;
 use App\Models\AssetEmbedding;
 use App\Models\BrandComplianceScore;
 use App\Models\Asset;
+use App\Models\Category;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Models\Brand;
@@ -777,6 +778,16 @@ class AdminAssetController extends Controller
         $list['storage_bucket_id'] = $asset->storage_bucket_id;
         $list['thumbnail_error'] = $asset->thumbnail_error;
         $list['thumbnail_view_urls'] = $this->adminThumbnailViewUrls($asset);
+
+        // Resolve category_id to category name for Overview display
+        $categoryId = $metadata['category_id'] ?? null;
+        if ($categoryId) {
+            $category = Category::find($categoryId);
+            $list['category'] = $category ? ['id' => $category->id, 'name' => $category->name] : null;
+        } else {
+            $list['category'] = null;
+        }
+
         return $list;
     }
 
