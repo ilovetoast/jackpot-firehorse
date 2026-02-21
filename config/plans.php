@@ -187,8 +187,8 @@ return [
         ],
     ],
 
-    'enterprise' => [
-        'name' => 'Enterprise',
+    'premium' => [
+        'name' => 'Premium',
         'stripe_price_id' => env('STRIPE_PRICE_ENTERPRISE', 'price_1SlzxCBF7ZSvskYAigcdiKKj'),
         'fallback_monthly_price' => 299.00, // Fallback price if Stripe unavailable
         'limits' => [
@@ -201,7 +201,7 @@ return [
             'max_downloads_per_month' => 999999, // Unlimited
             'max_download_assets' => 2000,
             'max_download_zip_mb' => 5120,
-            'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on enterprise plan
+            'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on premium plan
             'max_tags_per_asset' => 15, // Maximum tags allowed per asset
             // AI Usage caps (per month)
             'max_ai_tagging_per_month' => 10000, // 10,000 AI tagging calls per month
@@ -221,7 +221,7 @@ return [
             'notifications.enabled' => true,
             'approval_summaries.enabled' => true,
         ],
-        'public_collections_enabled' => true, // C10: Enterprise only
+        'public_collections_enabled' => true, // C10: Premium
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999, // Unlimited
@@ -255,6 +255,73 @@ return [
             'Share downloads with custom permissions',
             'Up to 15 tags per asset for maximum flexibility',
             '10,000 AI tagging operations and 10,000 AI suggestions per month',
+        ],
+    ],
+
+    'enterprise' => [
+        'name' => 'Enterprise',
+        'stripe_price_id' => null,
+        'selectable' => false,
+        'requires_contact' => true,
+        'limits' => [
+            'max_brands' => 999,
+            'max_categories' => 999,
+            'max_private_categories' => 999,
+            'max_storage_mb' => 20971520, // 20 TB
+            'max_upload_size_mb' => 999999,
+            'max_users' => 999,
+            'max_downloads_per_month' => 999999,
+            'max_download_assets' => 5000,
+            'max_download_zip_mb' => 10240,
+            'max_custom_metadata_fields' => 500,
+            'max_tags_per_asset' => 50,
+            'max_ai_tagging_per_month' => 999999,
+            'max_ai_suggestions_per_month' => 999999,
+        ],
+        'features' => [
+            'all_asset_types',
+            'advanced_features',
+            'custom_integrations',
+            'access_to_more_roles',
+            'edit_system_categories',
+        ],
+        'versions_enabled' => true,
+        'max_versions_per_asset' => 500,
+        'approval_features' => [
+            'approvals.enabled' => true,
+            'notifications.enabled' => true,
+            'approval_summaries.enabled' => true,
+        ],
+        'public_collections_enabled' => true,
+        'download_features' => [
+            'download_links_limited' => false,
+            'download_links_limit' => 999999,
+            'custom_download_permissions' => true,
+            'share_downloads_with_permissions' => true,
+        ],
+        'download_management' => [
+            'extend_expiration' => true,
+            'revoke' => true,
+            'restrict_access_brand' => true,
+            'restrict_access_company' => true,
+            'restrict_access_users' => true,
+            'non_expiring' => true,
+            'regenerate' => true,
+            'rename' => true,
+            'password_protection' => true,
+            'branding' => true,
+            'require_landing_page' => true,
+            'max_expiration_days' => 365,
+        ],
+        'download_policy' => [
+            'disable_single_asset_downloads' => false,
+            'require_password_for_public' => false,
+            'force_expiration_days' => null,
+            'disallow_non_expiring' => false,
+        ],
+        'notes' => [
+            'Sales-only. Contact for pricing.',
+            'Dedicated infrastructure.',
         ],
     ],
 ];

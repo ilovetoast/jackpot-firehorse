@@ -29,11 +29,9 @@ use RuntimeException;
 class TenantBucketService
 {
     public function __construct(
-        protected ?S3Client $s3Client = null,
-        protected ?PlanService $planService = null
+        protected ?S3Client $s3Client = null
     ) {
         $this->s3Client = $this->s3Client ?? $this->createS3Client();
-        $this->planService = $this->planService ?? app(PlanService::class);
     }
 
     /**
@@ -120,12 +118,12 @@ class TenantBucketService
      * Get bucket for upload/asset flows.
      *
      * Hybrid S3 storage:
-     * - Enterprise plan: dedicated per-tenant bucket (existing behavior)
-     * - Standard plans: shared bucket only; never provisions new bucket
+     * - Dedicated infrastructure: per-tenant bucket (infrastructure_tier = dedicated)
+     * - Shared: shared bucket only; never provisions new bucket
      */
     public function getOrProvisionBucket(Tenant $tenant): StorageBucket
     {
-        if ($this->planService->isEnterprisePlan($tenant)) {
+        if ($tenant->hasDedicatedInfrastructure()) {
             if ($tenant->storage_mode !== 'dedicated') {
                 $tenant->update(['storage_mode' => 'dedicated']);
             }
@@ -281,12 +279,12 @@ class TenantBucketService
 
     /**
      * Expected bucket name for tenant (no DB).
-     * Enterprise (dedicated): always generated per-tenant name.
-     * Standard (shared): shared_bucket config.
+     * Dedicated infrastructure: always generated per-tenant name.
+     * Shared: shared_bucket config.
      */
     protected function getExpectedBucketName(Tenant $tenant): string
     {
-        if ($this->planService->isEnterprisePlan($tenant)) {
+        if ($tenant->hasDedicatedInfrastructure()) {
             return $this->generateBucketName($tenant);
         }
 

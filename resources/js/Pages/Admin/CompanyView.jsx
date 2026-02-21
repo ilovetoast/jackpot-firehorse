@@ -345,7 +345,9 @@ export default function AdminCompanyView({
                                                     company.plan_name === 'free' ? 'bg-gray-100 text-gray-800' :
                                                     company.plan_name === 'starter' ? 'bg-green-100 text-green-800' :
                                                     company.plan_name === 'pro' ? 'bg-blue-100 text-blue-800' :
-                                                    'bg-purple-100 text-purple-800'
+                                                    company.plan_name === 'premium' ? 'bg-indigo-100 text-indigo-800' :
+                                                    company.plan_name === 'enterprise' ? 'bg-purple-100 text-purple-800' :
+                                                    'bg-gray-100 text-gray-800'
                                                 }`}>
                                                     {company.billing_status && (
                                                         <span className="mr-1 font-semibold">{company.billing_status === 'comped' ? 'Comped' : company.billing_status === 'trial' ? 'Trial' : ''}:</span>
@@ -428,6 +430,43 @@ export default function AdminCompanyView({
                                                  'Unknown'}
                                             </dd>
                                         </div>
+                                        {company.plan_name === 'enterprise' && (
+                                            <div className="col-span-full">
+                                                <dt className="text-sm font-medium text-gray-500 mb-2">Infrastructure Tier</dt>
+                                                <dd className="mt-1">
+                                                    <form
+                                                        onSubmit={(e) => {
+                                                            e.preventDefault()
+                                                            const form = e.target
+                                                            const tier = form.infrastructure_tier?.value
+                                                            if (tier) {
+                                                                router.put(route('admin.companies.update-infrastructure-tier', company.id), {
+                                                                    infrastructure_tier: tier,
+                                                                }, { preserveScroll: true })
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-4"
+                                                    >
+                                                        <select
+                                                            name="infrastructure_tier"
+                                                            defaultValue={company.infrastructure_tier || 'shared'}
+                                                            onChange={(e) => {
+                                                                router.put(route('admin.companies.update-infrastructure-tier', company.id), {
+                                                                    infrastructure_tier: e.target.value,
+                                                                }, { preserveScroll: true })
+                                                            }}
+                                                            className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                        >
+                                                            <option value="shared">Shared</option>
+                                                            <option value="dedicated">Dedicated</option>
+                                                        </select>
+                                                        <span className="text-xs text-gray-500">
+                                                            Dedicated = per-tenant S3 bucket. Sales provisions via this control.
+                                                        </span>
+                                                    </form>
+                                                </dd>
+                                            </div>
+                                        )}
                                         {company.plan_management.is_externally_managed && (
                                             <div className="col-span-full">
                                                 <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3">
@@ -715,7 +754,7 @@ export default function AdminCompanyView({
                                                 >
                                                     <option value="member">Member</option>
                                                     <option value="admin">Admin</option>
-                                                    {company.plan_name && ['pro', 'enterprise'].includes(company.plan_name.toLowerCase()) && (
+                                                    {company.plan_name && ['pro', 'premium', 'enterprise'].includes(company.plan_name.toLowerCase()) && (
                                                         <option value="brand_manager">Brand Manager</option>
                                                     )}
                                                     <option value="owner">Owner</option>
@@ -1029,6 +1068,7 @@ export default function AdminCompanyView({
                                                         <option value="free">Free</option>
                                                         <option value="starter">Starter</option>
                                                         <option value="pro">Pro</option>
+                                                        <option value="premium">Premium</option>
                                                         <option value="enterprise">Enterprise</option>
                                                     </select>
                                                 </div>

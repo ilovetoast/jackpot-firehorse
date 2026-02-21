@@ -46,6 +46,7 @@ class Tenant extends Model
         'storage_mode', // Hybrid S3: 'shared' | 'dedicated'
         'storage_bucket', // Dedicated bucket name (Enterprise)
         'cdn_distribution_id', // CloudFront distribution (Enterprise)
+        'infrastructure_tier', // 'shared' | 'dedicated' — decoupled from plan; local always shared
     ];
 
     /**
@@ -204,6 +205,19 @@ class Tenant extends Model
     public function agencyPartnerReferrals(): HasMany
     {
         return $this->hasMany(AgencyPartnerReferral::class, 'agency_tenant_id');
+    }
+
+    /**
+     * Whether tenant uses dedicated infrastructure (separate S3 bucket, etc.).
+     * Decoupled from Stripe plan. Local env always returns false.
+     */
+    public function hasDedicatedInfrastructure(): bool
+    {
+        if (app()->environment('local')) {
+            return false;
+        }
+
+        return ($this->infrastructure_tier ?? 'shared') === 'dedicated';
     }
 
     /**

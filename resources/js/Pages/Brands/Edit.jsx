@@ -1175,7 +1175,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="px-4 py-5 sm:p-6">
                                     <div className="space-y-6">
                                         {/* Phase M-2: Metadata Approval Toggle */}
-                                        {['pro', 'enterprise'].includes(current_plan) && tenant_settings?.enable_metadata_approval && (
+                                        {['pro', 'premium', 'enterprise'].includes(current_plan) && tenant_settings?.enable_metadata_approval && (
                                             <div>
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex-1">
@@ -1206,10 +1206,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 </div>
                                             </div>
                                         )}
-                                        {(!['pro', 'enterprise'].includes(current_plan) || !tenant_settings?.enable_metadata_approval) && (
+                                        {(!['pro', 'premium', 'enterprise'].includes(current_plan) || !tenant_settings?.enable_metadata_approval) && (
                                             <div className="rounded-md bg-gray-50 p-4">
                                                 <p className="text-sm text-gray-600">
-                                                    {!['pro', 'enterprise'].includes(current_plan) 
+                                                    {!['pro', 'premium', 'enterprise'].includes(current_plan) 
                                                         ? 'Metadata approval workflows require a Pro or Enterprise plan.'
                                                         : 'Metadata approval must be enabled at the company level first.'}
                                                 </p>

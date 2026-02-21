@@ -32,7 +32,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
     const canDeleteCompany = is_current_user_owner
     const canViewMetadata = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [activeSection, setActiveSection] = useState('company-information')
-    const isEnterprise = billing?.current_plan === 'enterprise'
+    const hasDownloadPolicyAccess = ['premium', 'enterprise'].includes(billing?.current_plan)
     const [downloadPolicy, setDownloadPolicy] = useState(() => ({
         ...DEFAULT_DOWNLOAD_POLICY,
         ...(enterpriseDownloadPolicy || {}),
@@ -222,7 +222,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
     }
 
     const persistDownloadPolicy = (next) => {
-        if (!isEnterprise) return
+        if (!hasDownloadPolicyAccess) return
         setDownloadPolicy(next)
         setDownloadPolicySaving(true)
         router.put(route('companies.settings.download-policy'), {
@@ -275,6 +275,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
             free: 'Free',
             starter: 'Starter',
             pro: 'Pro',
+            premium: 'Premium',
             enterprise: 'Enterprise',
         }
         return planNames[planKey] || planKey
@@ -459,7 +460,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                 </div>
 
                                 {/* Phase M-2: Metadata Approval Toggle */}
-                                {['pro', 'enterprise'].includes(billing.current_plan) && (
+                                {['pro', 'premium', 'enterprise'].includes(billing.current_plan) && (
                                     <div className="border-t border-gray-200 pt-6">
                                         <div className="flex items-center justify-between">
                                             <div className="flex-1">
@@ -724,7 +725,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
 
                     {/* Enterprise Download Policy — Company Settings → Downloads → Policy (D12: single card like other sections) */}
                     <div id="enterprise-download-policy" className="mb-12 scroll-mt-8">
-                        {isEnterprise && !canManageDownloadPolicy ? (
+                        {hasDownloadPolicyAccess && !canManageDownloadPolicy ? (
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="relative">
                                     <div className="blur-sm select-none pointer-events-none">
@@ -753,7 +754,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                 <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
                                     <h2 className="text-lg font-semibold text-gray-900">Enterprise Download Policy</h2>
                                     <p className="mt-1 text-sm text-gray-500">Controls how assets leave the system.</p>
-                                    {!isEnterprise && (
+                                    {!hasDownloadPolicyAccess && (
                                         <p className="mt-3 rounded-md bg-gray-100 px-3 py-2 text-sm text-gray-700">
                                             Download policy controls are available on the Enterprise plan.
                                         </p>
@@ -817,8 +818,8 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         type="checkbox"
                                                         id="policy-disable-single"
                                                         checked={downloadPolicy.disable_single_asset_downloads ?? false}
-                                                        disabled={!isEnterprise}
-                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, disable_single_asset_downloads: e.target.checked })}
+                                                        disabled={!hasDownloadPolicyAccess}
+                                                        onChange={(e) => hasDownloadPolicyAccess && persistDownloadPolicy({ ...downloadPolicy, disable_single_asset_downloads: e.target.checked })}
                                                         className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
                                                     />
                                                     <div>
@@ -828,7 +829,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         <p className="mt-0.5 text-sm text-gray-500">
                                                             Require assets to be delivered as packaged downloads instead of individual files. This helps ensure assets are shared intentionally and with context.
                                                         </p>
-                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                        {!hasDownloadPolicyAccess && <p className="mt-1 text-xs text-gray-400">Included with Premium or Enterprise plan.</p>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -843,8 +844,8 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         type="checkbox"
                                                         id="policy-password"
                                                         checked={downloadPolicy.require_password_for_public ?? false}
-                                                        disabled={!isEnterprise}
-                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, require_password_for_public: e.target.checked })}
+                                                        disabled={!hasDownloadPolicyAccess}
+                                                        onChange={(e) => hasDownloadPolicyAccess && persistDownloadPolicy({ ...downloadPolicy, require_password_for_public: e.target.checked })}
                                                         className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
                                                     />
                                                     <div>
@@ -854,7 +855,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         <p className="mt-0.5 text-sm text-gray-500">
                                                             Require a password before accessing public download links. Passwords add a basic security layer for external sharing.
                                                         </p>
-                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                        {!hasDownloadPolicyAccess && <p className="mt-1 text-xs text-gray-400">Included with Premium or Enterprise plan.</p>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -869,9 +870,9 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         type="checkbox"
                                                         id="policy-expiration"
                                                         checked={(downloadPolicy.force_expiration_days != null || downloadPolicy.disallow_non_expiring) ?? false}
-                                                        disabled={!isEnterprise}
+                                                        disabled={!hasDownloadPolicyAccess}
                                                         onChange={(e) => {
-                                                            if (!isEnterprise) return
+                                                            if (!hasDownloadPolicyAccess) return
                                                             const on = e.target.checked
                                                             persistDownloadPolicy({
                                                                 ...downloadPolicy,
@@ -888,7 +889,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         <p className="mt-0.5 text-sm text-gray-500">
                                                             Automatically limit how long downloads remain available. Expired downloads cannot be accessed, even if links are shared.
                                                         </p>
-                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                        {!hasDownloadPolicyAccess && <p className="mt-1 text-xs text-gray-400">Included with Premium or Enterprise plan.</p>}
                                                     </div>
                                                 </div>
                                                 <div className="ml-7 flex items-center gap-2">
@@ -897,12 +898,12 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                                         type="number"
                                                         id="policy-max-days"
                                                         value={downloadPolicy.force_expiration_days ?? ''}
-                                                        disabled={!isEnterprise}
+                                                        disabled={!hasDownloadPolicyAccess}
                                                         min={1}
                                                         max={365}
                                                         placeholder="—"
                                                         onChange={(e) => {
-                                                            if (!isEnterprise) return
+                                                            if (!hasDownloadPolicyAccess) return
                                                             const v = e.target.value ? parseInt(e.target.value, 10) : null
                                                             if (v != null && (v < 1 || v > 365)) return
                                                             persistDownloadPolicy({ ...downloadPolicy, force_expiration_days: v || null })

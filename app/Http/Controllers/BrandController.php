@@ -516,7 +516,7 @@ class BrandController extends Controller
                 'current' => $currentPrivateCount,
                 'max' => $maxPrivateCategories,
                 'can_create' => $canCreatePrivateCategory,
-                'plan_allows' => in_array($currentPlan, ['pro', 'enterprise']),
+                'plan_allows' => in_array($currentPlan, ['pro', 'premium', 'enterprise']),
             ],
             'can_edit_system_categories' => $canEditSystemCategories,
             // Phase M-2: Pass tenant settings to check if company metadata approval is enabled

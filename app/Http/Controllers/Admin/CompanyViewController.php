@@ -325,6 +325,7 @@ class CompanyViewController extends Controller
                     'is_externally_managed' => $isExternallyManaged,
                     'manual_plan_override' => $tenant->manual_plan_override,
                 ],
+                'infrastructure_tier' => $tenant->infrastructure_tier ?? 'shared',
                 'can_manage_plan' => !$stripeConnected, // Allow non-Stripe plans to be managed
                 'plan_change_info' => $planChangeInfo,
                 'owner' => $owner ? [

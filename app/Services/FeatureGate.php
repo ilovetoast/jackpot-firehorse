@@ -82,7 +82,7 @@ class FeatureGate
     public function getRequiredPlanName(Tenant $tenant): string
     {
         // Find the lowest plan that has approvals enabled
-        foreach (['pro', 'enterprise'] as $planName) {
+        foreach (['pro', 'premium', 'enterprise'] as $planName) {
             $plan = config("plans.{$planName}");
             if (($plan['approval_features']['approvals.enabled'] ?? false) === true) {
                 return ucfirst($planName);

@@ -219,18 +219,21 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
         }
         
         // Add plan-specific features
-        if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'enterprise') {
+        if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'premium' || plan.id === 'enterprise') {
             features.push('Quarterly workshops')
         }
         
-        if (plan.id === 'pro' || plan.id === 'enterprise') {
+        if (plan.id === 'pro' || plan.id === 'premium' || plan.id === 'enterprise') {
             features.push('Single sign-on (SSO)')
             features.push('Priority phone support')
         }
         
-        if (plan.id === 'enterprise') {
+        if (plan.id === 'premium' || plan.id === 'enterprise') {
             features.push('Custom integrations')
-            features.push('Dedicated account manager')
+            if (plan.id === 'enterprise') {
+                features.push('Dedicated account manager')
+                features.push('Dedicated infrastructure')
+            }
         }
         
         // Add role access feature
@@ -522,7 +525,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         <h3 className="text-xl font-semibold text-gray-900 mb-2">{plan.name}</h3>
                                         
                                         <div className="mb-4">
-                                            {plan.monthly_price ? (
+                                            {plan.requires_contact ? (
+                                                <>
+                                                    <span className="text-3xl font-bold text-gray-900">Custom</span>
+                                                    <p className="text-sm text-gray-500 mt-1">Contact sales for pricing</p>
+                                                </>
+                                            ) : plan.monthly_price ? (
                                                 <>
                                                     <span className="text-3xl font-bold text-gray-900">${plan.monthly_price}</span>
                                                     <span className="text-gray-500 ml-2">USD</span>
@@ -553,10 +561,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             <div className="flex justify-between">
                                                 <span>Storage:</span>
                                                 <span className="font-medium text-gray-900">
-                                                    {plan.id === 'enterprise' ? (
+                                                    {(plan.id === 'enterprise' || plan.id === 'premium') ? (
                                                         <span>
-                                                            <span>2 TB included</span>
-                                                            <span className="block text-xs text-gray-500 font-normal">Additional storage available</span>
+                                                            {formatStorage(plan.limits.max_storage_mb)}
+                                                            {(plan.id === 'enterprise') && (
+                                                                <span className="block text-xs text-gray-500 font-normal">Dedicated infrastructure available</span>
+                                                            )}
                                                         </span>
                                                     ) : (
                                                         formatStorage(plan.limits.max_storage_mb)
@@ -637,6 +647,14 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 >
                                                     Free Plan
                                                 </button>
+                                            ) : plan.requires_contact ? (
+                                                <Link
+                                                    href={route('contact', { plan: plan.id })}
+                                                    className="flex w-full justify-center rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
+                                                    style={{ backgroundColor: sitePrimaryColor }}
+                                                >
+                                                    Contact Sales
+                                                </Link>
                                             ) : subscription?.has_incomplete_payment ? (
                                                 <button
                                                     type="button"
@@ -661,7 +679,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                         }
                                                     }}
                                                     disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free' || subscription?.has_incomplete_payment}
-                                                    className={`w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                                    className="w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                                                     style={{ backgroundColor: sitePrimaryColor }}
                                                 >
                                                     {processingPlanId === plan.id ? 'Processing...' : getButtonText(plan)}
@@ -675,7 +693,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     </div>
 
                     {/* Add Storage Section - for paid plans */}
-                    {['starter', 'pro', 'enterprise'].includes(current_plan) && (
+                    {['starter', 'pro', 'premium', 'enterprise'].includes(current_plan) && (
                         <div className="mt-10 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
                             <h3 className="text-lg font-semibold text-gray-900 mb-2">Additional Storage</h3>
                             <p className="text-sm text-gray-600 mb-4">

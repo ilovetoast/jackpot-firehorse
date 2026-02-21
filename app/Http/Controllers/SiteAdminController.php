@@ -1429,7 +1429,7 @@ class SiteAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'plan' => ['required', 'string', 'in:free,starter,pro,enterprise'],
+            'plan' => ['required', 'string', 'in:free,starter,pro,premium,enterprise'],
             'management_source' => ['nullable', 'string', 'in:stripe,shopify,manual'],
             'billing_status' => ['nullable', 'string', 'in:trial,comped'],
             'expiration_months' => ['nullable', 'integer', 'min:1', 'max:36'], // Max 3 years
@@ -1575,6 +1575,23 @@ class SiteAdminController extends Controller
         }
 
         return back()->with('success', "Plan updated from {$oldPlan} to {$planName}.");
+    }
+
+    /**
+     * Update a tenant's infrastructure tier (admin-only).
+     * Used by sales to provision dedicated infrastructure for Enterprise tenants.
+     */
+    public function updateInfrastructureTier(Request $request, Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can update infrastructure tier.');
+
+        $validated = $request->validate([
+            'infrastructure_tier' => ['required', 'string', 'in:shared,dedicated'],
+        ]);
+
+        $tenant->update(['infrastructure_tier' => $validated['infrastructure_tier']]);
+
+        return back()->with('success', "Infrastructure tier set to {$validated['infrastructure_tier']}.");
     }
 
     /**

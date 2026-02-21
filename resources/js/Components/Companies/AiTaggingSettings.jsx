@@ -58,7 +58,8 @@ export default function AiTaggingSettings({
         free: { max: 1, name: 'Free' },
         starter: { max: 5, name: 'Starter' },
         pro: { max: 10, name: 'Pro' },
-        enterprise: { max: 15, name: 'Enterprise' }
+        premium: { max: 15, name: 'Premium' },
+        enterprise: { max: 50, name: 'Enterprise' }
     }
     const planLimit = planLimits[currentPlan] || planLimits.free
     const maxTagsPerAsset = planLimit.max

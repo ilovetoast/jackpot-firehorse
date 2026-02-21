@@ -20,13 +20,13 @@ class EnterpriseDownloadPolicy
     ) {}
 
     /**
-     * Effective policy array for tenant (null if not enterprise or no policy).
+     * Effective policy array for tenant (null if not premium/enterprise or no policy).
      * D12: Tenant-level overrides from settings['download_policy'] merge over plan config.
      */
     protected function getPolicy(Tenant $tenant): ?array
     {
         $planName = $this->planService->getCurrentPlan($tenant);
-        if ($planName !== 'enterprise') {
+        if (!in_array($planName, ['premium', 'enterprise'])) {
             return null;
         }
         $plan = config("plans.{$planName}");

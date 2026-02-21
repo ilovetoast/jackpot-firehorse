@@ -31,6 +31,11 @@ Route::get('/manifest.webmanifest', function () {
 // Home route - simple home page (subdomains disabled)
 Route::get('/', fn () => Inertia::render('Home'));
 
+// Contact / sales inquiry (e.g. Enterprise plan)
+Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
+    'plan' => $request->query('plan'),
+]))->name('contact');
+
 // Standalone cinematic experience (frontend-only, no auth)
 Route::get('/experience', fn () => Inertia::render('Experience/Index'));
 
@@ -293,6 +298,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/users/{user}/suspend', [\App\Http\Controllers\SiteAdminController::class, 'suspendAccount'])->name('admin.users.suspend');
     Route::post('/admin/users/{user}/unsuspend', [\App\Http\Controllers\SiteAdminController::class, 'unsuspendAccount'])->name('admin.users.unsuspend');
     Route::put('/admin/companies/{tenant}/plan', [\App\Http\Controllers\SiteAdminController::class, 'updatePlan'])->name('admin.companies.update-plan');
+    Route::put('/admin/companies/{tenant}/infrastructure-tier', [\App\Http\Controllers\SiteAdminController::class, 'updateInfrastructureTier'])->name('admin.companies.update-infrastructure-tier');
     
     // Phase AG-11: Admin Agency Management
     Route::get('/admin/agencies', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'index'])->name('admin.agencies.index');

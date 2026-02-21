@@ -90,9 +90,9 @@ class BillingController extends Controller
             ->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
             $priceData = null;
             $monthlyPrice = null;
-            
-            // Skip free plan
-            if ($key !== 'free' && $plan['stripe_price_id'] !== 'price_free') {
+
+            // Skip Stripe fetch for plans without a price (e.g. enterprise sales-only)
+            if ($key !== 'free' && ! empty($plan['stripe_price_id']) && $plan['stripe_price_id'] !== 'price_free') {
                 try {
                     $stripeSecret = config('services.stripe.secret');
                     if ($stripeSecret) {
@@ -110,9 +110,9 @@ class BillingController extends Controller
                     $priceData = null;
                     $monthlyPrice = null;
                 }
-                
+
                 // Use fallback price if Stripe price not available
-                if (!$monthlyPrice && isset($plan['fallback_monthly_price'])) {
+                if (! $monthlyPrice && isset($plan['fallback_monthly_price'])) {
                     $monthlyPrice = number_format($plan['fallback_monthly_price'], 2);
                 }
             }
@@ -121,6 +121,8 @@ class BillingController extends Controller
                 'id' => $key,
                 'name' => $plan['name'],
                 'stripe_price_id' => $plan['stripe_price_id'],
+                'selectable' => $plan['selectable'] ?? true,
+                'requires_contact' => $plan['requires_contact'] ?? false,
                 'limits' => $plan['limits'],
                 'features' => $plan['features'],
                 'download_features' => $plan['download_features'] ?? null,
@@ -227,6 +229,13 @@ class BillingController extends Controller
      */
     public function subscribe(Request $request)
     {
+        // Phase 5: Block Stripe checkout for enterprise (sales-only)
+        $planId = $request->input('plan_id');
+        if ($planId === 'enterprise') {
+            return redirect()->route('contact', ['plan' => 'enterprise'])
+                ->with('info', 'Enterprise is a custom plan. Please contact sales for pricing.');
+        }
+
         $request->validate([
             'price_id' => 'required|string',
         ]);

@@ -204,7 +204,7 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                     </div>
 
                     {/* Additional Storage - for paid plans */}
-                    {['starter', 'pro', 'enterprise'].includes(current_plan?.id) && (
+                    {['starter', 'pro', 'premium', 'enterprise'].includes(current_plan?.id) && (
                         <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="px-6 py-5 border-b border-gray-200">
                                 <h2 className="text-lg font-semibold text-gray-900">Additional Storage</h2>

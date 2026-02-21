@@ -674,6 +674,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                                                                                 <option value="free">Free</option>
                                                                                 <option value="starter">Starter</option>
                                                                                 <option value="pro">Pro</option>
+                                                                                <option value="premium">Premium</option>
                                                                                 <option value="enterprise">Enterprise</option>
                                                                             </select>
                                                                         )}

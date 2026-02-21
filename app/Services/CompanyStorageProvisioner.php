@@ -6,7 +6,6 @@ use App\Enums\StorageBucketStatus;
 use App\Exceptions\BucketProvisioningNotAllowedException;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
-use App\Services\PlanService;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
@@ -27,8 +26,8 @@ class CompanyStorageProvisioner
      * Provision storage for a company (tenant).
      *
      * Hybrid S3 storage:
-     * - Enterprise plan: provisionPerCompany (dedicated bucket, may create S3 bucket)
-     * - Standard plans: provisionShared (StorageBucket record only; no S3 CreateBucket)
+     * - Dedicated infrastructure: provisionPerCompany (dedicated bucket, may create S3 bucket)
+     * - Shared: provisionShared (StorageBucket record only; no S3 CreateBucket)
      *
      * MUST NOT be called from web requests in staging/production (use TenantBucketService::provisionBucket which guards).
      *
@@ -42,9 +41,7 @@ class CompanyStorageProvisioner
             throw new BucketProvisioningNotAllowedException(app()->environment());
         }
 
-        $planService = app(PlanService::class);
-
-        if ($planService->isEnterprisePlan($tenant)) {
+        if ($tenant->hasDedicatedInfrastructure()) {
             return $this->provisionPerCompany($tenant);
         }
 
