@@ -47,6 +47,8 @@ class TenantsEnsureBucketsCommand extends Command
             return self::FAILURE;
         }
 
+        $this->repairMissingTenantUuids();
+
         $tenantId = $this->option('tenant-id');
         $tenants = $tenantId
             ? Tenant::where('id', (int) $tenantId)->get()
@@ -93,6 +95,22 @@ class TenantsEnsureBucketsCommand extends Command
         $this->info($failed > 0 ? "Summary: {$failed} tenant(s) had errors." : 'Reconciliation complete.');
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Repair tenants with null UUID. Self-healing for staging/production.
+     * Ensures canonical storage paths (tenants/{uuid}/...) never fail.
+     */
+    protected function repairMissingTenantUuids(): void
+    {
+        $tenants = Tenant::whereNull('uuid')->get();
+
+        foreach ($tenants as $tenant) {
+            $tenant->uuid = (string) \Illuminate\Support\Str::uuid();
+            $tenant->save();
+
+            $this->warn("Repaired missing UUID for tenant ID {$tenant->id}");
+        }
     }
 
     /**

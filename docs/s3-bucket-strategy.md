@@ -127,6 +127,19 @@ When S3 versioning is enabled, overwrites and deletes create non-current (previo
 
 ---
 
+## Tenant UUID Requirement
+
+Canonical shared storage requires every tenant to have a UUID. The path format depends on it:
+
+**Path format:** `tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/...`
+
+- **UUID is auto-generated** at creation (model-level enforcement).
+- **`tenants:ensure-buckets`** automatically repairs tenants with missing UUIDs (self-healing).
+- **`uuid` column** is NOT NULL and unique in the database.
+- **`tenant_id`** is no longer used in canonical storage paths — UUID provides stable, non-sequential isolation.
+
+---
+
 ## Canonical Shared Bucket Structure (Post Refactor)
 
 **Phase 5 + 6:** All shared bucket assets MUST follow this canonical structure:

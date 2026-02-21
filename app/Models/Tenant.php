@@ -75,12 +75,6 @@ class Tenant extends Model
     {
         parent::boot();
 
-        static::creating(function ($tenant) {
-            if (empty($tenant->uuid)) {
-                $tenant->uuid = (string) \Illuminate\Support\Str::uuid();
-            }
-        });
-
         static::created(function ($tenant) {
             // Automatically create a default brand when tenant is created
             $defaultBrand = $tenant->brands()->create([
@@ -102,6 +96,26 @@ class Tenant extends Model
             // Provision storage bucket (shared or dedicated) so uploads work immediately.
             // Runs in queue worker; for shared strategy creates StorageBucket record only.
             \App\Jobs\ProvisionCompanyStorageJob::dispatch($tenant->id);
+        });
+    }
+
+    /**
+     * Booted hook: enforce UUID at creation and save.
+     * Guarantees seeder, factory, manual creation, migrations, and updates
+     * cannot result in null uuid.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Tenant $tenant): void {
+            if (empty($tenant->uuid)) {
+                $tenant->uuid = (string) \Illuminate\Support\Str::uuid();
+            }
+        });
+
+        static::saving(function (Tenant $tenant): void {
+            if (empty($tenant->uuid)) {
+                $tenant->uuid = (string) \Illuminate\Support\Str::uuid();
+            }
         });
     }
 
