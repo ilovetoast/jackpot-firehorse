@@ -326,6 +326,7 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
+            'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // Phase C12.0: Collection-only mode (no brand; user has only collection access)
             'collection_only' => app()->bound('collection_only') && app('collection_only'),

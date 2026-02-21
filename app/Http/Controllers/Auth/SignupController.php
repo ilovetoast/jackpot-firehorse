@@ -18,8 +18,12 @@ class SignupController extends Controller
     /**
      * Show the signup page.
      */
-    public function show(): Response
+    public function show(): Response|\Illuminate\Http\RedirectResponse
     {
+        if (app()->environment('staging')) {
+            return redirect()->route('login')->with('info', 'Signup is temporarily disabled on staging.');
+        }
+
         return Inertia::render('Auth/Signup');
     }
 
@@ -28,6 +32,10 @@ class SignupController extends Controller
      */
     public function store(Request $request)
     {
+        if (app()->environment('staging')) {
+            return redirect()->route('login')->with('error', 'Signup is temporarily disabled on staging.');
+        }
+
         $validated = $request->validate([
             'first_name' => ['required', 'string', 'max:255'],
             'last_name' => ['required', 'string', 'max:255'],

@@ -1,7 +1,8 @@
-import { useForm } from '@inertiajs/react'
+import { useForm, usePage } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
 
 export default function Login() {
+    const { signup_enabled } = usePage().props
     const { data, setData, post, processing, errors } = useForm({
         email: '',
         password: '',
@@ -128,12 +129,14 @@ export default function Login() {
                         </div>
                     </form>
 
-                    <p className="mt-6 text-center text-sm text-gray-500">
-                        Don't have an account?{' '}
-                        <Link href="/signup" className="font-semibold text-indigo-600 hover:text-indigo-500">
-                            Sign up
-                        </Link>
-                    </p>
+                    {signup_enabled !== false && (
+                        <p className="mt-6 text-center text-sm text-gray-500">
+                            Don't have an account?{' '}
+                            <Link href="/signup" className="font-semibold text-indigo-600 hover:text-indigo-500">
+                                Sign up
+                            </Link>
+                        </p>
+                    )}
 
                     <p className="mt-4 text-center text-sm text-gray-500">
                         <Link href="/" className="font-semibold text-indigo-600 hover:text-indigo-500">

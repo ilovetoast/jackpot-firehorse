@@ -1,7 +1,7 @@
 import { Link, usePage } from '@inertiajs/react'
 
 export default function Contact({ plan }) {
-    const { auth, flash } = usePage().props
+    const { auth, flash, signup_enabled } = usePage().props
     const isEnterprise = plan === 'enterprise'
 
     return (
@@ -27,12 +27,14 @@ export default function Contact({ plan }) {
                                     <Link href="/login" className="text-sm font-semibold text-gray-900 hover:text-gray-700">
                                         Login
                                     </Link>
-                                    <Link
-                                        href="/signup"
-                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                                    >
-                                        Sign up
-                                    </Link>
+                                    {signup_enabled !== false && (
+                                        <Link
+                                            href="/signup"
+                                            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                        >
+                                            Sign up
+                                        </Link>
+                                    )}
                                 </>
                             )}
                         </div>

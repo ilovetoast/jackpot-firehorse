@@ -1,7 +1,7 @@
 import { Link, usePage } from '@inertiajs/react'
 
 export default function Home() {
-    const { auth } = usePage().props
+    const { auth, signup_enabled } = usePage().props
 
     // Determine the button text and link based on auth status
     const getButtonProps = () => {
@@ -55,12 +55,14 @@ export default function Home() {
                                     >
                                         Login
                                     </Link>
-                                    <Link
-                                        href="/signup"
-                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                    >
-                                        Sign up
-                                    </Link>
+                                    {signup_enabled !== false && (
+                                        <Link
+                                            href="/signup"
+                                            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                        >
+                                            Sign up
+                                        </Link>
+                                    )}
                                 </>
                             )}
                         </div>

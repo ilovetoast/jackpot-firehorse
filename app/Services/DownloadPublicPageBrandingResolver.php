@@ -124,7 +124,7 @@ class DownloadPublicPageBrandingResolver
             'footer_promo' => [
                 'line1' => 'Provided by ' . $appName . ' — Free Digital Asset Management',
                 'line2' => 'Sign up today',
-                'signup_url' => config('app.url') . '/signup',
+                'signup_url' => app()->environment('staging') ? null : (config('app.url') . '/signup'),
             ],
         ];
     }
