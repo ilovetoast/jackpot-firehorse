@@ -115,11 +115,30 @@ return [
     ],
 
     /*
-     * Fields restricted to specific slugs. Empty = no type-based auto-enabling.
-     * Type fields listed here are HIDDEN for categories not in their category_config.
-     * Ensures e.g. packaging shows only packaging_type, not template_type/audio_type/model_3d_type.
+     * Fields restricted to specific slugs. Type fields listed here are HIDDEN for categories
+     * not in their category_config. Ensures e.g. Photography shows only Photo Type, not
+     * Logo Type, Print Type, etc. Each type field is enabled only for its assigned category.
      */
-    'restrict_fields' => ['template_type', 'audio_type', 'model_3d_type'],
+    'restrict_fields' => [
+        'photo_type',
+        'logo_type',
+        'graphic_type',
+        'video_type',
+        'scene_classification',
+        'print_type',
+        'digital_type',
+        'ooh_type',
+        'event_type',
+        'execution_video_type',
+        'sales_collateral_type',
+        'pr_type',
+        'packaging_type',
+        'product_render_type',
+        'radio_type',
+        'template_type',
+        'audio_type',
+        'model_3d_type',
+    ],
 
     /*
      * Dominant color fields: enabled by default for all categories.
