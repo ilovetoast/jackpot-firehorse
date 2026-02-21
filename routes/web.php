@@ -83,6 +83,13 @@ Route::post('/d/{download}/unlock', [\App\Http\Controllers\DownloadController::c
 // D-SHARE: Send download link via email (rate-limited)
 Route::post('/d/{download}/share-email', [\App\Http\Controllers\DownloadController::class, 'shareEmail'])->name('downloads.public.share-email')->middleware(['web', 'throttle:10,1']);
 
+// CDN test route (temporary — verify CloudFront signed cookies)
+Route::get('/cdn-test', function () {
+    return response()->json([
+        'cookies' => request()->cookies->all(),
+    ]);
+})->middleware(['web', 'auth']);
+
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
 Route::get('/csrf-token', function (Request $request) {

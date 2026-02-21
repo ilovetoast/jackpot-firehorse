@@ -17,6 +17,7 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/keys/
 /storage/pail
 /storage/framework/*.pid
 /storage/logs/scheduler.log
