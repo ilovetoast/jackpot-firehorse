@@ -11,6 +11,15 @@ use Illuminate\Support\Facades\DB;
 class PlanService
 {
     /**
+     * Check if tenant is on the Enterprise plan.
+     * Uses existing plan identifier system (getCurrentPlan); no hardcoded plan names.
+     */
+    public function isEnterprisePlan(Tenant $tenant): bool
+    {
+        return $this->getCurrentPlan($tenant) === 'enterprise';
+    }
+
+    /**
      * Get the current plan name for a tenant.
      */
     public function getCurrentPlan(Tenant $tenant): string

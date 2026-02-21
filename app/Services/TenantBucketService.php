@@ -29,9 +29,11 @@ use RuntimeException;
 class TenantBucketService
 {
     public function __construct(
-        protected ?S3Client $s3Client = null
+        protected ?S3Client $s3Client = null,
+        protected ?PlanService $planService = null
     ) {
         $this->s3Client = $this->s3Client ?? $this->createS3Client();
+        $this->planService = $this->planService ?? app(PlanService::class);
     }
 
     /**
@@ -115,9 +117,31 @@ class TenantBucketService
     }
 
     /**
-     * Get bucket for upload/asset flows. Local/testing: resolve or provision. Staging/production: resolve only (never provisions).
+     * Get bucket for upload/asset flows.
+     *
+     * Hybrid S3 storage:
+     * - Enterprise plan: dedicated per-tenant bucket (existing behavior)
+     * - Standard plans: shared bucket only; never provisions new bucket
      */
     public function getOrProvisionBucket(Tenant $tenant): StorageBucket
+    {
+        if ($this->planService->isEnterprisePlan($tenant)) {
+            if ($tenant->storage_mode !== 'dedicated') {
+                $tenant->update(['storage_mode' => 'dedicated']);
+            }
+            return $this->getOrProvisionBucketDedicated($tenant);
+        }
+
+        if ($tenant->storage_mode !== 'shared') {
+            $tenant->update(['storage_mode' => 'shared']);
+        }
+        return $this->resolveSharedBucketOrFail($tenant);
+    }
+
+    /**
+     * Dedicated bucket path (Enterprise only): resolve or provision per-tenant bucket.
+     */
+    protected function getOrProvisionBucketDedicated(Tenant $tenant): StorageBucket
     {
         if ($this->isLocalOrTesting()) {
             $bucket = $this->resolveActiveBucketOrFailIfExists($tenant);
@@ -129,6 +153,44 @@ class TenantBucketService
         }
 
         return $this->resolveActiveBucketOrFail($tenant);
+    }
+
+    /**
+     * Resolve shared bucket for standard plans.
+     *
+     * - Looks up StorageBucket where name = config('storage.shared_bucket') for this tenant
+     * - Staging/production: throws if not found (shared bucket must be pre-provisioned)
+     * - Local/testing: allows provisioning (creates StorageBucket record only; no S3 CreateBucket)
+     */
+    public function resolveSharedBucketOrFail(Tenant $tenant): StorageBucket
+    {
+        $sharedBucketName = config('storage.shared_bucket');
+
+        if (! $sharedBucketName) {
+            throw new RuntimeException('Shared bucket not configured. Set AWS_BUCKET in .env.');
+        }
+
+        $bucket = StorageBucket::where('tenant_id', $tenant->id)
+            ->where('name', $sharedBucketName)
+            ->where('status', StorageBucketStatus::ACTIVE)
+            ->first();
+
+        if ($bucket) {
+            return $bucket;
+        }
+
+        if ($this->isStagingOrProduction()) {
+            Log::error('[STORAGE_BUCKET_MISSING] Shared bucket record missing for tenant', [
+                'tenant_id' => $tenant->id,
+                'expected_bucket' => $sharedBucketName,
+                'env' => app()->environment(),
+            ]);
+
+            throw new BucketNotProvisionedException($tenant->id);
+        }
+
+        // Local/testing: allow provisioning (creates StorageBucket record only)
+        return app(CompanyStorageProvisioner::class)->provisionShared($tenant);
     }
 
     /**
@@ -218,20 +280,22 @@ class TenantBucketService
     }
 
     /**
-     * Expected bucket name for tenant (no DB). Local: shared_bucket. Staging/Production: generated name.
+     * Expected bucket name for tenant (no DB).
+     * Enterprise (dedicated): always generated per-tenant name.
+     * Standard (shared): shared_bucket config.
      */
     protected function getExpectedBucketName(Tenant $tenant): string
     {
-        if ($this->isLocal()) {
-            $name = config('storage.shared_bucket');
-            if (! $name) {
-                throw new RuntimeException('Shared bucket not configured. Set AWS_BUCKET in .env for local.');
-            }
-
-            return $name;
+        if ($this->planService->isEnterprisePlan($tenant)) {
+            return $this->generateBucketName($tenant);
         }
 
-        return $this->generateBucketName($tenant);
+        $name = config('storage.shared_bucket');
+        if (! $name) {
+            throw new RuntimeException('Shared bucket not configured. Set AWS_BUCKET in .env.');
+        }
+
+        return $name;
     }
 
     protected function isLocalOrTesting(): bool

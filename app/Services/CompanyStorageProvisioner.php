@@ -6,6 +6,7 @@ use App\Enums\StorageBucketStatus;
 use App\Exceptions\BucketProvisioningNotAllowedException;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
+use App\Services\PlanService;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
@@ -25,8 +26,9 @@ class CompanyStorageProvisioner
     /**
      * Provision storage for a company (tenant).
      *
-     * This method is idempotent and safe to retry. If the bucket already exists,
-     * it will verify and update its configuration rather than failing.
+     * Hybrid S3 storage:
+     * - Enterprise plan: provisionPerCompany (dedicated bucket, may create S3 bucket)
+     * - Standard plans: provisionShared (StorageBucket record only; no S3 CreateBucket)
      *
      * MUST NOT be called from web requests in staging/production (use TenantBucketService::provisionBucket which guards).
      *
@@ -40,13 +42,13 @@ class CompanyStorageProvisioner
             throw new BucketProvisioningNotAllowedException(app()->environment());
         }
 
-        $strategy = config('storage.provision_strategy', 'shared');
+        $planService = app(PlanService::class);
 
-        return match ($strategy) {
-            'per_company' => $this->provisionPerCompany($tenant),
-            'shared' => $this->provisionShared($tenant),
-            default => throw new \InvalidArgumentException("Unknown provision strategy: {$strategy}"),
-        };
+        if ($planService->isEnterprisePlan($tenant)) {
+            return $this->provisionPerCompany($tenant);
+        }
+
+        return $this->provisionShared($tenant);
     }
 
     /**
@@ -140,13 +142,16 @@ class CompanyStorageProvisioner
     }
 
     /**
-     * Provision using shared bucket (local/staging).
+     * Provision using shared bucket (standard plans).
+     *
+     * - Ensures one StorageBucket record exists per tenant referencing the shared bucket name
+     * - Does NOT call S3 CreateBucket (shared bucket must exist in AWS)
      *
      * @param Tenant $tenant
      * @return StorageBucket
      * @throws \Exception
      */
-    protected function provisionShared(Tenant $tenant): StorageBucket
+    public function provisionShared(Tenant $tenant): StorageBucket
     {
         $sharedBucketName = config('storage.shared_bucket');
 

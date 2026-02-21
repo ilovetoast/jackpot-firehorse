@@ -43,6 +43,9 @@ class Tenant extends Model
         'storage_addon_mb', // Storage add-on: additional MB from purchased add-on
         'storage_addon_stripe_price_id', // Stripe price ID for add-on subscription item
         'storage_addon_stripe_subscription_item_id', // Stripe subscription item ID
+        'storage_mode', // Hybrid S3: 'shared' | 'dedicated'
+        'storage_bucket', // Dedicated bucket name (Enterprise)
+        'cdn_distribution_id', // CloudFront distribution (Enterprise)
     ];
 
     /**
