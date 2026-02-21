@@ -87,10 +87,10 @@ class CompanyBrandSeeder extends Seeder
         );
         $initialCompany->update(['name' => 'Velvet Hammer']);
 
-        // Agency: enterprise plan (feature limits), Silver tier, approved
+        // Agency: premium plan (feature limits), Silver tier, approved
         $silverTier = AgencyTier::where('name', 'Silver')->first();
         $initialCompany->update([
-            'manual_plan_override' => 'enterprise',
+            'manual_plan_override' => 'premium',
             'is_agency' => true,
             'agency_approved_at' => now(),
             'agency_approved_by' => $initialUser->id,
