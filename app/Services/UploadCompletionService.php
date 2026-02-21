@@ -13,6 +13,7 @@ use App\Jobs\ExtractMetadataJob;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\Category;
+use App\Services\AssetPathGenerator;
 use App\Models\UploadSession;
 use App\Services\AssetVersionService;
 use App\Services\MetadataPersistenceService;
@@ -450,12 +451,14 @@ class UploadCompletionService
             // Refresh asset to get latest state
             $asset->refresh();
 
-            // Phase 2B: Copy to versioned path and create version 1 (new asset)
+            // Phase 2B: Copy to canonical versioned path and create version 1 (new asset)
+            // Canonical: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
             $versionService = app(AssetVersionService::class);
             $nextVersion = $versionService->getNextVersionNumber($asset);
             $extension = pathinfo($finalFilename ?? $fileInfo['original_filename'], PATHINFO_EXTENSION);
             $extension = $extension ? strtolower($extension) : 'file';
-            $versionedPath = "assets/{$asset->id}/v{$nextVersion}/original.{$extension}";
+            $pathGenerator = app(AssetPathGenerator::class);
+            $versionedPath = $pathGenerator->generateOriginalPath($asset->tenant, $asset, $nextVersion, $extension);
             $this->copyTempToVersionedPath($uploadSession, $versionedPath);
             $fileMeta = [
                 'file_path' => $versionedPath,
@@ -1131,7 +1134,7 @@ class UploadCompletionService
 
     /**
      * Copy file from temp upload location to versioned path.
-     * Phase 2B: assets/{asset_id}/v{n}/original.{ext}
+     * Phase 2B: tenants/{tenant_uuid}/assets/{asset_uuid}/v{n}/original.{ext}
      *
      * @param UploadSession $uploadSession
      * @param string $versionedPath Destination S3 key
@@ -1204,37 +1207,6 @@ class UploadCompletionService
         // Path is deterministic and based solely on upload_session_id
         // MUST match UploadInitiationService::generateTempUploadPath() exactly
         return "temp/uploads/{$uploadSession->id}/original";
-    }
-
-    /**
-     * Generate final storage path for asset.
-     *
-     * Uses the provided filename (which may be the resolvedFilename from frontend,
-     * derived from title + extension) for storage path generation.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param string $filename Filename to use for storage (resolvedFilename from frontend, or original_filename from S3)
-     * @param string $uploadSessionId
-     * @return string
-     */
-    protected function generateStoragePath(
-        int $tenantId,
-        ?int $brandId,
-        string $filename,
-        string $uploadSessionId
-    ): string {
-        $basePath = "assets/{$tenantId}";
-
-        if ($brandId) {
-            $basePath .= "/{$brandId}";
-        }
-
-        // Generate unique filename to avoid conflicts
-        // Uses provided filename (which respects user's title-derived filename if provided)
-        $uniqueFileName = \Illuminate\Support\Str::uuid()->toString() . '_' . $filename;
-
-        return "{$basePath}/{$uniqueFileName}";
     }
 
     /**
@@ -1413,12 +1385,14 @@ class UploadCompletionService
         // Resolve filename for path: client > S3 metadata > existing asset (extension only, no MIME inference)
         $newFilename = $resolvedFilename ?? ($fileInfo['original_filename'] !== 'unknown' ? $fileInfo['original_filename'] : null) ?? $asset->original_filename;
 
-        // Phase 2B: Copy to versioned path and create new version (existing asset)
+        // Phase 2B: Copy to canonical versioned path and create new version (existing asset)
+        // Canonical: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
         $versionService = app(AssetVersionService::class);
         $nextVersion = $versionService->getNextVersionNumber($asset);
         $extension = pathinfo($newFilename ?? 'file', PATHINFO_EXTENSION);
         $extension = $extension ? strtolower($extension) : 'file';
-        $versionedPath = "assets/{$asset->id}/v{$nextVersion}/original.{$extension}";
+        $pathGenerator = app(AssetPathGenerator::class);
+        $versionedPath = $pathGenerator->generateOriginalPath($asset->tenant, $asset, $nextVersion, $extension);
         $this->copyTempToVersionedPath($uploadSession, $versionedPath);
 
         // Version creation: minimal fields. mime_type placeholder required (DB NOT NULL); FileInspectionService overwrites in ProcessAssetJob.
@@ -1624,15 +1598,10 @@ class UploadCompletionService
 
         $newFilename = $resolvedFilename ?? ($fileInfo['original_filename'] !== 'unknown' ? $fileInfo['original_filename'] : null) ?? $asset->original_filename;
 
-        // Extension change: Starter replace must not allow extension mismatch (prevents MIME confusion)
-        $newExtension = $newFilename ? strtolower(pathinfo($newFilename, PATHINFO_EXTENSION)) : '';
-        $currentExtension = $asset->storage_root_path ? strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION)) : '';
-        $destPath = $asset->storage_root_path;
-        if ($newExtension && $currentExtension && $newExtension !== $currentExtension) {
-            $dir = pathinfo($asset->storage_root_path, PATHINFO_DIRNAME);
-            $base = pathinfo($asset->storage_root_path, PATHINFO_FILENAME);
-            $destPath = "{$dir}/{$base}.{$newExtension}";
-        }
+        // Use canonical path: tenants/{tenant_uuid}/assets/{asset_uuid}/v1/original.{ext}
+        $newExtension = $newFilename ? strtolower(pathinfo($newFilename, PATHINFO_EXTENSION)) : 'file';
+        $pathGenerator = app(AssetPathGenerator::class);
+        $destPath = $pathGenerator->generateOriginalPath($asset->tenant, $asset, 1, $newExtension ?: 'file');
 
         $this->copyTempToVersionedPath($uploadSession, $destPath);
 

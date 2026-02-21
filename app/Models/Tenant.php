@@ -23,6 +23,7 @@ class Tenant extends Model
     protected $fillable = [
         'name',
         'slug',
+        'uuid', // Phase 5: Canonical storage path isolation (tenants/{uuid}/assets/...)
         'timezone',
         'plan_management_source',
         'manual_plan_override',
@@ -73,6 +74,12 @@ class Tenant extends Model
     protected static function boot(): void
     {
         parent::boot();
+
+        static::creating(function ($tenant) {
+            if (empty($tenant->uuid)) {
+                $tenant->uuid = (string) \Illuminate\Support\Str::uuid();
+            }
+        });
 
         static::created(function ($tenant) {
             // Automatically create a default brand when tenant is created

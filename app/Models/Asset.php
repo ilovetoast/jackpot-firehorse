@@ -294,7 +294,24 @@ class Asset extends Model
      */
     protected $appends = [
         'is_complete',
+        'original_url',
     ];
+
+    /**
+     * Get CDN URL for the original asset file.
+     *
+     * storage_root_path stores the relative S3 key only (no full URLs).
+     *
+     * @return string CDN URL (CloudFront in staging/production, S3 in local)
+     */
+    public function getOriginalUrlAttribute(): string
+    {
+        $path = $this->storage_root_path ?? '';
+        if ($path === '') {
+            return '';
+        }
+        return cdn_url($path);
+    }
 
     /**
      * Check if asset processing pipeline is complete.

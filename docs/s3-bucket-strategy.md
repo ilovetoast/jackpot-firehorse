@@ -127,6 +127,55 @@ When S3 versioning is enabled, overwrites and deletes create non-current (previo
 
 ---
 
+## Canonical Shared Bucket Structure (Post Refactor)
+
+**Phase 5 + 6:** All shared bucket assets MUST follow this canonical structure:
+
+### Original files
+```
+tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
+```
+
+### Thumbnails
+```
+tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
+```
+
+### Key points
+- **Tenant UUID** used for isolation (not `tenant_id`). Provides stable, non-sequential path prefix.
+- **Version directory** (`v{version}`) prevents CloudFront stale caching; each version is immutable.
+- **No `tenant_id`** in path — deprecated in favor of UUID.
+- **No `brand_id`** in path.
+- **All assets immutable per version** — new versions get new `v{n}` directory.
+
+### Migration note
+Legacy paths (`assets/{tenant_id}/...`, `assets/{tenant_id}/{brand_id}/...`, `uuid_filename` pattern) are **deprecated** and **no longer written**. Existing assets in legacy paths remain readable for backwards compatibility but new uploads, promotions, restores, and thumbnail writes use the canonical structure only.
+
+---
+
+## Tenant-Scoped CDN Authorization
+
+CloudFront signed cookies are **tenant-scoped** for defense-in-depth isolation.
+
+### Policy scope
+- **Resource:** `https://{cdn-domain}/tenants/{tenant_uuid}/*`
+- **Not wildcard:** No `https://{cdn-domain}/*` — access is limited to the active tenant's path only.
+
+### Behavior
+- Cookies regenerate automatically when the user switches tenants.
+- Session stores `cdn_tenant_uuid`; mismatch triggers regeneration.
+- No wildcard CDN access — even if the app leaks a path, CloudFront blocks cross-tenant requests.
+
+### Defense-in-depth
+- CDN-level enforcement: CloudFront validates the signed policy before serving content.
+- Tenant isolation at the edge, independent of application logic.
+
+### Local environment
+- Signing is skipped entirely when `APP_ENV=local`.
+- `cdn_url()` returns S3/MinIO URLs directly (no CloudFront).
+
+---
+
 ## Summary
 
 | Rule | Description |

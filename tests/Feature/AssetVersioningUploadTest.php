@@ -124,9 +124,9 @@ class AssetVersioningUploadTest extends TestCase
         $this->assertNotNull($v1, 'v1 should be created');
         $this->assertTrue($v1->is_current, 'v1 should be is_current true');
 
-        // storage_root_path → v1 path
-        $expectedPath = "assets/{$asset->id}/v1/original.jpg";
-        $this->assertEquals($expectedPath, $asset->storage_root_path, 'storage_root_path should point to v1 path');
+        // storage_root_path → canonical v1 path: tenants/{tenant_uuid}/assets/{asset_uuid}/v1/original.jpg
+        $expectedPath = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
+        $this->assertEquals($expectedPath, $asset->storage_root_path, 'storage_root_path should point to canonical v1 path');
         $this->assertEquals($expectedPath, $v1->file_path, 'version file_path should match');
     }
 
@@ -163,7 +163,7 @@ class AssetVersioningUploadTest extends TestCase
             'storage_root_path' => 'temp/placeholder', // Will update after we have asset id
         ]);
 
-        $v1Path = "assets/{$asset->id}/v1/original.jpg";
+        $v1Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
         $asset->update(['storage_root_path' => $v1Path]);
 
         AssetVersion::create([
@@ -218,9 +218,9 @@ class AssetVersioningUploadTest extends TestCase
         $this->assertNotNull($v2, 'v2 should be created');
         $this->assertTrue($v2->is_current, 'v2 should be is_current true');
 
-        // storage_root_path → v2 path
-        $expectedV2Path = "assets/{$asset->id}/v2/original.jpg";
-        $this->assertEquals($expectedV2Path, $updatedAsset->storage_root_path, 'storage_root_path should point to v2 path');
+        // storage_root_path → canonical v2 path
+        $expectedV2Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v2/original.jpg";
+        $this->assertEquals($expectedV2Path, $updatedAsset->storage_root_path, 'storage_root_path should point to canonical v2 path');
         $this->assertEquals($expectedV2Path, $v2->file_path, 'v2 file_path should match');
     }
 
@@ -255,7 +255,7 @@ class AssetVersioningUploadTest extends TestCase
             'size_bytes' => 1024,
             'storage_root_path' => 'temp/placeholder',
         ]);
-        $existingPath = "assets/{$asset->id}/file.jpg";
+        $existingPath = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/file.jpg";
         $asset->update(['storage_root_path' => $existingPath]);
 
         $uploadSession = UploadSession::create([
@@ -291,8 +291,9 @@ class AssetVersioningUploadTest extends TestCase
         $versionCount = AssetVersion::where('asset_id', $asset->id)->count();
         $this->assertEquals(0, $versionCount, 'Starter plan should not create version records on replace');
 
-        // storage_root_path unchanged (file overwritten in place)
-        $this->assertEquals($existingPath, $updatedAsset->storage_root_path, 'storage_root_path should remain unchanged (in-place overwrite)');
+        // storage_root_path → canonical v1 path (in-place replace uses canonical path)
+        $expectedPath = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
+        $this->assertEquals($expectedPath, $updatedAsset->storage_root_path, 'storage_root_path should be canonical v1 path');
     }
 
     /**
@@ -326,7 +327,7 @@ class AssetVersioningUploadTest extends TestCase
             'size_bytes' => 1024,
             'storage_root_path' => 'temp/placeholder',
         ]);
-        $v1Path = "assets/{$asset->id}/v1/original.jpg";
+        $v1Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
         $asset->update(['storage_root_path' => $v1Path]);
 
         AssetVersion::create([
@@ -510,7 +511,7 @@ class AssetVersioningUploadTest extends TestCase
             'size_bytes' => 1024,
             'storage_root_path' => 'temp/placeholder',
         ]);
-        $v1Path = "assets/{$asset->id}/v1/original.jpg";
+        $v1Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
         $asset->update(['storage_root_path' => $v1Path]);
 
         AssetVersion::create([
@@ -562,8 +563,8 @@ class AssetVersioningUploadTest extends TestCase
             'size_bytes' => 1024,
             'storage_root_path' => 'temp/placeholder',
         ]);
-        $v1Path = "assets/{$asset->id}/v1/original.jpg";
-        $v2Path = "assets/{$asset->id}/v2/original.jpg";
+        $v1Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v1/original.jpg";
+        $v2Path = "tenants/{$this->tenant->uuid}/assets/{$asset->id}/v2/original.jpg";
         $asset->update(['storage_root_path' => $v1Path]);
 
         AssetVersion::create([

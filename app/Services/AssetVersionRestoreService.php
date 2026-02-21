@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\AssetMetadata;
+use App\Services\AssetPathGenerator;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -43,9 +44,10 @@ class AssetVersionRestoreService
             // Determine next version number (exclude trashed for promotion; withTrashed for limit count)
             $nextVersion = ($asset->versions()->max('version_number') ?? 0) + 1;
 
-            // Build new file path
-            $extension = pathinfo($sourceVersion->file_path, PATHINFO_EXTENSION);
-            $newPath = "assets/{$asset->id}/v{$nextVersion}/original.{$extension}";
+            // Build canonical file path: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
+            $extension = pathinfo($sourceVersion->file_path, PATHINFO_EXTENSION) ?: 'file';
+            $pathGenerator = app(AssetPathGenerator::class);
+            $newPath = $pathGenerator->generateOriginalPath($asset->tenant, $asset, $nextVersion, $extension);
 
             // Copy file in S3 - use asset's storage bucket (tenant bucket on staging, shared on local)
             $bucket = $asset->storageBucket;

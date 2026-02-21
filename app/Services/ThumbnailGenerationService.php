@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
+use App\Services\AssetPathGenerator;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Support\Facades\Log;
@@ -701,14 +702,14 @@ class ThumbnailGenerationService
 
     /**
      * Upload thumbnail to S3.
-     * When version is present, base path is derived from version->file_path (never asset->storage_root_path).
+     * Uses AssetPathGenerator for canonical path: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
      *
      * @param StorageBucket $bucket
      * @param Asset $asset
      * @param string $localThumbnailPath
      * @param string $styleName
-     * @param string|null $outputBasePath Base path for thumbnails. When version present, must be dirname(version->file_path).
-     * @param AssetVersion|null $version When provided, base path MUST come from version (outputBasePath or dirname(version->file_path))
+     * @param string|null $outputBasePath Unused; kept for signature compatibility
+     * @param AssetVersion|null $version When provided, version_number used for path
      * @return string S3 key path for the thumbnail
      * @throws \RuntimeException If upload fails
      */
@@ -720,14 +721,11 @@ class ThumbnailGenerationService
         ?string $outputBasePath = null,
         ?AssetVersion $version = null
     ): string {
-        // Generate S3 path for thumbnail. Pattern: {base_path}/thumbnails/{style}/{filename}
-        // When version present: base from version->file_path. Never use asset->storage_root_path.
-        $basePath = $version && $version->file_path
-            ? dirname($version->file_path)
-            : ($outputBasePath ?? pathinfo($asset->storage_root_path ?? '', PATHINFO_DIRNAME));
+        $versionNumber = $version?->version_number ?? $asset->currentVersion?->version_number ?? 1;
         $extension = pathinfo($localThumbnailPath, PATHINFO_EXTENSION) ?: 'jpg';
         $thumbnailFilename = "{$styleName}.{$extension}";
-        $s3ThumbnailPath = "{$basePath}/thumbnails/{$styleName}/{$thumbnailFilename}";
+        $pathGenerator = app(AssetPathGenerator::class);
+        $s3ThumbnailPath = $pathGenerator->generateThumbnailPath($asset->tenant, $asset, $versionNumber, $styleName, $thumbnailFilename);
         
         try {
             $this->s3Client->putObject([

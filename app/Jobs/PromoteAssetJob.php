@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Services\AssetPathGenerator;
 use App\Services\AssetProcessingFailureService;
 use App\Services\Reliability\ReliabilityEngine;
 use Aws\S3\S3Client;
@@ -38,7 +39,7 @@ use Illuminate\Support\Facades\Log;
  * - Supports enterprise reliability: can retry promotion without reprocessing
  *
  * This job:
- * - Moves original file from temp/{upload_session_id}/original to assets/{tenant_id}/{asset_uuid}/original.{ext}
+ * - Moves original file from temp/{upload_session_id}/original to tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
  * - Moves thumbnails to canonical location
  * - Updates asset.storage_root_path to canonical path
  * - Cleans up empty temp folders
@@ -123,7 +124,7 @@ class PromoteAssetJob implements ShouldQueue
         }
 
         // Idempotency: Check if already promoted
-        // Canonical path pattern: assets/{tenant_id}/{asset_uuid}/original.{ext}
+        // Canonical path pattern: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
         if ($this->isAlreadyPromoted($asset)) {
             Log::info('Asset promotion skipped - already promoted', [
                 'asset_id' => $asset->id,
@@ -154,7 +155,10 @@ class PromoteAssetJob implements ShouldQueue
 
         // Determine source and destination paths
         $sourcePath = $asset->storage_root_path;
-        $canonicalPath = $this->generateCanonicalPath($asset);
+        $pathGenerator = app(AssetPathGenerator::class);
+        $version = $asset->currentVersion?->version_number ?? 1;
+        $extension = $this->extractExtension($asset);
+        $canonicalPath = $pathGenerator->generateOriginalPath($asset->tenant, $asset, $version, $extension);
 
         // Double-check: if source path is not in temp/, skip promotion
         // (This should have been caught by isAlreadyPromoted, but extra safety check)
@@ -271,10 +275,10 @@ class PromoteAssetJob implements ShouldQueue
      * Check if asset is already promoted (idempotency check).
      *
      * An asset is considered "already promoted" if:
-     * 1. It's in the new canonical format: assets/{tenant_id}/{asset_uuid}/original.{ext}
-     * 2. It's in the old permanent format: assets/{tenant_id}/{brand_id}/{uuid}_{filename}
-     *    (existing assets that were created before promotion was implemented)
-     * 3. It's NOT in temp/ location (temp/uploads/{upload_session_id}/original)
+     * 1. It's in the canonical format: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
+     * 2. It's NOT in temp/ location (temp/uploads/{upload_session_id}/original)
+     *
+     * Legacy paths (assets/{tenant_id}/...) are deprecated and no longer written.
      *
      * @param Asset $asset
      * @return bool
@@ -282,7 +286,7 @@ class PromoteAssetJob implements ShouldQueue
     protected function isAlreadyPromoted(Asset $asset): bool
     {
         $path = $asset->storage_root_path;
-        
+
         if (!$path) {
             return false;
         }
@@ -292,21 +296,12 @@ class PromoteAssetJob implements ShouldQueue
             return false;
         }
 
-        // Check if path matches new canonical pattern: assets/{tenant_id}/{asset_uuid}/original.{ext}
-        $newCanonicalPattern = '#^assets/\d+/' . preg_quote($asset->id, '#') . '/original\.#';
-        if (preg_match($newCanonicalPattern, $path) === 1) {
+        // Canonical pattern: tenants/{uuid}/assets/{uuid}/v{n}/original.{ext}
+        if ($asset->tenant?->uuid && str_starts_with($path, "tenants/{$asset->tenant->uuid}/assets/{$asset->id}/v")) {
             return true;
         }
 
-        // Check if path matches old permanent format: assets/{tenant_id}/{brand_id}/{uuid}_{filename}
-        // This handles existing assets created before promotion was implemented
-        $oldPermanentPattern = '#^assets/\d+/\d+/[a-f0-9\-]+_#';
-        if (preg_match($oldPermanentPattern, $path) === 1) {
-            return true; // Already in permanent location, consider it promoted
-        }
-
-        // If path starts with assets/ but doesn't match either pattern, assume it's promoted
-        // (could be a different format we haven't seen yet)
+        // Legacy: assets/{tenant_id}/... or assets/{asset_id}/v{n}/... — consider promoted (no re-promotion)
         if (str_starts_with($path, 'assets/')) {
             return true;
         }
@@ -315,30 +310,23 @@ class PromoteAssetJob implements ShouldQueue
     }
 
     /**
-     * Generate canonical path for asset.
-     *
-     * Pattern: assets/{tenant_id}/{asset_uuid}/original.{ext}
-     *
-     * @param Asset $asset
-     * @return string
+     * Extract file extension from asset.
      */
-    protected function generateCanonicalPath(Asset $asset): string
+    protected function extractExtension(Asset $asset): string
     {
-        // Extract file extension from original filename or storage path
-        $extension = 'file';
         if ($asset->original_filename) {
             $ext = pathinfo($asset->original_filename, PATHINFO_EXTENSION);
             if ($ext) {
-                $extension = strtolower($ext);
-            }
-        } elseif ($asset->storage_root_path) {
-            $ext = pathinfo($asset->storage_root_path, PATHINFO_EXTENSION);
-            if ($ext) {
-                $extension = strtolower($ext);
+                return strtolower($ext);
             }
         }
-
-        return "assets/{$asset->tenant_id}/{$asset->id}/original.{$extension}";
+        if ($asset->storage_root_path) {
+            $ext = pathinfo($asset->storage_root_path, PATHINFO_EXTENSION);
+            if ($ext) {
+                return strtolower($ext);
+            }
+        }
+        return 'file';
     }
 
     /**
@@ -391,8 +379,7 @@ class PromoteAssetJob implements ShouldQueue
     /**
      * Move thumbnails to canonical location.
      *
-     * Thumbnails are stored at: {asset_path_base}/thumbnails/{style}/{filename}
-     * After promotion, they should be at: assets/{tenant_id}/{asset_uuid}/thumbnails/{style}/{filename}
+     * Thumbnails are stored at: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
      *
      * Thumbnail promotion failures do NOT block original promotion.
      *
@@ -421,19 +408,22 @@ class PromoteAssetJob implements ShouldQueue
             return $moved;
         }
 
-        // Extract old and new base paths
-        $oldBasePath = dirname($oldAssetPath);
-        $newBasePath = dirname($newAssetPath);
+        $version = $asset->currentVersion?->version_number ?? 1;
+        $pathGenerator = app(AssetPathGenerator::class);
+        $tenant = $asset->tenant;
 
         foreach ($thumbnails as $style => $thumbnailInfo) {
             $oldThumbnailPath = $thumbnailInfo['path'] ?? null;
-            
+
             if (!$oldThumbnailPath) {
                 continue;
             }
 
+            $thumbnailFilename = basename($oldThumbnailPath);
+            $newThumbnailPath = $pathGenerator->generateThumbnailPath($tenant, $asset, $version, $style, $thumbnailFilename);
+
             // Skip if thumbnail is already in canonical location
-            if (str_starts_with($oldThumbnailPath, $newBasePath)) {
+            if ($oldThumbnailPath === $newThumbnailPath || str_starts_with($oldThumbnailPath, dirname($newAssetPath))) {
                 Log::debug('Thumbnail already in canonical location', [
                     'asset_id' => $asset->id,
                     'style' => $style,
@@ -441,11 +431,6 @@ class PromoteAssetJob implements ShouldQueue
                 ]);
                 continue;
             }
-
-            // Generate new thumbnail path
-            // Pattern: assets/{tenant_id}/{asset_uuid}/thumbnails/{style}/{filename}
-            $thumbnailFilename = basename($oldThumbnailPath);
-            $newThumbnailPath = "{$newBasePath}/thumbnails/{$style}/{$thumbnailFilename}";
 
             try {
                 // Check if old thumbnail exists

@@ -16,25 +16,26 @@ class EnsureCloudFrontSignedCookies
     /**
      * Handle an incoming request.
      *
-     * If user is authenticated and CloudFront signing is enabled (non-local),
-     * ensure signed cookies are set. Regenerate if missing or near expiry.
+     * Tenant-scoped: cookies allow access only to https://{cdn}/tenants/{tenant_uuid}/*.
+     * Regenerates when tenant changes, cookies missing, or near expiry.
      */
     public function handle(Request $request, Closure $next): Response
     {
-        \Log::info('[CDN_COOKIE] middleware running', [
-            'user_id' => auth()->id(),
-            'env' => app()->environment(),
-        ]);
+        // Local environment: skip entirely
+        if (app()->environment('local')) {
+            return $next($request);
+        }
 
         $response = $next($request);
 
-        // Local environment: skip signing per task requirements
-        if (app()->environment('local')) {
+        // Only set cookies for authenticated users
+        if (!$request->user()) {
             return $response;
         }
 
-        // Only set cookies for authenticated users
-        if (! $request->user()) {
+        // Resolve active tenant (same mechanism as controllers — app('tenant') from ResolveTenant)
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        if (!$tenant) {
             return $response;
         }
 
@@ -43,8 +44,8 @@ class EnsureCloudFrontSignedCookies
             return $response;
         }
 
-        if ($this->shouldRegenerateCookies($request)) {
-            $this->attachCookiesToResponse($response);
+        if ($this->shouldRegenerateCookies($request, $tenant)) {
+            $this->attachCookiesToResponse($response, $tenant);
         }
 
         return $response;
@@ -53,19 +54,28 @@ class EnsureCloudFrontSignedCookies
     /**
      * Determine if we need to regenerate signed cookies.
      */
-    protected function shouldRegenerateCookies(Request $request): bool
+    protected function shouldRegenerateCookies(Request $request, $tenant): bool
     {
-        $policy = $request->cookie('CloudFront-Policy');
-        if (! $policy) {
+        $currentTenantUuid = $tenant->uuid;
+        $previousTenantUuid = session('cdn_tenant_uuid');
+
+        // No cookies present
+        if (!$request->cookie('CloudFront-Policy')) {
             return true;
         }
 
+        // Tenant switched — must regenerate
+        if ($previousTenantUuid !== $currentTenantUuid) {
+            return true;
+        }
+
+        // Near expiry
         $threshold = config('cloudfront.refresh_threshold', 600);
         if ($threshold <= 0) {
             return false;
         }
 
-        $expiresAt = $this->getPolicyExpiry($policy);
+        $expiresAt = $this->getPolicyExpiry($request->cookie('CloudFront-Policy'));
         if ($expiresAt === null) {
             return true;
         }
@@ -78,7 +88,7 @@ class EnsureCloudFrontSignedCookies
      */
     protected function getPolicyExpiry(?string $policy): ?int
     {
-        if (! $policy) {
+        if (!$policy) {
             return null;
         }
 
@@ -95,25 +105,23 @@ class EnsureCloudFrontSignedCookies
     }
 
     /**
-     * Attach CloudFront signed cookies to the response.
+     * Attach tenant-scoped CloudFront signed cookies to the response.
      */
-    protected function attachCookiesToResponse(Response $response): void
+    protected function attachCookiesToResponse(Response $response, $tenant): void
     {
         try {
-            $cookies = $this->cookieService->generate();
+            $cookies = $this->cookieService->generateForTenant($tenant);
         } catch (\Throwable $e) {
             report($e);
             return;
         }
 
         $expirySeconds = $this->cookieService->getExpirySeconds();
-        $expires = time() + $expirySeconds;
-        // For CloudFront, cookies must be set for the CDN domain so the browser sends them on CloudFront requests.
-        // Default to CloudFront domain when cookie_domain is null.
         $domain = config('cloudfront.cookie_domain') ?? config('cloudfront.domain');
         $path = '/';
 
         foreach ($cookies as $name => $value) {
+            // raw: true — CloudFront must receive the exact policy string; Laravel encryption would break CDN validation
             $cookie = cookie(
                 name: $name,
                 value: $value,
@@ -122,10 +130,12 @@ class EnsureCloudFrontSignedCookies
                 domain: $domain,
                 secure: true,
                 httpOnly: true,
-                raw: false,
+                raw: true,
                 sameSite: 'none'
             );
             $response->headers->setCookie($cookie);
         }
+
+        session(['cdn_tenant_uuid' => $tenant->uuid]);
     }
 }

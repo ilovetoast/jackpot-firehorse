@@ -2,15 +2,48 @@
 
 namespace App\Services;
 
+use App\Models\Tenant;
 use RuntimeException;
 
 class CloudFrontSignedCookieService
 {
     /**
-     * Generate CloudFront signed cookies for private content access.
+     * Generate CloudFront signed cookies scoped to tenant path.
      *
-     * Uses a custom policy allowing access to https://{domain}/* with
-     * expiration based on environment. Signs with RSA SHA1 (CloudFront requirement).
+     * Policy allows access to https://{domain}/tenants/{tenant_uuid}/* only.
+     * Provides CDN-level multi-tenant isolation.
+     *
+     * @return array{CloudFront-Policy: string, CloudFront-Signature: string, CloudFront-Key-Pair-Id: string}
+     *
+     * @throws RuntimeException If tenant has no UUID or signing fails
+     */
+    public function generateForTenant(Tenant $tenant): array
+    {
+        if (!$tenant->uuid) {
+            throw new RuntimeException('Tenant UUID required for CDN policy.');
+        }
+
+        $domain = config('cloudfront.domain');
+        $keyPairId = config('cloudfront.key_pair_id');
+        $privateKeyPath = $this->resolvePrivateKeyPath();
+
+        if (empty($domain) || empty($keyPairId)) {
+            throw new RuntimeException('CloudFront domain and key_pair_id must be configured.');
+        }
+
+        if (!file_exists($privateKeyPath)) {
+            throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
+        }
+
+        $resource = "https://{$domain}/tenants/{$tenant->uuid}/*";
+        return $this->signPolicy($resource, $keyPairId, $privateKeyPath);
+    }
+
+    /**
+     * Generate CloudFront signed cookies with wildcard policy (legacy).
+     *
+     * Policy allows access to https://{domain}/*. Kept for backwards compatibility
+     * but no longer used. Use generateForTenant() for tenant-scoped access.
      *
      * @return array{CloudFront-Policy: string, CloudFront-Signature: string, CloudFront-Key-Pair-Id: string}
      *
@@ -26,13 +59,21 @@ class CloudFrontSignedCookieService
             throw new RuntimeException('CloudFront domain and key_pair_id must be configured.');
         }
 
-        if (! file_exists($privateKeyPath)) {
+        if (!file_exists($privateKeyPath)) {
             throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
         }
 
+        $resource = 'https://' . $domain . '/*';
+        return $this->signPolicy($resource, $keyPairId, $privateKeyPath);
+    }
+
+    /**
+     * Sign a CloudFront policy and return cookie values.
+     */
+    protected function signPolicy(string $resource, string $keyPairId, string $privateKeyPath): array
+    {
         $expirySeconds = $this->getExpirySeconds();
         $expires = time() + $expirySeconds;
-        $resource = 'https://' . $domain . '/*';
 
         $policy = [
             'Statement' => [

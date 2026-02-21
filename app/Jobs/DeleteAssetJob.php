@@ -150,6 +150,10 @@ class DeleteAssetJob implements ShouldQueue
     /**
      * Delete all files and folders from S3.
      *
+     * For canonical paths (tenants/{uuid}/assets/{asset_uuid}/...), deletes the full asset prefix
+     * so all versions (v1, v2, ...) and thumbnails are removed. Never overwrites; each version
+     * lives in its own v{n}/ directory.
+     *
      * @param Asset $asset
      * @return array Array of deleted paths
      * @throws \RuntimeException If deletion fails
@@ -161,66 +165,46 @@ class DeleteAssetJob implements ShouldQueue
         $deletedPaths = [];
 
         try {
-            // Get asset metadata to find all related files
-            $metadata = $asset->metadata ?? [];
-            
-            // Delete main asset file
-            $mainPath = $asset->storage_root_path;
-            if ($s3Client->doesObjectExist($bucket->name, $mainPath)) {
-                $s3Client->deleteObject([
-                    'Bucket' => $bucket->name,
-                    'Key' => $mainPath,
-                ]);
-                $deletedPaths[] = $mainPath;
-            }
+            $tenant = $asset->tenant;
 
-            // Delete thumbnails if they exist
-            $thumbnails = $metadata['thumbnails'] ?? [];
-            foreach ($thumbnails as $thumbnail) {
-                $thumbnailPath = $thumbnail['path'] ?? null;
-                if ($thumbnailPath && $s3Client->doesObjectExist($bucket->name, $thumbnailPath)) {
+            // Canonical path: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/...
+            // Delete full asset prefix to remove ALL versions (v1, v2, ...) and thumbnails
+            if ($tenant && $tenant->uuid && str_starts_with($asset->storage_root_path ?? '', "tenants/{$tenant->uuid}/assets/{$asset->id}/")) {
+                $assetPrefix = "tenants/{$tenant->uuid}/assets/{$asset->id}/";
+                $deletedPaths = $this->deleteAllObjectsUnderPrefix($s3Client, $bucket->name, $assetPrefix);
+            } else {
+                // Legacy path: delete main file, thumbnails from metadata, and folder
+                $metadata = $asset->metadata ?? [];
+                $mainPath = $asset->storage_root_path;
+                if ($mainPath && $s3Client->doesObjectExist($bucket->name, $mainPath)) {
                     $s3Client->deleteObject([
                         'Bucket' => $bucket->name,
-                        'Key' => $thumbnailPath,
+                        'Key' => $mainPath,
                     ]);
-                    $deletedPaths[] = $thumbnailPath;
+                    $deletedPaths[] = $mainPath;
                 }
-            }
 
-            // Delete preview if it exists
-            $preview = $metadata['preview'] ?? null;
-            if ($preview && isset($preview['path'])) {
-                $previewPath = $preview['path'];
-                if ($s3Client->doesObjectExist($bucket->name, $previewPath)) {
-                    $s3Client->deleteObject([
-                        'Bucket' => $bucket->name,
-                        'Key' => $previewPath,
-                    ]);
-                    $deletedPaths[] = $previewPath;
-                }
-            }
-
-            // Delete asset folder (if structured as folders)
-            // Extract folder path from asset storage path
-            $folderPath = dirname($asset->storage_root_path);
-            if ($folderPath !== '.' && $folderPath !== '/') {
-                // List and delete all objects in folder
-                $objects = $s3Client->listObjectsV2([
-                    'Bucket' => $bucket->name,
-                    'Prefix' => $folderPath . '/',
-                ]);
-
-                if (isset($objects['Contents'])) {
-                    foreach ($objects['Contents'] as $object) {
-                        $objectPath = $object['Key'];
-                        if ($s3Client->doesObjectExist($bucket->name, $objectPath)) {
-                            $s3Client->deleteObject([
-                                'Bucket' => $bucket->name,
-                                'Key' => $objectPath,
-                            ]);
-                            $deletedPaths[] = $objectPath;
-                        }
+                foreach (($metadata['thumbnails'] ?? []) as $thumbnail) {
+                    $thumbnailPath = $thumbnail['path'] ?? null;
+                    if ($thumbnailPath && $s3Client->doesObjectExist($bucket->name, $thumbnailPath)) {
+                        $s3Client->deleteObject(['Bucket' => $bucket->name, 'Key' => $thumbnailPath]);
+                        $deletedPaths[] = $thumbnailPath;
                     }
+                }
+
+                $preview = $metadata['preview'] ?? null;
+                if ($preview && isset($preview['path'])) {
+                    $previewPath = $preview['path'];
+                    if ($s3Client->doesObjectExist($bucket->name, $previewPath)) {
+                        $s3Client->deleteObject(['Bucket' => $bucket->name, 'Key' => $previewPath]);
+                        $deletedPaths[] = $previewPath;
+                    }
+                }
+
+                $folderPath = dirname($asset->storage_root_path ?? '');
+                if ($folderPath !== '.' && $folderPath !== '/') {
+                    $folderDeleted = $this->deleteAllObjectsUnderPrefix($s3Client, $bucket->name, $folderPath . '/');
+                    $deletedPaths = array_merge($deletedPaths, $folderDeleted);
                 }
             }
 
@@ -243,6 +227,38 @@ class DeleteAssetJob implements ShouldQueue
             
             throw new \RuntimeException("Failed to delete storage files: {$e->getMessage()}", 0, $e);
         }
+    }
+
+    /**
+     * List and delete all S3 objects under a prefix (handles pagination).
+     *
+     * @return array Deleted object keys
+     */
+    protected function deleteAllObjectsUnderPrefix(S3Client $s3Client, string $bucketName, string $prefix): array
+    {
+        $deletedPaths = [];
+        $continuationToken = null;
+
+        do {
+            $params = ['Bucket' => $bucketName, 'Prefix' => $prefix];
+            if ($continuationToken) {
+                $params['ContinuationToken'] = $continuationToken;
+            }
+            $result = $s3Client->listObjectsV2($params);
+            $contents = $result['Contents'] ?? [];
+
+            foreach ($contents as $object) {
+                $key = $object['Key'] ?? null;
+                if ($key) {
+                    $s3Client->deleteObject(['Bucket' => $bucketName, 'Key' => $key]);
+                    $deletedPaths[] = $key;
+                }
+            }
+
+            $continuationToken = $result['IsTruncated'] ? ($result['NextContinuationToken'] ?? null) : null;
+        } while ($continuationToken);
+
+        return $deletedPaths;
     }
 
     /**
