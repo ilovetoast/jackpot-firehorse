@@ -187,6 +187,22 @@ CloudFront signed cookies are **tenant-scoped** for defense-in-depth isolation.
 - Signing is skipped entirely when `APP_ENV=local`.
 - `cdn_url()` returns S3/MinIO URLs directly (no CloudFront).
 
+### CloudFront custom error (403)
+When CloudFront returns 403 (expired signed URL, invalid policy, etc.), serve a branded page instead of the AWS default:
+
+- **Response page path:** `/cdn-access-denied`
+- **HTTP response code:** 403
+- **TTL:** 0
+
+Configure in CloudFront distribution → Error pages → Create custom error response:
+- HTTP error code: 403
+- Customize error response: Yes
+- Response page path: `/cdn-access-denied`
+- HTTP response code: 403
+- Error caching TTL: 0
+
+Do not expose S3 or AWS error details to users.
+
 ---
 
 ## CDN-Only Asset Delivery

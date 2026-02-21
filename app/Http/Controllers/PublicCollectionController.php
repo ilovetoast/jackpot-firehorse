@@ -91,6 +91,7 @@ class PublicCollectionController extends Controller
             'assets' => $assets,
             'public_collection_downloads_enabled' => $publicCollectionDownloadsEnabled,
             'branding_options' => $brandingOptions,
+            'cdn_domain' => config('cloudfront.domain'),
         ]);
     }
 

@@ -63,6 +63,22 @@ class ErrorController extends Controller
     }
 
     /**
+     * Branded CDN access denied page (403).
+     *
+     * CloudFront custom error: 403 → /cdn-access-denied, response code 403, TTL 0.
+     * Do not expose S3/AWS error details.
+     */
+    public function cdnAccessDenied(): Response
+    {
+        // Use app icon from public (no CDN) — CDN logo would fail when user hit 403
+        $logoUrl = asset('icons/apple-touch-icon.png');
+
+        return Inertia::render('Errors/CdnAccessDenied', [
+            'logoUrl' => $logoUrl,
+        ]);
+    }
+
+    /**
      * Display the no companies error page.
      * This is shown when a user has no companies/tenants associated with their account.
      */

@@ -8,13 +8,16 @@
 import { useState } from 'react'
 import { DocumentIcon, ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import AssetGrid from '../../Components/AssetGrid'
+import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
 
 export default function PublicCollection({
     collection = {},
     assets = [],
     public_collection_downloads_enabled: downloadCollectionEnabled = false,
     branding_options = {},
+    cdn_domain = null,
 }) {
+    useCdn403Recovery(cdn_domain)
     const { name, description, brand_name, brand_slug, slug } = collection
     const accentColor = branding_options?.accent_color || branding_options?.primary_color || '#4F46E5'
     const primaryColor = branding_options?.primary_color || accentColor

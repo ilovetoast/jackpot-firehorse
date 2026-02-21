@@ -65,20 +65,29 @@ class AssetDeliveryService
 
         return match ($contextEnum) {
             DeliveryContext::AUTHENTICATED => $cdnUrl,
-            DeliveryContext::PUBLIC_COLLECTION => $this->signForPublicCollection($cdnUrl),
-            DeliveryContext::PUBLIC_DOWNLOAD => $this->signForPublicDownload($cdnUrl, $asset, $options),
+            DeliveryContext::PUBLIC_COLLECTION => $this->signForPublicCollection($cdnUrl, $asset, $variant),
+            DeliveryContext::PUBLIC_DOWNLOAD => $this->signForPublicDownload($cdnUrl, $asset, array_merge($options, ['variant' => $variant])),
         };
     }
 
     /**
      * Sign URL for public collection context.
      */
-    protected function signForPublicCollection(string $cdnUrl): string
+    protected function signForPublicCollection(string $cdnUrl, Asset $asset, string $variant): string
     {
         $ttl = $this->signedUrlService->getPublicCollectionTtl();
         $expiresAt = time() + $ttl;
+        $signed = $this->signedUrlService->sign($cdnUrl, $expiresAt);
 
-        return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+        \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Signed URL generated (public_collection)', [
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'variant' => $variant,
+            'expires_at' => $expiresAt,
+            'expires_at_iso' => date('c', $expiresAt),
+        ]);
+
+        return $signed;
     }
 
     /**
@@ -94,8 +103,17 @@ class AssetDeliveryService
             $tenant
         );
         $expiresAt = time() + $ttl;
+        $signed = $this->signedUrlService->sign($cdnUrl, $expiresAt);
 
-        return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+        \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Signed URL generated (public_download)', [
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'variant' => $options['variant'] ?? 'unknown',
+            'expires_at' => $expiresAt,
+            'expires_at_iso' => date('c', $expiresAt),
+        ]);
+
+        return $signed;
     }
 
     /**

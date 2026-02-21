@@ -82,6 +82,9 @@ Route::post('/d/{download}/unlock', [\App\Http\Controllers\DownloadController::c
 // D-SHARE: Send download link via email (rate-limited)
 Route::post('/d/{download}/share-email', [\App\Http\Controllers\DownloadController::class, 'shareEmail'])->name('downloads.public.share-email')->middleware(['web', 'throttle:10,1']);
 
+// Branded CDN 403 page — CloudFront custom error: 403 → /cdn-access-denied, response code 403, TTL 0
+Route::get('/cdn-access-denied', [\App\Http\Controllers\ErrorController::class, 'cdnAccessDenied'])->name('errors.cdn-access-denied')->middleware(['web']);
+
 // CDN test route (temporary — verify CloudFront signed cookies)
 Route::get('/cdn-test', function () {
     return response()->json([

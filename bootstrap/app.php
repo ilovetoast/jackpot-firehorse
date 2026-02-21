@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'tenant' => \App\Http\Middleware\ResolveTenant::class,
+            'tenant.cdn.cookie' => \App\Http\Middleware\EnsureCloudFrontSignedCookies::class, // TenantCdnCookieMiddleware
             'subdomain' => \App\Http\Middleware\ResolveSubdomainTenant::class,
             'ensure.brand.assignment' => \App\Http\Middleware\EnsureBrandAssignment::class,
             'ensure.account.active' => \App\Http\Middleware\EnsureAccountActive::class,
@@ -60,6 +61,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'password_required' => false,
                 'download_id' => null,
                 'unlock_url' => '',
+                'cdn_domain' => config('cloudfront.domain'),
             ], $branding))->toResponse($request)->setStatusCode(404);
         });
     })->create();

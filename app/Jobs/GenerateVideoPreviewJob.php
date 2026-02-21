@@ -189,9 +189,10 @@ class GenerateVideoPreviewJob implements ShouldQueue
             }
 
             // Update asset with preview path (stored as S3 key, not signed URL)
-            // Signed URLs will be generated on-demand in the frontend/API
+            // Path format: tenants/{uuid}/assets/{uuid}/v{n}/previews/video_preview.mp4
+            // AssetVariantPathResolver uses this for VIDEO_PREVIEW; AssetDeliveryService generates URLs on-demand
             $asset->update([
-                'video_preview_url' => $previewPath, // Store S3 key path
+                'video_preview_url' => $previewPath,
             ]);
 
             Log::info('[GenerateVideoPreviewJob] Preview generated and verified successfully', [

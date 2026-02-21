@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\CloudFrontSignedCookieService;
+use App\Services\TenantCookieInvalidationService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -10,7 +11,8 @@ use Symfony\Component\HttpFoundation\Response;
 class EnsureCloudFrontSignedCookies
 {
     public function __construct(
-        protected CloudFrontSignedCookieService $cookieService
+        protected CloudFrontSignedCookieService $cookieService,
+        protected TenantCookieInvalidationService $invalidationService
     ) {}
 
     /**
@@ -18,6 +20,7 @@ class EnsureCloudFrontSignedCookies
      *
      * Tenant-scoped: cookies allow access only to https://{cdn}/tenants/{tenant_uuid}/*.
      * Regenerates when tenant changes, cookies missing, or near expiry.
+     * Never issues cookies for PUBLIC_COLLECTION or PUBLIC_DOWNLOAD contexts.
      */
     public function handle(Request $request, Closure $next): Response
     {
@@ -27,6 +30,11 @@ class EnsureCloudFrontSignedCookies
         }
 
         $response = $next($request);
+
+        // Never issue cookies for public download or public collection (they use signed URLs)
+        if ($this->isPublicContext($request)) {
+            return $response;
+        }
 
         // Only set cookies for authenticated users
         if (!$request->user()) {
@@ -45,10 +53,45 @@ class EnsureCloudFrontSignedCookies
         }
 
         if ($this->shouldRegenerateCookies($request, $tenant)) {
-            $this->attachCookiesToResponse($response, $tenant);
+            // Tenant switch: invalidate old cookies before issuing new ones
+            if ($this->tenantSwitched($request, $tenant)) {
+                $this->invalidateExistingCookies($response, $request);
+            }
+            $this->attachCookiesToResponse($response, $tenant, $request);
         }
 
         return $response;
+    }
+
+    /**
+     * Whether the request is for a public context (download or collection).
+     * No CDN cookie should be issued for these — they use signed URLs.
+     */
+    protected function isPublicContext(Request $request): bool
+    {
+        $path = $request->path();
+
+        return str_starts_with($path, 'd/')  // Public download: /d/{download}
+            || str_starts_with($path, 'b/'); // Public collection: /b/{brand}/collections/...
+    }
+
+    /**
+     * Whether tenant context changed (stale cookie would grant wrong tenant).
+     */
+    protected function tenantSwitched(Request $request, $tenant): bool
+    {
+        $previous = session('cdn_tenant_uuid');
+
+        return $previous !== null && $previous !== $tenant->uuid;
+    }
+
+    /**
+     * Clear existing CloudFront cookies so no stale cookie remains after tenant switch.
+     */
+    protected function invalidateExistingCookies(Response $response, Request $request): void
+    {
+        $previousUuid = session('cdn_tenant_uuid');
+        $this->invalidationService->clearCookiesForTenant($response, $previousUuid);
     }
 
     /**
@@ -69,8 +112,8 @@ class EnsureCloudFrontSignedCookies
             return true;
         }
 
-        // Near expiry
-        $threshold = config('cloudfront.refresh_threshold', 600);
+        // Near expiry: regenerate if < 5 minutes remain (prevents mid-session 403s)
+        $threshold = config('cloudfront.refresh_threshold', 300);
         if ($threshold <= 0) {
             return false;
         }
@@ -106,11 +149,15 @@ class EnsureCloudFrontSignedCookies
 
     /**
      * Attach tenant-scoped CloudFront signed cookies to the response.
+     *
+     * Cookie path is /tenants/{tenant_uuid}/ so the cookie is only sent for that tenant's CDN paths.
+     * Prevents cross-tenant access at CDN layer.
      */
-    protected function attachCookiesToResponse(Response $response, $tenant): void
+    protected function attachCookiesToResponse(Response $response, $tenant, Request $request): void
     {
         try {
-            $cookies = $this->cookieService->generateForTenant($tenant);
+            $clientIp = config('cloudfront.cookie_restrict_ip', false) ? $request->ip() : null;
+            $cookies = $this->cookieService->generateForTenant($tenant, $clientIp);
         } catch (\Throwable $e) {
             report($e);
             return;
@@ -118,7 +165,17 @@ class EnsureCloudFrontSignedCookies
 
         $expirySeconds = $this->cookieService->getExpirySeconds();
         $domain = config('cloudfront.cookie_domain') ?? config('cloudfront.domain');
-        $path = '/';
+        // Path scoped to tenant: cookie only sent for /tenants/{uuid}/* — prevents cross-tenant bleed
+        $path = '/tenants/' . $tenant->uuid . '/';
+
+        $expiresAt = time() + $expirySeconds;
+
+        \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Signed cookie issued', [
+            'tenant_id' => $tenant->id,
+            'tenant_uuid' => $tenant->uuid,
+            'expires_at' => $expiresAt,
+            'expires_at_iso' => date('c', $expiresAt),
+        ]);
 
         foreach ($cookies as $name => $value) {
             // raw: true — CloudFront must receive the exact policy string; Laravel encryption would break CDN validation
@@ -131,7 +188,7 @@ class EnsureCloudFrontSignedCookies
                 secure: true,
                 httpOnly: true,
                 raw: true,
-                sameSite: 'none'
+                sameSite: 'lax'
             );
             $response->headers->setCookie($cookie);
         }

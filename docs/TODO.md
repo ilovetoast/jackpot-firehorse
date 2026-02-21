@@ -3,6 +3,7 @@ Must Have
 
 
 - versioning fixed, test all options, restore, new verions file type diff, delete, restore
+- fix public files not being public (see collections)  see 
 - performance stats
 - glacvier for version and archive
 - clean up pooling to much
@@ -10,6 +11,13 @@ Must Have
 - combine down and selects with floating dialog like actions
 - change details view to be full screen dark, shopify esk with deatil on the side
 - see trashed files
+- Enterprise TODO (Single Sentence Summary)
+
+Here’s your clean one-liner:
+
+Enterprise buckets will use a per-tenant CloudFront distribution and key pair, isolating each tenant at the CDN layer while preserving the same AssetDeliveryService abstraction.
+
+That’s the future extension. Clean. No schema changes needed today.
 
 grid swipe load
 login screen, splash screen

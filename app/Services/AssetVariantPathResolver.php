@@ -55,7 +55,14 @@ class AssetVariantPathResolver
     }
 
     /**
-     * Resolve video preview path. Uses video_preview_url column (raw path) when available; otherwise canonical path (stub).
+     * Resolve video preview path for VIDEO_PREVIEW variant.
+     *
+     * Priority:
+     * 1. video_preview_url column (raw S3 path) — set by GenerateVideoPreviewJob after generation
+     * 2. metadata['video_preview']['path'] — custom path if stored in metadata
+     * 3. Canonical path: {basePath}previews/video_preview.mp4 — matches VideoPreviewGenerationService output
+     *
+     * Returns '' when no path available (triggers placeholder in AssetDeliveryService).
      */
     protected function resolveVideoPreviewPath(Asset $asset, string $basePath): string
     {
@@ -64,6 +71,11 @@ class AssetVariantPathResolver
 
         if ($path && is_string($path) && !str_starts_with($path, 'http')) {
             return $path;
+        }
+
+        $metadataPath = $asset->metadata['video_preview']['path'] ?? null;
+        if ($metadataPath && is_string($metadataPath) && !str_starts_with($metadataPath, 'http')) {
+            return $metadataPath;
         }
 
         return $basePath !== '' ? $basePath . 'previews/video_preview.mp4' : '';

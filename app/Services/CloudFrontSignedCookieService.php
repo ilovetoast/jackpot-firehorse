@@ -13,11 +13,12 @@ class CloudFrontSignedCookieService
      * Policy allows access to https://{domain}/tenants/{tenant_uuid}/* only.
      * Provides CDN-level multi-tenant isolation.
      *
+     * @param string|null $clientIp When cookie_restrict_ip enabled, pass $request->ip()
      * @return array{CloudFront-Policy: string, CloudFront-Signature: string, CloudFront-Key-Pair-Id: string}
      *
      * @throws RuntimeException If tenant has no UUID or signing fails
      */
-    public function generateForTenant(Tenant $tenant): array
+    public function generateForTenant(Tenant $tenant, ?string $clientIp = null): array
     {
         if (!$tenant->uuid) {
             throw new RuntimeException('Tenant UUID required for CDN policy.');
@@ -36,52 +37,32 @@ class CloudFrontSignedCookieService
         }
 
         $resource = "https://{$domain}/tenants/{$tenant->uuid}/*";
-        return $this->signPolicy($resource, $keyPairId, $privateKeyPath);
-    }
-
-    /**
-     * Generate CloudFront signed cookies with wildcard policy (legacy).
-     *
-     * Policy allows access to https://{domain}/*. Kept for backwards compatibility
-     * but no longer used. Use generateForTenant() for tenant-scoped access.
-     *
-     * @return array{CloudFront-Policy: string, CloudFront-Signature: string, CloudFront-Key-Pair-Id: string}
-     *
-     * @throws RuntimeException If private key is missing or invalid
-     */
-    public function generate(): array
-    {
-        $domain = config('cloudfront.domain');
-        $keyPairId = config('cloudfront.key_pair_id');
-        $privateKeyPath = $this->resolvePrivateKeyPath();
-
-        if (empty($domain) || empty($keyPairId)) {
-            throw new RuntimeException('CloudFront domain and key_pair_id must be configured.');
-        }
-
-        if (!file_exists($privateKeyPath)) {
-            throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
-        }
-
-        $resource = 'https://' . $domain . '/*';
-        return $this->signPolicy($resource, $keyPairId, $privateKeyPath);
+        return $this->signPolicy($resource, $keyPairId, $privateKeyPath, $clientIp);
     }
 
     /**
      * Sign a CloudFront policy and return cookie values.
+     *
+     * @param string|null $clientIp When cookie_restrict_ip is true, restrict to this IP (e.g. from $request->ip())
      */
-    protected function signPolicy(string $resource, string $keyPairId, string $privateKeyPath): array
+    protected function signPolicy(string $resource, string $keyPairId, string $privateKeyPath, ?string $clientIp = null): array
     {
         $expirySeconds = $this->getExpirySeconds();
         $expires = time() + $expirySeconds;
+
+        $condition = [
+            'DateLessThan' => ['AWS:EpochTime' => $expires],
+        ];
+
+        if (config('cloudfront.cookie_restrict_ip', false) && $clientIp) {
+            $condition['IpAddress'] = ['AWS:SourceIp' => $clientIp . '/32'];
+        }
 
         $policy = [
             'Statement' => [
                 [
                     'Resource' => $resource,
-                    'Condition' => [
-                        'DateLessThan' => ['AWS:EpochTime' => $expires],
-                    ],
+                    'Condition' => $condition,
                 ],
             ],
         ];
@@ -99,10 +80,15 @@ class CloudFrontSignedCookieService
     }
 
     /**
-     * Get expiry in seconds based on environment.
+     * Get expiry in seconds. Uses authenticated_cookie_ttl when set; otherwise env-specific defaults.
      */
     public function getExpirySeconds(): int
     {
+        $ttl = config('cloudfront.authenticated_cookie_ttl') ?: config('cdn.authenticated_cookie_ttl');
+        if ($ttl > 0) {
+            return (int) $ttl;
+        }
+
         return app()->environment('production')
             ? config('cloudfront.cookie_expiry_production', 14400)
             : config('cloudfront.cookie_expiry_staging', 3600);

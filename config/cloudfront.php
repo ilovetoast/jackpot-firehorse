@@ -72,10 +72,33 @@ return [
     |--------------------------------------------------------------------------
     |
     | Regenerate cookies when less than this many seconds remain.
-    | E.g. 600 = refresh if < 10 minutes left.
+    | Default 300 (5 min) prevents mid-session asset failures.
     |
     */
 
-    'refresh_threshold' => (int) env('CLOUDFRONT_COOKIE_REFRESH_THRESHOLD', 600),
+    'refresh_threshold' => (int) env('CLOUDFRONT_COOKIE_REFRESH_THRESHOLD', 300),
+
+    /*
+    |--------------------------------------------------------------------------
+    | IP Restriction (optional)
+    |--------------------------------------------------------------------------
+    |
+    | When true, signed cookie policy includes IpAddress condition.
+    | Disabled by default. Future enterprise toggle.
+    |
+    */
+
+    'cookie_restrict_ip' => (bool) env('CLOUDFRONT_COOKIE_RESTRICT_IP', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authenticated Cookie TTL (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | Primary config for signed cookie expiration. Used by CloudFrontSignedCookieService.
+    | Fallback: 3600 (1 hour).
+    |
+    */
+    'authenticated_cookie_ttl' => (int) env('CLOUDFRONT_AUTHENTICATED_COOKIE_TTL', env('CDN_AUTHENTICATED_COOKIE_TTL', 3600)),
 
 ];

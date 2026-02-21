@@ -4,6 +4,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Authenticated Cookie TTL (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | TTL for CloudFront signed cookies (AUTHENTICATED context).
+    | Cookies restrict access to /tenants/{tenant_uuid}/* only.
+    |
+    */
+    'authenticated_cookie_ttl' => (int) env('CDN_AUTHENTICATED_COOKIE_TTL', 3600),
+
+    /*
+    |--------------------------------------------------------------------------
     | Public Collection TTL (seconds)
     |--------------------------------------------------------------------------
     |

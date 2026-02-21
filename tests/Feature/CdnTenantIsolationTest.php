@@ -29,6 +29,9 @@ class CdnTenantIsolationTest extends TestCase
 
         $this->tenantA = Tenant::create(['name' => 'Company A', 'slug' => 'company-a']);
         $this->tenantB = Tenant::create(['name' => 'Company B', 'slug' => 'company-b']);
+        // Ensure UUIDs exist for policy resource
+        $this->tenantA->refresh();
+        $this->tenantB->refresh();
 
         Brand::create(['tenant_id' => $this->tenantA->id, 'name' => 'Brand A', 'slug' => 'brand-a', 'is_default' => true]);
         Brand::create(['tenant_id' => $this->tenantB->id, 'name' => 'Brand B', 'slug' => 'brand-b', 'is_default' => true]);
@@ -156,5 +159,46 @@ class CdnTenantIsolationTest extends TestCase
         $this->assertNotNull($resourceB);
         $this->assertStringContainsString("/tenants/{$this->tenantB->uuid}/", $resourceB);
         $this->assertStringNotContainsString("/tenants/{$this->tenantA->uuid}/", $resourceB);
+    }
+
+    /**
+     * Cookie issued for Tenant A must NOT allow access to Tenant B assets.
+     * Policy resource must be /tenants/{tenant_a_uuid}/* — not /tenants/* or *.
+     */
+    public function test_signed_cookie_is_tenant_scoped(): void
+    {
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenantA->id, 'brand_id' => $this->tenantA->brands()->first()->id])
+            ->get('/app/dashboard');
+
+        $response->assertStatus(200);
+
+        $policyValue = null;
+        foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->getName() === 'CloudFront-Policy') {
+                $policyValue = $cookie->getValue();
+                break;
+            }
+        }
+
+        if (!$policyValue) {
+            $this->markTestSkipped('CloudFront-Policy cookie not set (local env skips)');
+        }
+
+        $decoded = $this->decodePolicyFromCookie($policyValue);
+        $this->assertNotNull($decoded);
+        $resource = $decoded['Statement'][0]['Resource'] ?? null;
+        $this->assertNotNull($resource);
+
+        // Must be tenant-scoped: /tenants/{uuid}/*
+        $this->assertStringContainsString("/tenants/{$this->tenantA->uuid}/", $resource);
+        $this->assertStringEndsWith('*', $resource);
+
+        // Must NOT be permissive wildcard
+        $this->assertStringNotContainsString('/*', preg_replace('#/tenants/[^/]+/\*$#', '', $resource), 'Resource must not allow /tenants/*');
+        $this->assertNotSame('https://cdn.test/*', $resource, 'Resource must not be domain-wide wildcard');
+
+        // Cookie for Tenant A must NOT include Tenant B path
+        $this->assertStringNotContainsString($this->tenantB->uuid, $resource);
     }
 }

@@ -6,6 +6,7 @@
  */
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
+import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
 
 function formatBytes(bytes) {
   if (bytes == null || bytes === 0) return null
@@ -45,7 +46,9 @@ export default function DownloadsPublic({
   file_url = '',
   show_jackpot_promo = false,
   footer_promo = {},
+  cdn_domain = null,
 }) {
+  useCdn403Recovery(cdn_domain)
   const { errors: pageErrors = {}, flash = {} } = usePage().props
   const isProcessing = state === 'processing'
   const isReady = state === 'ready'

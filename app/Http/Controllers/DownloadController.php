@@ -945,6 +945,7 @@ class DownloadController extends Controller
             'show_jackpot_promo' => $branding['show_jackpot_promo'] ?? false,
             'footer_promo' => $branding['footer_promo'] ?? [],
             'zip_time_estimate' => $zipTimeEstimate,
+            'cdn_domain' => config('cloudfront.domain'),
         ];
         if ($zipProgress !== null) {
             $props['zip_progress_percentage'] = $zipProgress['zip_progress_percentage'] ?? null;
