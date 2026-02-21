@@ -123,7 +123,7 @@ class PublicCollectionTest extends TestCase
             'is_public' => true,
         ]);
 
-        $asset = $this->createAsset(['title' => 'Test Asset']);
+        $asset = $this->createAsset(['title' => 'Test Asset', 'published_at' => now()]);
         $collection->assets()->attach($asset->id);
 
         $response = $this->get('/b/' . $this->brand->slug . '/collections/public-collection');
@@ -152,7 +152,7 @@ class PublicCollectionTest extends TestCase
             'is_public' => true,
         ]);
 
-        $assetSameBrand = $this->createAsset(['title' => 'Same Brand', 'original_filename' => 'same.jpg', 'storage_root_path' => 'same/path.jpg']);
+        $assetSameBrand = $this->createAsset(['title' => 'Same Brand', 'original_filename' => 'same.jpg', 'storage_root_path' => 'same/path.jpg', 'published_at' => now()]);
         $uploadOther = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $otherBrand->id,
@@ -175,6 +175,7 @@ class PublicCollectionTest extends TestCase
             'type' => AssetType::ASSET,
             'storage_root_path' => 'other/path.jpg',
             'size_bytes' => 1024,
+            'published_at' => now(),
         ]);
         $collection->assets()->attach($assetSameBrand->id);
         // Maliciously attach other brand asset to pivot (simulating bad data)

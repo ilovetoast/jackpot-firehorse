@@ -26,6 +26,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Delivery (Local Presign)
+    |--------------------------------------------------------------------------
+    |
+    | In local environment, thumbnail URLs use S3 temporaryUrl (presigned) so
+    | they load without CORS. TTL in seconds (default 900 = 15 min).
+    |
+    */
+    'delivery' => [
+        'local_presign_ttl' => (int) env('ASSET_DELIVERY_LOCAL_PRESIGN_TTL', 900),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage Calculation
     |--------------------------------------------------------------------------
     |

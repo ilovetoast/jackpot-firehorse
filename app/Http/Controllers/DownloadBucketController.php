@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Asset;
+use App\Services\AssetDeliveryService;
 use App\Services\DownloadBucketService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -43,15 +46,16 @@ class DownloadBucketController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
+                $assetDelivery = app(AssetDeliveryService::class);
                 $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
 
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                    $variant = $asset->thumbnailPathForStyle('medium') ? AssetVariant::THUMB_MEDIUM : AssetVariant::THUMB_SMALL;
+                    $finalThumbnailUrl = $assetDelivery->url($asset, $variant->value, DeliveryContext::AUTHENTICATED->value);
+                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }

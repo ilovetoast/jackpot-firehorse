@@ -116,7 +116,7 @@ class AssetApprovalController extends Controller
             if ($thumbnailStatus === 'completed') {
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                 $finalThumbnailUrl = $asset->thumbnailUrl('medium');
-                if ($finalThumbnailUrl && $thumbnailVersion) {
+                if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                 }
             }

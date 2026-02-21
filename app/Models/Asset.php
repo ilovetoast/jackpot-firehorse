@@ -304,38 +304,39 @@ class Asset extends Model
      *
      * storage_root_path stores the relative S3 key only (no full URLs).
      *
-     * @return string CDN URL (CloudFront in staging/production, S3 in local)
+     * @return string CDN URL (CloudFront in staging/production, presigned S3 in local)
      */
     public function getOriginalUrlAttribute(): string
     {
-        $path = $this->storage_root_path ?? '';
-        if ($path === '') {
-            return '';
-        }
-        return cdn_url($path);
+        return app(\App\Services\AssetDeliveryService::class)->url(
+            $this,
+            \App\Support\AssetVariant::ORIGINAL->value,
+            \App\Support\DeliveryContext::AUTHENTICATED->value
+        );
     }
 
     /**
-     * Get CDN URL for a thumbnail style.
-     * Uses canonical path from metadata when available.
+     * Get CDN URL for a thumbnail style via AssetDeliveryService.
+     * All thumbnail URLs flow through unified delivery (presigned in local).
      *
      * @param string $style Thumbnail style (thumb, medium, large, preview)
      * @return string CDN URL, or empty string if thumbnail not available
      */
     public function thumbnailUrl(string $style = 'medium'): string
     {
-        $path = $this->thumbnailPathForStyle($style);
-        if ($path) {
-            return cdn_url($path);
-        }
-        // Fallback: preview thumbnails (during processing)
-        if ($style === 'preview') {
-            $preview = $this->metadata['preview_thumbnails']['preview']['path'] ?? null;
-            if ($preview) {
-                return cdn_url($preview);
-            }
-        }
-        return '';
+        $variant = match ($style) {
+            'thumb' => \App\Support\AssetVariant::THUMB_SMALL,
+            'medium' => \App\Support\AssetVariant::THUMB_MEDIUM,
+            'large' => \App\Support\AssetVariant::THUMB_LARGE,
+            'preview' => \App\Support\AssetVariant::THUMB_PREVIEW,
+            default => \App\Support\AssetVariant::THUMB_MEDIUM,
+        };
+
+        return app(\App\Services\AssetDeliveryService::class)->url(
+            $this,
+            $variant->value,
+            \App\Support\DeliveryContext::AUTHENTICATED->value
+        );
     }
 
     /**
@@ -343,7 +344,12 @@ class Asset extends Model
      */
     public function getThumbnailUrlAttribute(): string
     {
-        return $this->thumbnailUrl('medium') ?: $this->thumbnailUrl('thumb');
+        $service = app(\App\Services\AssetDeliveryService::class);
+        $url = $service->url($this, \App\Support\AssetVariant::THUMB_MEDIUM->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
+        if ($url !== '') {
+            return $url;
+        }
+        return $service->url($this, \App\Support\AssetVariant::THUMB_SMALL->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
     }
 
     /**
@@ -351,7 +357,16 @@ class Asset extends Model
      */
     public function getThumbnailUrlLargeAttribute(): string
     {
-        return $this->thumbnailUrl('large') ?: $this->thumbnailUrl('medium') ?: $this->thumbnailUrl('thumb');
+        $service = app(\App\Services\AssetDeliveryService::class);
+        $url = $service->url($this, \App\Support\AssetVariant::THUMB_LARGE->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
+        if ($url !== '') {
+            return $url;
+        }
+        $url = $service->url($this, \App\Support\AssetVariant::THUMB_MEDIUM->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
+        if ($url !== '') {
+            return $url;
+        }
+        return $service->url($this, \App\Support\AssetVariant::THUMB_SMALL->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
     }
 
     /**
@@ -925,67 +940,24 @@ class Asset extends Model
      */
     public function getMediumThumbnailUrlAttribute(): ?string
     {
-        $metadata = $this->metadata ?? [];
-        
-        // Check if final thumbnail exists (after promotion)
-        if (isset($metadata['thumbnails']['medium']['path'])) {
-            $thumbnailPath = $metadata['thumbnails']['medium']['path'];
-            
-            // Check if thumbnail is in final location (assets/ path)
-            if (str_starts_with($thumbnailPath, 'assets/')) {
-                // Generate signed S3 URL for OpenAI to access
-                try {
-                    return \Illuminate\Support\Facades\Storage::disk('s3')
-                        ->temporaryUrl($thumbnailPath, now()->addHours(1));
-                } catch (\Exception $e) {
-                    \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for thumbnail', [
-                        'asset_id' => $this->id,
-                        'thumbnail_path' => $thumbnailPath,
-                        'error' => $e->getMessage(),
-                    ]);
-                    return null;
-                }
-            }
-            
-            // Check if thumbnail is in temp location (temp/uploads/ path)
-            if (str_starts_with($thumbnailPath, 'temp/uploads/')) {
-                // Temp thumbnail - check if file exists by verifying thumbnail_status
-                // If status is COMPLETED, we can use the temp path
-                if ($this->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
-                    // Generate signed S3 URL for temp thumbnail
-                    try {
-                        return \Illuminate\Support\Facades\Storage::disk('s3')
-                            ->temporaryUrl($thumbnailPath, now()->addHours(1));
-                    } catch (\Exception $e) {
-                        \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for temp thumbnail', [
-                            'asset_id' => $this->id,
-                            'thumbnail_path' => $thumbnailPath,
-                            'error' => $e->getMessage(),
-                        ]);
-                        return null;
-                    }
-                }
-            }
+        $url = app(\App\Services\AssetDeliveryService::class)->url(
+            $this,
+            \App\Support\AssetVariant::THUMB_MEDIUM->value,
+            \App\Support\DeliveryContext::AUTHENTICATED->value
+        );
+
+        if ($url !== '') {
+            return $url;
         }
-        
-        // Check preview thumbnail as fallback (low quality, but available during processing)
-        if (isset($metadata['preview_thumbnails']['preview']['path'])) {
-            $previewPath = $metadata['preview_thumbnails']['preview']['path'];
-            // Generate signed S3 URL for preview thumbnail
-            try {
-                return Storage::disk('s3')
-                    ->temporaryUrl($previewPath, now()->addHours(1));
-            } catch (\Exception $e) {
-                Log::error('[Asset] Failed to generate signed S3 URL for preview thumbnail', [
-                    'asset_id' => $this->id,
-                    'thumbnail_path' => $previewPath,
-                    'error' => $e->getMessage(),
-                ]);
-                return null;
-            }
-        }
-        
-        return null;
+
+        // Fallback: preview thumbnail (during processing, before promotion)
+        $url = app(\App\Services\AssetDeliveryService::class)->url(
+            $this,
+            \App\Support\AssetVariant::THUMB_PREVIEW->value,
+            \App\Support\DeliveryContext::AUTHENTICATED->value
+        );
+
+        return $url !== '' ? $url : null;
     }
 
     /**

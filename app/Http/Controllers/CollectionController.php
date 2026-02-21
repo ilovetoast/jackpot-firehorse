@@ -762,7 +762,7 @@ class CollectionController extends Controller
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
             $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-            if ($finalThumbnailUrl && $thumbnailVersion) {
+            if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }

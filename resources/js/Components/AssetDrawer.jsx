@@ -2794,10 +2794,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 )
                             } else {
                                 // Image/PDF thumbnail
+                                const carouselImgUrl = currentCarouselAsset.thumbnail_url_large ?? currentCarouselAsset.final_thumbnail_url ?? currentCarouselAsset.thumbnail_url ?? currentCarouselAsset.preview_thumbnail_url ?? ''
+                                console.log('IMAGE LARGE URL FROM API:', carouselImgUrl)
                                 return (
                                     <img
-                                        key={currentCarouselAsset.id} // Key forces remount for clean transition
-                                        src={`/app/assets/${currentCarouselAsset.id}/thumbnail/large`}
+                                        key={currentCarouselAsset.id}
+                                        src={carouselImgUrl}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
                                         className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out"
                                         style={{

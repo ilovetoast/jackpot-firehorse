@@ -187,6 +187,11 @@ nav.app-nav[data-collection-only="true"] .app-nav-main-links .nav-link-disabled,
     bottom: calc(4.5rem + env(safe-area-inset-bottom));
 }
 
+/* Selection action bar: compact bar above bottom nav on mobile */
+.app-mobile-selection-bar-offset {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom) + 0.5rem);
+}
+
 .app-mobile-tray-offset {
     bottom: calc(5.5rem + env(safe-area-inset-bottom));
 }
@@ -198,6 +203,10 @@ body.has-mobile-tabbar {
 @media (min-width: 640px) {
     .app-mobile-bottom-offset {
         bottom: 0;
+    }
+
+    .app-mobile-selection-bar-offset {
+        bottom: 1rem;
     }
 
     .app-mobile-tray-offset {

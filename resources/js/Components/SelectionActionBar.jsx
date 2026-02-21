@@ -152,10 +152,9 @@ export default function SelectionActionBar({
     return (
         <>
             <div
-                className={`fixed left-1/2 -translate-x-1/2 z-50 app-mobile-bottom-offset transition-all duration-200 ease-out ${
+                className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-200 ease-out ${
                     selectedCount > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'
-                }`}
-                style={{ bottom: '10px' }}
+                } app-mobile-selection-bar-offset`}
             >
                 <div className="relative">
                     <SelectedItemsDrawer
@@ -166,29 +165,29 @@ export default function SelectionActionBar({
                         onBulkEdit={handleBulkEditClick}
                     />
                     <div
-                        className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 px-4 py-3 bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 w-full max-w-[900px] transition-shadow duration-200 hover:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"
+                        className="flex flex-row items-center justify-between gap-2 sm:gap-4 px-3 py-2 sm:px-4 sm:py-3 bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 w-full max-w-[900px] transition-shadow duration-200 hover:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"
                         style={{ maxWidth: 'min(900px, calc(100vw - 2rem))' }}
                     >
                     {/* Cluster 1: Selection info */}
-                    <div className="flex items-center gap-3">
-                        <span className={`text-sm font-semibold text-gray-700 tabular-nums transition-transform duration-150 ${countJustChanged ? 'scale-110' : 'scale-100'}`}>
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <span className={`text-xs sm:text-sm font-semibold text-gray-700 tabular-nums transition-transform duration-150 shrink-0 ${countJustChanged ? 'scale-110' : 'scale-100'}`}>
                             {selectedCount} selected
                         </span>
                         <button
                             type="button"
                             onClick={() => setDrawerOpen(true)}
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95 shrink-0"
                         >
                             Preview
                         </button>
                     </div>
 
                     {/* Cluster 2: Primary actions (Create Download) + Secondary (Bulk Edit) */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                         <button
                             type="button"
                             onClick={handleCreateDownload}
-                            className="inline-flex items-center rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-all duration-100 active:scale-95"
+                            className="inline-flex items-center rounded-md px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-all duration-100 active:scale-95"
                             style={{ backgroundColor: primaryColor, ['--tw-ring-color']: primaryColor }}
                         >
                             Create Download
@@ -202,7 +201,7 @@ export default function SelectionActionBar({
                                     type="button"
                                     onClick={isMixedType ? undefined : handleBulkEditClick}
                                     disabled={isMixedType}
-                                    className={`inline-flex items-center rounded-md px-4 py-2 text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 ${
+                                    className={`inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 ${
                                         isMixedType
                                             ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
                                             : 'border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 active:scale-95'
@@ -215,18 +214,19 @@ export default function SelectionActionBar({
                     </div>
 
                     {/* Cluster 3: Secondary controls */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                         <button
                             type="button"
                             onClick={handleSelectAllPage}
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
                         >
-                            {allPageSelected ? 'Deselect all' : 'Select all (page)'}
+                            <span className="hidden sm:inline">{allPageSelected ? 'Deselect all' : 'Select all (page)'}</span>
+                            <span className="sm:hidden">{allPageSelected ? 'Deselect' : 'Select all'}</span>
                         </button>
                         <button
                             type="button"
                             onClick={clearSelection}
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
                         >
                             Clear
                         </button>

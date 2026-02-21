@@ -228,11 +228,12 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                                     onClick={() => setShowZoomModal(true)}
                                 >
                                     <AssetImage
-                                        assetId={asset.id}
+                                        thumbnailUrl={asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url}
+                                        thumbnailUrlLarge={asset.thumbnail_url_large}
                                         alt={asset.title || asset.original_filename || 'Asset preview'}
                                         className="w-full h-full object-contain"
-                                        containerWidth={448} // Drawer max-width 480px - padding (32px) = 448px
-                                        lazy={false} // Load immediately in detail view
+                                        containerWidth={448}
+                                        lazy={false}
                                     />
                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                                         <span className="text-white text-sm font-medium">Click to zoom</span>
@@ -388,7 +389,11 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                         <XMarkIcon className="h-8 w-8" />
                     </button>
                     <img
-                        src={`/app/assets/${asset.id}/thumbnail/large`}
+                        src={(() => {
+                            const zoomUrl = asset.thumbnail_url_large ?? asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? ''
+                            if (zoomUrl) console.log('IMAGE LARGE URL FROM API:', zoomUrl)
+                            return zoomUrl
+                        })()}
                         alt={asset.title || asset.original_filename || 'Asset preview'}
                         className="max-w-full max-h-full object-contain"
                         onClick={(e) => e.stopPropagation()}

@@ -249,7 +249,7 @@ class DashboardController extends Controller
                     $thumbnails = $metadata['thumbnails'] ?? [];
                     $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }
@@ -346,7 +346,7 @@ class DashboardController extends Controller
                     $thumbnails = $metadata['thumbnails'] ?? [];
                     $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }

@@ -551,7 +551,8 @@ class DeliverableController extends Controller
                     if ($thumbnailPath) {
                         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                         $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-                        if ($thumbnailVersion && $finalThumbnailUrl) {
+                        // Do NOT append ?v= to presigned URLs — invalidates S3 signature
+                        if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                             $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                         }
                     } else {
@@ -592,6 +593,7 @@ class DeliverableController extends Controller
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (available even when pending/processing)
                     'final_thumbnail_url' => $finalThumbnailUrl, // Only set if file exists and is valid
+                    'thumbnail_url_large' => $asset->thumbnail_url_large, // Large style for drawer/zoom
                     'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
                     // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
@@ -603,6 +605,13 @@ class DeliverableController extends Controller
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                 ];
+                if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                    Log::info('ASSET API RESPONSE URL', [
+                        'asset_id' => $asset->id,
+                        'thumbnail_url' => $finalThumbnailUrl,
+                        'thumbnail_url_large' => $asset->thumbnail_url_large,
+                    ]);
+                }
             })
             ->values()
             ->all();

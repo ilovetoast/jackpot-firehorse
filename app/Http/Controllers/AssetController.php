@@ -562,7 +562,8 @@ class AssetController extends Controller
                     $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
                     if ($pathExists) {
                         $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-                        if ($thumbnailVersion && $finalThumbnailUrl) {
+                        // Do NOT append ?v= to presigned URLs — invalidates S3 signature
+                        if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                             $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                         }
                         if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
@@ -592,9 +593,10 @@ class AssetController extends Controller
                     ] : null,
                     'user_id' => $asset->user_id, // For delete-own permission check
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Thumbnail URLs - distinct paths prevent cache confusion
+                    // Thumbnail URLs - distinct paths prevent cache confusion (all from AssetDeliveryService)
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
                     'final_thumbnail_url' => $finalThumbnailUrl, // Final thumbnail (permanent, full-quality, only when completed)
+                    'thumbnail_url_large' => $asset->thumbnail_url_large, // Large style for drawer/zoom (SVG crisp rendering)
                     'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
                     // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
@@ -628,6 +630,13 @@ class AssetController extends Controller
                     // Asset health badge (healthy|warning|critical) for support visibility
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                 ];
+                if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                    Log::info('ASSET API RESPONSE URL', [
+                        'asset_id' => $asset->id,
+                        'thumbnail_url' => $finalThumbnailUrl,
+                        'thumbnail_url_large' => $asset->thumbnail_url_large,
+                    ]);
+                }
                 } catch (\Throwable $e) {
                     Log::error('[AssetController::index] map asset failed', [
                         'asset_id' => $asset->id ?? null,
@@ -647,9 +656,10 @@ class AssetController extends Controller
                         'category' => null,
                         'user_id' => $asset->user_id ?? null,
                         'uploaded_by' => null,
-                        'preview_thumbnail_url' => null,
-                        'final_thumbnail_url' => null,
-                        'thumbnail_url' => null,
+                    'preview_thumbnail_url' => null,
+                    'final_thumbnail_url' => null,
+                    'thumbnail_url_large' => null,
+                    'thumbnail_url' => null,
                         'thumbnail_status' => 'pending',
                         'thumbnail_error' => null,
                         'published_at' => null,
@@ -1352,7 +1362,7 @@ class AssetController extends Controller
                                 if ($contentLength >= $minValidSize) {
                                     // File exists and is valid - return CDN URL
                                     $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
-                                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                                     }
                                 } else {
@@ -1501,7 +1511,7 @@ class AssetController extends Controller
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
-            if ($finalThumbnailUrl && $thumbnailVersion) {
+            if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
@@ -1586,7 +1596,7 @@ class AssetController extends Controller
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
-            if ($finalThumbnailUrl && $thumbnailVersion) {
+            if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }

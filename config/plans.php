@@ -293,6 +293,7 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => true,
+        'public_collection_downloads_enabled' => true,
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999,

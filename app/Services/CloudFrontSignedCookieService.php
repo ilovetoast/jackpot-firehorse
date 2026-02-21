@@ -151,4 +151,49 @@ class CloudFrontSignedCookieService
 
         return base_path($path);
     }
+
+    /**
+     * Sign a resource for CloudFront signed URL (canned policy).
+     * Shared signing logic used by CloudFrontSignedUrlService.
+     *
+     * @param string $resource Full CDN URL (e.g. https://domain.com/path/to/file.jpg)
+     * @param int $expiresAt Unix timestamp when URL expires
+     * @return array{signature: string, key_pair_id: string, expires: int}
+     *
+     * @throws RuntimeException If signing fails
+     */
+    public function signForSignedUrl(string $resource, int $expiresAt): array
+    {
+        $keyPairId = config('cloudfront.key_pair_id');
+        $privateKeyPath = $this->resolvePrivateKeyPath();
+
+        if (empty($keyPairId)) {
+            throw new RuntimeException('CloudFront key_pair_id must be configured.');
+        }
+
+        if (!file_exists($privateKeyPath)) {
+            throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
+        }
+
+        $policy = [
+            'Statement' => [
+                [
+                    'Resource' => $resource,
+                    'Condition' => [
+                        'DateLessThan' => ['AWS:EpochTime' => $expiresAt],
+                    ],
+                ],
+            ],
+        ];
+
+        $policyJson = json_encode($policy);
+        $signature = $this->rsaSha1Sign($policyJson, $privateKeyPath);
+        $encodedSignature = $this->urlSafeBase64Encode($signature);
+
+        return [
+            'signature' => $encodedSignature,
+            'key_pair_id' => $keyPairId,
+            'expires' => $expiresAt,
+        ];
+    }
 }

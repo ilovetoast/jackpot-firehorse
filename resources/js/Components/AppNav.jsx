@@ -217,6 +217,7 @@ export default function AppNav({ brand, tenant }) {
         }
     }, [isAppPage, isCollectionOnlyNav, isAdminPage])
 
+    // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
         {
             href: '/app/dashboard',
@@ -252,13 +253,6 @@ export default function AppNav({ brand, tenant }) {
             shortLabel: 'Collections',
             icon: FolderIcon,
             isActive: (url) => url.startsWith('/app/collections'),
-        },
-        {
-            href: '/app/brand-guidelines',
-            label: 'Brand Guidelines',
-            shortLabel: 'Guides',
-            icon: BookOpenIcon,
-            isActive: (url) => url.startsWith('/app/brand-guidelines') || url.includes('/guidelines'),
         },
     ]
     
@@ -659,20 +653,35 @@ export default function AppNav({ brand, tenant }) {
                             </Link>
                         )}
                         {isAppPage && !isCollectionOnlyNav && (
-                            <Link
-                                href="/app/downloads"
-                                className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                style={{
-                                    color: currentUrl.startsWith('/app/downloads')
-                                        ? (activeBrand?.primary_color || '#4f46e5')
-                                        : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
-                                }}
-                                aria-label="Downloads"
-                                title="Downloads"
-                            >
-                                <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                                <span className="hidden md:inline">Downloads</span>
-                            </Link>
+                            <>
+                                <Link
+                                    href="/app/downloads"
+                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/downloads')
+                                            ? (activeBrand?.primary_color || '#4f46e5')
+                                            : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
+                                    }}
+                                    aria-label="Downloads"
+                                    title="Downloads"
+                                >
+                                    <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                                    <span className="hidden md:inline">Downloads</span>
+                                </Link>
+                                <Link
+                                    href="/app/brand-guidelines"
+                                    className="md:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
+                                            ? (activeBrand?.primary_color || '#4f46e5')
+                                            : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
+                                    }}
+                                    aria-label="Brand Guidelines"
+                                    title="Guides"
+                                >
+                                    <BookOpenIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                                </Link>
+                            </>
                         )}
                         
                         {/* User Menu (Notifications next to user name) */}
@@ -1043,7 +1052,7 @@ export default function AppNav({ brand, tenant }) {
             {/* Mobile PWA bottom app navigation */}
             {isAppPage && !isCollectionOnlyNav && !isAdminPage && (
                 <div className="fixed inset-x-0 bottom-0 z-[95] border-t border-gray-200 bg-white/95 backdrop-blur sm:hidden safe-area-pb">
-                    <div className="grid grid-cols-6 gap-0.5 px-1 py-1.5">
+                    <div className="grid grid-cols-5 gap-0.5 px-1 py-1.5">
                         {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
                             const active = isActive(currentUrl)
                             return (

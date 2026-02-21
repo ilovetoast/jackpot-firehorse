@@ -93,12 +93,29 @@ return [
             return array_values(array_filter(array_map('trim', explode(',', $custom))));
         }
 
-        return [
+        $origins = [
             'https://staging-jackpot.velvetysoft.com',
             'https://jackpot.velvetysoft.com',
             'http://localhost:3000',
             'http://localhost:5173',
         ];
+
+        // Include APP_URL origin (e.g. http://jackpot.local) so cross-origin S3 requests work
+        $appUrl = config('app.url');
+        if ($appUrl) {
+            $parsed = parse_url($appUrl);
+            if (isset($parsed['scheme'], $parsed['host'])) {
+                $origin = $parsed['scheme'] . '://' . $parsed['host'];
+                if (isset($parsed['port']) && ! in_array($parsed['port'], [80, 443], true)) {
+                    $origin .= ':' . $parsed['port'];
+                }
+                if (! in_array($origin, $origins, true)) {
+                    $origins[] = $origin;
+                }
+            }
+        }
+
+        return $origins;
     })(),
 
     'cors_expose_headers' => ['ETag', 'x-amz-request-id', 'x-amz-id-2'],

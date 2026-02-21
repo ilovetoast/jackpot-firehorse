@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Asset;
 use App\Models\Collection;
+use App\Services\AssetDeliveryService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionZipBuilderService;
 use App\Services\DownloadNameResolver;
@@ -11,6 +12,8 @@ use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\PublicCollectionPageBrandingResolver;
 use App\Services\TenantBucketService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +31,7 @@ use Inertia\Response;
 class PublicCollectionController extends Controller
 {
     public function __construct(
+        protected AssetDeliveryService $assetDelivery,
         protected CollectionAssetQueryService $collectionAssetQueryService,
         protected CollectionZipBuilderService $zipBuilder,
         protected FeatureGate $featureGate,
@@ -273,11 +277,13 @@ class PublicCollectionController extends Controller
             'brand_slug' => $brand_slug,
         ]);
 
-        $bucketService = app(TenantBucketService::class);
-        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
-        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
+        $downloadUrl = $this->assetDelivery->url(
+            $asset,
+            AssetVariant::ORIGINAL->value,
+            DeliveryContext::PUBLIC_COLLECTION->value
+        );
 
-        return redirect($signedUrl);
+        return redirect($downloadUrl);
     }
 
     /**
@@ -305,7 +311,25 @@ class PublicCollectionController extends Controller
             $title = $asset->original_filename ? (pathinfo($asset->original_filename, PATHINFO_FILENAME) ?? $asset->original_filename) : null;
         }
 
-        $thumbnailUrl = $asset->thumbnailUrl('medium') ?: $asset->thumbnailUrl('thumb');
+        $thumbnailUrl = $this->assetDelivery->url(
+            $asset,
+            AssetVariant::THUMB_LARGE->value,
+            DeliveryContext::PUBLIC_COLLECTION->value
+        );
+        if ($thumbnailUrl === '') {
+            $thumbnailUrl = $this->assetDelivery->url(
+                $asset,
+                AssetVariant::THUMB_MEDIUM->value,
+                DeliveryContext::PUBLIC_COLLECTION->value
+            );
+        }
+        if ($thumbnailUrl === '') {
+            $thumbnailUrl = $this->assetDelivery->url(
+                $asset,
+                AssetVariant::THUMB_SMALL->value,
+                DeliveryContext::PUBLIC_COLLECTION->value
+            );
+        }
 
         $downloadUrl = route('public.collections.assets.download', [
             'brand_slug' => $brand->slug,

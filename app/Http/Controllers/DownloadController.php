@@ -13,6 +13,7 @@ use App\Models\Brand;
 use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AssetDeliveryService;
 use App\Services\DownloadBucketService;
 use App\Services\TenantBucketService;
 use App\Services\DownloadEventEmitter;
@@ -28,6 +29,8 @@ use App\Services\PlanService;
 use App\Services\StreamingZipService;
 use App\Enums\EventType;
 use App\Mail\DownloadShareEmail;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -1099,24 +1102,28 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        // UX-R2: Single-asset download — deliver direct_asset_path with asset filename
+        // UX-R2: Single-asset download — deliver via AssetDeliveryService (CloudFront signed URL)
         if (! empty($download->direct_asset_path)) {
             $firstAsset = $download->assets()->first();
-            $filename = $firstAsset?->original_filename ?? basename($download->direct_asset_path);
             $download->increment('access_count');
             app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
-            $bucketService = app(TenantBucketService::class);
-            $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
-            $signedUrl = $bucketService->getPresignedGetUrl(
-                $bucket,
-                $download->direct_asset_path,
-                10,
-                'attachment; filename="' . addcslashes($filename, '"\\') . '"'
-            );
+            $assetDelivery = app(AssetDeliveryService::class);
+            $downloadUrl = $firstAsset
+                ? $assetDelivery->url(
+                    $firstAsset,
+                    AssetVariant::ORIGINAL->value,
+                    DeliveryContext::PUBLIC_DOWNLOAD->value,
+                    ['download' => $download, 'tenant' => $download->tenant]
+                )
+                : $assetDelivery->urlForPath(
+                    $download->direct_asset_path,
+                    DeliveryContext::PUBLIC_DOWNLOAD->value,
+                    ['download' => $download, 'tenant' => $download->tenant]
+                );
             DownloadEventEmitter::emitDownloadZipRequested($download);
             DownloadEventEmitter::emitDownloadZipCompleted($download);
 
-            return redirect($signedUrl);
+            return redirect($downloadUrl);
         }
 
         if ($download->zip_status !== ZipStatus::READY) {
@@ -1135,19 +1142,16 @@ class DownloadController extends Controller
 
         $download->increment('access_count');
         app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
-        $filename = $this->getDownloadZipFilename($download);
-        $bucketService = app(TenantBucketService::class);
-        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
-        $signedUrl = $bucketService->getPresignedGetUrl(
-            $bucket,
+        $assetDelivery = app(AssetDeliveryService::class);
+        $downloadUrl = $assetDelivery->urlForPath(
             $download->zip_path,
-            10,
-            'attachment; filename="' . addcslashes($filename, '"\\') . '"'
+            DeliveryContext::PUBLIC_DOWNLOAD->value,
+            ['download' => $download, 'tenant' => $download->tenant]
         );
         DownloadEventEmitter::emitDownloadZipRequested($download);
         DownloadEventEmitter::emitDownloadZipCompleted($download);
 
-        return redirect($signedUrl);
+        return redirect($downloadUrl);
     }
 
     /**

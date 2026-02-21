@@ -16,9 +16,10 @@ class CdnUrl
     {
         $path = ltrim($path, '/');
 
-        // Local: skip CloudFront, return normal S3/storage URL per task requirements
+        // Local: return presigned S3 URL (temporaryUrl) so thumbnails load without CORS
         if (app()->environment('local')) {
-            return \Illuminate\Support\Facades\Storage::disk('s3')->url($path);
+            $ttl = (int) config('assets.delivery.local_presign_ttl', 900);
+            return \Illuminate\Support\Facades\Storage::disk('s3')->temporaryUrl($path, now()->addSeconds($ttl));
         }
 
         $domain = config('cloudfront.domain');

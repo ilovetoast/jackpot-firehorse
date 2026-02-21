@@ -4585,7 +4585,7 @@ class AssetMetadataController extends Controller
             }
 
             $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
-            if ($finalThumbnailUrl && $thumbnailVersion) {
+            if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
