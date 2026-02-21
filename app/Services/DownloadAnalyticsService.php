@@ -8,8 +8,6 @@ use App\Models\ActivityEvent;
 use App\Models\Download;
 use App\Models\User;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Route;
-
 /**
  * D9 — Download Analytics (Internal)
  *
@@ -137,9 +135,7 @@ class DownloadAnalyticsService
         foreach ($assets as $asset) {
             $thumbnailUrl = null;
             if (($asset->thumbnail_status ?? '') === 'completed') {
-                $thumbnailUrl = Route::has('assets.thumbnail.final')
-                    ? route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'thumb'])
-                    : null;
+                $thumbnailUrl = $asset->thumbnailUrl('thumb') ?: null;
             }
             $out[] = [
                 'asset_id' => $asset->id,

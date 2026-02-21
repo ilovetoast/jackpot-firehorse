@@ -243,12 +243,9 @@ class DownloadController extends Controller
                 : ($asset->thumbnail_status ?? 'pending');
             $thumbUrl = null;
             if ($thumbStatus === 'completed' && $asset->thumbnailPathForStyle('thumb')) {
-                $thumbUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'thumb']);
+                $thumbUrl = $asset->thumbnailUrl('thumb');
             } else {
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    $thumbUrl = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
-                }
+                $thumbUrl = $asset->thumbnailUrl('preview') ?: null;
             }
             $thumbnails[] = [
                 'id' => $asset->id,

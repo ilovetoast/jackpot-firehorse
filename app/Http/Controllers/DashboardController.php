@@ -235,44 +235,25 @@ class DashboardController extends Controller
                     }
                 }
                 
-                // Generate thumbnail URLs (same logic as AssetController)
+                // Generate thumbnail URLs (CDN URLs from Asset model)
                 $metadata = $asset->metadata ?? [];
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                    ? $asset->thumbnail_status->value 
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
-                
-                $previewThumbnailUrl = null;
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                        'asset' => $asset->id,
-                        'style' => 'preview',
-                    ]);
-                }
-                
+
+                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    // Prefer large, then medium (at least medium size)
-                    $thumbnailStyle = null;
-                    if (!empty($thumbnails) && isset($thumbnails['large'])) {
-                        $thumbnailStyle = 'large';
-                    } elseif (!empty($thumbnails) && isset($thumbnails['medium'])) {
-                        $thumbnailStyle = 'medium';
-                    }
-                    
-                    if ($thumbnailStyle) {
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => $thumbnailStyle,
-                        ]);
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . $thumbnailVersion;
-                        }
+                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }
-                
+
                 return [
                     'id' => $asset->id,
                     'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
@@ -351,44 +332,25 @@ class DashboardController extends Controller
                     }
                 }
                 
-                // Generate thumbnail URLs (same logic as AssetController)
+                // Generate thumbnail URLs (CDN URLs from Asset model)
                 $metadata = $asset->metadata ?? [];
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                    ? $asset->thumbnail_status->value 
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
-                
-                $previewThumbnailUrl = null;
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                        'asset' => $asset->id,
-                        'style' => 'preview',
-                    ]);
-                }
-                
+
+                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    // Prefer large, then medium (at least medium size)
-                    $thumbnailStyle = null;
-                    if (!empty($thumbnails) && isset($thumbnails['large'])) {
-                        $thumbnailStyle = 'large';
-                    } elseif (!empty($thumbnails) && isset($thumbnails['medium'])) {
-                        $thumbnailStyle = 'medium';
-                    }
-                    
-                    if ($thumbnailStyle) {
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => $thumbnailStyle,
-                        ]);
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . $thumbnailVersion;
-                        }
+                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }
-                
+
                 return [
                     'id' => $asset->id,
                     'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
@@ -605,12 +567,9 @@ class DashboardController extends Controller
                             : ($asset->thumbnail_status ?? 'pending');
                         if ($thumbStatus === 'completed') {
                             $version = $meta['thumbnails_generated_at'] ?? null;
-                            $subjectThumbnailUrl = route('assets.thumbnail.final', [
-                                'asset' => $asset->id,
-                                'style' => 'thumb',
-                            ]);
-                            if ($version) {
-                                $subjectThumbnailUrl .= '?v=' . urlencode($version);
+                            $subjectThumbnailUrl = $asset->thumbnailUrl('thumb');
+                            if ($subjectThumbnailUrl && $version) {
+                                $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($version);
                             }
                         }
                     }

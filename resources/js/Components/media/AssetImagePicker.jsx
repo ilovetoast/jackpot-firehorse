@@ -288,7 +288,7 @@ export default function AssetImagePicker({
           const assetResult = finalData.results?.[0]
           const assetId = assetResult?.asset_id ?? assetResult?.id
           if (assetId) {
-            const thumb = assetResult?.thumbnail_url ?? assetResult?.final_thumbnail_url ?? `/app/assets/${assetId}/thumbnail/final/medium`
+            const thumb = assetResult?.thumbnail_url ?? assetResult?.final_thumbnail_url ?? null
             // New assets don't have thumbnails yet (generated async) - pass blob preview for immediate display
             const immediatePreview = uploadedFilePreviewUrl || (uploadedFile ? URL.createObjectURL(uploadedFile) : null)
             onSelect?.({ asset_id: assetId, thumbnail_url: thumb, preview_url: immediatePreview })

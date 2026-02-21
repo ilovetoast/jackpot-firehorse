@@ -62,7 +62,6 @@ Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controlle
 Route::post('/b/{brand_slug}/collections/{collection_slug}/download', [\App\Http\Controllers\PublicCollectionController::class, 'createDownload'])->name('public.collections.download');
 // D6: On-the-fly collection ZIP — signed URL, no Download record; throttle to prevent abuse
 Route::get('/b/{brand_slug}/collections/{collection_slug}/zip', [\App\Http\Controllers\PublicCollectionController::class, 'streamZip'])->name('public.collections.zip')->middleware(['signed', 'throttle:10,1']);
-Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
 // Public collection branding (logo, background) — no auth; from Brand Settings > Public Pages
 Route::get('/b/{brand_slug}/collections/{collection_slug}/logo', [\App\Http\Controllers\AssetThumbnailController::class, 'streamLogoForPublicCollection'])->name('public.collections.logo')->middleware(['web']);
@@ -264,7 +263,6 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/assets/recover-category-id', [\App\Http\Controllers\Admin\AdminAssetController::class, 'recoverCategoryId'])->name('admin.assets.recover-category-id');
     Route::get('/admin/assets/{asset}', [\App\Http\Controllers\Admin\AdminAssetController::class, 'show'])->name('admin.assets.show');
     Route::get('/admin/assets/{asset}/download-source', [\App\Http\Controllers\Admin\AdminAssetController::class, 'downloadSource'])->name('admin.assets.download-source');
-    Route::get('/admin/assets/{asset}/thumbnail', [\App\Http\Controllers\AssetThumbnailController::class, 'adminThumbnail'])->name('admin.assets.thumbnail');
     Route::post('/admin/assets/{asset}/repair', [\App\Http\Controllers\Admin\AdminAssetController::class, 'repair'])->name('admin.assets.repair');
     Route::post('/admin/assets/{asset}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restore'])->name('admin.assets.restore');
     Route::post('/admin/assets/{asset}/retry-pipeline', [\App\Http\Controllers\Admin\AdminAssetController::class, 'retryPipeline'])->name('admin.assets.retry-pipeline');
@@ -520,11 +518,6 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/metrics', [\App\Http\Controllers\AssetMetricController::class, 'index'])->name('assets.metrics.index');
             Route::get('/assets/{asset}/metrics/downloads', [\App\Http\Controllers\AssetMetricController::class, 'downloads'])->name('assets.metrics.downloads');
             Route::get('/assets/{asset}/metrics/views', [\App\Http\Controllers\AssetMetricController::class, 'views'])->name('assets.metrics.views');
-            // Thumbnail endpoints - distinct URLs for preview and final to prevent cache confusion
-            Route::get('/assets/{asset}/thumbnail/preview/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'preview'])->name('assets.thumbnail.preview');
-            Route::get('/assets/{asset}/thumbnail/final/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'final'])->name('assets.thumbnail.final');
-            // Legacy endpoint for backward compatibility (redirects to final)
-            Route::get('/assets/{asset}/thumbnail/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'show'])->name('assets.thumbnail');
             // Thumbnail retry endpoint
             Route::post('/assets/{asset}/thumbnails/retry', [\App\Http\Controllers\AssetThumbnailController::class, 'retry'])->name('assets.thumbnails.retry');
             // Thumbnail generation endpoint (for existing assets without thumbnails)
@@ -688,6 +681,11 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
     });
+
+    // PHASE 7: 410 safeguard — no silent fallback to deprecated proxy
+    Route::get('/assets/{asset}/thumbnail/{any}', fn () => abort(410, 'Asset proxy removed. Use CDN.'))->where('any', '.*');
+    Route::get('/assets/{asset}/thumbnail', fn () => abort(410, 'Asset proxy removed. Use CDN.'));
+    Route::get('/admin/assets/{asset}/thumbnail', fn () => abort(410, 'Asset proxy removed. Use CDN.'));
 });
 
 // Stripe webhook (no auth, no CSRF)

@@ -26,8 +26,6 @@ class RestrictCollectionOnlyUser
         'collection-invite.switch',
         'assets.view',
         'assets.download',
-        'assets.thumbnail.final',
-        'assets.thumbnail.preview',
         'logout',
     ];
 

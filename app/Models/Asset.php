@@ -295,6 +295,8 @@ class Asset extends Model
     protected $appends = [
         'is_complete',
         'original_url',
+        'thumbnail_url',
+        'thumbnail_url_large',
     ];
 
     /**
@@ -311,6 +313,45 @@ class Asset extends Model
             return '';
         }
         return cdn_url($path);
+    }
+
+    /**
+     * Get CDN URL for a thumbnail style.
+     * Uses canonical path from metadata when available.
+     *
+     * @param string $style Thumbnail style (thumb, medium, large, preview)
+     * @return string CDN URL, or empty string if thumbnail not available
+     */
+    public function thumbnailUrl(string $style = 'medium'): string
+    {
+        $path = $this->thumbnailPathForStyle($style);
+        if ($path) {
+            return cdn_url($path);
+        }
+        // Fallback: preview thumbnails (during processing)
+        if ($style === 'preview') {
+            $preview = $this->metadata['preview_thumbnails']['preview']['path'] ?? null;
+            if ($preview) {
+                return cdn_url($preview);
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Get thumbnail_url for default style (medium). Appended to JSON.
+     */
+    public function getThumbnailUrlAttribute(): string
+    {
+        return $this->thumbnailUrl('medium') ?: $this->thumbnailUrl('thumb');
+    }
+
+    /**
+     * Get thumbnail_url for large style (e.g. SVG detail view). Appended to JSON.
+     */
+    public function getThumbnailUrlLargeAttribute(): string
+    {
+        return $this->thumbnailUrl('large') ?: $this->thumbnailUrl('medium') ?: $this->thumbnailUrl('thumb');
     }
 
     /**

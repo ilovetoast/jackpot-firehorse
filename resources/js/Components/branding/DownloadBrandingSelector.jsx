@@ -135,7 +135,7 @@ export default function DownloadBrandingSelector({
             <button
               key={a.id}
               type="button"
-              onClick={() => !disabled && onLogoChange?.('custom', a.id)}
+              onClick={() => !disabled && onLogoChange?.('custom', a.id, a.thumbnail_url)}
               className={`w-16 h-16 rounded-lg border-2 overflow-hidden flex-shrink-0 transition-colors ${
                 selectedLogoAssetId === a.id
                   ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1'
@@ -158,7 +158,7 @@ export default function DownloadBrandingSelector({
             onClose={() => setShowLogoPicker(false)}
             fetchAssets={fetchLogoAssets}
             onSelect={(result) => {
-              if (result.asset_id) onLogoChange?.('custom', result.asset_id)
+              if (result.asset_id) onLogoChange?.('custom', result.asset_id, result.thumbnail_url)
               setShowLogoPicker(false)
             }}
             title="Select logo"

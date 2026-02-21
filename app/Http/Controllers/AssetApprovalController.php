@@ -110,27 +110,14 @@ class AssetApprovalController extends Controller
                 ? $asset->thumbnail_status->value 
                 : ($asset->thumbnail_status ?? 'pending');
             
-            $previewThumbnailUrl = null;
-            $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-            if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                    'asset' => $asset->id,
-                    'style' => 'preview',
-                ]);
-            }
-            
+            $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+
             $finalThumbnailUrl = null;
             if ($thumbnailStatus === 'completed') {
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                $thumbnails = $metadata['thumbnails'] ?? [];
-                if (!empty($thumbnails) && isset($thumbnails['medium'])) {
-                    $finalThumbnailUrl = route('assets.thumbnail.final', [
-                        'asset' => $asset->id,
-                        'style' => 'medium',
-                    ]);
-                    if ($thumbnailVersion) {
-                        $finalThumbnailUrl .= '?v=' . $thumbnailVersion;
-                    }
+                $finalThumbnailUrl = $asset->thumbnailUrl('medium');
+                if ($finalThumbnailUrl && $thumbnailVersion) {
+                    $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                 }
             }
             

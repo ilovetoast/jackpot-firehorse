@@ -4566,14 +4566,7 @@ class AssetMetadataController extends Controller
             : ($asset->thumbnail_status ?? 'pending');
 
         // Preview thumbnail URL (temporary, available early)
-        $previewThumbnailUrl = null;
-        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-        if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-            $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                'asset' => $asset->id,
-                'style' => 'preview',
-            ]);
-        }
+        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
 
         // Final thumbnail URL (permanent, only when completed)
         $finalThumbnailUrl = null;
@@ -4585,23 +4578,15 @@ class AssetMetadataController extends Controller
             // Prefer medium size for better quality, fallback to thumb if medium not available
             $thumbnailStyle = 'medium';
             $thumbnailPath = $asset->thumbnailPathForStyle('medium');
-            
-            // Fallback to 'thumb' if medium doesn't exist
+
             if (!$thumbnailPath && !isset($thumbnails['medium'])) {
                 $thumbnailStyle = 'thumb';
                 $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
             }
-            
-            if ($thumbnailPath || $thumbnailsExistInMetadata) {
-                $finalThumbnailUrl = route('assets.thumbnail.final', [
-                    'asset' => $asset->id,
-                    'style' => $thumbnailStyle,
-                ]);
-                
-                // Add version query param if available (ensures browser refetches when version changes)
-                if ($thumbnailVersion) {
-                    $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
-                }
+
+            $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+            if ($finalThumbnailUrl && $thumbnailVersion) {
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
 

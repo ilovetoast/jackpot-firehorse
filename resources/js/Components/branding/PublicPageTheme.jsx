@@ -39,13 +39,12 @@ export default function PublicPageTheme({
 
   const handleBackgroundsConfirm = (ids, assets) => {
     const idsArray = Array.isArray(ids) ? ids : []
-    // Use full assets when available; otherwise build minimal objects with thumbnail URLs for display
+    const detailMap = (brand?.background_asset_details || []).reduce((m, d) => { m[d.id] = d; return m }, {})
+    // Use full assets when available; otherwise use backend-provided thumbnail URLs from background_asset_details
     const resolved = Array.isArray(assets) && assets.length > 0
       ? assets
       : idsArray.map((id) => {
-          const thumbUrl = typeof route === 'function'
-            ? route('assets.thumbnail.final', { asset: id, style: 'medium' })
-            : `/app/assets/${id}/thumbnail/final/medium`
+          const thumbUrl = detailMap[id]?.thumbnail_url ?? null
           return { id, thumbnail_url: thumbUrl, url: thumbUrl }
         })
 
@@ -71,15 +70,13 @@ export default function PublicPageTheme({
     setSelectedBackgroundAssets((prev) => prev.filter((a) => a?.id != null && String(a.id) !== String(id)))
   }
 
-  // Build display assets: prefer local full objects; when we have IDs but no local assets (e.g. from save, or lost state), hydrate from IDs
+  // Build display assets: prefer local full objects; when we have IDs but no local assets (e.g. from save, or lost state), hydrate from backend-provided background_asset_details
   const displayAssets = (() => {
     if (selectedBackgroundAssets.length > 0) return selectedBackgroundAssets
     if (backgroundAssetIds.length === 0) return []
-    // Hydrate from IDs so thumbnails show when form has IDs but local state is empty (page load after save, or state loss)
+    const detailMap = (brand?.background_asset_details || []).reduce((m, d) => { m[d.id] = d; return m }, {})
     return backgroundAssetIds.map((id) => {
-      const thumbUrl = typeof route === 'function'
-        ? route('assets.thumbnail.final', { asset: id, style: 'medium' })
-        : `/app/assets/${id}/thumbnail/final/medium`
+      const thumbUrl = detailMap[id]?.thumbnail_url ?? null
       return { id, thumbnail_url: thumbUrl, url: thumbUrl }
     })
   })()
@@ -121,11 +118,12 @@ export default function PublicPageTheme({
           brandLogoPath={brand.logo_path}
           logoMode={data.download_landing_settings?.logo_mode || 'brand'}
           selectedLogoAssetId={data.download_landing_settings?.logo_asset_id ?? null}
-          onLogoChange={(mode, assetId) => {
+          onLogoChange={(mode, assetId, thumbnailUrl) => {
             setData('download_landing_settings', {
               ...(data.download_landing_settings || {}),
               logo_mode: mode,
               logo_asset_id: mode === 'custom' ? assetId : null,
+              logo_asset_thumbnail_url: mode === 'custom' ? thumbnailUrl : null,
             })
           }}
           fetchLogoAssets={(opts) => {
@@ -183,8 +181,8 @@ export default function PublicPageTheme({
             const mode = data.download_landing_settings?.logo_mode || 'brand'
             if (mode === 'none') return null
             const lid = data.download_landing_settings?.logo_asset_id
-            if (mode === 'custom' && lid && typeof route === 'function') {
-              return route('assets.thumbnail.final', { asset: lid, style: 'medium' })
+            if (mode === 'custom' && lid) {
+              return data.download_landing_settings?.logo_asset_thumbnail_url ?? brand.logo_asset_thumbnail_url ?? null
             }
             return brand.logo_path
           })()}
@@ -192,8 +190,8 @@ export default function PublicPageTheme({
             const mode = data.download_landing_settings?.logo_mode || 'brand'
             if (mode === 'none') return null
             const lid = data.download_landing_settings?.logo_asset_id
-            if (mode === 'custom' && lid && typeof route === 'function') {
-              return route('assets.thumbnail.final', { asset: lid, style: 'medium' })
+            if (mode === 'custom' && lid) {
+              return data.download_landing_settings?.logo_asset_thumbnail_url ?? brand.logo_asset_thumbnail_url ?? null
             }
             return null
           })()}

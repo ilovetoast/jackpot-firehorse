@@ -124,9 +124,9 @@ class CollectionController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
                 if ($status === 'completed') {
-                    $featuredUrls[$asset->id] = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'large']);
-                } elseif (! empty($asset->metadata['preview_thumbnails']['preview'] ?? null)) {
-                    $featuredUrls[$asset->id] = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
+                    $featuredUrls[$asset->id] = $asset->thumbnailUrl('large') ?: $asset->thumbnailUrl('medium') ?: $asset->thumbnailUrl('thumb');
+                } elseif ($asset->thumbnailUrl('preview')) {
+                    $featuredUrls[$asset->id] = $asset->thumbnailUrl('preview');
                 }
             }
         }
@@ -754,20 +754,16 @@ class CollectionController extends Controller
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
 
-        $previewThumbnailUrl = null;
-        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-        if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-            $previewThumbnailUrl = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
-        }
+        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
 
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-            $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => $thumbnailStyle]);
-            if ($thumbnailVersion) {
-                $finalThumbnailUrl .= '?v='.urlencode($thumbnailVersion);
+            $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+            if ($finalThumbnailUrl && $thumbnailVersion) {
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
 

@@ -1323,7 +1323,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     route={typeof route === 'function' ? route : (name, params) => {
                                         const p = params && typeof params === 'object' && !Array.isArray(params) ? params : {}
                                         if (name === 'brands.download-background-candidates') return `/app/brands/${p.brand ?? params ?? brand.id}/download-background-candidates`
-                                        if (name === 'assets.thumbnail.final') return `/app/assets/${p.asset}/thumbnail/final/${p.style || 'medium'}`
                                         return '#'
                                     }}
                                 />

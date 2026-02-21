@@ -43,20 +43,16 @@ class DownloadBucketController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $previewThumbnailUrl = null;
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    $previewThumbnailUrl = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
-                }
+                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
 
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => $thumbnailStyle]);
-                    if ($thumbnailVersion) {
-                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
                 }
 

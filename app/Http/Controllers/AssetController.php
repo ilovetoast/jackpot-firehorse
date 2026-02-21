@@ -543,45 +543,27 @@ class AssetController extends Controller
                     ];
                 }
 
-                // Step 6: Generate distinct thumbnail URLs for preview and final
-                // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
-                // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
-                // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
-                
+                // Step 6: Thumbnail URLs — CDN-only (no app proxy)
+                // preview_thumbnail_url: LQIP during processing
+                // final_thumbnail_url: permanent CDN URL when thumbnails exist
                 $metadata = $asset->metadata ?? [];
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                    ? $asset->thumbnail_status->value 
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
-                
-                // Step 6: Preview thumbnail URL only if preview exists in metadata
-                // Preview thumbnails are generated early and stored separately
-                $previewThumbnailUrl = null;
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    // Preview exists - construct URL to preview endpoint
-                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                        'asset' => $asset->id,
-                        'style' => 'preview', // Preview endpoint serves 'preview' style
-                    ]);
-                }
-                
+
+                $previewThumbnailUrl = $asset->thumbnailUrl('preview');
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
-                
-                // Final thumbnail URL: provide when status is completed OR thumbnails exist in metadata
-                // (Resilient to status sync issues - see THUMBNAIL_STATUS_SYNC_ISSUE.md)
+
                 $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
                 if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                     $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
                     if ($pathExists) {
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => $thumbnailStyle,
-                        ]);
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                        if ($thumbnailVersion && $finalThumbnailUrl) {
+                            $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                         }
                         if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
                             Log::info('[AssetController] Providing final_thumbnail_url despite status mismatch', [
@@ -1368,14 +1350,10 @@ class AssetController extends Controller
                                 $minValidSize = 1024; // 1KB
                                 
                                 if ($contentLength >= $minValidSize) {
-                                    // File exists and is valid - return final URL
-                                    $finalThumbnailUrl = route('assets.thumbnail.final', [
-                                        'asset' => $asset->id,
-                                        'style' => 'thumb',
-                                    ]);
-                                    
-                                    if ($thumbnailVersion) {
-                                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                                    // File exists and is valid - return CDN URL
+                                    $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+                                    if ($finalThumbnailUrl && $thumbnailVersion) {
+                                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                                     }
                                 } else {
                                     // File exists but is too small - downgrade to failed
@@ -1421,15 +1399,7 @@ class AssetController extends Controller
                     }
                     
                     // Preview thumbnail URL - returned even when status is pending or processing
-                    $previewThumbnailUrl = null;
-                    $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                    if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                        // Preview exists - construct URL to preview endpoint
-                        $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                            'asset' => $asset->id,
-                            'style' => 'preview',
-                        ]);
-                    }
+                    $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
                     
                     return [
                         'asset_id' => $asset->id,
@@ -1520,33 +1490,19 @@ class AssetController extends Controller
             ? $asset->thumbnail_status->value 
             : ($asset->thumbnail_status ?? 'pending');
 
-        // Generate distinct thumbnail URLs for preview and final
-        // Step 6: Preview thumbnail URL only if preview exists in metadata
+        // Generate distinct thumbnail URLs for preview and final (CDN URLs)
         $metadata = $asset->metadata ?? [];
-        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-        $previewThumbnailUrl = null;
-        if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-            $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                'asset' => $asset->id,
-                'style' => 'preview', // Preview endpoint serves 'preview' style
-            ]);
-        }
-        
+        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
-        
+
         // Final thumbnail URL only provided when thumbnail_status === COMPLETED
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            
-            $finalThumbnailUrl = route('assets.thumbnail.final', [
-                'asset' => $asset->id,
-                'style' => 'thumb',
-            ]);
-            
-            // Add version query param if available
-            if ($thumbnailVersion) {
-                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+            $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+            if ($finalThumbnailUrl && $thumbnailVersion) {
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
 
@@ -1620,31 +1576,21 @@ class AssetController extends Controller
         $collectionOnly = app()->bound('collection_only') && app('collection_only');
         $collection = $collectionOnly && app()->bound('collection') ? app('collection') : null;
 
-        // Build thumbnail URLs from metadata (same logic as index) — Asset has no final/preview URL accessors
+        // Build thumbnail URLs (CDN URLs from Asset model)
         $metadata = $asset->metadata ?? [];
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
-        $previewThumbnailUrl = null;
-        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-        if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-            $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                'asset' => $asset->id,
-                'style' => 'preview',
-            ]);
-        }
+        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
         $finalThumbnailUrl = null;
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $finalThumbnailUrl = route('assets.thumbnail.final', [
-                'asset' => $asset->id,
-                'style' => 'thumb',
-            ]);
-            if ($thumbnailVersion) {
-                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+            $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+            if ($finalThumbnailUrl && $thumbnailVersion) {
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
         }
-        $thumbnailUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
+        $thumbnailUrl = $finalThumbnailUrl ?: $previewThumbnailUrl;
 
         $asset->load(['collections' => fn ($q) => $q->select('collections.id', 'collections.name')]);
         $payload = [

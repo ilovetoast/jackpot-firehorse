@@ -140,7 +140,7 @@ class BrandDNAController extends Controller
                     'asset' => $r->asset ? [
                         'id' => $r->asset->id,
                         'title' => $r->asset->title,
-                        'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $r->asset->id, 'style' => 'medium']),
+                        'thumbnail_url' => $r->asset->thumbnailUrl('medium'),
                     ] : null,
                 ]),
         ]);

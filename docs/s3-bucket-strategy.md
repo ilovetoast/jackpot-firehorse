@@ -189,6 +189,31 @@ CloudFront signed cookies are **tenant-scoped** for defense-in-depth isolation.
 
 ---
 
+## CDN-Only Asset Delivery
+
+**Phase 7:** All asset previews (thumbnails, originals) are delivered via CloudFront. The app-level proxy has been removed.
+
+### Architecture
+- **No backend streaming:** Laravel no longer streams thumbnails or originals from S3.
+- **CDN URLs only:** All preview URLs use `cdn_url()` → CloudFront (staging/prod) or S3 (local).
+- **Tenant isolation:** Signed cookies scope access to `https://{cdn-domain}/tenants/{tenant_uuid}/*`.
+- **Cross-tenant blocked:** CloudFront returns 403 for paths outside the active tenant.
+
+### Asset model
+- `original_url` — CDN URL for the original file.
+- `thumbnail_url` — CDN URL for medium/thumb thumbnail.
+- `thumbnailUrl($style)` — CDN URL for a specific style (thumb, medium, large, preview).
+
+### Deprecated routes
+- `/app/assets/{uuid}/thumbnail/*` — **410 Gone.** Use CDN URLs from asset payload.
+- `/app/assets/{uuid}/original` — Not used; originals use `original_url`.
+
+### Local development
+- `cdn_url()` returns S3/MinIO URLs directly (no CloudFront, no signing).
+- Thumbnails and originals load from local storage.
+
+---
+
 ## Summary
 
 | Rule | Description |

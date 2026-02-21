@@ -882,15 +882,11 @@ class AdminAssetController extends Controller
     {
         // Prefer completed thumbnail when available
         if ($asset->thumbnail_status?->value === 'completed' && $asset->thumbnailPathForStyle('medium')) {
-            return route('admin.assets.thumbnail', ['asset' => $asset->id]);
+            return $asset->thumbnailUrl('medium') ?: null;
         }
         // Fallback: show preview when main thumbnail skipped/failed but preview exists
-        $metadata = $asset->metadata ?? [];
-        $previewPath = $metadata['preview_thumbnails']['preview']['path'] ?? null;
-        if ($previewPath) {
-            return route('admin.assets.thumbnail', ['asset' => $asset->id]);
-        }
-        return null;
+        $previewUrl = $asset->thumbnailUrl('preview');
+        return $previewUrl ?: null;
     }
 
     protected function formatAssetForList(Asset $asset): array
@@ -965,8 +961,9 @@ class AdminAssetController extends Controller
             return $urls;
         }
         foreach (['thumb', 'medium', 'large'] as $style) {
-            if ($asset->thumbnailPathForStyle($style)) {
-                $urls[$style] = route('admin.assets.thumbnail', ['asset' => $asset->id, 'style' => $style]);
+            $url = $asset->thumbnailUrl($style);
+            if ($url) {
+                $urls[$style] = $url;
             }
         }
         return $urls;

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\Collection;
 use App\Services\CollectionAssetQueryService;
@@ -282,66 +281,7 @@ class PublicCollectionController extends Controller
     }
 
     /**
-     * Redirect to a signed thumbnail URL for an asset in a public collection. No auth.
-     * Same validation as download; only serves thumbnails for assets visible in the collection.
-     */
-    public function thumbnail(string $brand_slug, string $collection_slug, Asset $asset): RedirectResponse
-    {
-        $collection = Collection::query()
-            ->where('slug', $collection_slug)
-            ->where('is_public', true)
-            ->with('tenant')
-            ->whereHas('brand', fn ($q) => $q->where('slug', $brand_slug))
-            ->first();
-
-        if (! $collection) {
-            abort(404, 'Collection not found.');
-        }
-
-        $tenant = $collection->tenant;
-        if (! $tenant || ! $this->featureGate->publicCollectionsEnabled($tenant)) {
-            abort(404, 'Collection not found.');
-        }
-
-        if ($asset->tenant_id !== $collection->tenant_id || $asset->brand_id !== $collection->brand_id) {
-            abort(404, 'Asset not found.');
-        }
-
-        $inCollection = $asset->collections()->where('collection_id', $collection->id)->exists();
-        if (! $inCollection) {
-            abort(404, 'Asset not found.');
-        }
-
-        $query = $this->collectionAssetQueryService->queryPublic($collection);
-        $allowed = (clone $query)->where('assets.id', $asset->id)->exists();
-        if (! $allowed) {
-            abort(404, 'Asset not available.');
-        }
-
-        $asset->load('storageBucket');
-        $path = null;
-        if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
-            $path = $asset->thumbnailPathForStyle('medium') ?: $asset->thumbnailPathForStyle('thumb');
-        }
-        if (! $path && $asset->metadata) {
-            $preview = $asset->metadata['preview_thumbnails']['preview']['path'] ?? null;
-            if ($preview) {
-                $path = $preview;
-            }
-        }
-        if (! $path) {
-            abort(404, 'Thumbnail not available.');
-        }
-
-        $bucketService = app(TenantBucketService::class);
-        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
-        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $path, 15);
-
-        return redirect($signedUrl);
-    }
-
-    /**
-     * Public-safe asset payload: thumbnail_url (route), download_url, no internal metadata.
+     * Public-safe asset payload: thumbnail_url (CDN), download_url, no internal metadata.
      */
     private function mapAssetToPublicGridArray(Asset $asset, Collection $collection, \App\Models\Brand $brand): array
     {
@@ -365,11 +305,7 @@ class PublicCollectionController extends Controller
             $title = $asset->original_filename ? (pathinfo($asset->original_filename, PATHINFO_FILENAME) ?? $asset->original_filename) : null;
         }
 
-        $thumbnailUrl = route('public.collections.assets.thumbnail', [
-            'brand_slug' => $brand->slug,
-            'collection_slug' => $collection->slug,
-            'asset' => $asset->id,
-        ]);
+        $thumbnailUrl = $asset->thumbnailUrl('medium') ?: $asset->thumbnailUrl('thumb');
 
         $downloadUrl = route('public.collections.assets.download', [
             'brand_slug' => $brand->slug,

@@ -450,10 +450,10 @@ class BrandController extends Controller
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
                 'logo_id' => $brand->logo_id,
-                'logo_thumbnail_url' => $brand->logo_id ? route('assets.thumbnail.final', ['asset' => $brand->logo_id, 'style' => 'medium']) : null,
+                'logo_thumbnail_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->thumbnailUrl('medium') : null,
                 'icon_path' => $brand->icon_path,
                 'icon_id' => $brand->icon_id,
-                'icon_thumbnail_url' => $brand->icon_id ? route('assets.thumbnail.final', ['asset' => $brand->icon_id, 'style' => 'medium']) : null,
+                'icon_thumbnail_url' => $brand->icon_id ? \App\Models\Asset::find($brand->icon_id)?->thumbnailUrl('medium') : null,
                 'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
                 'is_default' => $brand->is_default,
@@ -467,7 +467,8 @@ class BrandController extends Controller
                 'settings' => $brand->settings,
                 'download_landing_settings' => $brand->download_landing_settings ?? [],
                 'logo_assets' => [], // Populated client-side when fetching logos
-                'background_asset_details' => [], // Populated when needed for preview
+                'background_asset_details' => $this->buildBackgroundAssetDetails($brand),
+                'logo_asset_thumbnail_url' => $this->buildLogoAssetThumbnailUrl($brand),
             ],
             'categories' => $categories->map(function ($category) {
                 // Get access rules for private categories
@@ -1192,7 +1193,7 @@ class BrandController extends Controller
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $style = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => $style]);
+                    $finalThumbnailUrl = $asset->thumbnailUrl($style);
                 }
                 return [
                     'id' => $asset->id,
@@ -1204,5 +1205,46 @@ class BrandController extends Controller
             });
 
         return response()->json(['assets' => $assets]);
+    }
+
+    /**
+     * Build background_asset_details for Brands/Edit (CDN thumbnail URLs for background_asset_ids).
+     */
+    protected function buildBackgroundAssetDetails(Brand $brand): array
+    {
+        $settings = $brand->download_landing_settings ?? [];
+        $ids = $settings['background_asset_ids'] ?? [];
+        if (! is_array($ids) || empty($ids)) {
+            return [];
+        }
+        $assets = \App\Models\Asset::whereIn('id', $ids)
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->get(['id']);
+        $out = [];
+        foreach ($assets as $asset) {
+            $url = $asset->thumbnailUrl('medium');
+            if ($url) {
+                $out[] = ['id' => $asset->id, 'thumbnail_url' => $url];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Build logo_asset_thumbnail_url for custom logo (when logo_mode is custom and logo_asset_id is set).
+     */
+    protected function buildLogoAssetThumbnailUrl(Brand $brand): ?string
+    {
+        $settings = $brand->download_landing_settings ?? [];
+        $logoAssetId = $settings['logo_asset_id'] ?? null;
+        if (! $logoAssetId) {
+            return null;
+        }
+        $asset = \App\Models\Asset::where('id', $logoAssetId)
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->first();
+        return $asset?->thumbnailUrl('medium') ?: null;
     }
 }

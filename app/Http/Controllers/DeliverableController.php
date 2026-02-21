@@ -535,49 +535,26 @@ class DeliverableController extends Controller
                     }
                 }
 
-                // Step 6: Generate distinct thumbnail URLs for preview and final
-                // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
-                // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
-                // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
-                
+                // Step 6: Thumbnail URLs — CDN-only (no app proxy)
                 $metadata = $asset->metadata ?? [];
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                    ? $asset->thumbnail_status->value 
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
-                
-                // Step 6: Preview thumbnail URL only if preview exists in metadata
-                // Preview thumbnails are generated early and stored separately
-                $previewThumbnailUrl = null;
-                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                    // Preview exists - construct URL to preview endpoint
-                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                        'asset' => $asset->id,
-                        'style' => 'preview', // Preview endpoint serves 'preview' style
-                    ]);
-                }
-                
+
+                $previewThumbnailUrl = $asset->thumbnailUrl('preview');
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
-                
-                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-                // AND thumbnail path exists in metadata (defensive check)
-                // Includes version query param (thumbnails_generated_at) for cache busting
+
                 if ($thumbnailStatus === 'completed') {
-                    // Prefer medium for grid; fallback to thumb if medium missing
                     $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                     $thumbnailPath = $asset->thumbnailPathForStyle($thumbnailStyle);
                     if ($thumbnailPath) {
                         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => $thumbnailStyle,
-                        ]);
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                        if ($thumbnailVersion && $finalThumbnailUrl) {
+                            $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                         }
                     } else {
-                        // Thumbnail status is completed but path is missing - log for debugging
                         \Illuminate\Support\Facades\Log::warning('Deliverable marked as completed but thumbnail path missing', [
                             'asset_id' => $asset->id,
                             'thumbnail_status' => $thumbnailStatus,

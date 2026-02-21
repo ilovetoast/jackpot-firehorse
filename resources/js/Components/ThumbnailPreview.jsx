@@ -83,7 +83,7 @@ export default function ThumbnailPreview({
         (asset?.original_filename?.toLowerCase().endsWith('.svg') || asset?.file_extension === 'svg')
     const useLargeForVector = preferLargeForVector && isSvg && asset?.id
     const effectiveFinalUrl = asset?.final_thumbnail_url && useLargeForVector
-        ? `/app/assets/${asset.id}/thumbnail/final/large${asset.thumbnail_version ? `?v=${encodeURIComponent(asset.thumbnail_version)}` : ''}`
+        ? (asset?.thumbnail_url_large ?? asset?.final_thumbnail_url)
         : asset?.final_thumbnail_url
 
     // Lock the URL on first render for grid, but allow updates for drawer

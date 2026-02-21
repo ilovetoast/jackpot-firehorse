@@ -10,8 +10,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Support\Facades\Route;
-
 class Brand extends Model
 {
     use RecordsActivity;
@@ -79,8 +77,8 @@ class Brand extends Model
             return $value;
         }
         $logoId = $this->attributes['logo_id'] ?? null;
-        if ($logoId && Route::has('assets.thumbnail.final')) {
-            return route('assets.thumbnail.final', ['asset' => $logoId, 'style' => 'medium']);
+        if ($logoId) {
+            return Asset::find($logoId)?->thumbnailUrl('medium') ?: null;
         }
         return null;
     }
@@ -95,8 +93,8 @@ class Brand extends Model
             return $value;
         }
         $iconId = $this->attributes['icon_id'] ?? null;
-        if ($iconId && Route::has('assets.thumbnail.final')) {
-            return route('assets.thumbnail.final', ['asset' => $iconId, 'style' => 'medium']);
+        if ($iconId) {
+            return Asset::find($iconId)?->thumbnailUrl('medium') ?: null;
         }
         return null;
     }
