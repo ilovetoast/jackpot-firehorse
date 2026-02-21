@@ -24,6 +24,22 @@ class CloudFrontSignedCookieService
             throw new RuntimeException('Tenant UUID required for CDN policy.');
         }
 
+        return $this->generateForTenantUuid($tenant->uuid, $clientIp);
+    }
+
+    /**
+     * Generate CloudFront signed cookies scoped to tenant path by UUID.
+     *
+     * Used for admin multi-tenant mode when only UUIDs are available.
+     * Policy allows access to https://{domain}/tenants/{tenant_uuid}/* only.
+     *
+     * @param string|null $clientIp When cookie_restrict_ip enabled, pass $request->ip()
+     * @return array{CloudFront-Policy: string, CloudFront-Signature: string, CloudFront-Key-Pair-Id: string}
+     *
+     * @throws RuntimeException If signing fails
+     */
+    public function generateForTenantUuid(string $tenantUuid, ?string $clientIp = null): array
+    {
         $domain = config('cloudfront.domain');
         $keyPairId = config('cloudfront.key_pair_id');
         $privateKeyPath = $this->resolvePrivateKeyPath();
@@ -36,7 +52,7 @@ class CloudFrontSignedCookieService
             throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
         }
 
-        $resource = "https://{$domain}/tenants/{$tenant->uuid}/*";
+        $resource = "https://{$domain}/tenants/{$tenantUuid}/*";
         return $this->signPolicy($resource, $keyPairId, $privateKeyPath, $clientIp);
     }
 

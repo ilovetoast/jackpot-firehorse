@@ -16,11 +16,19 @@ class EnsureCloudFrontSignedCookies
     ) {}
 
     /**
+     * Max tenant UUIDs for admin multi-tenant cookies (avoids browser cookie limits).
+     */
+    protected const ADMIN_TENANT_COOKIE_LIMIT = 50;
+
+    /**
      * Handle an incoming request.
      *
      * Tenant-scoped: cookies allow access only to https://{cdn}/tenants/{tenant_uuid}/*.
      * Regenerates when tenant changes, cookies missing, or near expiry.
      * Never issues cookies for PUBLIC_COLLECTION or PUBLIC_DOWNLOAD contexts.
+     *
+     * Admin multi-tenant: site_admin/site_owner on /app/admin/* with admin_tenants from controller
+     * receives multiple scoped cookies (one per tenant). No wildcard.
      */
     public function handle(Request $request, Closure $next): Response
     {
@@ -41,14 +49,21 @@ class EnsureCloudFrontSignedCookies
             return $response;
         }
 
-        // Resolve active tenant (same mechanism as controllers — app('tenant') from ResolveTenant)
-        $tenant = app()->bound('tenant') ? app('tenant') : null;
-        if (!$tenant) {
+        // Skip if CloudFront not configured
+        if (empty(config('cloudfront.domain')) || empty(config('cloudfront.key_pair_id'))) {
             return $response;
         }
 
-        // Skip if CloudFront not configured
-        if (empty(config('cloudfront.domain')) || empty(config('cloudfront.key_pair_id'))) {
+        // Admin multi-tenant mode: site_admin/site_owner on /app/admin/* with admin_tenants from controller
+        $adminTenants = $request->attributes->get('admin_tenants');
+        if ($this->isAdminMultiTenantContext($request, $adminTenants)) {
+            $this->attachAdminMultiTenantCookies($response, $adminTenants, $request);
+            return $response;
+        }
+
+        // Single-tenant mode (existing behavior)
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        if (!$tenant) {
             return $response;
         }
 
@@ -61,6 +76,82 @@ class EnsureCloudFrontSignedCookies
         }
 
         return $response;
+    }
+
+    /**
+     * Whether the request is in admin multi-tenant context.
+     *
+     * Requires: site_admin or site_owner role AND path app/admin/* AND admin_tenants array from controller.
+     */
+    protected function isAdminMultiTenantContext(Request $request, mixed $adminTenants): bool
+    {
+        if (!is_array($adminTenants) || empty($adminTenants)) {
+            return false;
+        }
+
+        $user = $request->user();
+        if (!$user) {
+            return false;
+        }
+
+        $siteRoles = $user->getSiteRoles();
+        $isSystemAdmin = $user->id === 1
+            || in_array('site_admin', $siteRoles, true)
+            || in_array('site_owner', $siteRoles, true);
+
+        if (!$isSystemAdmin) {
+            return false;
+        }
+
+        return $request->is('app/admin/*');
+    }
+
+    /**
+     * Attach CloudFront signed cookies for each tenant UUID (admin multi-tenant mode).
+     *
+     * Each cookie set is scoped to /tenants/{uuid}/. No wildcard.
+     */
+    protected function attachAdminMultiTenantCookies(Response $response, array $tenantUuids, Request $request): void
+    {
+        $uuids = array_values(array_unique(array_filter($tenantUuids, fn ($u) => is_string($u) && $u !== '')));
+        $uuids = array_slice($uuids, 0, self::ADMIN_TENANT_COOKIE_LIMIT);
+
+        $clientIp = config('cloudfront.cookie_restrict_ip', false) ? $request->ip() : null;
+        $expirySeconds = $this->cookieService->getExpirySeconds();
+        $domain = config('cloudfront.cookie_domain') ?? config('cloudfront.domain');
+
+        foreach ($uuids as $uuid) {
+            try {
+                $cookies = $this->cookieService->generateForTenantUuid($uuid, $clientIp);
+            } catch (\Throwable $e) {
+                report($e);
+                continue;
+            }
+
+            $path = '/tenants/' . $uuid . '/';
+            $expiresAt = time() + $expirySeconds;
+
+            \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Admin multi-tenant cookie issued', [
+                'tenant_uuid' => $uuid,
+                'expires_at' => $expiresAt,
+                'expires_at_iso' => date('c', $expiresAt),
+            ]);
+
+            foreach ($cookies as $name => $value) {
+                $cookie = cookie(
+                    name: $name,
+                    value: $value,
+                    minutes: (int) ceil($expirySeconds / 60),
+                    path: $path,
+                    domain: $domain,
+                    secure: true,
+                    httpOnly: true,
+                    raw: true,
+                    sameSite: 'lax'
+                );
+                $response->headers->setCookie($cookie);
+            }
+        }
     }
 
     /**

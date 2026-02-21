@@ -92,12 +92,21 @@ class AdminAssetController extends Controller
 
         $perPage = min((int) $request->get('per_page', 25), 100);
         $assets = $query
-            ->with(['tenant:id,name,slug', 'brand:id,name', 'user:id,first_name,last_name,email'])
+            ->with(['tenant:id,name,slug,uuid', 'brand:id,name', 'user:id,first_name,last_name,email'])
             ->orderBy($sortColumn, $sortDirection)
             ->paginate($perPage)
             ->withQueryString();
 
         $formatted = $assets->getCollection()->map(fn ($a) => $this->formatAssetForList($a));
+
+        // Admin multi-tenant CDN: pass tenant UUIDs so middleware can issue scoped cookies for each
+        $tenantUuids = $assets->getCollection()
+            ->pluck('tenant.uuid')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $request->attributes->set('admin_tenants', $tenantUuids);
 
         $filterOptions = [
             'tenants' => Tenant::select('id', 'name', 'slug')->orderBy('name')->get(),
@@ -146,16 +155,21 @@ class AdminAssetController extends Controller
     /**
      * GET /app/admin/assets/{asset} - Single asset detail (for modal).
      */
-    public function show(string $asset): JsonResponse
+    public function show(Request $request, string $asset): JsonResponse
     {
         $this->authorizeAdmin();
 
         $asset = Asset::withTrashed()->findOrFail($asset);
         $asset->load([
-            'tenant:id,name,slug',
+            'tenant:id,name,slug,uuid',
             'brand:id,name',
             'user:id,first_name,last_name,email',
         ]);
+
+        // Admin multi-tenant CDN: pass tenant UUID so middleware can issue scoped cookie
+        if ($asset->tenant?->uuid) {
+            $request->attributes->set('admin_tenants', [$asset->tenant->uuid]);
+        }
 
         $incidents = SystemIncident::where('source_type', 'asset')
             ->where('source_id', $asset->id)
