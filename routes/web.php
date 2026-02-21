@@ -665,7 +665,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::patch('/brands/{brand}/categories/{category}/fields/reorder', [\App\Http\Controllers\CategoryController::class, 'reorderFields'])->name('brands.categories.fields.reorder');
 
             // Support ticket routes (tenant-scoped)
-            Route::resource('support/tickets', \App\Http\Controllers\TenantTicketController::class)->only(['index', 'create', 'store', 'show']);
+            Route::resource('support/tickets', \App\Http\Controllers\TenantTicketController::class)->only(['index', 'create', 'store', 'show'])->names('support.tickets');
             Route::post('/support/tickets/{ticket}/reply', [\App\Http\Controllers\TenantTicketController::class, 'reply'])->name('support.tickets.reply');
             Route::post('/support/tickets/{ticket}/close', [\App\Http\Controllers\TenantTicketController::class, 'close'])->name('support.tickets.close');
         });

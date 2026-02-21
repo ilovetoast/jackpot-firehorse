@@ -1434,7 +1434,9 @@ class AssetMetadataController extends Controller
                 'tenant_ticket' => $tenantTicket ? [
                     'id' => $tenantTicket->id,
                     'ticket_number' => $tenantTicket->ticket_number,
-                    'url' => route('support.tickets.show', $tenantTicket),
+                    'url' => \Illuminate\Support\Facades\Route::has('support.tickets.show')
+                        ? route('support.tickets.show', $tenantTicket)
+                        : url('/app/support/tickets/' . $tenantTicket->id),
                 ] : null,
                 'incidents' => $recentIncidents,
                 'last_failed_job' => $lastFailedJob,
@@ -1465,7 +1467,9 @@ class AssetMetadataController extends Controller
             'tenant_ticket' => $tenantTicket ? [
                 'id' => $tenantTicket->id,
                 'ticket_number' => $tenantTicket->ticket_number,
-                'url' => route('support.tickets.show', $tenantTicket),
+                'url' => \Illuminate\Support\Facades\Route::has('support.tickets.show')
+                    ? route('support.tickets.show', $tenantTicket)
+                    : url('/app/support/tickets/' . $tenantTicket->id),
             ] : null,
             'incidents' => $recentIncidents,
             'last_failed_job' => $lastFailedJob,
