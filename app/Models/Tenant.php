@@ -94,7 +94,7 @@ class Tenant extends Model
             }
 
             // Provision storage bucket (shared or dedicated) so uploads work immediately.
-            // Runs in queue worker; for shared strategy creates StorageBucket record only.
+            // Runs in queue worker; for shared strategy creates StorageBucket record only. 1
             \App\Jobs\ProvisionCompanyStorageJob::dispatch($tenant->id);
         });
     }
