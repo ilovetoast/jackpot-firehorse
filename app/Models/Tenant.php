@@ -91,6 +91,10 @@ class Tenant extends Model
                     $owner->id => ['role' => 'admin']
                 ]);
             }
+
+            // Provision storage bucket (shared or dedicated) so uploads work immediately.
+            // Runs in queue worker; for shared strategy creates StorageBucket record only.
+            \App\Jobs\ProvisionCompanyStorageJob::dispatch($tenant->id);
         });
     }
 
