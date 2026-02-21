@@ -450,10 +450,10 @@ class BrandController extends Controller
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
                 'logo_id' => $brand->logo_id,
-                'logo_thumbnail_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->thumbnailUrl('medium') : null,
+                'logo_thumbnail_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
                 'icon_path' => $brand->icon_path,
                 'icon_id' => $brand->icon_id,
-                'icon_thumbnail_url' => $brand->icon_id ? \App\Models\Asset::find($brand->icon_id)?->thumbnailUrl('medium') : null,
+                'icon_thumbnail_url' => $brand->icon_id ? \App\Models\Asset::find($brand->icon_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
                 'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
                 'is_default' => $brand->is_default,
@@ -1192,8 +1192,8 @@ class BrandController extends Controller
                     : ($asset->thumbnail_status ?? 'pending');
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
-                    $style = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $finalThumbnailUrl = $asset->thumbnailUrl($style);
+                    $variant = $asset->thumbnailPathForStyle('medium') ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
+                    $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
                 }
                 return [
                     'id' => $asset->id,
@@ -1223,7 +1223,7 @@ class BrandController extends Controller
             ->get(['id']);
         $out = [];
         foreach ($assets as $asset) {
-            $url = $asset->thumbnailUrl('medium');
+            $url = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($url) {
                 $out[] = ['id' => $asset->id, 'thumbnail_url' => $url];
             }
@@ -1245,6 +1245,6 @@ class BrandController extends Controller
             ->where('tenant_id', $brand->tenant_id)
             ->where('brand_id', $brand->id)
             ->first();
-        return $asset?->thumbnailUrl('medium') ?: null;
+        return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
     }
 }

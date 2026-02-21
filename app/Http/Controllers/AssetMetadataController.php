@@ -4566,7 +4566,7 @@ class AssetMetadataController extends Controller
             : ($asset->thumbnail_status ?? 'pending');
 
         // Preview thumbnail URL (temporary, available early)
-        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+        $previewThumbnailUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
 
         // Final thumbnail URL (permanent, only when completed)
         $finalThumbnailUrl = null;
@@ -4584,7 +4584,8 @@ class AssetMetadataController extends Controller
                 $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
             }
 
-            $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+            $variant = $thumbnailStyle === 'medium' ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
+            $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }

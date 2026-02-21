@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\Download;
+use App\Support\AssetVariant;
 use App\Support\CdnUrl;
 use App\Support\DeliveryContext;
 use RuntimeException;
@@ -41,6 +42,12 @@ class AssetDeliveryService
     {
         $path = $this->pathResolver->resolve($asset, $variant, $options);
         if ($path === '') {
+            // VIDEO_PREVIEW and PDF_PAGE: return placeholder when file does not exist (do not throw)
+            $variantEnum = AssetVariant::tryFrom($variant);
+            if ($variantEnum && in_array($variantEnum, [AssetVariant::VIDEO_PREVIEW, AssetVariant::PDF_PAGE], true)) {
+                return config('assets.delivery.placeholder_url', '');
+            }
+
             return '';
         }
 

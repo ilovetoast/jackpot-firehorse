@@ -140,7 +140,7 @@ class BrandDNAController extends Controller
                     'asset' => $r->asset ? [
                         'id' => $r->asset->id,
                         'title' => $r->asset->title,
-                        'thumbnail_url' => $r->asset->thumbnailUrl('medium'),
+                        'thumbnail_url' => $r->asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null,
                     ] : null,
                 ]),
         ]);

@@ -882,10 +882,11 @@ class AdminAssetController extends Controller
     {
         // Prefer completed thumbnail when available
         if ($asset->thumbnail_status?->value === 'completed' && $asset->thumbnailPathForStyle('medium')) {
-            return $asset->thumbnailUrl('medium') ?: null;
+            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
         }
         // Fallback: show preview when main thumbnail skipped/failed but preview exists
-        $previewUrl = $asset->thumbnailUrl('preview');
+        $previewUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED);
+
         return $previewUrl ?: null;
     }
 
@@ -960,8 +961,9 @@ class AdminAssetController extends Controller
         if ($asset->thumbnail_status?->value !== 'completed') {
             return $urls;
         }
-        foreach (['thumb', 'medium', 'large'] as $style) {
-            $url = $asset->thumbnailUrl($style);
+        $variants = ['thumb' => \App\Support\AssetVariant::THUMB_SMALL, 'medium' => \App\Support\AssetVariant::THUMB_MEDIUM, 'large' => \App\Support\AssetVariant::THUMB_LARGE];
+        foreach ($variants as $style => $variant) {
+            $url = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($url) {
                 $urls[$style] = $url;
             }

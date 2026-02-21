@@ -1066,8 +1066,9 @@ class AssetThumbnailController extends Controller
             // Check if there are any thumbnails to remove (preview or final)
             $hasPreviewThumbnails = !empty($previewThumbnails);
             $hasFinalThumbnails = !empty($finalThumbnails);
-            $hasPreviewUrl = !empty($asset->preview_thumbnail_url);
-            $hasFinalUrl = !empty($asset->final_thumbnail_url);
+            $hasPreviewUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
+            $hasFinalUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) !== ''
+                || $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
             
             if (!$hasPreviewThumbnails && !$hasFinalThumbnails && !$hasPreviewUrl && !$hasFinalUrl) {
                 return response()->json([
@@ -1556,7 +1557,9 @@ class AssetThumbnailController extends Controller
 
         // Check if video has a thumbnail/poster (required for preview generation)
         // Video preview generation requires the video file to exist, which should have a poster thumbnail
-        if (!$asset->video_poster_url && !$asset->thumbnail_url && !$asset->final_thumbnail_url) {
+        $hasPosterPath = (bool) ($asset->getRawOriginal('video_poster_url') ?? $asset->attributes['video_poster_url'] ?? null);
+        $hasThumbnailPath = (bool) ($asset->thumbnailPathForStyle('thumb') ?? $asset->thumbnailPathForStyle('medium'));
+        if (!$hasPosterPath && !$hasThumbnailPath) {
             return response()->json([
                 'error' => 'Cannot generate video preview: Video thumbnail does not exist. Please generate a thumbnail first.',
             ], 422);

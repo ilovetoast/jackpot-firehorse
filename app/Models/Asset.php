@@ -294,79 +294,30 @@ class Asset extends Model
      */
     protected $appends = [
         'is_complete',
-        'original_url',
-        'thumbnail_url',
-        'thumbnail_url_large',
     ];
 
     /**
-     * Get CDN URL for the original asset file.
+     * Get delivery URL for an asset variant in the given context.
      *
-     * storage_root_path stores the relative S3 key only (no full URLs).
+     * All asset URLs flow through AssetDeliveryService. The model delegates only;
+     * no URL logic, Storage, CdnUrl, or path construction exists here.
      *
-     * @return string CDN URL (CloudFront in staging/production, presigned S3 in local)
+     * @param string|\App\Support\AssetVariant $variant AssetVariant enum or value
+     * @param string|\App\Support\DeliveryContext $context DeliveryContext enum or value
+     * @param array $options Optional (e.g. ['page' => 1] for PDF_PAGE, ['download' => Download] for PUBLIC_DOWNLOAD)
+     * @return string CDN URL (plain or signed depending on context)
      */
-    public function getOriginalUrlAttribute(): string
+    public function deliveryUrl(string|\App\Support\AssetVariant $variant, string|\App\Support\DeliveryContext $context, array $options = []): string
     {
-        return app(\App\Services\AssetDeliveryService::class)->url(
-            $this,
-            \App\Support\AssetVariant::ORIGINAL->value,
-            \App\Support\DeliveryContext::AUTHENTICATED->value
-        );
-    }
-
-    /**
-     * Get CDN URL for a thumbnail style via AssetDeliveryService.
-     * All thumbnail URLs flow through unified delivery (presigned in local).
-     *
-     * @param string $style Thumbnail style (thumb, medium, large, preview)
-     * @return string CDN URL, or empty string if thumbnail not available
-     */
-    public function thumbnailUrl(string $style = 'medium'): string
-    {
-        $variant = match ($style) {
-            'thumb' => \App\Support\AssetVariant::THUMB_SMALL,
-            'medium' => \App\Support\AssetVariant::THUMB_MEDIUM,
-            'large' => \App\Support\AssetVariant::THUMB_LARGE,
-            'preview' => \App\Support\AssetVariant::THUMB_PREVIEW,
-            default => \App\Support\AssetVariant::THUMB_MEDIUM,
-        };
+        $variantValue = $variant instanceof \App\Support\AssetVariant ? $variant->value : $variant;
+        $contextValue = $context instanceof \App\Support\DeliveryContext ? $context->value : $context;
 
         return app(\App\Services\AssetDeliveryService::class)->url(
             $this,
-            $variant->value,
-            \App\Support\DeliveryContext::AUTHENTICATED->value
+            $variantValue,
+            $contextValue,
+            $options
         );
-    }
-
-    /**
-     * Get thumbnail_url for default style (medium). Appended to JSON.
-     */
-    public function getThumbnailUrlAttribute(): string
-    {
-        $service = app(\App\Services\AssetDeliveryService::class);
-        $url = $service->url($this, \App\Support\AssetVariant::THUMB_MEDIUM->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
-        if ($url !== '') {
-            return $url;
-        }
-        return $service->url($this, \App\Support\AssetVariant::THUMB_SMALL->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
-    }
-
-    /**
-     * Get thumbnail_url for large style (e.g. SVG detail view). Appended to JSON.
-     */
-    public function getThumbnailUrlLargeAttribute(): string
-    {
-        $service = app(\App\Services\AssetDeliveryService::class);
-        $url = $service->url($this, \App\Support\AssetVariant::THUMB_LARGE->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
-        if ($url !== '') {
-            return $url;
-        }
-        $url = $service->url($this, \App\Support\AssetVariant::THUMB_MEDIUM->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
-        if ($url !== '') {
-            return $url;
-        }
-        return $service->url($this, \App\Support\AssetVariant::THUMB_SMALL->value, \App\Support\DeliveryContext::AUTHENTICATED->value);
     }
 
     /**
@@ -923,132 +874,4 @@ class Asset extends Model
             ->first();
     }
 
-    /**
-     * Get the medium thumbnail URL for AI image analysis.
-     *
-     * This method checks both temp and final thumbnail paths to support
-     * AI metadata generation during asset processing (before promotion).
-     *
-     * CRITICAL: This method checks:
-     * 1. Final thumbnail path (after asset promotion)
-     * 2. Temp thumbnail path (during processing, before promotion)
-     *
-     * Returns a signed S3 URL that can be accessed by OpenAI's API.
-     * OpenAI requires publicly accessible URLs, so we generate a signed S3 URL.
-     *
-     * @return string|null Signed S3 URL to medium thumbnail, or null if not available
-     */
-    public function getMediumThumbnailUrlAttribute(): ?string
-    {
-        $url = app(\App\Services\AssetDeliveryService::class)->url(
-            $this,
-            \App\Support\AssetVariant::THUMB_MEDIUM->value,
-            \App\Support\DeliveryContext::AUTHENTICATED->value
-        );
-
-        if ($url !== '') {
-            return $url;
-        }
-
-        // Fallback: preview thumbnail (during processing, before promotion)
-        $url = app(\App\Services\AssetDeliveryService::class)->url(
-            $this,
-            \App\Support\AssetVariant::THUMB_PREVIEW->value,
-            \App\Support\DeliveryContext::AUTHENTICATED->value
-        );
-
-        return $url !== '' ? $url : null;
-    }
-
-    /**
-     * Get the video preview URL (generated on-demand from S3 path).
-     *
-     * video_preview_url stores the S3 path in the database, and this accessor generates
-     * a presigned URL on-demand (max 7 days expiration per AWS limits).
-     *
-     * When setting: $asset->video_preview_url = 'path/to/file.mp4' - stores raw path
-     * When getting: $asset->video_preview_url - returns presigned URL generated from path
-     *
-     * @param mixed $value Raw database value (S3 path or legacy URL)
-     * @return string|null Presigned S3 URL to video preview, or null if not available
-     */
-    public function getVideoPreviewUrlAttribute($value): ?string
-    {
-        // If value is null or empty, return null
-        if (!$value) {
-            return null;
-        }
-
-        // If value is already a URL (legacy data from before fix), return it as-is
-        // This handles existing assets that may have URLs stored
-        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
-            return $value;
-        }
-
-        // Value is an S3 path - generate presigned URL using the asset's storage bucket
-        // (preview is stored in the same bucket as the asset; default disk may be a different bucket on staging)
-        try {
-            $bucket = $this->storageBucket;
-            if ($bucket) {
-                $bucketService = app(\App\Services\TenantBucketService::class);
-                return $bucketService->getPresignedGetUrl($bucket, $value, 7 * 24 * 60); // 7 days in minutes
-            }
-            // Fallback: legacy assets without storage_bucket_id use default disk
-            return \Illuminate\Support\Facades\Storage::disk('s3')
-                ->temporaryUrl($value, now()->addDays(7));
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('[Asset] Failed to generate signed S3 URL for video preview', [
-                'asset_id' => $this->id,
-                'preview_path' => $value,
-                'error' => $e->getMessage(),
-            ]);
-            return null;
-        }
-    }
-
-    /**
-     * Get the video poster URL (generated on-demand from S3 path).
-     *
-     * video_poster_url stores the S3 path in the database, and this accessor generates
-     * a presigned URL on-demand (max 7 days expiration per AWS limits).
-     *
-     * When setting: $asset->video_poster_url = 'path/to/file.jpg' - stores raw path
-     * When getting: $asset->video_poster_url - returns presigned URL generated from path
-     *
-     * @param mixed $value Raw database value (S3 path or legacy URL)
-     * @return string|null Presigned S3 URL to video poster, or null if not available
-     */
-    public function getVideoPosterUrlAttribute($value): ?string
-    {
-        // If value is null or empty, return null
-        if (!$value) {
-            return null;
-        }
-
-        // If value is already a URL (legacy data from before fix), return it as-is
-        // This handles existing assets that may have URLs stored
-        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
-            return $value;
-        }
-
-        // Value is an S3 path - generate presigned URL using the asset's storage bucket
-        // (poster is stored in the same bucket as the asset; default disk may be a different bucket on staging)
-        try {
-            $bucket = $this->storageBucket;
-            if ($bucket) {
-                $bucketService = app(\App\Services\TenantBucketService::class);
-                return $bucketService->getPresignedGetUrl($bucket, $value, 7 * 24 * 60); // 7 days in minutes
-            }
-            // Fallback: legacy assets without storage_bucket_id use default disk
-            return \Illuminate\Support\Facades\Storage::disk('s3')
-                ->temporaryUrl($value, now()->addDays(7));
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for video poster', [
-                'asset_id' => $this->id,
-                'poster_path' => $value,
-                'error' => $e->getMessage(),
-            ]);
-            return null;
-        }
-    }
 }

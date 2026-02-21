@@ -135,7 +135,7 @@ class DownloadAnalyticsService
         foreach ($assets as $asset) {
             $thumbnailUrl = null;
             if (($asset->thumbnail_status ?? '') === 'completed') {
-                $thumbnailUrl = $asset->thumbnailUrl('thumb') ?: null;
+                $thumbnailUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
             }
             $out[] = [
                 'asset_id' => $asset->id,

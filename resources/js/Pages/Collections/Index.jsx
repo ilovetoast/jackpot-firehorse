@@ -16,6 +16,7 @@ import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
+import { useBucketOptional } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
@@ -138,6 +139,16 @@ export default function CollectionsIndex({
     }, [selectedCollectionId])
 
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
+    const bucket = useBucketOptional()
+    const bucketAssetIds = bucket?.bucketAssetIds ?? []
+    const handleBucketToggle = useCallback((assetId) => {
+        if (!bucket) return
+        if (bucketAssetIds.includes(assetId)) {
+            bucket.bucketRemove(assetId)
+        } else {
+            bucket.bucketAdd(assetId)
+        }
+    }, [bucket, bucketAssetIds])
 
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220

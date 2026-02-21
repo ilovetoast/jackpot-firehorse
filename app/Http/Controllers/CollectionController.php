@@ -124,9 +124,15 @@ class CollectionController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
                 if ($status === 'completed') {
-                    $featuredUrls[$asset->id] = $asset->thumbnailUrl('large') ?: $asset->thumbnailUrl('medium') ?: $asset->thumbnailUrl('thumb');
-                } elseif ($asset->thumbnailUrl('preview')) {
-                    $featuredUrls[$asset->id] = $asset->thumbnailUrl('preview');
+                    $url = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_LARGE, \App\Support\DeliveryContext::AUTHENTICATED)
+                        ?: $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
+                        ?: $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED);
+                    $featuredUrls[$asset->id] = $url ?: null;
+                } else {
+                    $url = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED);
+                    if ($url !== '') {
+                        $featuredUrls[$asset->id] = $url;
+                    }
                 }
             }
         }
@@ -754,14 +760,15 @@ class CollectionController extends Controller
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
 
-        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+        $previewThumbnailUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
 
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-            $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+            $variant = $thumbnailStyle === 'medium' ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
+            $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }

@@ -16,6 +16,7 @@ import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
+import { useBucketOptional } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
 import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
@@ -134,6 +135,16 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     }, [activeAssetId, safeAssetsList])
 
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
+    const bucket = useBucketOptional()
+    const bucketAssetIds = bucket?.bucketAssetIds ?? []
+    const handleBucketToggle = useCallback((assetId) => {
+        if (!bucket) return
+        if (bucketAssetIds.includes(assetId)) {
+            bucket.bucketRemove(assetId)
+        } else {
+            bucket.bucketAdd(assetId)
+        }
+    }, [bucket, bucketAssetIds])
 
     // Category switches should reset the drawer selection
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -999,6 +1010,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
+                                bucketAssetIds={bucketAssetIds}
+                                onBucketToggle={handleBucketToggle}
                                 primaryColor={workspaceAccentColor}
                                 selectionAssetType="execution"
                             />

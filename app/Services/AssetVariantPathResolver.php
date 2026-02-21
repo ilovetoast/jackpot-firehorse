@@ -49,6 +49,7 @@ class AssetVariantPathResolver
                 ?? ($basePath !== '' ? $basePath . 'thumbnails/large/large.' . $this->thumbnailExtension() : ''),
             AssetVariant::THUMB_PREVIEW => $asset->metadata['preview_thumbnails']['preview']['path'] ?? '',
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
+            AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
             AssetVariant::PDF_PAGE => $basePath !== '' ? $this->resolvePdfPagePath($basePath, $options) : '',
         };
     }
@@ -66,6 +67,21 @@ class AssetVariantPathResolver
         }
 
         return $basePath !== '' ? $basePath . 'previews/video_preview.mp4' : '';
+    }
+
+    /**
+     * Resolve video poster path. Uses video_poster_url column (raw path) when available; otherwise canonical path (stub).
+     */
+    protected function resolveVideoPosterPath(Asset $asset, string $basePath): string
+    {
+        $path = $asset->getRawOriginal('video_poster_url')
+            ?? ($asset->attributes['video_poster_url'] ?? null);
+
+        if ($path && is_string($path) && !str_starts_with($path, 'http')) {
+            return $path;
+        }
+
+        return $basePath !== '' ? $basePath . 'thumbnails/medium/medium.webp' : '';
     }
 
     /**

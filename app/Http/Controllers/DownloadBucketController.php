@@ -47,7 +47,7 @@ class DownloadBucketController extends Controller
                     : ($asset->thumbnail_status ?? 'pending');
 
                 $assetDelivery = app(AssetDeliveryService::class);
-                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;

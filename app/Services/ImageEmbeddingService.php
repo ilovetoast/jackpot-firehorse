@@ -56,7 +56,8 @@ class ImageEmbeddingService implements \App\Contracts\ImageEmbeddingServiceInter
      */
     protected function embedViaApi(Asset $asset): array
     {
-        $url = $asset->medium_thumbnail_url;
+        $url = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
+            ?: $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED);
         if (! $url) {
             Log::warning('[ImageEmbeddingService] No image URL available for asset', [
                 'asset_id' => $asset->id,

@@ -246,9 +246,9 @@ class DownloadController extends Controller
                 : ($asset->thumbnail_status ?? 'pending');
             $thumbUrl = null;
             if ($thumbStatus === 'completed' && $asset->thumbnailPathForStyle('thumb')) {
-                $thumbUrl = $asset->thumbnailUrl('thumb');
+                $thumbUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
             } else {
-                $thumbUrl = $asset->thumbnailUrl('preview') ?: null;
+                $thumbUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
             }
             $thumbnails[] = [
                 'id' => $asset->id,

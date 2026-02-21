@@ -16,6 +16,7 @@ enum AssetVariant: string
     case THUMB_LARGE = 'thumbnail_large';
     case THUMB_PREVIEW = 'thumbnail_preview'; // LQIP during processing
     case VIDEO_PREVIEW = 'video_preview';
+    case VIDEO_POSTER = 'video_poster';
     case PDF_PAGE = 'pdf_page';
 
     /**

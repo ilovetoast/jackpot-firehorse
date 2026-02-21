@@ -78,7 +78,7 @@ class Brand extends Model
         }
         $logoId = $this->attributes['logo_id'] ?? null;
         if ($logoId) {
-            return Asset::find($logoId)?->thumbnailUrl('medium') ?: null;
+            return Asset::find($logoId)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
         }
         return null;
     }
@@ -94,7 +94,7 @@ class Brand extends Model
         }
         $iconId = $this->attributes['icon_id'] ?? null;
         if ($iconId) {
-            return Asset::find($iconId)?->thumbnailUrl('medium') ?: null;
+            return Asset::find($iconId)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
         }
         return null;
     }

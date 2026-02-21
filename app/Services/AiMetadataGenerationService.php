@@ -364,7 +364,7 @@ class AiMetadataGenerationService
     }
 
     /**
-     * Resolve thumbnail path from asset metadata (same logic as Asset::getMediumThumbnailUrlAttribute).
+     * Resolve thumbnail path from asset metadata (for THUMB_MEDIUM / THUMB_PREVIEW variant resolution).
      *
      * @return string|null S3 key path (assets/... or temp/uploads/...) or null if not available
      */

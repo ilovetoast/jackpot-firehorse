@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
@@ -241,14 +243,15 @@ class DashboardController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
                     $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
-                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                    $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
+                    $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
@@ -338,14 +341,15 @@ class DashboardController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
                     $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
-                    $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                    $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
+                    $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                     }
@@ -567,7 +571,7 @@ class DashboardController extends Controller
                             : ($asset->thumbnail_status ?? 'pending');
                         if ($thumbStatus === 'completed') {
                             $version = $meta['thumbnails_generated_at'] ?? null;
-                            $subjectThumbnailUrl = $asset->thumbnailUrl('thumb');
+                            $subjectThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
                             if ($subjectThumbnailUrl && $version) {
                                 $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($version);
                             }

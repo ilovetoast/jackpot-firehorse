@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\ApprovalStatus;
 use App\Enums\AssetType;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -110,12 +112,12 @@ class AssetApprovalController extends Controller
                 ? $asset->thumbnail_status->value 
                 : ($asset->thumbnail_status ?? 'pending');
             
-            $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+            $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
             $finalThumbnailUrl = null;
             if ($thumbnailStatus === 'completed') {
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                $finalThumbnailUrl = $asset->thumbnailUrl('medium');
+                $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
                 if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                 }

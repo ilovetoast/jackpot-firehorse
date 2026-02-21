@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
@@ -551,7 +553,7 @@ class AssetController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $previewThumbnailUrl = $asset->thumbnailUrl('preview');
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
 
@@ -561,7 +563,8 @@ class AssetController extends Controller
                     $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                     $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
                     if ($pathExists) {
-                        $finalThumbnailUrl = $asset->thumbnailUrl($thumbnailStyle);
+                        $variant = $thumbnailStyle === 'medium' ? AssetVariant::THUMB_MEDIUM : AssetVariant::THUMB_SMALL;
+                        $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                         // Do NOT append ?v= to presigned URLs — invalidates S3 signature
                         if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                             $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
@@ -593,13 +596,18 @@ class AssetController extends Controller
                     ] : null,
                     'user_id' => $asset->user_id, // For delete-own permission check
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Thumbnail URLs - distinct paths prevent cache confusion (all from AssetDeliveryService)
-                    'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
-                    'final_thumbnail_url' => $finalThumbnailUrl, // Final thumbnail (permanent, full-quality, only when completed)
-                    'thumbnail_url_large' => $asset->thumbnail_url_large, // Large style for drawer/zoom (SVG crisp rendering)
+                    // Thumbnail URLs — all via AssetDeliveryService (AUTHENTICATED context)
+                    'thumbnail_small' => $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
+                    'thumbnail_medium' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null,
+                    'thumbnail_large' => $this->thumbnailUrlLarge($asset),
+                    'thumbnail_preview' => $previewThumbnailUrl, // LQIP during processing
+                    'original' => $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null,
                     'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
-                    // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
-                    'thumbnail_url' => $finalThumbnailUrl ?? null,
+                    // Legacy aliases for frontend migration (remove when frontend updated)
+                    'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl ?? null,
+                    'preview_thumbnail_url' => $previewThumbnailUrl,
+                    'final_thumbnail_url' => $finalThumbnailUrl,
+                    'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
                     'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
@@ -624,7 +632,8 @@ class AssetController extends Controller
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                     // Phase V-1: Video quick preview on hover (grid and drawer)
-                    'video_preview_url' => $asset->video_preview_url,
+                    'video_preview_url' => $this->videoPreviewUrl($asset),
+                    'video_poster_url' => $this->videoPosterUrl($asset),
                     // Pipeline status for visible progression (uploading → complete)
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     // Asset health badge (healthy|warning|critical) for support visibility
@@ -634,7 +643,7 @@ class AssetController extends Controller
                     Log::info('ASSET API RESPONSE URL', [
                         'asset_id' => $asset->id,
                         'thumbnail_url' => $finalThumbnailUrl,
-                        'thumbnail_url_large' => $asset->thumbnail_url_large,
+                        'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
                     ]);
                 }
                 } catch (\Throwable $e) {
@@ -660,6 +669,11 @@ class AssetController extends Controller
                     'final_thumbnail_url' => null,
                     'thumbnail_url_large' => null,
                     'thumbnail_url' => null,
+                    'thumbnail_small' => null,
+                    'thumbnail_medium' => null,
+                    'thumbnail_large' => null,
+                    'thumbnail_preview' => null,
+                    'original' => null,
                         'thumbnail_status' => 'pending',
                         'thumbnail_error' => null,
                         'published_at' => null,
@@ -668,6 +682,7 @@ class AssetController extends Controller
                         'archived_at' => null,
                         'archived_by' => null,
                         'video_preview_url' => null,
+                        'video_poster_url' => null,
                         'analysis_status' => 'uploading',
                         'health_status' => 'healthy',
                     ];
@@ -678,7 +693,7 @@ class AssetController extends Controller
 
         $t2 = microtime(true);
 
-        // Count assets that trigger S3 presigned URL generation (video_preview_url accessor)
+        // Count assets that trigger video preview URL generation
         $assetsWithVideoPreview = $assetModels->filter(function ($a) {
             return $a->mime_type && str_starts_with((string) $a->mime_type, 'video/')
                 && ! empty($a->metadata['video_preview'] ?? null);
@@ -691,7 +706,7 @@ class AssetController extends Controller
                 'after_transform_ms' => round(($t2 - $t1) * 1000),
                 'assets_count' => count($mappedAssets),
                 's3_presign_count' => $assetsWithVideoPreview,
-                'note' => 'video_preview_url accessor triggers getPresignedGetUrl per video asset',
+                'note' => 'video_preview_url via AssetDeliveryService per video asset',
             ]);
         }
 
@@ -1361,7 +1376,7 @@ class AssetController extends Controller
                                 
                                 if ($contentLength >= $minValidSize) {
                                     // File exists and is valid - return CDN URL
-                                    $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+                                    $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
                                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                                         $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
                                     }
@@ -1409,7 +1424,7 @@ class AssetController extends Controller
                     }
                     
                     // Preview thumbnail URL - returned even when status is pending or processing
-                    $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+                    $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
                     
                     return [
                         'asset_id' => $asset->id,
@@ -1502,7 +1517,7 @@ class AssetController extends Controller
 
         // Generate distinct thumbnail URLs for preview and final (CDN URLs)
         $metadata = $asset->metadata ?? [];
-        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+        $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
@@ -1510,7 +1525,7 @@ class AssetController extends Controller
         // Final thumbnail URL only provided when thumbnail_status === COMPLETED
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+            $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
@@ -1591,11 +1606,11 @@ class AssetController extends Controller
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
-        $previewThumbnailUrl = $asset->thumbnailUrl('preview') ?: null;
+        $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
         $finalThumbnailUrl = null;
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $finalThumbnailUrl = $asset->thumbnailUrl('thumb');
+            $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                 $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
             }
@@ -1630,15 +1645,12 @@ class AssetController extends Controller
             abort(404, 'Asset not found.');
         }
 
-        if (! $asset->storage_root_path) {
+        $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+        if (! $url) {
             abort(404, 'File not available.');
         }
 
-        $bucketService = app(\App\Services\TenantBucketService::class);
-        $bucket = $bucketService->resolveActiveBucketOrFail($asset->tenant);
-        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
-
-        return redirect($signedUrl);
+        return redirect($url);
     }
 
     /**
@@ -1668,13 +1680,7 @@ class AssetController extends Controller
             ], 422);
         }
 
-        $previewUrl = null;
-
-        if ($asset->storage_root_path) {
-            $bucketService = app(\App\Services\TenantBucketService::class);
-            $bucket = $bucketService->resolveActiveBucketOrFail($asset->tenant);
-            $previewUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
-        }
+        $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
 
         return response()->json([
             'url' => $previewUrl,
@@ -2107,5 +2113,43 @@ class AssetController extends Controller
                 'message' => 'Failed to restore asset: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Get large thumbnail URL with fallback chain (large -> medium -> small).
+     */
+    private function thumbnailUrlLarge(Asset $asset): ?string
+    {
+        $url = $asset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED);
+        if ($url !== '') {
+            return $url;
+        }
+        $url = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+        if ($url !== '') {
+            return $url;
+        }
+        $url = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Get video preview URL via AssetDeliveryService (empty if not available).
+     */
+    private function videoPreviewUrl(Asset $asset): ?string
+    {
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Get video poster URL via AssetDeliveryService (empty if not available).
+     */
+    private function videoPosterUrl(Asset $asset): ?string
+    {
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_POSTER, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
     }
 }

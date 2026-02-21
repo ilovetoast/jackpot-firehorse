@@ -154,4 +154,89 @@ class AssetDeliveryServiceTest extends TestCase
         $this->assertStringNotContainsString('.s3.', $url);
         $this->assertStringNotContainsString('s3.amazonaws.com', $url);
     }
+
+    public function test_public_download_returns_signed_url_with_ttl(): void
+    {
+        $domain = 'cdn.example.com';
+        config(['cloudfront.domain' => $domain]);
+        config(['cloudfront.key_pair_id' => 'K123']);
+        $keyPath = base_path('storage/keys/cloudfront-private.pem');
+        if (!file_exists($keyPath)) {
+            $this->markTestSkipped('CloudFront private key not found');
+        }
+        config(['cloudfront.private_key_path' => $keyPath]);
+
+        $service = app(AssetDeliveryService::class);
+        $url = $service->url(
+            $this->asset,
+            AssetVariant::ORIGINAL->value,
+            DeliveryContext::PUBLIC_DOWNLOAD->value,
+            []
+        );
+
+        $this->assertNotEmpty($url);
+        $this->assertStringContainsString($domain, $url);
+        $this->assertStringContainsString('Expires=', $url);
+        $this->assertStringContainsString('Signature=', $url);
+    }
+
+    public function test_video_preview_returns_placeholder_when_missing(): void
+    {
+        config(['cloudfront.domain' => 'cdn.example.com']);
+        config(['cloudfront.key_pair_id' => 'K123']);
+        config(['cloudfront.private_key_path' => base_path('storage/keys/cloudfront-private.pem')]);
+
+        // PDF_PAGE with empty basePath - path resolver returns '' when storage_root_path is empty
+        // Service returns placeholder for stub variants (VIDEO_PREVIEW, PDF_PAGE) when path is empty
+        $upload2 = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 0,
+            'uploaded_size' => 0,
+        ]);
+        $resolver = app(AssetVariantPathResolver::class);
+        $assetEmpty = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => null,
+            'upload_session_id' => $upload2->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'title' => 'Empty',
+            'original_filename' => 'empty.pdf',
+            'mime_type' => 'application/pdf',
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'storage_root_path' => '',
+            'size_bytes' => 0,
+        ]);
+        $path = $resolver->resolve($assetEmpty, AssetVariant::PDF_PAGE->value, ['page' => 1]);
+        $this->assertSame('', $path, 'Path resolver should return empty for PDF_PAGE when basePath empty');
+
+        $service = app(AssetDeliveryService::class);
+        $url = $service->url(
+            $assetEmpty,
+            AssetVariant::PDF_PAGE->value,
+            DeliveryContext::AUTHENTICATED->value,
+            ['page' => 1]
+        );
+
+        $this->assertNotEmpty($url);
+        $this->assertStringContainsString('data:image/png;base64,', $url);
+    }
+
+    public function test_asset_delivery_url_proxies_to_service(): void
+    {
+        config(['cloudfront.domain' => 'cdn.example.com']);
+        config(['cloudfront.key_pair_id' => 'K123']);
+        config(['cloudfront.private_key_path' => base_path('storage/keys/cloudfront-private.pem')]);
+
+        $url = $this->asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+
+        $this->assertNotEmpty($url);
+        $this->assertStringContainsString('cdn.example.com', $url);
+        $this->assertStringNotContainsString('.s3.', $url);
+    }
 }
