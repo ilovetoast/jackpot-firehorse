@@ -67,11 +67,6 @@ class EnsureCloudFrontSignedCookies
             return $response;
         }
 
-        // Skip if tenant has no UUID (e.g. legacy or broken data) to avoid throwing and causing 502
-        if (empty($tenant->uuid)) {
-            return $response;
-        }
-
         if ($this->shouldRegenerateCookies($request, $tenant)) {
             // Tenant switch: invalidate old cookies before issuing new ones
             if ($this->tenantSwitched($request, $tenant)) {

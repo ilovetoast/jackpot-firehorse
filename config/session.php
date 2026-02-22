@@ -154,11 +154,6 @@ return [
     | available to. By default, the cookie will be available to the root
     | domain without subdomains. Typically, this shouldn't be changed.
     |
-    | STAGING / MULTI-ENVIRONMENT: Leave null (or unset) so the session cookie
-    | is scoped to the exact request host. If you set a broad value (e.g.
-    | .velvetysoft.com), staging and production would share the same cookie
-    | and overwrite each other, causing 419 Page Expired (CSRF) and auth issues.
-    |
     */
 
     'domain' => env('SESSION_DOMAIN'),
