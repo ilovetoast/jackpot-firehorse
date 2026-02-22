@@ -1634,6 +1634,13 @@ class AssetController extends Controller
             }
         }
         $thumbnailUrl = $finalThumbnailUrl ?: $previewThumbnailUrl;
+        $fileExtension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf' || $fileExtension === 'pdf';
+        $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
+        $firstPageUrl = $isPdf ? ($finalThumbnailUrl ?: $previewThumbnailUrl) : null;
+        $pdfPageApiEndpoint = $isPdf
+            ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
+            : null;
 
         $asset->load(['collections' => fn ($q) => $q->select('collections.id', 'collections.name')]);
         $payload = [
@@ -1645,6 +1652,10 @@ class AssetController extends Controller
             'download_url' => route('assets.download', ['asset' => $asset->id]),
             'collection_only' => $collectionOnly,
             'collection' => $collection ? ['id' => $collection->id, 'name' => $collection->name] : null,
+            'is_pdf' => $isPdf,
+            'pdf_page_count' => $pdfPageCount,
+            'first_page_url' => $firstPageUrl,
+            'pdf_page_api_endpoint' => $pdfPageApiEndpoint,
         ];
 
         return Inertia::render('Assets/View', ['asset' => $payload]);
