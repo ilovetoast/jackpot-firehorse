@@ -62,6 +62,11 @@ return [
     | (e.g. cdn.example.com), use .example.com so cookies work for both
     | app and CDN. Null = current request host.
     |
+    | STAGING: Use the same domain as your CDN (e.g. CloudFront custom domain).
+    | Do NOT set SESSION_DOMAIN to a broad value; keep SESSION_DOMAIN=null so
+    | the Laravel session cookie is host-only. Otherwise staging and production
+    | can share the session cookie and you will see 419 (CSRF) and 502 errors.
+    |
     */
 
     'cookie_domain' => env('CLOUDFRONT_COOKIE_DOMAIN'),
