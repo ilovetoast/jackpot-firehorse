@@ -17,6 +17,20 @@ class AssetUrlService
     private const PUBLIC_TTL_SECONDS = 1800;
 
     /**
+     * In-request cache for resolved tenants.
+     *
+     * @var array<int, Tenant|null>
+     */
+    protected array $tenantCache = [];
+
+    /**
+     * In-request cache for resolved buckets.
+     *
+     * @var array<string, StorageBucket|null>
+     */
+    protected array $bucketCache = [];
+
+    /**
      * In-request cache for object existence checks.
      *
      * @var array<string, bool>
@@ -49,7 +63,7 @@ class AssetUrlService
 
         $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
             ? [AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
-            : [AssetVariant::THUMB_PREVIEW, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL];
+            : [AssetVariant::THUMB_PREVIEW];
 
         return $this->firstAvailableVariantUrl(
             $asset,
@@ -94,9 +108,17 @@ class AssetUrlService
             return null;
         }
 
+        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : (string) ($asset->thumbnail_status ?? 'pending');
+
+        $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
+            ? [AssetVariant::THUMB_LARGE, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
+            : [AssetVariant::THUMB_PREVIEW];
+
         return $this->firstAvailableVariantUrl(
             $asset,
-            [AssetVariant::THUMB_LARGE, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW],
+            $variants,
             self::PUBLIC_TTL_SECONDS,
             true
         );
@@ -144,14 +166,27 @@ class AssetUrlService
         int $ttlSeconds,
         bool $requireObjectExists
     ): ?string {
-        foreach ($variants as $variant) {
-            $url = $this->buildVariantUrl($asset, $variant, $ttlSeconds, $requireObjectExists);
-            if ($url !== null) {
-                return $url;
-            }
+        $tenant = $this->resolveTenantForAsset($asset);
+        if (! $tenant) {
+            return null;
         }
 
-        return null;
+        return $this->runInTenantContext($tenant, function () use ($asset, $variants, $ttlSeconds, $requireObjectExists, $tenant) {
+            foreach ($variants as $variant) {
+                $url = $this->buildVariantUrlWithinTenant(
+                    $asset,
+                    $variant,
+                    $ttlSeconds,
+                    $requireObjectExists,
+                    $tenant
+                );
+                if ($url !== null) {
+                    return $url;
+                }
+            }
+
+            return null;
+        });
     }
 
     /**
@@ -163,26 +198,87 @@ class AssetUrlService
         int $ttlSeconds,
         bool $requireObjectExists
     ): ?string {
-        $tenant = Tenant::find($asset->tenant_id);
+        $tenant = $this->resolveTenantForAsset($asset);
         if (! $tenant) {
             return null;
         }
 
         return $this->runInTenantContext($tenant, function () use ($asset, $variant, $ttlSeconds, $requireObjectExists, $tenant) {
-            $path = $this->pathResolver->resolve($asset, $variant->value);
-            if ($path === '') {
+            return $this->buildVariantUrlWithinTenant(
+                $asset,
+                $variant,
+                $ttlSeconds,
+                $requireObjectExists,
+                $tenant
+            );
+        });
+    }
+
+    /**
+     * Build URL for a specific variant (expects tenant context already bound).
+     */
+    protected function buildVariantUrlWithinTenant(
+        Asset $asset,
+        AssetVariant $variant,
+        int $ttlSeconds,
+        bool $requireObjectExists,
+        Tenant $tenant
+    ): ?string {
+        if (! $this->shouldAttemptVariant($asset, $variant)) {
+            return null;
+        }
+
+        $path = $this->pathResolver->resolve($asset, $variant->value);
+        if ($path === '') {
+            return null;
+        }
+
+        if ($requireObjectExists) {
+            $bucket = $this->resolveBucketForAsset($asset, $tenant);
+            if (! $bucket || ! $this->objectExists($bucket, $path)) {
                 return null;
             }
+        }
 
-            if ($requireObjectExists) {
-                $bucket = $this->resolveBucketForAsset($asset, $tenant);
-                if (! $bucket || ! $this->objectExists($bucket, $path)) {
-                    return null;
-                }
-            }
+        return $this->buildSignedCdnUrl($path, $ttlSeconds, $asset, $variant);
+    }
 
-            return $this->buildSignedCdnUrl($path, $ttlSeconds, $asset, $variant);
-        });
+    /**
+     * Skip variant work when metadata says the file is not expected.
+     * This avoids unnecessary S3 existence calls on large admin/public grids.
+     */
+    protected function shouldAttemptVariant(Asset $asset, AssetVariant $variant): bool
+    {
+        return match ($variant) {
+            AssetVariant::THUMB_PREVIEW => ! empty($asset->metadata['preview_thumbnails']['preview']['path']),
+            AssetVariant::THUMB_SMALL => $asset->thumbnailPathForStyle('thumb') !== null,
+            AssetVariant::THUMB_MEDIUM => $asset->thumbnailPathForStyle('medium') !== null,
+            AssetVariant::THUMB_LARGE => $asset->thumbnailPathForStyle('large') !== null,
+            default => true,
+        };
+    }
+
+    /**
+     * Resolve tenant with in-request memoization to avoid repeated DB queries.
+     */
+    protected function resolveTenantForAsset(Asset $asset): ?Tenant
+    {
+        $tenantId = (int) $asset->tenant_id;
+        if ($tenantId <= 0) {
+            return null;
+        }
+
+        if (array_key_exists($tenantId, $this->tenantCache)) {
+            return $this->tenantCache[$tenantId];
+        }
+
+        $tenant = ($asset->relationLoaded('tenant') && $asset->tenant)
+            ? $asset->tenant
+            : Tenant::find($tenantId);
+
+        $this->tenantCache[$tenantId] = $tenant;
+
+        return $tenant;
     }
 
     /**
@@ -190,7 +286,14 @@ class AssetUrlService
      */
     protected function resolveBucketForAsset(Asset $asset, Tenant $tenant): ?StorageBucket
     {
+        $cacheKey = $tenant->id . ':' . ($asset->storage_bucket_id ?: 'active');
+        if (array_key_exists($cacheKey, $this->bucketCache)) {
+            return $this->bucketCache[$cacheKey];
+        }
+
         if ($asset->relationLoaded('storageBucket') && $asset->storageBucket) {
+            $this->bucketCache[$cacheKey] = $asset->storageBucket;
+
             return $asset->storageBucket;
         }
 
@@ -201,18 +304,25 @@ class AssetUrlService
                 ->first();
 
             if ($bucket) {
+                $this->bucketCache[$cacheKey] = $bucket;
+
                 return $bucket;
             }
         }
 
         try {
-            return $this->tenantBucketService->resolveActiveBucketOrFail($tenant);
+            $resolved = $this->tenantBucketService->resolveActiveBucketOrFail($tenant);
+            $this->bucketCache[$cacheKey] = $resolved;
+
+            return $resolved;
         } catch (\Throwable $e) {
             Log::warning('[AssetUrlService] Failed to resolve tenant bucket for asset URL generation', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $asset->tenant_id,
                 'error' => $e->getMessage(),
             ]);
+
+            $this->bucketCache[$cacheKey] = null;
 
             return null;
         }
