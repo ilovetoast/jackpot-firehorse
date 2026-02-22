@@ -6,10 +6,12 @@ use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
+use App\Services\AssetPathGenerator;
 use App\Services\AssetProcessingFailureService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\ThumbnailGenerationService;
@@ -180,7 +182,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                 if ($asset->storageBucket) {
                     $s3Client = $this->createS3Client();
                     $this->deleteS3Prefix($s3Client, $asset->storageBucket->name, $thumbnailsPrefix);
+                    $pdfPagesPrefix = dirname($version->file_path) . '/pdf_pages/';
+                    $this->deleteS3Prefix($s3Client, $asset->storageBucket->name, $pdfPagesPrefix);
                 }
+                AssetPdfPage::query()
+                    ->where('asset_id', $asset->id)
+                    ->where('version_number', $version->version_number)
+                    ->delete();
 
                 Log::info('[GenerateThumbnailsJob] Version-aware mode', [
                     'asset_id' => $asset->id,
@@ -453,6 +461,12 @@ class GenerateThumbnailsJob implements ShouldQueue
             $thumbnailDimensions = $result['thumbnail_dimensions'] ?? [];
             $imageWidth = $result['image_width'] ?? null;
             $imageHeight = $result['image_height'] ?? null;
+            $detectedFileType = app(\App\Services\FileTypeService::class)->detectFileType(
+                $version?->mime_type ?? $asset->mime_type,
+                pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)
+            );
+            $isPdf = $detectedFileType === 'pdf';
+            $pdfPageCount = $isPdf ? max(1, (int) ($result['pdf_page_count'] ?? 1)) : null;
             
             // CRITICAL: If NO final thumbnails were generated, mark as FAILED immediately
             // This prevents marking as COMPLETED when all thumbnail generation failed
@@ -675,6 +689,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (!empty($result['thumbnail_quality'])) {
                 $thumbnailMetadata['thumbnail_quality'] = $result['thumbnail_quality'];
             }
+            if ($isPdf && $pdfPageCount !== null) {
+                $thumbnailMetadata['pdf_page_count'] = $pdfPageCount;
+                $thumbnailMetadata['pdf_pages_rendered'] = $pdfPageCount <= 1;
+            }
 
             if ($version) {
                 // Version path: persist metadata onto version
@@ -699,6 +717,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'thumbnail_error' => null,
                 'thumbnail_started_at' => null,
             ];
+            if ($isPdf && $pdfPageCount !== null) {
+                $updateData['pdf_page_count'] = $pdfPageCount;
+                $updateData['pdf_pages_rendered'] = $pdfPageCount <= 1;
+            }
             if (!$version) {
                 $updateData['metadata'] = $currentMetadata ?? $asset->metadata;
             }
@@ -732,6 +754,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             $asset->refresh();
             if ($version) {
                 $version->refresh();
+            }
+
+            if ($isPdf) {
+                $this->syncFirstPdfPageRecord($asset, $version, $finalThumbnails, $pdfPageCount);
+
+                if ($this->shouldScheduleFullPdfExtraction($asset, $pdfPageCount)) {
+                    FullPdfExtractionJob::dispatch($asset->id, $version?->id);
+                }
             }
 
             // Verify metadata was saved correctly (defensive check)
@@ -1405,6 +1435,97 @@ class GenerateThumbnailsJob implements ShouldQueue
         }
 
         return config('file_types.global_errors.unknown_type', 'Thumbnail generation is not supported for this file type.');
+    }
+
+    /**
+     * Persist page 1 PDF derivative record from already-generated thumbnails.
+     */
+    protected function syncFirstPdfPageRecord(Asset $asset, ?AssetVersion $version, array $finalThumbnails, ?int $pdfPageCount): void
+    {
+        $source = $finalThumbnails['large'] ?? $finalThumbnails['medium'] ?? $finalThumbnails['thumb'] ?? null;
+        $sourcePath = is_array($source) ? ($source['path'] ?? null) : null;
+
+        if (!$sourcePath || !$asset->storageBucket) {
+            return;
+        }
+
+        $versionNumber = $version?->version_number
+            ?? ($asset->relationLoaded('currentVersion')
+                ? ($asset->currentVersion?->version_number ?? 1)
+                : (int) ($asset->currentVersion()->value('version_number') ?? 1));
+
+        try {
+            $extension = pathinfo($sourcePath, PATHINFO_EXTENSION) ?: 'webp';
+            $targetPath = app(AssetPathGenerator::class)->generatePdfPagePath(
+                $asset->tenant,
+                $asset,
+                $versionNumber,
+                1,
+                $extension
+            );
+
+            $storedPath = $sourcePath;
+            if ($targetPath !== $sourcePath) {
+                $copySource = $asset->storageBucket->name . '/' . str_replace('%2F', '/', rawurlencode($sourcePath));
+                $this->createS3Client()->copyObject([
+                    'Bucket' => $asset->storageBucket->name,
+                    'CopySource' => $copySource,
+                    'Key' => $targetPath,
+                    'MetadataDirective' => 'REPLACE',
+                    'ContentType' => strtolower($extension) === 'webp' ? 'image/webp' : 'image/jpeg',
+                    'Metadata' => [
+                        'original-asset-id' => $asset->id,
+                        'pdf-page' => '1',
+                        'generated-at' => now()->toIso8601String(),
+                    ],
+                ]);
+                $storedPath = $targetPath;
+            }
+
+            AssetPdfPage::updateOrCreate(
+                [
+                    'asset_id' => $asset->id,
+                    'version_number' => $versionNumber,
+                    'page_number' => 1,
+                ],
+                [
+                    'tenant_id' => $asset->tenant_id,
+                    'asset_version_id' => $version?->id,
+                    'storage_path' => $storedPath,
+                    'width' => isset($source['width']) ? (int) $source['width'] : null,
+                    'height' => isset($source['height']) ? (int) $source['height'] : null,
+                    'size_bytes' => isset($source['size_bytes']) ? (int) $source['size_bytes'] : null,
+                    'mime_type' => strtolower($extension) === 'webp' ? 'image/webp' : 'image/jpeg',
+                    'status' => 'completed',
+                    'error' => null,
+                    'rendered_at' => now(),
+                ]
+            );
+
+            if (($pdfPageCount ?? 0) <= 1) {
+                $asset->forceFill(['pdf_pages_rendered' => true])->save();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[GenerateThumbnailsJob] Failed to persist first PDF page derivative', [
+                'asset_id' => $asset->id,
+                'version_id' => $version?->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Whether this asset should enqueue full PDF extraction after page 1.
+     */
+    protected function shouldScheduleFullPdfExtraction(Asset $asset, ?int $pdfPageCount): bool
+    {
+        if (($pdfPageCount ?? 0) <= 1) {
+            return false;
+        }
+
+        $metadata = $asset->metadata ?? [];
+
+        return (bool) ($metadata['pdf_extract_full'] ?? $metadata['pdf_full_extraction_requested'] ?? false);
     }
 
     /**

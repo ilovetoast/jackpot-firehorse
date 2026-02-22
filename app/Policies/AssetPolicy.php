@@ -94,6 +94,20 @@ class AssetPolicy
     }
 
     /**
+     * Determine if user can request full PDF extraction.
+     */
+    public function requestFullPdfExtraction(User $user, Asset $asset): bool
+    {
+        if (!$this->view($user, $asset)) {
+            return false;
+        }
+
+        $tenantRole = $user->getRoleForTenant($asset->tenant);
+
+        return in_array($tenantRole, ['owner', 'admin'], true);
+    }
+
+    /**
      * Determine if the user can regenerate thumbnails with admin privileges.
      *
      * Site roles (site_owner, site_admin, site_support, site_engineering) can:

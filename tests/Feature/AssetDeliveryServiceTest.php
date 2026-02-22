@@ -8,6 +8,7 @@ use App\Enums\StorageBucketStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\Asset;
+use App\Models\AssetPdfPage;
 use App\Models\Brand;
 use App\Models\Collection;
 use App\Models\StorageBucket;
@@ -122,12 +123,24 @@ class AssetDeliveryServiceTest extends TestCase
 
     public function test_pdf_page_requires_page_option(): void
     {
+        AssetPdfPage::create([
+            'tenant_id' => $this->asset->tenant_id,
+            'asset_id' => $this->asset->id,
+            'asset_version_id' => null,
+            'version_number' => 1,
+            'page_number' => 3,
+            'storage_path' => 'tenants/' . $this->tenant->uuid . '/assets/' . $this->asset->id . '/v1/pdf_pages/page-3.webp',
+            'mime_type' => 'image/webp',
+            'status' => 'completed',
+            'rendered_at' => now(),
+        ]);
+
         $resolver = app(AssetVariantPathResolver::class);
         $pathWithPage = $resolver->resolve($this->asset, AssetVariant::PDF_PAGE->value, ['page' => 3]);
         $pathDefault = $resolver->resolve($this->asset, AssetVariant::PDF_PAGE->value, []);
 
-        $this->assertStringContainsString('pdf/pages/3.webp', $pathWithPage);
-        $this->assertStringContainsString('pdf/pages/1.webp', $pathDefault);
+        $this->assertStringContainsString('/pdf_pages/page-3.webp', $pathWithPage);
+        $this->assertSame('', $pathDefault);
     }
 
     public function test_asset_variant_requires_options(): void
@@ -135,6 +148,26 @@ class AssetDeliveryServiceTest extends TestCase
         $this->assertTrue(AssetVariant::PDF_PAGE->requiresOptions());
         $this->assertFalse(AssetVariant::ORIGINAL->requiresOptions());
         $this->assertFalse(AssetVariant::THUMB_SMALL->requiresOptions());
+    }
+
+    public function test_get_pdf_page_url_helper_uses_pdf_variant(): void
+    {
+        AssetPdfPage::create([
+            'tenant_id' => $this->asset->tenant_id,
+            'asset_id' => $this->asset->id,
+            'asset_version_id' => null,
+            'version_number' => 1,
+            'page_number' => 2,
+            'storage_path' => 'tenants/' . $this->tenant->uuid . '/assets/' . $this->asset->id . '/v1/pdf_pages/page-2.webp',
+            'mime_type' => 'image/webp',
+            'status' => 'completed',
+            'rendered_at' => now(),
+        ]);
+
+        $service = app(AssetDeliveryService::class);
+        $url = $service->getPdfPageUrl($this->asset, 2, DeliveryContext::AUTHENTICATED->value);
+
+        $this->assertNotEmpty($url);
     }
 
     public function test_no_s3_url_returned_when_cloudfront_configured(): void

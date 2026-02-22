@@ -29,6 +29,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PDF Processing Queue Name
+    |--------------------------------------------------------------------------
+    |
+    | Dedicated queue for PDF page rendering and full extraction jobs.
+    | Keep this isolated from default/download queues to prevent long-running
+    | PDF work from delaying regular asset processing.
+    |
+    */
+    'pdf_processing_queue' => env('QUEUE_PDF_PROCESSING_QUEUE', 'pdf-processing'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

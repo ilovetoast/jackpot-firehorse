@@ -611,6 +611,8 @@ class AssetController extends Controller
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
                     'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                    'pdf_page_count' => $asset->pdf_page_count,
+                    'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
                     // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
                     'published_at' => $asset->published_at?->toIso8601String(),
                     'is_published' => $asset->published_at !== null,
@@ -676,6 +678,8 @@ class AssetController extends Controller
                     'original' => null,
                         'thumbnail_status' => 'pending',
                         'thumbnail_error' => null,
+                        'pdf_page_count' => null,
+                        'pdf_pages_rendered' => false,
                         'published_at' => null,
                         'is_published' => false,
                         'published_by' => null,
@@ -1539,6 +1543,8 @@ class AssetController extends Controller
             'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
             'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
             'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+            'pdf_page_count' => $asset->pdf_page_count,
+            'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
         ], 200);
     }
 
@@ -1623,6 +1629,8 @@ class AssetController extends Controller
             'title' => $asset->title,
             'original_filename' => $asset->original_filename,
             'mime_type' => $asset->mime_type,
+            'pdf_page_count' => $asset->pdf_page_count,
+            'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
             'thumbnail_url' => $thumbnailUrl,
             'download_url' => route('assets.download', ['asset' => $asset->id]),
             'collection_only' => $collectionOnly,

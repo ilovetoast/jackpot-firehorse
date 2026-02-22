@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\AssetPdfPage;
 use App\Support\AssetVariant;
 
 /**
@@ -50,7 +51,7 @@ class AssetVariantPathResolver
             AssetVariant::THUMB_PREVIEW => $asset->metadata['preview_thumbnails']['preview']['path'] ?? '',
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
-            AssetVariant::PDF_PAGE => $basePath !== '' ? $this->resolvePdfPagePath($basePath, $options) : '',
+            AssetVariant::PDF_PAGE => $basePath !== '' ? $this->resolvePdfPagePath($asset, $options) : '',
         };
     }
 
@@ -112,12 +113,26 @@ class AssetVariantPathResolver
     }
 
     /**
-     * Resolve PDF page path (stub). Returns placeholder if page not provided.
+     * Resolve rendered PDF page path from database records.
      */
-    protected function resolvePdfPagePath(string $basePath, array $options): string
+    protected function resolvePdfPagePath(Asset $asset, array $options): string
     {
-        $page = $options['page'] ?? 1;
+        $page = max(1, (int) ($options['page'] ?? 1));
+        $versionNumber = $asset->relationLoaded('currentVersion')
+            ? ($asset->currentVersion?->version_number ?? 1)
+            : (int) ($asset->currentVersion()->value('version_number') ?? 1);
 
-        return $basePath . 'pdf/pages/' . (int) $page . '.webp';
+        $record = AssetPdfPage::query()
+            ->where('asset_id', $asset->id)
+            ->where('version_number', $versionNumber)
+            ->where('page_number', $page)
+            ->where('status', 'completed')
+            ->first();
+
+        if ($record && $record->storage_path) {
+            return $record->storage_path;
+        }
+
+        return '';
     }
 }

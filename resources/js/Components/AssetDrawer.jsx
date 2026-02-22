@@ -42,7 +42,7 @@
  * @param {Array} props.assets - Array of all assets (for carousel navigation)
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
@@ -531,11 +531,29 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
 
+    const isPdf = useMemo(() => {
+        if (!displayAsset) return false
+        const mimeType = (displayAsset.mime_type || '').toLowerCase()
+        const ext = (displayAsset.original_filename || '').split('.').pop()?.toLowerCase() || ''
+
+        return mimeType.includes('pdf') || ext === 'pdf'
+    }, [displayAsset])
+    const tenantRoleForPdfActions = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
+    const canRequestFullPdfExtraction = ['owner', 'admin'].includes(tenantRoleForPdfActions)
+
     // Phase V-1: Hover video preview state (for drawer)
     const [isHoveringVideo, setIsHoveringVideo] = useState(false)
     const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+    const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+    const [pdfPageCache, setPdfPageCache] = useState({})
+    const [pdfKnownPageCount, setPdfKnownPageCount] = useState(null)
+    const [pdfPageLoading, setPdfPageLoading] = useState(false)
+    const [pdfPageError, setPdfPageError] = useState(null)
+    const [pdfFullExtractionLoading, setPdfFullExtractionLoading] = useState(false)
+    const [pdfFullExtractionRequested, setPdfFullExtractionRequested] = useState(false)
+    const pdfPollTimeoutRef = useRef(null)
     
     // Phase V-1: Video view URL state (for gallery view)
     const [videoViewUrl, setVideoViewUrl] = useState(null)
@@ -587,6 +605,145 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             setVideoViewUrlLoading(false)
         }
     }, [showZoomModal, currentCarouselAsset?.id, currentCarouselAsset?.mime_type, currentCarouselAsset?.original_filename])
+
+    const effectivePdfPageCount = Math.max(
+        1,
+        Number(pdfKnownPageCount || displayAsset?.pdf_page_count || 1)
+    )
+
+    const fetchPdfPage = useCallback(async (pageToFetch, attempt = 0) => {
+        if (!isPdf || !displayAsset?.id) return
+
+        setPdfPageLoading(true)
+        setPdfPageError(null)
+
+        try {
+            const response = await window.axios.get(`/app/assets/${displayAsset.id}/pdf-page/${pageToFetch}`, {
+                headers: { Accept: 'application/json' },
+            })
+            const payload = response?.data || {}
+
+            if (payload.page_count != null) {
+                setPdfKnownPageCount(Number(payload.page_count))
+            }
+
+            if (payload.status === 'ready' && payload.url) {
+                setPdfPageCache(prev => ({ ...prev, [pageToFetch]: payload.url }))
+                setPdfPageLoading(false)
+                return
+            }
+
+            if (payload.status === 'processing') {
+                if (attempt >= 20) {
+                    setPdfPageLoading(false)
+                    setPdfPageError('Still rendering this page. Please try again in a few seconds.')
+                    return
+                }
+
+                const pollDelay = Number(payload.poll_after_ms || 1200)
+                if (pdfPollTimeoutRef.current) {
+                    clearTimeout(pdfPollTimeoutRef.current)
+                }
+                pdfPollTimeoutRef.current = setTimeout(() => {
+                    fetchPdfPage(pageToFetch, attempt + 1)
+                }, pollDelay)
+                return
+            }
+
+            setPdfPageLoading(false)
+            setPdfPageError(payload.message || 'Unable to load PDF page.')
+        } catch (error) {
+            const status = error?.response?.status
+            const message = error?.response?.data?.message
+            setPdfPageLoading(false)
+            if (status === 422 && message) {
+                setPdfPageError(message)
+                return
+            }
+            setPdfPageError('Unable to load PDF page right now.')
+        }
+    }, [displayAsset?.id, isPdf])
+
+    useEffect(() => {
+        if (pdfPollTimeoutRef.current) {
+            clearTimeout(pdfPollTimeoutRef.current)
+            pdfPollTimeoutRef.current = null
+        }
+
+        setPdfCurrentPage(1)
+        setPdfPageCache({})
+        setPdfKnownPageCount(null)
+        setPdfPageError(null)
+        setPdfPageLoading(false)
+        setPdfFullExtractionLoading(false)
+        setPdfFullExtractionRequested(Boolean(displayAsset?.metadata?.pdf_full_extraction_requested))
+
+        if (!isPdf || !displayAsset?.id) {
+            return undefined
+        }
+
+        fetchPdfPage(1)
+
+        return () => {
+            if (pdfPollTimeoutRef.current) {
+                clearTimeout(pdfPollTimeoutRef.current)
+                pdfPollTimeoutRef.current = null
+            }
+        }
+    }, [displayAsset?.id, fetchPdfPage, isPdf])
+
+    const handlePdfPageNavigate = useCallback((nextPage) => {
+        if (!isPdf) return
+        if (nextPage < 1 || nextPage > effectivePdfPageCount) return
+
+        setPdfCurrentPage(nextPage)
+        if (!pdfPageCache[nextPage]) {
+            fetchPdfPage(nextPage)
+        }
+    }, [effectivePdfPageCount, fetchPdfPage, isPdf, pdfPageCache])
+
+    const handleRequestFullPdfExtraction = useCallback(async () => {
+        if (!isPdf || !displayAsset?.id || pdfFullExtractionLoading || !canRequestFullPdfExtraction) {
+            return
+        }
+
+        setPdfFullExtractionLoading(true)
+        try {
+            const response = await window.axios.post(
+                `/app/assets/${displayAsset.id}/pdf-pages/full-extraction`,
+                {},
+                { headers: { Accept: 'application/json' } }
+            )
+
+            setPdfFullExtractionRequested(true)
+            setToastMessage(response?.data?.message || 'Full PDF extraction queued.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 4000)
+
+            if (onAssetUpdate) {
+                onAssetUpdate({
+                    ...displayAsset,
+                    pdf_pages_rendered: false,
+                    metadata: {
+                        ...(displayAsset.metadata || {}),
+                        pdf_full_extraction_requested: true,
+                    },
+                })
+            }
+        } catch (error) {
+            setToastMessage(error?.response?.data?.message || 'Failed to queue full PDF extraction.')
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setPdfFullExtractionLoading(false)
+        }
+    }, [
+        canRequestFullPdfExtraction,
+        displayAsset,
+        isPdf,
+        onAssetUpdate,
+        pdfFullExtractionLoading,
+    ])
 
     // Phase 3.1: Carousel navigation handlers with smooth transitions
     const handlePrevious = (e) => {
@@ -1453,6 +1610,32 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         <span className="text-white text-sm font-medium">Click to play</span>
                                     </div>
                                 </div>
+                            ) : isPdf && displayAsset.id ? (
+                                <div className="w-full h-full bg-white">
+                                    {pdfPageCache[pdfCurrentPage] ? (
+                                        <img
+                                            src={pdfPageCache[pdfCurrentPage]}
+                                            alt={`PDF page ${pdfCurrentPage}`}
+                                            className="w-full h-full object-contain"
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <div className="text-center px-4">
+                                                {pdfPageLoading ? (
+                                                    <>
+                                                        <ArrowPathIcon className="h-6 w-6 mx-auto text-gray-400 animate-spin" />
+                                                        <p className="mt-2 text-sm text-gray-500">Rendering page {pdfCurrentPage}...</p>
+                                                    </>
+                                                ) : (
+                                                    <p className="text-sm text-gray-500">Preparing PDF preview...</p>
+                                                )}
+                                                {pdfPageError && (
+                                                    <p className="mt-2 text-xs text-amber-600">{pdfPageError}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
@@ -1513,6 +1696,51 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             )}
                         </div>
                     </div>
+
+                    {isPdf && (
+                        <div className="space-y-2 rounded-md border border-gray-200 bg-white px-3 py-2">
+                            <div className="flex items-center justify-between">
+                                <button
+                                    type="button"
+                                    onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
+                                    disabled={pdfCurrentPage <= 1 || pdfPageLoading}
+                                    className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                                >
+                                    Previous
+                                </button>
+                                <div className="text-xs text-gray-600">
+                                    Page {pdfCurrentPage} of {effectivePdfPageCount}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
+                                    disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
+                                    className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                            {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
+                                <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                    <p className="text-xs text-gray-500">
+                                        Render all pages for AI ingestion and faster navigation.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleRequestFullPdfExtraction}
+                                        disabled={pdfFullExtractionLoading || pdfFullExtractionRequested}
+                                        className="inline-flex shrink-0 items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {pdfFullExtractionLoading
+                                            ? 'Queueing...'
+                                            : pdfFullExtractionRequested
+                                                ? 'Queued'
+                                                : 'Render all pages'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     
                     {/* Lifecycle badges - Unpublished, Archived, and Expired */}
                     <div className="flex flex-wrap gap-2">

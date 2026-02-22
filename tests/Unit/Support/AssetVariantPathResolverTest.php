@@ -8,6 +8,7 @@ use App\Enums\StorageBucketStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\Asset;
+use App\Models\AssetPdfPage;
 use App\Models\Brand;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
@@ -114,10 +115,21 @@ class AssetVariantPathResolverTest extends TestCase
     public function test_resolve_pdf_page_with_options(): void
     {
         $asset = $this->createAsset(['storage_root_path' => 'tenants/abc/assets/123/v1/original.pdf']);
+        AssetPdfPage::create([
+            'tenant_id' => $asset->tenant_id,
+            'asset_id' => $asset->id,
+            'asset_version_id' => null,
+            'version_number' => 1,
+            'page_number' => 5,
+            'storage_path' => 'tenants/abc/assets/123/v1/pdf_pages/page-5.webp',
+            'mime_type' => 'image/webp',
+            'status' => 'completed',
+            'rendered_at' => now(),
+        ]);
 
         $resolver = app(AssetVariantPathResolver::class);
         $path = $resolver->resolve($asset, AssetVariant::PDF_PAGE->value, ['page' => 5]);
 
-        $this->assertStringContainsString('pdf/pages/5.webp', $path);
+        $this->assertSame('tenants/abc/assets/123/v1/pdf_pages/page-5.webp', $path);
     }
 }

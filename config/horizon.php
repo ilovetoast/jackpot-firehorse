@@ -99,6 +99,7 @@ return [
     'waits' => [
         'redis:default' => 90,
         'redis:downloads' => 300,
+        'redis:pdf-processing' => 300,
     ],
 
     /*
@@ -213,12 +214,30 @@ return [
             'timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
+        'supervisor-pdf-processing' => [
+            'connection' => 'redis',
+            'queue' => ['pdf-processing'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 250,
+            'memory' => 512,
+            'tries' => 3,
+            'timeout' => (int) env('QUEUE_PDF_PROCESSING_TIMEOUT', 600),
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
         'production' => [
             'supervisor-default' => [
                 'maxProcesses' => 10,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+            'supervisor-pdf-processing' => [
+                'maxProcesses' => 2,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
@@ -230,10 +249,18 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-pdf-processing' => [
+                'maxProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
         ],
 
         'local' => [
             'supervisor-default' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
             ],
         ],
