@@ -3,11 +3,15 @@ import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import { ChartBarIcon, ServerIcon } from '@heroicons/react/24/outline'
 
-export default function AdminPerformanceIndex({ auth, metrics }) {
+export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics = null }) {
     const server = metrics?.server ?? {}
     const client = metrics?.client ?? {}
     const period = metrics?.period_hours ?? 24
     const config = metrics?.config ?? {}
+    const assetUrlMetrics = asset_url_metrics ?? null
+    const assetUrlAvgMs = assetUrlMetrics?.calls
+        ? Math.round((assetUrlMetrics.total_time_ms / assetUrlMetrics.calls) * 100) / 100
+        : null
 
     return (
         <div className="min-h-full bg-slate-50">
@@ -129,6 +133,42 @@ export default function AdminPerformanceIndex({ auth, metrics }) {
                 </div>
 
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    {assetUrlMetrics && (
+                        <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <h3 className="text-sm font-semibold text-slate-900">Asset URL Service Metrics</h3>
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Total Calls</p>
+                                    <p className="mt-1 text-lg font-semibold text-slate-900">{assetUrlMetrics.calls ?? 0}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Total Time</p>
+                                    <p className="mt-1 text-lg font-semibold text-slate-900">{Math.round(assetUrlMetrics.total_time_ms ?? 0)}ms</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Avg Time / Call</p>
+                                    <p className="mt-1 text-lg font-semibold text-slate-900">{assetUrlAvgMs != null ? `${assetUrlAvgMs}ms` : '—'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Existence Checks</p>
+                                    <p className="mt-1 text-lg font-semibold text-slate-900">{assetUrlMetrics.existence_checks ?? 0}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Tenant Cache</p>
+                                    <p className="mt-1 text-sm text-slate-700">Hits: {assetUrlMetrics.tenant_cache_hits ?? 0} / Misses: {assetUrlMetrics.tenant_cache_misses ?? 0}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Bucket Cache</p>
+                                    <p className="mt-1 text-sm text-slate-700">Hits: {assetUrlMetrics.bucket_cache_hits ?? 0} / Misses: {assetUrlMetrics.bucket_cache_misses ?? 0}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase text-slate-500">Existence Cache Hits</p>
+                                    <p className="mt-1 text-sm text-slate-700">{assetUrlMetrics.existence_cache_hits ?? 0}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <h3 className="text-sm font-semibold text-slate-900">Configuration (runtime values)</h3>
                     <ul className="mt-2 space-y-1 text-sm text-slate-600">
                         <li>PERFORMANCE_MONITORING_ENABLED — <span className={config.enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.enabled ? 'enabled' : 'disabled'}</span></li>

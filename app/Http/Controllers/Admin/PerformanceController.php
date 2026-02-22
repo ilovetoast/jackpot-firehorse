@@ -41,9 +41,20 @@ class PerformanceController extends Controller
         $this->authorizeAdmin();
 
         $metrics = $this->getMetrics();
+        $assetUrlMetrics = null;
+        if (config('asset_url.metrics_enabled')) {
+            $assetUrlMetrics = app()->bound('asset_url_request_metrics')
+                ? app('asset_url_request_metrics')
+                : app(\App\Services\AssetUrlService::class)->getMetrics();
+
+            if (($assetUrlMetrics['calls'] ?? 0) === 0) {
+                $assetUrlMetrics = null;
+            }
+        }
 
         return Inertia::render('Admin/Performance/Index', [
             'metrics' => $metrics,
+            'asset_url_metrics' => $assetUrlMetrics,
         ]);
     }
 

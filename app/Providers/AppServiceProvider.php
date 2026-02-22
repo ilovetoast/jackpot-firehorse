@@ -48,6 +48,15 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {
             return new ImageEmbeddingService();
         });
+
+        // Request-scoped URL metrics/state for AssetUrlService.
+        $this->app->scoped(\App\Services\AssetUrlService::class, function ($app) {
+            return new \App\Services\AssetUrlService(
+                $app->make(\App\Services\AssetVariantPathResolver::class),
+                $app->make(\App\Services\CloudFrontSignedUrlService::class),
+                $app->make(\App\Services\TenantBucketService::class),
+            );
+        });
     }
 
     /**

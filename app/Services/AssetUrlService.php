@@ -44,6 +44,23 @@ class AssetUrlService
      */
     protected array $publicAssetCache = [];
 
+    protected ?bool $metricsEnabledCache = null;
+
+    protected array $metrics = [
+        'calls' => 0,
+        'admin_thumbnail_calls' => 0,
+        'public_thumbnail_calls' => 0,
+        'admin_download_calls' => 0,
+        'public_download_calls' => 0,
+        'tenant_cache_hits' => 0,
+        'tenant_cache_misses' => 0,
+        'bucket_cache_hits' => 0,
+        'bucket_cache_misses' => 0,
+        'existence_checks' => 0,
+        'existence_cache_hits' => 0,
+        'total_time_ms' => 0,
+    ];
+
     public function __construct(
         protected AssetVariantPathResolver $pathResolver,
         protected CloudFrontSignedUrlService $signedUrlService,
@@ -57,20 +74,29 @@ class AssetUrlService
      */
     public function getAdminThumbnailUrl(Asset $asset): ?string
     {
-        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
-            ? $asset->thumbnail_status->value
-            : (string) ($asset->thumbnail_status ?? 'pending');
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
+        }
 
-        $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
-            ? [AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
-            : [AssetVariant::THUMB_PREVIEW];
+        try {
+            $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+                ? $asset->thumbnail_status->value
+                : (string) ($asset->thumbnail_status ?? 'pending');
 
-        return $this->firstAvailableVariantUrl(
-            $asset,
-            $variants,
-            self::ADMIN_TTL_SECONDS,
-            true
-        );
+            $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
+                ? [AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
+                : [AssetVariant::THUMB_PREVIEW];
+
+            return $this->firstAvailableVariantUrl(
+                $asset,
+                $variants,
+                self::ADMIN_TTL_SECONDS,
+                true
+            );
+        } finally {
+            $this->recordTimedCall($start, 'admin_thumbnail_calls');
+        }
     }
 
     /**
@@ -79,23 +105,32 @@ class AssetUrlService
      */
     public function getAdminThumbnailUrlForStyle(Asset $asset, string $style): ?string
     {
-        $variant = match ($style) {
-            'thumb' => AssetVariant::THUMB_SMALL,
-            'medium' => AssetVariant::THUMB_MEDIUM,
-            'large' => AssetVariant::THUMB_LARGE,
-            default => null,
-        };
-
-        if (! $variant) {
-            return null;
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
         }
 
-        return $this->buildVariantUrl(
-            $asset,
-            $variant,
-            self::ADMIN_TTL_SECONDS,
-            true
-        );
+        try {
+            $variant = match ($style) {
+                'thumb' => AssetVariant::THUMB_SMALL,
+                'medium' => AssetVariant::THUMB_MEDIUM,
+                'large' => AssetVariant::THUMB_LARGE,
+                default => null,
+            };
+
+            if (! $variant) {
+                return null;
+            }
+
+            return $this->buildVariantUrl(
+                $asset,
+                $variant,
+                self::ADMIN_TTL_SECONDS,
+                true
+            );
+        } finally {
+            $this->recordTimedCall($start, 'admin_thumbnail_calls');
+        }
     }
 
     /**
@@ -104,24 +139,33 @@ class AssetUrlService
      */
     public function getPublicThumbnailUrl(Asset $asset): ?string
     {
-        if (! $this->isAssetPublic($asset)) {
-            return null;
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
         }
 
-        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
-            ? $asset->thumbnail_status->value
-            : (string) ($asset->thumbnail_status ?? 'pending');
+        try {
+            if (! $this->isAssetPublic($asset)) {
+                return null;
+            }
 
-        $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
-            ? [AssetVariant::THUMB_LARGE, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
-            : [AssetVariant::THUMB_PREVIEW];
+            $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+                ? $asset->thumbnail_status->value
+                : (string) ($asset->thumbnail_status ?? 'pending');
 
-        return $this->firstAvailableVariantUrl(
-            $asset,
-            $variants,
-            self::PUBLIC_TTL_SECONDS,
-            true
-        );
+            $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
+                ? [AssetVariant::THUMB_LARGE, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
+                : [AssetVariant::THUMB_PREVIEW];
+
+            return $this->firstAvailableVariantUrl(
+                $asset,
+                $variants,
+                self::PUBLIC_TTL_SECONDS,
+                true
+            );
+        } finally {
+            $this->recordTimedCall($start, 'public_thumbnail_calls');
+        }
     }
 
     /**
@@ -129,12 +173,21 @@ class AssetUrlService
      */
     public function getAdminDownloadUrl(Asset $asset): ?string
     {
-        return $this->buildVariantUrl(
-            $asset,
-            AssetVariant::ORIGINAL,
-            self::ADMIN_TTL_SECONDS,
-            false
-        );
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
+        }
+
+        try {
+            return $this->buildVariantUrl(
+                $asset,
+                AssetVariant::ORIGINAL,
+                self::ADMIN_TTL_SECONDS,
+                false
+            );
+        } finally {
+            $this->recordTimedCall($start, 'admin_download_calls');
+        }
     }
 
     /**
@@ -143,16 +196,25 @@ class AssetUrlService
      */
     public function getPublicDownloadUrl(Asset $asset): ?string
     {
-        if (! $this->isAssetPublic($asset)) {
-            return null;
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
         }
 
-        return $this->buildVariantUrl(
-            $asset,
-            AssetVariant::ORIGINAL,
-            self::PUBLIC_TTL_SECONDS,
-            false
-        );
+        try {
+            if (! $this->isAssetPublic($asset)) {
+                return null;
+            }
+
+            return $this->buildVariantUrl(
+                $asset,
+                AssetVariant::ORIGINAL,
+                self::PUBLIC_TTL_SECONDS,
+                false
+            );
+        } finally {
+            $this->recordTimedCall($start, 'public_download_calls');
+        }
     }
 
     /**
@@ -269,7 +331,15 @@ class AssetUrlService
         }
 
         if (array_key_exists($tenantId, $this->tenantCache)) {
+            if ($this->metricsEnabled()) {
+                $this->metrics['tenant_cache_hits']++;
+            }
+
             return $this->tenantCache[$tenantId];
+        }
+
+        if ($this->metricsEnabled()) {
+            $this->metrics['tenant_cache_misses']++;
         }
 
         $tenant = ($asset->relationLoaded('tenant') && $asset->tenant)
@@ -288,7 +358,15 @@ class AssetUrlService
     {
         $cacheKey = $tenant->id . ':' . ($asset->storage_bucket_id ?: 'active');
         if (array_key_exists($cacheKey, $this->bucketCache)) {
+            if ($this->metricsEnabled()) {
+                $this->metrics['bucket_cache_hits']++;
+            }
+
             return $this->bucketCache[$cacheKey];
+        }
+
+        if ($this->metricsEnabled()) {
+            $this->metrics['bucket_cache_misses']++;
         }
 
         if ($asset->relationLoaded('storageBucket') && $asset->storageBucket) {
@@ -337,8 +415,16 @@ class AssetUrlService
             return true;
         }
 
+        if ($this->metricsEnabled()) {
+            $this->metrics['existence_checks']++;
+        }
+
         $cacheKey = $bucket->name . ':' . ltrim($path, '/');
         if (array_key_exists($cacheKey, $this->objectExistenceCache)) {
+            if ($this->metricsEnabled()) {
+                $this->metrics['existence_cache_hits']++;
+            }
+
             return $this->objectExistenceCache[$cacheKey];
         }
 
@@ -434,6 +520,53 @@ class AssetUrlService
         $this->publicAssetCache[$cacheKey] = $isPublic;
 
         return $isPublic;
+    }
+
+    protected function metricsEnabled(): bool
+    {
+        if ($this->metricsEnabledCache !== null) {
+            return $this->metricsEnabledCache;
+        }
+
+        $this->metricsEnabledCache = (bool) config('asset_url.metrics_enabled');
+
+        return $this->metricsEnabledCache;
+    }
+
+    protected function recordTimedCall(?float $start, string $counterKey): void
+    {
+        if (! $this->metricsEnabled() || $start === null) {
+            return;
+        }
+
+        $this->metrics['calls']++;
+        if (array_key_exists($counterKey, $this->metrics)) {
+            $this->metrics[$counterKey]++;
+        }
+        $this->metrics['total_time_ms'] += (microtime(true) - $start) * 1000;
+    }
+
+    public function getMetrics(): array
+    {
+        return $this->metrics;
+    }
+
+    public function resetMetrics(): void
+    {
+        $this->metrics = [
+            'calls' => 0,
+            'admin_thumbnail_calls' => 0,
+            'public_thumbnail_calls' => 0,
+            'admin_download_calls' => 0,
+            'public_download_calls' => 0,
+            'tenant_cache_hits' => 0,
+            'tenant_cache_misses' => 0,
+            'bucket_cache_hits' => 0,
+            'bucket_cache_misses' => 0,
+            'existence_checks' => 0,
+            'existence_cache_hits' => 0,
+            'total_time_ms' => 0,
+        ];
     }
 
     /**
