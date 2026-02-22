@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Asset;
 use App\Models\Collection;
-use App\Services\AssetDeliveryService;
+use App\Services\AssetUrlService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionZipBuilderService;
 use App\Services\DownloadNameResolver;
@@ -12,13 +12,10 @@ use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\PublicCollectionPageBrandingResolver;
 use App\Services\TenantBucketService;
-use App\Support\AssetVariant;
-use App\Support\DeliveryContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -31,7 +28,7 @@ use Inertia\Response;
 class PublicCollectionController extends Controller
 {
     public function __construct(
-        protected AssetDeliveryService $assetDelivery,
+        protected AssetUrlService $assetUrlService,
         protected CollectionAssetQueryService $collectionAssetQueryService,
         protected CollectionZipBuilderService $zipBuilder,
         protected FeatureGate $featureGate,
@@ -69,9 +66,12 @@ class PublicCollectionController extends Controller
         }
 
         $query = $this->collectionAssetQueryService->queryPublic($collection);
-        $assetModels = $query->get();
+        $assetModels = $query
+            ->get();
 
-        $assets = $assetModels->map(fn (Asset $asset) => $this->mapAssetToPublicGridArray($asset, $collection, $brand))
+        $assets = $assetModels
+            ->map(fn (Asset $asset) => $this->mapAssetToPublicGridArray($asset))
+            ->filter()
             ->values()
             ->all();
 
@@ -278,19 +278,22 @@ class PublicCollectionController extends Controller
             'brand_slug' => $brand_slug,
         ]);
 
-        $downloadUrl = $this->assetDelivery->url(
-            $asset,
-            AssetVariant::ORIGINAL->value,
-            DeliveryContext::PUBLIC_COLLECTION->value
-        );
+        if (! $asset->isPublic()) {
+            abort(403, 'Asset not publicly accessible.');
+        }
 
-        return redirect($downloadUrl);
+        $downloadUrl = $this->assetUrlService->getPublicDownloadUrl($asset);
+        if (! $downloadUrl) {
+            abort(404, 'File not available.');
+        }
+
+        return redirect()->away($downloadUrl);
     }
 
     /**
      * Public-safe asset payload: thumbnail_url (CDN), download_url, no internal metadata.
      */
-    private function mapAssetToPublicGridArray(Asset $asset, Collection $collection, \App\Models\Brand $brand): array
+    private function mapAssetToPublicGridArray(Asset $asset): ?array
     {
         $fileExtension = null;
         if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -312,31 +315,12 @@ class PublicCollectionController extends Controller
             $title = $asset->original_filename ? (pathinfo($asset->original_filename, PATHINFO_FILENAME) ?? $asset->original_filename) : null;
         }
 
-        $thumbnailUrl = $this->assetDelivery->url(
-            $asset,
-            AssetVariant::THUMB_LARGE->value,
-            DeliveryContext::PUBLIC_COLLECTION->value
-        );
-        if ($thumbnailUrl === '') {
-            $thumbnailUrl = $this->assetDelivery->url(
-                $asset,
-                AssetVariant::THUMB_MEDIUM->value,
-                DeliveryContext::PUBLIC_COLLECTION->value
-            );
-        }
-        if ($thumbnailUrl === '') {
-            $thumbnailUrl = $this->assetDelivery->url(
-                $asset,
-                AssetVariant::THUMB_SMALL->value,
-                DeliveryContext::PUBLIC_COLLECTION->value
-            );
-        }
+        $thumbnailUrl = $this->assetUrlService->getPublicThumbnailUrl($asset);
+        $downloadUrl = $this->assetUrlService->getPublicDownloadUrl($asset);
 
-        $downloadUrl = route('public.collections.assets.download', [
-            'brand_slug' => $brand->slug,
-            'collection_slug' => $collection->slug,
-            'asset' => $asset->id,
-        ]);
+        if (! $downloadUrl) {
+            return null;
+        }
 
         return [
             'id' => $asset->id,
@@ -348,8 +332,8 @@ class PublicCollectionController extends Controller
             'thumbnail_url' => $thumbnailUrl,
             'final_thumbnail_url' => $thumbnailUrl, // ThumbnailPreview uses this for initial display
             'download_url' => $downloadUrl,
-            // thumbnail_status 'completed' so getThumbnailState returns AVAILABLE and card shows img
-            'thumbnail_status' => 'completed',
+            // Keep card behavior stable when thumbnail is available.
+            'thumbnail_status' => $thumbnailUrl ? 'completed' : 'pending',
             'is_published' => true, // Public collections only show published assets
             'archived_at' => null, // Public collections never show archived assets
         ];

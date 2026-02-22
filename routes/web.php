@@ -63,6 +63,7 @@ Route::post('/b/{brand_slug}/collections/{collection_slug}/download', [\App\Http
 // D6: On-the-fly collection ZIP — signed URL, no Download record; throttle to prevent abuse
 Route::get('/b/{brand_slug}/collections/{collection_slug}/zip', [\App\Http\Controllers\PublicCollectionController::class, 'streamZip'])->name('public.collections.zip')->middleware(['signed', 'throttle:10,1']);
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
+Route::get('/public/download/{asset}', \App\Http\Controllers\PublicDownloadController::class)->name('public.assets.download');
 // Public collection branding (logo, background) — no auth; from Brand Settings > Public Pages
 Route::get('/b/{brand_slug}/collections/{collection_slug}/logo', [\App\Http\Controllers\AssetThumbnailController::class, 'streamLogoForPublicCollection'])->name('public.collections.logo')->middleware(['web']);
 Route::get('/b/{brand_slug}/collections/{collection_slug}/background', [\App\Http\Controllers\AssetThumbnailController::class, 'streamBackgroundForPublicCollection'])->name('public.collections.background')->middleware(['web']);

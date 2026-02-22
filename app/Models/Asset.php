@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -55,6 +56,10 @@ use Illuminate\Support\Facades\Storage;
 class Asset extends Model
 {
     use HasUuids, SoftDeletes;
+
+    protected static ?bool $collectionsHasPublicEnabledColumn = null;
+
+    protected static ?bool $collectionsHasPublicUrlColumn = null;
 
     /**
      * Boot the model.
@@ -378,6 +383,36 @@ class Asset extends Model
     }
 
     /**
+     * Determine whether the asset is publicly accessible through collection membership.
+     *
+     * Public eligibility is derived from collections, not from asset-level flags.
+     * Rules:
+     * - Asset must belong to at least one collection
+     * - collections.is_public = true
+     * - collections.public_enabled = true (when column exists)
+     * - collections.public_url is not null (when column exists), otherwise slug must exist
+     */
+    public function isPublic(): bool
+    {
+        $query = $this->collections()
+            ->where('collections.is_public', true);
+
+        if (self::collectionsHasPublicEnabledColumn()) {
+            $query->where('collections.public_enabled', true);
+        }
+
+        if (self::collectionsHasPublicUrlColumn()) {
+            $query->whereNotNull('collections.public_url')
+                ->where('collections.public_url', '!=', '');
+        } else {
+            $query->whereNotNull('collections.slug')
+                ->where('collections.slug', '!=', '');
+        }
+
+        return $query->exists();
+    }
+
+    /**
      * Check if asset is expired.
      *
      * Phase M: Asset expiration (time-based access control).
@@ -389,6 +424,36 @@ class Asset extends Model
     public function isExpired(): bool
     {
         return $this->expires_at !== null && $this->expires_at->isPast();
+    }
+
+    protected static function collectionsHasPublicEnabledColumn(): bool
+    {
+        if (self::$collectionsHasPublicEnabledColumn !== null) {
+            return self::$collectionsHasPublicEnabledColumn;
+        }
+
+        try {
+            self::$collectionsHasPublicEnabledColumn = Schema::hasColumn('collections', 'public_enabled');
+        } catch (\Throwable) {
+            self::$collectionsHasPublicEnabledColumn = false;
+        }
+
+        return self::$collectionsHasPublicEnabledColumn;
+    }
+
+    protected static function collectionsHasPublicUrlColumn(): bool
+    {
+        if (self::$collectionsHasPublicUrlColumn !== null) {
+            return self::$collectionsHasPublicUrlColumn;
+        }
+
+        try {
+            self::$collectionsHasPublicUrlColumn = Schema::hasColumn('collections', 'public_url');
+        } catch (\Throwable) {
+            self::$collectionsHasPublicUrlColumn = false;
+        }
+
+        return self::$collectionsHasPublicUrlColumn;
     }
 
     /**

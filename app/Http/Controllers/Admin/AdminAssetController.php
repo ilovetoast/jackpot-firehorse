@@ -21,6 +21,7 @@ use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Models\Brand;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
 use App\Services\TenantBucketService;
@@ -46,7 +47,8 @@ class AdminAssetController extends Controller
         protected AssetStateReconciliationService $reconciliationService,
         protected SystemIncidentRecoveryService $recoveryService,
         protected ReliabilityEngine $reliabilityEngine,
-        protected ThumbnailRetryService $thumbnailRetryService
+        protected ThumbnailRetryService $thumbnailRetryService,
+        protected AssetUrlService $assetUrlService
     ) {}
 
     protected function authorizeAdmin(): void
@@ -894,14 +896,7 @@ class AdminAssetController extends Controller
 
     protected function adminThumbnailUrl(Asset $asset): ?string
     {
-        // Prefer completed thumbnail when available
-        if ($asset->thumbnail_status?->value === 'completed' && $asset->thumbnailPathForStyle('medium')) {
-            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-        }
-        // Fallback: show preview when main thumbnail skipped/failed but preview exists
-        $previewUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED);
-
-        return $previewUrl ?: null;
+        return $this->assetUrlService->getAdminThumbnailUrl($asset);
     }
 
     protected function formatAssetForList(Asset $asset): array
@@ -949,6 +944,7 @@ class AdminAssetController extends Controller
         $list['storage_bucket_id'] = $asset->storage_bucket_id;
         $list['thumbnail_error'] = $asset->thumbnail_error;
         $list['thumbnail_view_urls'] = $this->adminThumbnailViewUrls($asset);
+        $list['admin_download_url'] = $this->assetUrlService->getAdminDownloadUrl($asset);
 
         // Resolve category_id to category name for Overview display
         $categoryId = $metadata['category_id'] ?? null;
@@ -972,16 +968,14 @@ class AdminAssetController extends Controller
     protected function adminThumbnailViewUrls(Asset $asset): array
     {
         $urls = [];
-        if ($asset->thumbnail_status?->value !== 'completed') {
-            return $urls;
-        }
-        $variants = ['thumb' => \App\Support\AssetVariant::THUMB_SMALL, 'medium' => \App\Support\AssetVariant::THUMB_MEDIUM, 'large' => \App\Support\AssetVariant::THUMB_LARGE];
-        foreach ($variants as $style => $variant) {
-            $url = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
+
+        foreach (['thumb', 'medium', 'large'] as $style) {
+            $url = $this->assetUrlService->getAdminThumbnailUrlForStyle($asset, $style);
             if ($url) {
                 $urls[$style] = $url;
             }
         }
+
         return $urls;
     }
 }
