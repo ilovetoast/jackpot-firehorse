@@ -99,6 +99,7 @@ return [
     'waits' => [
         'redis:default' => 90,
         'redis:downloads' => 300,
+        'redis:pdf-processing' => 300,
     ],
 
     /*
@@ -200,7 +201,7 @@ return [
     'defaults' => [
         'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'downloads'],
+            'queue' => ['default', 'downloads', 'pdf-processing'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,

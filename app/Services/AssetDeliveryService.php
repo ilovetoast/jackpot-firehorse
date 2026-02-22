@@ -64,10 +64,33 @@ class AssetDeliveryService
         $contextEnum = DeliveryContext::tryFrom($context) ?? DeliveryContext::AUTHENTICATED;
 
         return match ($contextEnum) {
-            DeliveryContext::AUTHENTICATED => $cdnUrl,
+            DeliveryContext::AUTHENTICATED => $this->urlForAuthenticatedContext($cdnUrl, $variant, $options),
             DeliveryContext::PUBLIC_COLLECTION => $this->signForPublicCollection($cdnUrl, $asset, $variant),
             DeliveryContext::PUBLIC_DOWNLOAD => $this->signForPublicDownload($cdnUrl, $asset, array_merge($options, ['variant' => $variant])),
         };
+    }
+
+    /**
+     * AUTHENTICATED context URL behavior.
+     *
+     * For PDF pages we optionally issue short-lived signed URLs to reduce
+     * frequent regeneration while keeping stale exposure low.
+     */
+    protected function urlForAuthenticatedContext(string $cdnUrl, string $variant, array $options): string
+    {
+        $variantEnum = AssetVariant::tryFrom($variant);
+        $requiresSignedPdfUrl = $variantEnum === AssetVariant::PDF_PAGE
+            && (($options['signed'] ?? false) === true);
+
+        if (! $requiresSignedPdfUrl) {
+            return $cdnUrl;
+        }
+
+        $isPublic = (($options['pdf_page_access'] ?? 'admin') === 'public');
+        $ttl = $this->signedUrlService->getPdfPageTtl($isPublic);
+        $expiresAt = time() + $ttl;
+
+        return $this->signedUrlService->sign($cdnUrl, $expiresAt);
     }
 
     /**
@@ -75,7 +98,10 @@ class AssetDeliveryService
      */
     protected function signForPublicCollection(string $cdnUrl, Asset $asset, string $variant): string
     {
-        $ttl = $this->signedUrlService->getPublicCollectionTtl();
+        $variantEnum = AssetVariant::tryFrom($variant);
+        $ttl = $variantEnum === AssetVariant::PDF_PAGE
+            ? $this->signedUrlService->getPdfPagePublicTtl()
+            : $this->signedUrlService->getPublicCollectionTtl();
         $expiresAt = time() + $ttl;
         $signed = $this->signedUrlService->sign($cdnUrl, $expiresAt);
 

@@ -59,4 +59,22 @@ class AssetPathGenerator
 
         return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/thumbnails/{$style}/{$filename}";
     }
+
+    /**
+     * Generate canonical path for a rendered PDF page.
+     */
+    public function generatePdfPagePath(Tenant $tenant, Asset $asset, int $version, int $page): string
+    {
+        if (!$tenant->uuid) {
+            throw new \RuntimeException('Tenant UUID required for canonical storage path.');
+        }
+        if ($version < 1) {
+            throw new \RuntimeException('Version must be >= 1 for canonical storage path. Non-versioned path writes are not allowed.');
+        }
+        if ($page < 1) {
+            throw new \RuntimeException('PDF page must be >= 1.');
+        }
+
+        return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/pdf_pages/page-{$page}.webp";
+    }
 }

@@ -29,6 +29,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PDF Processing Queue Name
+    |--------------------------------------------------------------------------
+    |
+    | Dedicated queue for PDF page rendering and full extraction jobs.
+    |
+    */
+    'pdf_processing_queue' => env('QUEUE_PDF_PROCESSING_QUEUE', 'pdf-processing'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

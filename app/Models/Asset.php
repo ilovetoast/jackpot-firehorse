@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Bus\Batch;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -259,6 +261,12 @@ class Asset extends Model
         'dominant_color_bucket', // Deprecated - kept for safety
         'dominant_hue_group', // Perceptual hue cluster for filtering
         'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
+        'pdf_page_count',
+        'pdf_unsupported_large',
+        'pdf_rendered_pages_count',
+        'pdf_rendered_storage_bytes',
+        'pdf_pages_rendered',
+        'full_pdf_extraction_batch_id',
     ];
 
     /**
@@ -284,7 +292,74 @@ class Asset extends Model
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
             'approval_summary_generated_at' => 'datetime', // Phase AF-6
+            'pdf_page_count' => 'integer',
+            'pdf_unsupported_large' => 'boolean',
+            'pdf_rendered_pages_count' => 'integer',
+            'pdf_rendered_storage_bytes' => 'integer',
+            'pdf_pages_rendered' => 'boolean',
         ];
+    }
+
+    /**
+     * Request a full PDF page extraction as a tracked batch.
+     *
+     * Returns null for non-PDF assets.
+     *
+     * @throws \RuntimeException When guardrails block extraction
+     */
+    public function requestFullPdfExtraction(bool $adminOverride = false): ?Batch
+    {
+        $pdfService = app(\App\Services\PdfPageRenderingService::class);
+        if (! $pdfService->isPdfAsset($this)) {
+            return null;
+        }
+
+        $pageCount = $pdfService->getPdfPageCount($this, true);
+        if ($pageCount < 1) {
+            return null;
+        }
+
+        $maxAllowedPages = (int) config('pdf.max_allowed_pages', 500);
+        if ($pageCount > $maxAllowedPages) {
+            $this->forceFill([
+                'pdf_page_count' => $pageCount,
+                'pdf_unsupported_large' => true,
+                'pdf_pages_rendered' => false,
+            ])->save();
+
+            throw new \RuntimeException("PDF exceeds allowed page guardrail ({$pageCount} > {$maxAllowedPages}).");
+        }
+
+        $jobs = [];
+        for ($page = 1; $page <= $pageCount; $page++) {
+            $jobs[] = new \App\Jobs\FullPdfExtractionJob($this->id, $page, $adminOverride);
+        }
+
+        $assetId = $this->id;
+        $batch = Bus::batch($jobs)
+            ->name("asset:{$assetId}:full-pdf-extraction")
+            ->then(function (Batch $batch) use ($assetId): void {
+                $asset = self::find($assetId);
+                if (! $asset) {
+                    return;
+                }
+
+                $asset->forceFill([
+                    'pdf_pages_rendered' => true,
+                ])->save();
+
+                \App\Jobs\IngestPdfPagesForAiJob::dispatch($asset->id);
+            })
+            ->dispatch();
+
+        $this->forceFill([
+            'pdf_page_count' => $pageCount,
+            'pdf_unsupported_large' => false,
+            'pdf_pages_rendered' => false,
+            'full_pdf_extraction_batch_id' => $batch->id,
+        ])->save();
+
+        return $batch;
     }
 
     /**

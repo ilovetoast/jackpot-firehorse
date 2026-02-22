@@ -11,6 +11,7 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
+use App\Services\PdfPageRenderingService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\ThumbnailGenerationService;
 use Aws\S3\S3Client;
@@ -114,7 +115,7 @@ class GenerateThumbnailsJob implements ShouldQueue
      * Generates all thumbnail styles for the asset atomically.
      * Updates thumbnail_status and metadata on success or failure.
      */
-    public function handle(ThumbnailGenerationService $thumbnailService): void
+    public function handle(ThumbnailGenerationService $thumbnailService, PdfPageRenderingService $pdfPageService): void
     {
         // TASK 1: Prove whether GenerateThumbnailsJob runs at all
         // This log MUST appear if the job is dispatched
@@ -275,6 +276,68 @@ class GenerateThumbnailsJob implements ShouldQueue
         // Use version->mime_type when version-aware (from FileInspectionService)
         $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
         $extForCheck = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+
+        // PDF guardrail: do not process extremely large page-count documents.
+        $isPdf = strtolower((string) $mimeForCheck) === 'application/pdf'
+            || strtolower((string) $extForCheck) === 'pdf';
+
+        if ($isPdf) {
+            $pageCount = (int) ($asset->pdf_page_count ?? 0);
+            if ($pageCount < 1) {
+                try {
+                    $pageCount = $pdfPageService->getPdfPageCount($asset, true);
+                } catch (\Throwable $countEx) {
+                    Log::warning('[GenerateThumbnailsJob] Failed to inspect PDF page count; continuing with thumbnail generation', [
+                        'asset_id' => $asset->id,
+                        'error' => $countEx->getMessage(),
+                    ]);
+                }
+            }
+
+            $maxAllowedPages = (int) config('pdf.max_allowed_pages', 500);
+            if ($pageCount > $maxAllowedPages) {
+                $metadata = $asset->metadata ?? [];
+                $metadata['pdf_page_count'] = $pageCount;
+                $metadata['pdf_guardrail'] = 'pdf_unsupported_large';
+                $metadata['thumbnails_generated'] = false;
+
+                $asset->update([
+                    'pdf_page_count' => $pageCount,
+                    'pdf_unsupported_large' => true,
+                    'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                    'thumbnail_error' => "PDF has {$pageCount} pages and exceeds allowed limit ({$maxAllowedPages}).",
+                    'thumbnail_started_at' => null,
+                    'metadata' => $metadata,
+                ]);
+
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'pdf_page_count' => $pageCount,
+                            'pdf_guardrail' => 'pdf_unsupported_large',
+                            'thumbnails_generated' => false,
+                        ]),
+                        'pipeline_status' => 'complete',
+                    ]);
+                }
+
+                Log::warning('[GenerateThumbnailsJob] Skipping PDF thumbnail generation due to page-count guardrail', [
+                    'asset_id' => $asset->id,
+                    'page_count' => $pageCount,
+                    'max_allowed_pages' => $maxAllowedPages,
+                ]);
+
+                return;
+            }
+
+            if ($pageCount > 0) {
+                $asset->update([
+                    'pdf_page_count' => $pageCount,
+                    'pdf_unsupported_large' => false,
+                ]);
+            }
+        }
+
         if (!$this->supportsThumbnailGeneration($asset, $version)) {
             // Determine skip reason and user-facing message based on file type
             $mimeType = strtolower($mimeForCheck ?? '');

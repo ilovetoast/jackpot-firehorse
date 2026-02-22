@@ -136,7 +136,10 @@ class ThumbnailFailureStateTest extends TestCase
         // This tests the safety guard that prevents assets from being stuck in PROCESSING forever
         try {
             $job = new GenerateThumbnailsJob($asset->id);
-            $job->handle(app(\App\Services\ThumbnailGenerationService::class));
+            $job->handle(
+                app(\App\Services\ThumbnailGenerationService::class),
+                app(\App\Services\PdfPageRenderingService::class)
+            );
         } catch (\Throwable $e) {
             // Expected - job may fail without actual S3 file
             // But the timeout guard should have set FAILED before any exception
@@ -226,7 +229,10 @@ class ThumbnailFailureStateTest extends TestCase
 
         try {
             $job = new GenerateThumbnailsJob($asset->id);
-            $job->handle(app(ThumbnailGenerationService::class));
+            $job->handle(
+                app(ThumbnailGenerationService::class),
+                app(\App\Services\PdfPageRenderingService::class)
+            );
         } catch (\Throwable $e) {
             // Expected - job throws after recording failure
         }

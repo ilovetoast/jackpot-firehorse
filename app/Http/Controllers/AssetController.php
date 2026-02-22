@@ -556,6 +556,13 @@ class AssetController extends Controller
                 $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
+                $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'
+                    || strtolower((string) ($fileExtension ?? '')) === 'pdf';
+                $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
+                $pdfPageApiEndpoint = $isPdf
+                    ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
+                    : null;
+                $firstPageUrl = null;
 
                 $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
                 if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
@@ -576,6 +583,9 @@ class AssetController extends Controller
                             ]);
                         }
                     }
+                }
+                if ($isPdf) {
+                    $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
                 }
 
                 return [
@@ -611,6 +621,10 @@ class AssetController extends Controller
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
                     'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                    'is_pdf' => $isPdf,
+                    'pdf_page_count' => $pdfPageCount,
+                    'first_page_url' => $firstPageUrl,
+                    'pdf_page_api_endpoint' => $pdfPageApiEndpoint,
                     // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
                     'published_at' => $asset->published_at?->toIso8601String(),
                     'is_published' => $asset->published_at !== null,
@@ -676,6 +690,10 @@ class AssetController extends Controller
                     'original' => null,
                         'thumbnail_status' => 'pending',
                         'thumbnail_error' => null,
+                        'is_pdf' => false,
+                        'pdf_page_count' => null,
+                        'first_page_url' => null,
+                        'pdf_page_api_endpoint' => null,
                         'published_at' => null,
                         'is_published' => false,
                         'published_by' => null,

@@ -71,4 +71,28 @@ class CloudFrontSignedUrlService
 
         return config('cdn.public_download_ttl', 900);
     }
+
+    /**
+     * Get TTL in seconds for admin/internal PDF page signed URLs.
+     */
+    public function getPdfPageAdminTtl(): int
+    {
+        return config('cdn.pdf_page_admin_ttl', 300);
+    }
+
+    /**
+     * Get TTL in seconds for public PDF page signed URLs.
+     */
+    public function getPdfPagePublicTtl(): int
+    {
+        return config('cdn.pdf_page_public_ttl', 1800);
+    }
+
+    /**
+     * Get TTL in seconds for PDF page signed URLs by audience.
+     */
+    public function getPdfPageTtl(bool $public): int
+    {
+        return $public ? $this->getPdfPagePublicTtl() : $this->getPdfPageAdminTtl();
+    }
 }

@@ -58,6 +58,7 @@ import AssetDetailPanel from './AssetDetailPanel'
 import CollapsibleSection from './CollapsibleSection'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
+import PDFViewer from './PDFViewer'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
@@ -92,6 +93,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [generateError, setGenerateError] = useState(null)
     const [generateTimeoutId, setGenerateTimeoutId] = useState(null)
     const [reprocessLoading, setReprocessLoading] = useState(false)
+    const [extractAllLoading, setExtractAllLoading] = useState(false)
+    const [extractAllError, setExtractAllError] = useState(null)
+    const [extractAllBatchId, setExtractAllBatchId] = useState(null)
     // Details modal state
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     // Publish confirmation modal state
@@ -664,6 +668,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 fileExtension.toUpperCase() === 'PSB' ||
                                 fileExtension.toUpperCase() === 'EPS' ||
                                 fileExtension.toUpperCase() === 'AI'
+    const isPdfAsset = Boolean(displayAsset?.is_pdf)
+        || displayAsset.mime_type === 'application/pdf'
+        || fileExtension.toUpperCase() === 'PDF'
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
@@ -916,6 +923,33 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             setReprocessLoading(false)
         }
     }
+
+    const handleExtractAllPdfPages = async () => {
+        if (!displayAsset?.id) return
+
+        setExtractAllLoading(true)
+        setExtractAllError(null)
+        setExtractAllBatchId(null)
+
+        try {
+            const response = await window.axios.post(`/app/assets/${displayAsset.id}/pdf/extract-all`)
+            const batchId = response?.data?.batch_id || null
+
+            setExtractAllBatchId(batchId)
+            setToastMessage(batchId
+                ? `PDF extraction started (batch ${batchId.slice(0, 8)}...).`
+                : 'PDF extraction started.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 5000)
+
+            if (onAssetUpdate) onAssetUpdate()
+        } catch (e) {
+            const message = e?.response?.data?.message || 'Failed to start PDF extraction.'
+            setExtractAllError(message)
+        } finally {
+            setExtractAllLoading(false)
+        }
+    }
     
     
     // Handle asset delete (soft delete — permanent after grace period)
@@ -948,6 +982,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             }
         }
     }, [generateTimeoutId])
+
+    useEffect(() => {
+        setExtractAllLoading(false)
+        setExtractAllError(null)
+        setExtractAllBatchId(null)
+    }, [displayAsset?.id])
     
     // Clear loading state if status changes from skipped (polling detected the change)
     useEffect(() => {
@@ -2575,6 +2615,50 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 )}
 
 
+                {isPdfAsset && (
+                    <div className="border-t border-gray-200 pt-6">
+                        <h3 className="text-sm font-medium text-gray-900 mb-2">PDF Pages</h3>
+                        <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
+                            <p className="text-sm text-gray-700">
+                                Render all pages for deep review and ingestion workflows.
+                            </p>
+                            {displayAsset.pdf_page_count ? (
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Detected pages: {displayAsset.pdf_page_count}
+                                </p>
+                            ) : null}
+
+                            {extractAllBatchId ? (
+                                <p className="mt-2 text-xs text-gray-600 font-mono break-all">
+                                    Batch: {extractAllBatchId}
+                                </p>
+                            ) : null}
+
+                            {extractAllError ? (
+                                <p className="mt-2 text-xs text-red-700">{extractAllError}</p>
+                            ) : null}
+
+                            <div className="mt-3">
+                                <button
+                                    type="button"
+                                    onClick={handleExtractAllPdfPages}
+                                    disabled={extractAllLoading}
+                                    className="inline-flex items-center rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
+                                >
+                                    {extractAllLoading ? (
+                                        <>
+                                            <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                            Starting...
+                                        </>
+                                    ) : (
+                                        <>Extract All Pages</>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Processing State - Failed (error with details) */}
                 {/* Use displayAsset (with live updates) instead of prop asset */}
                 {thumbnailsFailed && displayAsset.thumbnail_error && (
@@ -2750,6 +2834,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
                             const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
                             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
+                            const isCurrentPdf = Boolean(currentCarouselAsset?.is_pdf)
+                                || currentMimeType === 'application/pdf'
+                                || ext === 'pdf'
                             
                             if (isCurrentVideo && currentCarouselAsset.id) {
                                 // Video playback in fullscreen modal
@@ -2791,6 +2878,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
                                         Your browser does not support the video tag.
                                     </video>
+                                )
+                            } else if (isCurrentPdf && currentCarouselAsset.id) {
+                                return (
+                                    <PDFViewer asset={currentCarouselAsset} />
                                 )
                             } else {
                                 // Image/PDF thumbnail

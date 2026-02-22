@@ -118,6 +118,6 @@ class AssetVariantPathResolverTest extends TestCase
         $resolver = app(AssetVariantPathResolver::class);
         $path = $resolver->resolve($asset, AssetVariant::PDF_PAGE->value, ['page' => 5]);
 
-        $this->assertStringContainsString('pdf/pages/5.webp', $path);
+        $this->assertStringContainsString('pdf_pages/page-5.webp', $path);
     }
 }

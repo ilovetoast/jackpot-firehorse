@@ -332,6 +332,11 @@ class ProcessAssetJob implements ShouldQueue
         
         Bus::chain($chainJobs)->dispatch();
 
+        // Seed page 1 render for PDFs on dedicated queue.
+        if ($fileType === 'pdf') {
+            PdfPageRenderJob::dispatch($asset->id, 1);
+        }
+
         PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
             'asset_id' => $asset->id,
             'job_id' => $this->job?->getJobId() ?? 'unknown',

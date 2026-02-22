@@ -118,6 +118,6 @@ class AssetVariantPathResolver
     {
         $page = $options['page'] ?? 1;
 
-        return $basePath . 'pdf/pages/' . (int) $page . '.webp';
+        return $basePath . 'pdf_pages/page-' . (int) $page . '.webp';
     }
 }
