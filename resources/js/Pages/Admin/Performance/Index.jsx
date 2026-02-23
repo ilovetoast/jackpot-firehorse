@@ -176,7 +176,13 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
                         <li>PERFORMANCE_PERSIST_ALL_REQUESTS — <span className={config.persist_all_requests ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.persist_all_requests ? 'enabled' : 'disabled'}</span> (persist every request for avg)</li>
                         <li>PERFORMANCE_CLIENT_METRICS_ENABLED — <span className={config.client_metrics_enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.client_metrics_enabled ? 'enabled' : 'disabled'}</span></li>
                         <li>PERFORMANCE_SLOW_THRESHOLD_MS — {config.slow_threshold_ms ?? 1000}ms</li>
+                        <li>ASSET_URL_METRICS — <span className={config.asset_url_metrics_enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.asset_url_metrics_enabled ? 'enabled' : 'disabled'}</span> (request-scoped URL generation counts; public download routes not included)</li>
                     </ul>
+                    {assetUrlMetrics === null && config.asset_url_metrics_enabled && (
+                        <p className="mt-2 text-sm text-slate-500">
+                            Asset URL metrics show only for the request that loaded this page (usually zero). Download delivery uses public routes and is not included. See docs/PERFORMANCE_AND_ASSET_URL_METRICS.md.
+                        </p>
+                    )}
                     <p className="mt-3 text-xs text-slate-500">
                         If values are wrong, run <code className="bg-slate-100 px-1 rounded">php artisan config:clear</code> and restart the server.
                     </p>

@@ -165,6 +165,7 @@ class PerformanceController extends Controller
                 'persist_all_requests' => config('performance.persist_all_requests', false),
                 'client_metrics_enabled' => config('performance.client_metrics_enabled', false),
                 'slow_threshold_ms' => config('performance.slow_threshold_ms', 1000),
+                'asset_url_metrics_enabled' => config('asset_url.metrics_enabled', false),
             ],
         ];
     }
