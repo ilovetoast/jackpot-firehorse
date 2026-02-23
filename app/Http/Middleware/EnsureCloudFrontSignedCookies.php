@@ -54,17 +54,21 @@ class EnsureCloudFrontSignedCookies
             return $response;
         }
 
-        // Admin multi-tenant mode: site_admin/site_owner on /app/admin/* with admin_tenants from controller
+        // Admin multi-tenant mode: site_admin/site_owner on /app/admin/* with admin_tenants from controller.
+        // For the assets index (multi-tenant grid), do NOT attach cookies here to avoid 502 from large
+        // response (9 Set-Cookie headers + big Inertia payload). Frontend fetches cookies via cdn_cookies_url.
         $adminTenants = $request->attributes->get('admin_tenants');
         if ($this->isAdminMultiTenantContext($request, $adminTenants)) {
-            try {
-                $this->attachAdminMultiTenantCookies($response, $adminTenants, $request);
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::error('[CDN] Admin multi-tenant cookies failed', [
-                    'error' => $e->getMessage(),
-                    'tenant_count' => is_array($adminTenants) ? count($adminTenants) : 0,
-                ]);
-                report($e);
+            if (!$request->routeIs('admin.assets.index')) {
+                try {
+                    $this->attachAdminMultiTenantCookies($response, $adminTenants, $request);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error('[CDN] Admin multi-tenant cookies failed', [
+                        'error' => $e->getMessage(),
+                        'tenant_count' => is_array($adminTenants) ? count($adminTenants) : 0,
+                    ]);
+                    report($e);
+                }
             }
             return $response;
         }

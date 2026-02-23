@@ -164,6 +164,10 @@ class AdminAssetController extends Controller
                 ->all();
         }
 
+        $cdnCookiesUrl = count($tenantUuids) > 0
+            ? route('admin.cdn-cookies', ['uuids' => implode(',', $tenantUuids)])
+            : null;
+
         return Inertia::render('Admin/Assets/Index', [
             'assets' => $formatted,
             'pagination' => $assets->toArray(),
@@ -173,6 +177,7 @@ class AdminAssetController extends Controller
             'canDestructive' => $this->canDestructive(),
             'assetsWithoutCategoryCount' => $assetsWithoutCategoryCount,
             'categoriesForRecovery' => $categoriesForRecovery,
+            'cdnCookiesUrl' => $cdnCookiesUrl,
         ]);
     }
 

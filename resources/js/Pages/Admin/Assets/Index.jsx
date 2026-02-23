@@ -123,6 +123,7 @@ export default function AdminAssetsIndex({
     canDestructive,
     assetsWithoutCategoryCount = 0,
     categoriesForRecovery = [],
+    cdnCookiesUrl = null,
 }) {
     const [searchInput, setSearchInput] = useState(() => initialFilters?.search ?? '')
     const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -136,6 +137,12 @@ export default function AdminAssetsIndex({
     const [recoverCategoryId, setRecoverCategoryId] = useState('')
     const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
+
+    // Fetch CDN cookies in a separate request so the main document response stays small (avoids 502)
+    useEffect(() => {
+        if (!cdnCookiesUrl) return
+        fetch(cdnCookiesUrl, { method: 'GET', credentials: 'include' }).catch(() => {})
+    }, [cdnCookiesUrl])
 
     useEffect(() => {
         if (!actionsOpen) return
