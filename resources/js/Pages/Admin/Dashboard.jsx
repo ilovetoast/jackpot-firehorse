@@ -135,6 +135,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         { name: 'Derivative Failures', description: `${failures.derivative_escalated ?? 0} escalated`, href: '/app/admin/derivative-failures', icon: ExclamationTriangleIcon },
         { name: 'Upload Failures', description: `${failures.upload_failures_24h ?? 0} (24h)`, href: '/app/admin/upload-failures', icon: CloudArrowUpIcon },
         { name: 'Download Failures', description: `${failures.download_failures_24h ?? 0} (24h)`, href: '/app/admin/download-failures', icon: ArrowDownTrayIcon },
+        { name: 'AI Error Monitoring', description: 'Sentry issues, AI summary, root cause, fix suggestions', href: '/app/admin/ai-error-monitoring', icon: ExclamationTriangleIcon },
     ].filter(Boolean)
 
     const supportItems = [
