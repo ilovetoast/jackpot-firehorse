@@ -96,11 +96,10 @@ class AssetUrlService
             throw new \RuntimeException('CloudFront signing is not configured.');
         }
 
-        // Sign the exact URL (no ?v= or other params for admin; add any before this call if ever needed)
-        return $this->signedUrlService->sign(
-            $cdnUrl,
-            now()->addSeconds($ttlSeconds)->timestamp
-        );
+        // Sign the exact URL (no ?v= or other params for admin; add any before this call if ever needed).
+        // Expires must be UNIX seconds (not milliseconds); now()->timestamp is already in seconds.
+        $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
+        return $this->signedUrlService->sign($cdnUrl, $expiresAt);
     }
 
     /**
@@ -589,10 +588,9 @@ class AssetUrlService
         }
 
         try {
-            return $this->signedUrlService->sign(
-                $cdnUrl,
-                now()->addSeconds($ttlSeconds)->timestamp
-            );
+            // UNIX timestamp in seconds (not milliseconds); CloudFront expects seconds
+            $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
+            return $this->signedUrlService->sign($cdnUrl, $expiresAt);
         } catch (\Throwable $e) {
             Log::error('[AssetUrlService] Failed to sign CloudFront URL', [
                 'asset_id' => $asset->id,

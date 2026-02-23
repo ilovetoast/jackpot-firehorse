@@ -159,7 +159,7 @@ class CloudFrontSignedCookieService
      * Shared signing logic used by CloudFrontSignedUrlService.
      *
      * @param string $resource Full CDN URL (e.g. https://domain.com/path/to/file.jpg)
-     * @param int $expiresAt Unix timestamp when URL expires
+     * @param int $expiresAt Unix timestamp in SECONDS when URL expires (do not multiply by 1000)
      * @return array{signature: string, key_pair_id: string, expires: int}
      *
      * @throws RuntimeException If signing fails

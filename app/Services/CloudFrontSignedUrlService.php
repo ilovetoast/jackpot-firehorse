@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Download;
 use App\Models\Tenant;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -24,9 +25,12 @@ class CloudFrontSignedUrlService
     /**
      * Generate a CloudFront signed URL for the given CDN URL.
      *
+     * Expires must be a UNIX timestamp in SECONDS (not milliseconds). CloudFront expects
+     * AWS:EpochTime in seconds. Verify Expires in the generated URL is ~now + TTL seconds.
+     *
      * @param string $cdnUrl Full CDN URL (e.g. https://cdn.example.com/path/to/file.jpg)
-     * @param int $expiresAt Unix timestamp when URL expires
-     * @return string Signed URL with Expires, Signature, Key-Pair-Id query params
+     * @param int $expiresAt Unix timestamp in SECONDS when URL expires
+     * @return string Signed URL with Expires=..., Signature=..., Key-Pair-Id=... (Expires in seconds)
      *
      * @throws RuntimeException If signing fails or CloudFront not configured
      */
@@ -36,6 +40,13 @@ class CloudFrontSignedUrlService
         if (empty($domain)) {
             throw new RuntimeException('CloudFront domain must be configured for signed URLs.');
         }
+
+        $nowSeconds = now()->timestamp;
+        Log::debug('[CloudFrontSignedUrl] Signing URL', [
+            'now_timestamp_seconds' => $nowSeconds,
+            'expires_timestamp_seconds' => $expiresAt,
+            'ttl_seconds' => $expiresAt - $nowSeconds,
+        ]);
 
         $signed = $this->cookieService->signForSignedUrl($cdnUrl, $expiresAt);
 
