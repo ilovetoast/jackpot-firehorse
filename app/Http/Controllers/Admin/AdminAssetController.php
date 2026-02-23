@@ -32,6 +32,7 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -84,6 +85,10 @@ class AdminAssetController extends Controller
     {
         $this->authorizeAdmin();
 
+        Log::info('[AdminAssets] Index request', [
+            'filters' => $request->only(['tenant_id', 'brand_id', 'per_page', 'sort', 'sort_direction']),
+        ]);
+
         $filters = $this->parseFilters($request);
         $query = $this->buildQuery($filters);
 
@@ -99,8 +104,6 @@ class AdminAssetController extends Controller
             ->paginate($perPage)
             ->withQueryString();
 
-        $formatted = $assets->getCollection()->map(fn ($a) => $this->formatAssetForList($a));
-
         // Admin multi-tenant CDN: pass tenant UUIDs so middleware can issue scoped cookies for each
         $tenantUuids = $assets->getCollection()
             ->pluck('tenant.uuid')
@@ -109,6 +112,25 @@ class AdminAssetController extends Controller
             ->values()
             ->all();
         $request->attributes->set('admin_tenants', $tenantUuids);
+
+        $formatted = $assets->getCollection()->map(function ($a) {
+            try {
+                return $this->formatAssetForList($a);
+            } catch (\Throwable $e) {
+                Log::error('[AdminAssets] formatAssetForList failed for asset', [
+                    'asset_id' => $a->id,
+                    'tenant_id' => $a->tenant_id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                return $this->formatAssetForListFallback($a);
+            }
+        });
+
+        Log::info('[AdminAssets] Index response', [
+            'assets_count' => $formatted->count(),
+            'tenant_uuid_count' => count($tenantUuids),
+        ]);
 
         $filterOptions = [
             'tenants' => Tenant::select('id', 'name', 'slug')->orderBy('name')->get(),
@@ -932,6 +954,45 @@ class AdminAssetController extends Controller
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
             'thumbnail_url' => $this->adminThumbnailUrl($asset),
+        ];
+    }
+
+    /**
+     * Fallback when formatAssetForList throws (e.g. AssetUrlService failure). Same shape, thumbnail_url = null.
+     */
+    protected function formatAssetForListFallback(Asset $asset): array
+    {
+        $metadata = $asset->metadata ?? [];
+        $incidentCount = SystemIncident::where('source_type', 'asset')
+            ->where('source_id', $asset->id)
+            ->whereNull('resolved_at')
+            ->count();
+
+        $type = $asset->type ?? null;
+        $assetTypeLabel = $type ? match ($type) {
+            AssetType::ASSET => 'Asset',
+            AssetType::DELIVERABLE => 'Execution',
+            AssetType::AI_GENERATED => 'Generative',
+            default => $type->value,
+        } : '—';
+
+        return [
+            'id' => $asset->id,
+            'id_short' => substr($asset->id, 0, 12),
+            'original_filename' => $asset->original_filename ?? $asset->title,
+            'title' => $asset->title,
+            'tenant' => $asset->tenant ? ['id' => $asset->tenant->id, 'name' => $asset->tenant->name] : null,
+            'brand' => $asset->brand ? ['id' => $asset->brand->id, 'name' => $asset->brand->name] : null,
+            'asset_type' => ['value' => $type?->value ?? null, 'label' => $assetTypeLabel],
+            'category_id' => $metadata['category_id'] ?? null,
+            'analysis_status' => $asset->analysis_status ?? 'unknown',
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
+            'storage_missing' => $asset->isStorageMissing(),
+            'incident_count' => $incidentCount,
+            'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
+            'created_at' => $asset->created_at?->toIso8601String(),
+            'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'thumbnail_url' => null,
         ];
     }
 

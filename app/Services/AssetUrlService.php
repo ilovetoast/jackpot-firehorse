@@ -80,6 +80,11 @@ class AssetUrlService
         }
 
         try {
+            Log::debug('[AssetUrlService] getAdminThumbnailUrl', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+            ]);
+
             $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
                 ? $asset->thumbnail_status->value
                 : (string) ($asset->thumbnail_status ?? 'pending');
@@ -94,6 +99,14 @@ class AssetUrlService
                 self::ADMIN_TTL_SECONDS,
                 true
             );
+        } catch (\Throwable $e) {
+            Log::error('[AssetUrlService] getAdminThumbnailUrl failed', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
+            return null;
         } finally {
             $this->recordTimedCall($start, 'admin_thumbnail_calls');
         }
@@ -128,6 +141,14 @@ class AssetUrlService
                 self::ADMIN_TTL_SECONDS,
                 true
             );
+        } catch (\Throwable $e) {
+            Log::error('[AssetUrlService] getAdminThumbnailUrlForStyle failed', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'style' => $style,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
         } finally {
             $this->recordTimedCall($start, 'admin_thumbnail_calls');
         }
@@ -179,12 +200,25 @@ class AssetUrlService
         }
 
         try {
+            Log::debug('[AssetUrlService] getAdminDownloadUrl', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+            ]);
+
             return $this->buildVariantUrl(
                 $asset,
                 AssetVariant::ORIGINAL,
                 self::ADMIN_TTL_SECONDS,
                 false
             );
+        } catch (\Throwable $e) {
+            Log::error('[AssetUrlService] getAdminDownloadUrl failed', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
+            return null;
         } finally {
             $this->recordTimedCall($start, 'admin_download_calls');
         }
@@ -327,6 +361,9 @@ class AssetUrlService
     {
         $tenantId = (int) $asset->tenant_id;
         if ($tenantId <= 0) {
+            Log::warning('[AssetUrlService] resolveTenantForAsset: asset has no tenant_id', [
+                'asset_id' => $asset->id,
+            ]);
             return null;
         }
 
@@ -347,6 +384,13 @@ class AssetUrlService
             : Tenant::find($tenantId);
 
         $this->tenantCache[$tenantId] = $tenant;
+
+        if ($tenant && empty($tenant->uuid)) {
+            Log::warning('[AssetUrlService] resolveTenantForAsset: tenant has no uuid (multi-tenant admin CDN path may fail)', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $tenantId,
+            ]);
+        }
 
         return $tenant;
     }
