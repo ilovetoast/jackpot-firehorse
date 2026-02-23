@@ -301,7 +301,8 @@ class AssetUrlService
     }
 
     /**
-     * Public source download URL (signed CloudFront, 30-minute TTL).
+     * Public source download URL (CloudFront signed URL, 30-minute TTL).
+     * No cookies; anonymous users redirect to this URL and CloudFront returns 200.
      * Only available when the asset is public via collection membership.
      */
     public function getPublicDownloadUrl(Asset $asset): ?string
@@ -316,12 +317,20 @@ class AssetUrlService
                 return null;
             }
 
-            return $this->buildVariantUrl(
-                $asset,
-                AssetVariant::ORIGINAL,
-                self::PUBLIC_TTL_SECONDS,
-                false
-            );
+            $tenant = $this->resolveTenantForAsset($asset);
+            if (! $tenant) {
+                return null;
+            }
+
+            $path = $this->runInTenantContext($tenant, function () use ($asset) {
+                return $this->pathResolver->resolve($asset, AssetVariant::ORIGINAL->value);
+            });
+
+            if ($path === '') {
+                return null;
+            }
+
+            return $this->getSignedCloudFrontUrl($path, 1800);
         } finally {
             $this->recordTimedCall($start, 'public_download_calls');
         }

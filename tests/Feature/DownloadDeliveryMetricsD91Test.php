@@ -114,10 +114,9 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         // Metrics are recorded when the file is actually delivered (GET /file), not on the redirect to the ready page
         $download = Download::where('tenant_id', $this->tenant->id)->whereNotNull('direct_asset_path')->latest()->first();
         $this->assertNotNull($download);
-        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
-        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
-        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed-asset');
-        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
+        $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
+        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed-asset');
+        $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
 
         $this->get(route('downloads.public.file', ['download' => $download->id]))->assertRedirect('https://example.com/signed-asset');
         $this->assertSame(1, $this->downloadCountForAsset($asset->id));
@@ -148,10 +147,9 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false], $asset3->id => ['is_primary' => false]]);
 
         // Metrics are recorded when the file is delivered (GET /file), not when viewing the landing page
-        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
-        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
-        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed.zip');
-        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
+        $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
+        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed.zip');
+        $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
 
         $response = $this->get(route('downloads.public.file', ['download' => $download->id]));
 
@@ -184,11 +182,9 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         ]);
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false]]);
 
-        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
-        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
-        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed.zip');
-
-        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
+        $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
+        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed.zip');
+        $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
 
         $this->get(route('downloads.public.file', ['download' => $download->id]));
         $this->get(route('downloads.public.file', ['download' => $download->id]));

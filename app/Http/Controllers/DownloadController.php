@@ -14,6 +14,7 @@ use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetDeliveryService;
+use App\Services\AssetUrlService;
 use App\Services\DownloadBucketService;
 use App\Services\TenantBucketService;
 use App\Services\DownloadEventEmitter;
@@ -1103,28 +1104,15 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        // UX-R2: Single-asset download — deliver via AssetDeliveryService (CloudFront signed URL)
+        // UX-R2: Single-asset download — redirect to CloudFront signed URL (no cookies)
         if (! empty($download->direct_asset_path)) {
-            $firstAsset = $download->assets()->first();
             $download->increment('access_count');
             app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
-            $assetDelivery = app(AssetDeliveryService::class);
-            $downloadUrl = $firstAsset
-                ? $assetDelivery->url(
-                    $firstAsset,
-                    AssetVariant::ORIGINAL->value,
-                    DeliveryContext::PUBLIC_DOWNLOAD->value,
-                    ['download' => $download, 'tenant' => $download->tenant]
-                )
-                : $assetDelivery->urlForPath(
-                    $download->direct_asset_path,
-                    DeliveryContext::PUBLIC_DOWNLOAD->value,
-                    ['download' => $download, 'tenant' => $download->tenant]
-                );
+            $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrl($download->direct_asset_path, 1800);
             DownloadEventEmitter::emitDownloadZipRequested($download);
             DownloadEventEmitter::emitDownloadZipCompleted($download);
 
-            return redirect($downloadUrl);
+            return redirect()->away($signedUrl);
         }
 
         if ($download->zip_status !== ZipStatus::READY) {
@@ -1143,16 +1131,11 @@ class DownloadController extends Controller
 
         $download->increment('access_count');
         app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
-        $assetDelivery = app(AssetDeliveryService::class);
-        $downloadUrl = $assetDelivery->urlForPath(
-            $download->zip_path,
-            DeliveryContext::PUBLIC_DOWNLOAD->value,
-            ['download' => $download, 'tenant' => $download->tenant]
-        );
+        $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrl($download->zip_path, 1800);
         DownloadEventEmitter::emitDownloadZipRequested($download);
         DownloadEventEmitter::emitDownloadZipCompleted($download);
 
-        return redirect($downloadUrl);
+        return redirect()->away($signedUrl);
     }
 
     /**

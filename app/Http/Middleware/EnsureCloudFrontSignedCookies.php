@@ -165,8 +165,9 @@ class EnsureCloudFrontSignedCookies
     {
         $path = $request->path();
 
-        return str_starts_with($path, 'd/')  // Public download: /d/{download}
-            || str_starts_with($path, 'b/'); // Public collection: /b/{brand}/collections/...
+        return str_starts_with($path, 'd/')   // Public download: /d/{download}
+            || str_starts_with($path, 'b/')    // Public collection: /b/{brand}/collections/...
+            || str_starts_with($path, 'public/download'); // Single-asset public download: /public/download/{asset}
     }
 
     /**
