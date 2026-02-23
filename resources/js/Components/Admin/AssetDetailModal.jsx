@@ -63,7 +63,8 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
         { id: 'tickets', label: 'Support Tickets' },
     ]
 
-    const hasThumbnail = showThumbnail && asset?.thumbnail_url
+    const thumbnailUrl = asset?.admin_thumbnail_url ?? asset?.thumbnail_url
+    const hasThumbnail = showThumbnail && thumbnailUrl
 
     return (
         <div className="flex">
@@ -71,7 +72,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
             {hasThumbnail && (
                 <div className="flex-shrink-0 w-32 border-r border-slate-200 bg-slate-50 p-4 flex items-center justify-center">
                     <img
-                        src={asset.thumbnail_url}
+                        src={thumbnailUrl}
                         alt={asset?.original_filename || asset?.title || 'Asset'}
                         className="max-w-full max-h-32 object-contain rounded border border-slate-200"
                     />

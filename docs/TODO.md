@@ -1,6 +1,9 @@
 Must Have
 
-
+- download public
+- metric performance
+- metric ASSET_URL_METRICS=
+- sentry full loop
 
 - versioning fixed, test all options, restore, new verions file type diff, delete, restore
 - fix public files not being public (see collections)  see 

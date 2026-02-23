@@ -123,7 +123,6 @@ export default function AdminAssetsIndex({
     canDestructive,
     assetsWithoutCategoryCount = 0,
     categoriesForRecovery = [],
-    cdnCookiesUrls = [],
 }) {
     const [searchInput, setSearchInput] = useState(() => initialFilters?.search ?? '')
     const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -137,14 +136,6 @@ export default function AdminAssetsIndex({
     const [recoverCategoryId, setRecoverCategoryId] = useState('')
     const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
-
-    // Fetch CDN cookies (one request per tenant) so each response has only 3 Set-Cookie headers (avoids 502)
-    useEffect(() => {
-        if (!Array.isArray(cdnCookiesUrls) || cdnCookiesUrls.length === 0) return
-        cdnCookiesUrls.forEach((url) => {
-            fetch(url, { method: 'GET', credentials: 'include' }).catch(() => {})
-        })
-    }, [cdnCookiesUrls])
 
     useEffect(() => {
         if (!actionsOpen) return
@@ -708,8 +699,8 @@ export default function AdminAssetsIndex({
                                             </td>
                                             <td className="px-4 py-2 font-mono text-xs text-slate-600" title={a.id}>{a.id_short}</td>
                                             <td className="w-16 px-2 py-2">
-                                                {a.thumbnail_url ? (
-                                                    <img src={a.thumbnail_url} alt="" className="h-10 w-10 object-cover rounded" />
+                                                {a.admin_thumbnail_url ? (
+                                                    <img src={a.admin_thumbnail_url} alt="" className="h-10 w-10 object-cover rounded" />
                                                 ) : (
                                                     <div className="h-10 w-10 rounded bg-slate-200 flex items-center justify-center">
                                                         <PhotoIcon className="h-5 w-5 text-slate-400" />

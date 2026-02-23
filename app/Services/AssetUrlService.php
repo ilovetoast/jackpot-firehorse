@@ -69,6 +69,69 @@ class AssetUrlService
     }
 
     /**
+     * Generate a CloudFront signed URL for an arbitrary storage path (canned policy).
+     * Used by admin routes so thumbnails load via signed URLs instead of signed cookies.
+     *
+     * @param string $path Storage path relative to CDN root (e.g. tenants/{uuid}/assets/.../thumb.webp)
+     * @param int $ttlSeconds URL validity in seconds (default 600 = 10 min)
+     * @return string Full signed URL: https://cdn-domain/path?Expires=...&Signature=...&Key-Pair-Id=...
+     */
+    public function getSignedCloudFrontUrl(string $path, int $ttlSeconds = 600): string
+    {
+        $cdnUrl = CdnUrl::url($path);
+        if ($cdnUrl === '') {
+            throw new \InvalidArgumentException('AssetUrlService: path resulted in empty CDN URL.');
+        }
+
+        if (app()->environment('local')) {
+            return $cdnUrl;
+        }
+
+        if (! $this->cloudFrontSigningConfigured()) {
+            throw new \RuntimeException('CloudFront signing is not configured.');
+        }
+
+        return $this->signedUrlService->sign(
+            $cdnUrl,
+            now()->addSeconds($ttlSeconds)->timestamp
+        );
+    }
+
+    /**
+     * Get the first available thumbnail storage path for an asset (admin context).
+     * No existence check, no signing. Used with getSignedCloudFrontUrl for admin grid.
+     */
+    public function getAdminThumbnailPath(Asset $asset): ?string
+    {
+        $tenant = $this->resolveTenantForAsset($asset);
+        if (! $tenant) {
+            return null;
+        }
+
+        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : (string) ($asset->thumbnail_status ?? 'pending');
+
+        $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
+            ? [AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
+            : [AssetVariant::THUMB_PREVIEW];
+
+        return $this->runInTenantContext($tenant, function () use ($asset, $variants) {
+            foreach ($variants as $variant) {
+                if (! $this->shouldAttemptVariant($asset, $variant)) {
+                    continue;
+                }
+                $path = $this->pathResolver->resolve($asset, $variant->value);
+                if ($path !== '') {
+                    return $path;
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
      * Admin thumbnail URL (signed CloudFront, 5-minute TTL).
      * Cross-tenant safe: resolves tenant context from Asset::tenant_id.
      */

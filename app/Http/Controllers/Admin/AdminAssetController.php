@@ -31,6 +31,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -164,11 +165,6 @@ class AdminAssetController extends Controller
                 ->all();
         }
 
-        // One URL per tenant so each response has only 3 Set-Cookie headers (avoids 502 from proxy limits)
-        $cdnCookiesUrls = count($tenantUuids) > 0
-            ? array_map(fn ($uuid) => route('admin.cdn-cookies', ['uuids' => $uuid]), $tenantUuids)
-            : [];
-
         return Inertia::render('Admin/Assets/Index', [
             'assets' => $formatted,
             'pagination' => $assets->toArray(),
@@ -178,7 +174,6 @@ class AdminAssetController extends Controller
             'canDestructive' => $this->canDestructive(),
             'assetsWithoutCategoryCount' => $assetsWithoutCategoryCount,
             'categoriesForRecovery' => $categoriesForRecovery,
-            'cdnCookiesUrls' => $cdnCookiesUrls,
         ]);
     }
 
@@ -922,9 +917,30 @@ class AdminAssetController extends Controller
         }
     }
 
-    protected function adminThumbnailUrl(Asset $asset): ?string
+    /**
+     * Admin grid: signed CloudFront URL for thumbnail (no cookies). Optional 5-min Redis cache.
+     */
+    protected function adminThumbnailSignedUrl(Asset $asset): ?string
     {
-        return $this->assetUrlService->getAdminThumbnailUrl($asset);
+        $path = $this->assetUrlService->getAdminThumbnailPath($asset);
+        if (! $path) {
+            return null;
+        }
+
+        try {
+            $cacheKey = 'admin:signed_url:' . $asset->id . ':' . ($asset->updated_at?->timestamp ?? 0);
+
+            return Cache::remember($cacheKey, 300, function () use ($path) {
+                return $this->assetUrlService->getSignedCloudFrontUrl($path, 600);
+            });
+        } catch (\Throwable $e) {
+            Log::warning('[AdminAssets] Failed to generate signed thumbnail URL', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     protected function formatAssetForList(Asset $asset): array
@@ -959,7 +975,7 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
-            'thumbnail_url' => $this->adminThumbnailUrl($asset),
+            'admin_thumbnail_url' => $this->adminThumbnailSignedUrl($asset),
         ];
     }
 
@@ -998,7 +1014,7 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
-            'thumbnail_url' => null,
+            'admin_thumbnail_url' => null,
         ];
     }
 
