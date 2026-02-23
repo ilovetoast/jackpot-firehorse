@@ -6,6 +6,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
+use Sentry\Laravel\Integration;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -47,6 +48,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        Integration::handles($exceptions);
+
         // /d/* 404 (download not found): use shared branding resolver so error pages never silently fall back to unbranded layouts.
         // Same resolver as active/expired/revoked/403—intentional design for consistent branding across all download states.
         $exceptions->render(function (ModelNotFoundException $e, Request $request) {
