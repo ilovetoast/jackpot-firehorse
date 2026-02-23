@@ -231,6 +231,12 @@ php artisan --version >/dev/null || {
   exit 1
 }
 
+php artisan validate:cloudfront
+if [ $? -ne 0 ]; then
+  echo "CloudFront validation failed. Aborting deploy."
+  exit 1
+fi
+
 echo "✅ Preflight checks passed"
 
 ############################################
