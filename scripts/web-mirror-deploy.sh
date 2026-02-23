@@ -218,7 +218,7 @@ if [[ ! -f public/build/manifest.json ]]; then
 fi
 
 ############################################
-# PREFLIGHT CHECKS
+# PREFLIGHT CHECKS .
 ############################################
 
 echo "🔍 Running preflight checks..."
