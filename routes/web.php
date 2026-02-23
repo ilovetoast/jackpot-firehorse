@@ -349,6 +349,13 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/derivative-failures/{failure}', [\App\Http\Controllers\Admin\AdminDerivativeFailuresController::class, 'show'])->name('admin.derivative-failures.show');
     // Phase A-1: AI Agent Health (observability, read-only)
     Route::get('/admin/ai-agents', [\App\Http\Controllers\Admin\AdminAIAgentHealthController::class, 'index'])->name('admin.ai-agent-health.index');
+    Route::get('/admin/ai-error-monitoring', [\App\Http\Controllers\Admin\SentryAIController::class, 'index'])->name('admin.ai-error-monitoring.index');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/toggle-heal', [\App\Http\Controllers\Admin\SentryAIController::class, 'toggleHeal'])->name('admin.ai-error-monitoring.toggle-heal');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/dismiss', [\App\Http\Controllers\Admin\SentryAIController::class, 'dismiss'])->name('admin.ai-error-monitoring.dismiss');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/resolve', [\App\Http\Controllers\Admin\SentryAIController::class, 'resolve'])->name('admin.ai-error-monitoring.resolve');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/reanalyze', [\App\Http\Controllers\Admin\SentryAIController::class, 'reanalyze'])->name('admin.ai-error-monitoring.reanalyze');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/confirm', [\App\Http\Controllers\Admin\SentryAIController::class, 'confirm'])->name('admin.ai-error-monitoring.confirm');
+    Route::post('/admin/ai-error-monitoring/sentry-issues/bulk-action', [\App\Http\Controllers\Admin\SentryAIController::class, 'bulkAction'])->name('admin.ai-error-monitoring.bulk-action');
 
     Route::get('/admin/deletion-errors', [\App\Http\Controllers\DeletionErrorController::class, 'index'])->name('deletion-errors.index');
     Route::get('/admin/deletion-errors/{deletionError}', [\App\Http\Controllers\DeletionErrorController::class, 'show'])->name('deletion-errors.show');

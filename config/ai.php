@@ -259,6 +259,16 @@ return [
                 // No specific permissions required (system-triggered)
             ],
         ],
+        'sentry_error_analyzer' => [
+            'name' => 'Sentry Error Analyzer',
+            'description' => 'Analyzes Sentry error stack traces for summary, root cause, and fix suggestion',
+            'scope' => 'system',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // System-level agent - runs from PullSentryIssuesJob when pull enabled
+            ],
+        ],
         'approval_summarizer' => [
             'name' => 'Approval Summarizer',
             'description' => 'Generates neutral summaries of approval feedback history',

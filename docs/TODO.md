@@ -1,8 +1,7 @@
 Must Have
 
-- download public
-- metric performance
-- metric ASSET_URL_METRICS=
+- replacment file support to multipart
+- big tiff error timeout success
 - sentry full loop
 
 - versioning fixed, test all options, restore, new verions file type diff, delete, restore

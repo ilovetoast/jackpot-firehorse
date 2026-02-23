@@ -3163,9 +3163,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
                                             const { upload_session_id, upload_type, upload_url } = initiateResponse.data
 
-                                            // Step 2: Upload file directly to S3
+                                            // Step 2: Upload file to S3 (direct or multipart)
                                             if (upload_type === 'direct' && upload_url) {
-                                                // Direct upload: PUT file to S3 using fetch (pre-signed URL)
                                                 const uploadResponse = await fetch(upload_url, {
                                                     method: 'PUT',
                                                     body: resubmitFile,
@@ -3173,13 +3172,32 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                         'Content-Type': resubmitFile.type || 'application/octet-stream',
                                                     },
                                                 })
-
                                                 if (!uploadResponse.ok) {
                                                     throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`)
                                                 }
                                                 setResubmitUploadProgress(100)
                                             } else if (upload_type === 'chunked') {
-                                                throw new Error('Large file uploads (chunked) are not yet supported for file replacement. Please use a smaller file.')
+                                                // Multipart: init → upload parts → complete
+                                                const initRes = await window.axios.post(`/app/uploads/${upload_session_id}/multipart/init`)
+                                                const { part_size: partSize, total_parts: totalParts } = initRes.data
+                                                const parts = {}
+                                                for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+                                                    const start = (partNumber - 1) * partSize
+                                                    const end = Math.min(start + partSize, resubmitFile.size)
+                                                    const chunk = resubmitFile.slice(start, end)
+                                                    const signRes = await window.axios.post(
+                                                        `/app/uploads/${upload_session_id}/multipart/sign-part`,
+                                                        { part_number: partNumber }
+                                                    )
+                                                    const putRes = await fetch(signRes.data.upload_url, { method: 'PUT', body: chunk })
+                                                    if (!putRes.ok) throw new Error(`Part ${partNumber} upload failed: ${putRes.status}`)
+                                                    const etag = putRes.headers.get('ETag')?.replace(/"/g, '')
+                                                    if (!etag) throw new Error(`No ETag for part ${partNumber}`)
+                                                    parts[String(partNumber)] = etag
+                                                    setResubmitUploadProgress(Math.round((partNumber / totalParts) * 100))
+                                                }
+                                                await window.axios.post(`/app/uploads/${upload_session_id}/multipart/complete`, { parts })
+                                                setResubmitUploadProgress(100)
                                             } else {
                                                 throw new Error(`Unsupported upload type: ${upload_type}`)
                                             }

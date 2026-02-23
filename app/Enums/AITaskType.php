@@ -54,6 +54,9 @@ class AITaskType
     // Phase 7: Brand Bootstrap signal extraction
     public const BRAND_BOOTSTRAP_SIGNAL_EXTRACTION = 'brand_bootstrap_signal_extraction';
 
+    // Sentry AI: error analysis (summary, root cause, fix suggestion)
+    public const SENTRY_ERROR_ANALYSIS = 'sentry_error_analysis';
+
     /**
      * Get all task types as an array.
      *
@@ -79,6 +82,7 @@ class AITaskType
             self::ASSET_DERIVATIVE_FAILURE_ANALYSIS,
             self::BRAND_BOOTSTRAP_INFERENCE,
             self::BRAND_BOOTSTRAP_SIGNAL_EXTRACTION,
+            self::SENTRY_ERROR_ANALYSIS,
         ];
     }
     

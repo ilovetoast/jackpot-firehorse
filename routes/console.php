@@ -101,6 +101,13 @@ Schedule::job(\App\Jobs\AggregateMetricsJob::class)
     ->name('aggregate-metrics')
     ->description('Aggregate asset metrics into periodic aggregates');
 
+// Sentry AI: pull unresolved issues from Sentry API into sentry_issues (no AI analysis)
+Schedule::job(new \App\Jobs\PullSentryIssuesJob())
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->name('pull-sentry-issues')
+    ->description('Pull unresolved Sentry issues and upsert into sentry_issues');
+
 // Phase D5: Expired download cleanup (delete artifacts, verify, record metrics)
 Schedule::job(new \App\Jobs\CleanupExpiredDownloadsJob())
     ->daily()

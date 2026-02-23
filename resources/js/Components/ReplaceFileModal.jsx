@@ -30,6 +30,47 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
         }
     }
 
+    /**
+     * Perform multipart (chunked) upload for replace-file.
+     * Calls multipart/init, uploads each part via sign-part + PUT, then multipart/complete.
+     * @param {string} uploadSessionId
+     * @param {File} file
+     * @param {function(number): void} onProgress - callback with 0-100 progress
+     */
+    const performMultipartReplaceUpload = async (uploadSessionId, file, onProgress) => {
+        const initRes = await window.axios.post(`/app/uploads/${uploadSessionId}/multipart/init`)
+        const { part_size: partSize, total_parts: totalParts } = initRes.data
+
+        const parts = {}
+        for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+            const start = (partNumber - 1) * partSize
+            const end = Math.min(start + partSize, file.size)
+            const chunk = file.slice(start, end)
+
+            const signRes = await window.axios.post(
+                `/app/uploads/${uploadSessionId}/multipart/sign-part`,
+                { part_number: partNumber }
+            )
+            const partUrl = signRes.data.upload_url
+
+            const putRes = await fetch(partUrl, {
+                method: 'PUT',
+                body: chunk,
+            })
+            if (!putRes.ok) {
+                throw new Error(`Part ${partNumber} upload failed: ${putRes.status} ${putRes.statusText}`)
+            }
+            const etag = putRes.headers.get('ETag')?.replace(/"/g, '')
+            if (!etag) throw new Error(`No ETag for part ${partNumber}`)
+            parts[String(partNumber)] = etag
+
+            onProgress(Math.round((partNumber / totalParts) * 100))
+        }
+
+        await window.axios.post(`/app/uploads/${uploadSessionId}/multipart/complete`, { parts })
+        onProgress(100)
+    }
+
     const handleReplace = async () => {
         if (!selectedFile || uploading) return
 
@@ -48,9 +89,9 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                 }
             )
 
-            const { upload_session_id, upload_type, upload_url, chunk_size } = initiateResponse.data
+            const { upload_session_id, upload_type, upload_url } = initiateResponse.data
 
-            // Step 2: Upload file directly to S3
+            // Step 2: Upload file to S3 (direct or multipart)
             if (upload_type === 'direct' && upload_url) {
                 // Direct upload: PUT file to S3 using fetch (pre-signed URL)
                 const uploadResponse = await fetch(upload_url, {
@@ -66,10 +107,12 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                 }
                 setUploadProgress(100)
             } else if (upload_type === 'chunked') {
-                // Chunked upload: Use multipart upload flow
-                // For now, throw error - chunked uploads require more complex handling
-                // This can be enhanced later if needed
-                throw new Error('Large file uploads (chunked) are not yet supported for file replacement. Please use a smaller file.')
+                // Chunked upload: multipart init → upload parts → complete
+                await performMultipartReplaceUpload(
+                    upload_session_id,
+                    selectedFile,
+                    (p) => setUploadProgress(p)
+                )
             } else {
                 throw new Error(`Unsupported upload type: ${upload_type}`)
             }

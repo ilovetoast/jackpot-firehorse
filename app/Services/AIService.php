@@ -420,6 +420,9 @@ class AIService
         if (isset($options['brand_bootstrap_run_id'])) {
             return ['entity_type' => 'brand_bootstrap_run', 'entity_id' => (string) $options['brand_bootstrap_run_id']];
         }
+        if (isset($options['sentry_issue_id'])) {
+            return ['entity_type' => 'sentry_issue', 'entity_id' => (string) $options['sentry_issue_id']];
+        }
 
         return ['entity_type' => 'job', 'entity_id' => null];
     }
