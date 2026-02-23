@@ -93,11 +93,14 @@ class AssetUrlService
                 ? [AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
                 : [AssetVariant::THUMB_PREVIEW];
 
+            // Staging: skip S3 existence check to avoid 9+ round-trips and proxy timeouts (502)
+            $requireExists = ! app()->environment('staging');
+
             return $this->firstAvailableVariantUrl(
                 $asset,
                 $variants,
                 self::ADMIN_TTL_SECONDS,
-                true
+                $requireExists
             );
         } catch (\Throwable $e) {
             Log::error('[AssetUrlService] getAdminThumbnailUrl failed', [
@@ -135,11 +138,14 @@ class AssetUrlService
                 return null;
             }
 
+            // Staging: skip S3 existence check to reduce latency and avoid proxy timeouts
+            $requireExists = ! app()->environment('staging');
+
             return $this->buildVariantUrl(
                 $asset,
                 $variant,
                 self::ADMIN_TTL_SECONDS,
-                true
+                $requireExists
             );
         } catch (\Throwable $e) {
             Log::error('[AssetUrlService] getAdminThumbnailUrlForStyle failed', [
