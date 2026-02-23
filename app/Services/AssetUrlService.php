@@ -78,11 +78,13 @@ class AssetUrlService
      * unnecessary — signed URLs are short-lived and unique).
      *
      * @param string $path Storage path relative to CDN root (e.g. tenants/{uuid}/assets/.../thumb.webp)
-     * @param int $ttlSeconds URL validity in seconds (default 600 = 10 min)
+     * @param int|null $ttlSeconds URL validity in seconds (default from config cloudfront.admin_signed_url_ttl, fallback 300)
      * @return string Full signed URL: https://cdn-domain/path?Expires=...&Signature=...&Key-Pair-Id=...
      */
-    public function getSignedCloudFrontUrl(string $path, int $ttlSeconds = 600): string
+    public function getSignedCloudFrontUrl(string $path, ?int $ttlSeconds = null): string
     {
+        $ttlSeconds = $ttlSeconds ?? config('cloudfront.admin_signed_url_ttl', 300);
+
         $cdnUrl = CdnUrl::url($path);
         if ($cdnUrl === '') {
             throw new \InvalidArgumentException('AssetUrlService: path resulted in empty CDN URL.');

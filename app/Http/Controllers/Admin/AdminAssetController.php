@@ -918,7 +918,8 @@ class AdminAssetController extends Controller
     }
 
     /**
-     * Admin grid: signed CloudFront URL for thumbnail (no cookies). Optional 5-min Redis cache.
+     * Admin grid: signed CloudFront URL for thumbnail (no cookies). Redis cache 240s;
+     * cache TTL must be shorter than signed URL TTL (config cloudfront.admin_signed_url_ttl, default 300).
      * No ?v= query param — signed URLs are short-lived and unique; adding ?v= would require
      * including it in the URL before signing or CloudFront returns 403.
      */
@@ -932,9 +933,11 @@ class AdminAssetController extends Controller
         try {
             $cacheKey = 'admin:signed_url:' . $asset->id . ':' . ($asset->updated_at?->timestamp ?? 0);
 
-            return Cache::remember($cacheKey, 300, function () use ($path) {
-                return $this->assetUrlService->getSignedCloudFrontUrl($path, 600);
+            $signedUrl = Cache::remember($cacheKey, 240, function () use ($path) {
+                return $this->assetUrlService->getSignedCloudFrontUrl($path);
             });
+
+            return $signedUrl;
         } catch (\Throwable $e) {
             Log::warning('[AdminAssets] Failed to generate signed thumbnail URL', [
                 'asset_id' => $asset->id,

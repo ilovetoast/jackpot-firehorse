@@ -104,7 +104,7 @@ Route::post('/app/admin/performance/client-metric', [\App\Http\Controllers\Admin
     ->middleware(['web'])
     ->name('admin.performance.client-metric');
 
-Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics'])->prefix('app')->group(function () {
+Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
     // GET /app → redirect to dashboard (avoids 405 from OPTIONS catch-all matching path /app)
     Route::get('', fn () => redirect()->route('dashboard'))->name('app');
 

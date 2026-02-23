@@ -101,4 +101,16 @@ return [
     */
     'authenticated_cookie_ttl' => (int) env('CLOUDFRONT_AUTHENTICATED_COOKIE_TTL', env('CDN_AUTHENTICATED_COOKIE_TTL', 3600)),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Admin Signed URL TTL (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | TTL for CloudFront signed URLs used by admin routes (e.g. asset grid
+    | thumbnails). Shorter than cookie-based tenant flows. Cache TTL for
+    | signed URL generation should be less than this value.
+    |
+    */
+    'admin_signed_url_ttl' => (int) env('CLOUDFRONT_ADMIN_SIGNED_URL_TTL', 300),
+
 ];

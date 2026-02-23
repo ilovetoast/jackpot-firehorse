@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->alias([
+            'log.cloudfront.403' => \App\Http\Middleware\LogCloudFront403::class,
             'tenant' => \App\Http\Middleware\ResolveTenant::class,
             'tenant.cdn.cookie' => \App\Http\Middleware\EnsureCloudFrontSignedCookies::class, // TenantCdnCookieMiddleware
             'subdomain' => \App\Http\Middleware\ResolveSubdomainTenant::class,

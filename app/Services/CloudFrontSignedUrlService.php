@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Download;
 use App\Models\Tenant;
 use Aws\CloudFront\UrlSigner;
-use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -51,13 +50,6 @@ class CloudFrontSignedUrlService
         if (! file_exists($privateKeyPath)) {
             throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
         }
-
-        $nowSeconds = now()->timestamp;
-        Log::debug('[CloudFrontSignedUrl] Signing URL', [
-            'now_timestamp_seconds' => $nowSeconds,
-            'expires_timestamp_seconds' => $expiresAt,
-            'ttl_seconds' => $expiresAt - $nowSeconds,
-        ]);
 
         $signer = new UrlSigner(
             $keyPairId,
