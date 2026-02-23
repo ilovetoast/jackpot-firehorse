@@ -123,7 +123,7 @@ export default function AdminAssetsIndex({
     canDestructive,
     assetsWithoutCategoryCount = 0,
     categoriesForRecovery = [],
-    cdnCookiesUrl = null,
+    cdnCookiesUrls = [],
 }) {
     const [searchInput, setSearchInput] = useState(() => initialFilters?.search ?? '')
     const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -138,11 +138,13 @@ export default function AdminAssetsIndex({
     const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
 
-    // Fetch CDN cookies in a separate request so the main document response stays small (avoids 502)
+    // Fetch CDN cookies (one request per tenant) so each response has only 3 Set-Cookie headers (avoids 502)
     useEffect(() => {
-        if (!cdnCookiesUrl) return
-        fetch(cdnCookiesUrl, { method: 'GET', credentials: 'include' }).catch(() => {})
-    }, [cdnCookiesUrl])
+        if (!Array.isArray(cdnCookiesUrls) || cdnCookiesUrls.length === 0) return
+        cdnCookiesUrls.forEach((url) => {
+            fetch(url, { method: 'GET', credentials: 'include' }).catch(() => {})
+        })
+    }, [cdnCookiesUrls])
 
     useEffect(() => {
         if (!actionsOpen) return

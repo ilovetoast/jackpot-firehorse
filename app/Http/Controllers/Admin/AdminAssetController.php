@@ -164,9 +164,10 @@ class AdminAssetController extends Controller
                 ->all();
         }
 
-        $cdnCookiesUrl = count($tenantUuids) > 0
-            ? route('admin.cdn-cookies', ['uuids' => implode(',', $tenantUuids)])
-            : null;
+        // One URL per tenant so each response has only 3 Set-Cookie headers (avoids 502 from proxy limits)
+        $cdnCookiesUrls = count($tenantUuids) > 0
+            ? array_map(fn ($uuid) => route('admin.cdn-cookies', ['uuids' => $uuid]), $tenantUuids)
+            : [];
 
         return Inertia::render('Admin/Assets/Index', [
             'assets' => $formatted,
@@ -177,7 +178,7 @@ class AdminAssetController extends Controller
             'canDestructive' => $this->canDestructive(),
             'assetsWithoutCategoryCount' => $assetsWithoutCategoryCount,
             'categoriesForRecovery' => $categoriesForRecovery,
-            'cdnCookiesUrl' => $cdnCookiesUrl,
+            'cdnCookiesUrls' => $cdnCookiesUrls,
         ]);
     }
 
