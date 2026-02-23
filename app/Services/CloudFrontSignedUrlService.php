@@ -31,7 +31,7 @@ class CloudFrontSignedUrlService
      * @param int $expiresAt Unix timestamp in SECONDS when URL expires
      * @return string Signed URL with Expires=..., Signature=..., Key-Pair-Id=... (Expires in seconds)
      *
-     * @throws RuntimeException If signing fails or CloudFront not configured
+     * @throws RuntimeException If signing fails or CloudFront not configured 
      */
     public function sign(string $cdnUrl, int $expiresAt): string
     {
