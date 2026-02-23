@@ -19,6 +19,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -50,10 +51,21 @@ class AdminOverviewController extends Controller
      */
     public function index(Request $request): Response
     {
+        Log::info('[AdminOverview] Index request');
         $this->authorizeAdmin();
 
-        $metrics = $this->getOverviewMetrics();
+        try {
+            $metrics = $this->getOverviewMetrics();
+        } catch (\Throwable $e) {
+            Log::error('[AdminOverview] getOverviewMetrics failed', [
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
+            report($e);
+            $metrics = $this->getOverviewMetricsFallback();
+        }
 
+        Log::info('[AdminOverview] Index response');
         return Inertia::render('Admin/Dashboard', [
             'metrics' => $metrics,
         ]);
@@ -96,6 +108,26 @@ class AdminOverviewController extends Controller
                 'horizon_workers' => $this->getHorizonWorkerCount(),
             ];
         });
+    }
+
+    /**
+     * Fallback when getOverviewMetrics throws (e.g. Redis/DB timeout). Prevents 502/503.
+     */
+    protected function getOverviewMetricsFallback(): array
+    {
+        return [
+            'incidents' => ['critical' => 0, 'error' => 0, 'warning' => 0, 'total_unresolved' => 0],
+            'queue' => ['status' => 'unknown', 'pending_count' => null, 'failed_count' => null],
+            'scheduler' => ['status' => 'unknown', 'last_heartbeat' => null, 'heartbeat_age_minutes' => null],
+            'auto_recovery' => [],
+            'support' => ['open_tickets' => 0, 'engineering_tickets' => 0, 'total_tickets' => 0],
+            'ai' => [],
+            'failures' => [],
+            'organization' => ['tenants' => 0, 'users' => 0],
+            'health_score' => null,
+            'last_deploy' => null,
+            'horizon_workers' => null,
+        ];
     }
 
     protected function getIncidentMetrics(): array
