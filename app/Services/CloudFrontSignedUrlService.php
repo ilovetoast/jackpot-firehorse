@@ -4,22 +4,22 @@ namespace App\Services;
 
 use App\Models\Download;
 use App\Models\Tenant;
+use Aws\CloudFront\UrlSigner;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
  * CloudFront signed URL service.
  *
- * Generates CloudFront signed URLs for public contexts (no signed cookies).
- * Uses same key pair configuration as CloudFrontSignedCookieService.
+ * Generates CloudFront signed URLs using AWS SDK canned policy signing.
+ * No dependency on cookie service; uses Aws\CloudFront\UrlSigner.
  *
  * Do NOT use for authenticated tenant access — signed cookies apply there.
  */
 class CloudFrontSignedUrlService
 {
-    public function __construct(
-        protected CloudFrontSignedCookieService $cookieService
-    ) {
+    public function __construct()
+    {
     }
 
     /**
@@ -41,6 +41,17 @@ class CloudFrontSignedUrlService
             throw new RuntimeException('CloudFront domain must be configured for signed URLs.');
         }
 
+        $keyPairId = config('cloudfront.key_pair_id');
+        $privateKeyPath = $this->resolvePrivateKeyPath();
+
+        if (empty($keyPairId)) {
+            throw new RuntimeException('CloudFront key_pair_id must be configured for signed URLs.');
+        }
+
+        if (! file_exists($privateKeyPath)) {
+            throw new RuntimeException("CloudFront private key not found at: {$privateKeyPath}");
+        }
+
         $nowSeconds = now()->timestamp;
         Log::debug('[CloudFrontSignedUrl] Signing URL', [
             'now_timestamp_seconds' => $nowSeconds,
@@ -48,14 +59,26 @@ class CloudFrontSignedUrlService
             'ttl_seconds' => $expiresAt - $nowSeconds,
         ]);
 
-        $signed = $this->cookieService->signForSignedUrl($cdnUrl, $expiresAt);
+        $signer = new UrlSigner(
+            $keyPairId,
+            file_get_contents($privateKeyPath)
+        );
 
-        $separator = str_contains($cdnUrl, '?') ? '&' : '?';
+        return $signer->getSignedUrl($cdnUrl, $expiresAt);
+    }
 
-        // Signature is already URL-safe base64; do not double-encode
-        return $cdnUrl . $separator . 'Expires=' . $signed['expires']
-            . '&Signature=' . $signed['signature']
-            . '&Key-Pair-Id=' . rawurlencode($signed['key_pair_id']);
+    /**
+     * Resolve private key path (supports relative to base_path).
+     */
+    protected function resolvePrivateKeyPath(): string
+    {
+        $path = config('cloudfront.private_key_path');
+
+        if (str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        return base_path($path);
     }
 
     /**

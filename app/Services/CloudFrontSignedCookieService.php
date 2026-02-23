@@ -156,7 +156,7 @@ class CloudFrontSignedCookieService
 
     /**
      * Sign a resource for CloudFront signed URL (canned policy).
-     * Shared signing logic used by CloudFrontSignedUrlService.
+     * CloudFrontSignedUrlService now uses Aws\CloudFront\UrlSigner; this method remains for optional/cookie-related use.
      *
      * @param string $resource Full CDN URL (e.g. https://domain.com/path/to/file.jpg)
      * @param int $expiresAt Unix timestamp in SECONDS when URL expires (do not multiply by 1000)
