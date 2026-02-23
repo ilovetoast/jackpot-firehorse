@@ -150,6 +150,82 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               <XMarkIcon className="h-5 w-5" />
             </button>
           </div>
+          <nav className="flex border-b border-gray-200 px-4" aria-label="Tabs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'settings' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+            >
+              <span className="flex items-center gap-2">
+                <Cog6ToothIcon className="h-4 w-4" />
+                Settings
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('analytics')}
+              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'analytics' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+            >
+              <span className="flex items-center gap-2">
+                <ChartBarIcon className="h-4 w-4" />
+                Activity & Analytics
+              </span>
+            </button>
+          </nav>
+          {activeTab === 'analytics' ? (
+            <div className="max-h-[60vh] overflow-y-auto px-4 py-4">
+              {analytics.loading && (
+                <p className="text-sm text-gray-500">Loading analytics…</p>
+              )}
+              {analytics.error && (
+                <p className="text-sm text-red-600">Analytics unavailable for this download.</p>
+              )}
+              {analytics.data && !analytics.loading && !analytics.error && (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs font-medium uppercase text-gray-500">Summary</p>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                      <dt className="text-gray-500">Total downloads</dt>
+                      <dd className="font-medium text-gray-900">{analytics.data.summary?.total_downloads ?? 0}</dd>
+                      <dt className="text-gray-500">Unique users</dt>
+                      <dd className="font-medium text-gray-900">{analytics.data.summary?.unique_users ?? '—'}</dd>
+                      <dt className="text-gray-500">Landing page views</dt>
+                      <dd className="font-medium text-gray-900">{analytics.data.summary?.landing_page_views ?? 0}</dd>
+                    </dl>
+                  </div>
+                  {analytics.data.recent_activity?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium uppercase text-gray-500">Recent activity</p>
+                      <ul className="mt-2 space-y-1 text-sm">
+                        {analytics.data.recent_activity.map((a, i) => (
+                          <li key={i} className="flex justify-between text-gray-700">
+                            <span>{a.event ?? 'Downloaded'}</span>
+                            <span className="text-gray-500">{formatAnalyticsDate(a.at)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {analytics.data.asset_breakdown?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium uppercase text-gray-500">Asset breakdown</p>
+                      <ul className="mt-2 space-y-1 text-sm">
+                        {analytics.data.asset_breakdown.map((a, i) => (
+                          <li key={i} className="flex justify-between text-gray-700">
+                            <span className="truncate max-w-[70%]" title={a.name}>{a.name || `Asset ${i + 1}`}</span>
+                            <span className="text-gray-500">{a.download_count ?? 0} downloads</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(!analytics.data.recent_activity?.length && !analytics.data.asset_breakdown?.length && (analytics.data.summary?.total_downloads ?? 0) === 0) && (
+                    <p className="text-sm text-gray-500">No activity yet.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="px-4 py-4">
             {(pageBannerError || error) && (
               <div className="mb-4 rounded-md bg-red-50 p-3">
@@ -295,6 +371,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>
