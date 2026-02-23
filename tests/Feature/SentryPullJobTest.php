@@ -174,4 +174,66 @@ class SentryPullJobTest extends TestCase
 
         $this->assertDatabaseCount('sentry_issues', 0);
     }
+
+    public function test_pull_saves_stack_trace_from_events_endpoint(): void
+    {
+        $issuesPayload = [
+            [
+                'id' => 'sentry-with-events',
+                'level' => 'error',
+                'title' => 'Test exception',
+                'lifetime' => [
+                    'count' => '5',
+                    'firstSeen' => '2026-02-20T10:00:00Z',
+                    'lastSeen' => '2026-02-23T12:00:00Z',
+                ],
+                'metadata' => ['title' => 'Test exception'],
+            ],
+        ];
+
+        $eventWithStackTrace = [
+            'eventID' => 'abc123',
+            'entries' => [
+                [
+                    'type' => 'exception',
+                    'data' => [
+                        'values' => [
+                            [
+                                'stacktrace' => [
+                                    'frames' => [
+                                        ['filename' => 'vendor/foo/bar.php', 'lineNo' => 10, 'function' => 'bootstrap'],
+                                        ['filename' => 'app/Http/Kernel.php', 'lineNo' => 42, 'function' => 'handle'],
+                                        ['filename' => 'public/index.php', 'lineNo' => 1, 'function' => 'run'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        Http::fake(function ($request) use ($issuesPayload, $eventWithStackTrace) {
+            $url = $request->url();
+            if (str_contains($url, '/events/')) {
+                return Http::response([$eventWithStackTrace], 200);
+            }
+            if (str_contains($url, '/organizations/test-org/issues/') && ! str_contains($url, '/events/')) {
+                return Http::response($issuesPayload, 200);
+            }
+            return Http::response(null, 404);
+        });
+
+        $service = app(SentryPullService::class);
+        $result = $service->pull();
+
+        $this->assertSame(1, $result['pulled']);
+        $issue = SentryIssue::where('sentry_issue_id', 'sentry-with-events')->first();
+        $this->assertNotNull($issue);
+        $this->assertNotNull($issue->stack_trace);
+        // Frames reversed: most recent first -> index.php, then Kernel, then bar.php
+        $this->assertStringContainsString('public/index.php:1 run', $issue->stack_trace);
+        $this->assertStringContainsString('app/Http/Kernel.php:42 handle', $issue->stack_trace);
+        $this->assertStringContainsString('vendor/foo/bar.php:10 bootstrap', $issue->stack_trace);
+    }
 }

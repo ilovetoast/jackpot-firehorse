@@ -5,6 +5,7 @@ import {
     PhotoIcon,
     XMarkIcon,
     ChevronRightIcon,
+    ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline'
 
 export default function DerivativeFailuresIndex({
@@ -210,7 +211,19 @@ export default function DerivativeFailuresIndex({
                                                     onClick={() => openDrawer(f.id)}
                                                 >
                                                     <td className="px-4 py-3 text-sm text-gray-600">{f.id}</td>
-                                                    <td className="px-4 py-3 text-sm font-mono text-gray-900">{f.asset_id?.slice(0, 8)}…</td>
+                                                    <td className="px-4 py-3 text-sm">
+                                                        {f.asset_id ? (
+                                                            <Link
+                                                                href={`/app/admin/assets?asset_id=${encodeURIComponent(f.asset_id)}`}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="font-mono text-indigo-600 hover:text-indigo-800"
+                                                            >
+                                                                {f.asset_id.slice(0, 8)}…
+                                                            </Link>
+                                                        ) : (
+                                                            <span className="font-mono text-gray-900">—</span>
+                                                        )}
+                                                    </td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{f.derivative_type ?? '—'}</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{f.processor ?? '—'}</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{f.failure_reason ?? '—'}</td>
@@ -293,7 +306,18 @@ export default function DerivativeFailuresIndex({
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Asset ID</p>
-                                            <p className="font-mono text-sm text-gray-900">{drawerData.asset_id}</p>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="font-mono text-sm text-gray-900">{drawerData.asset_id}</p>
+                                                {drawerData.asset_id && (
+                                                    <Link
+                                                        href={`/app/admin/assets?asset_id=${encodeURIComponent(drawerData.asset_id)}`}
+                                                        className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800"
+                                                    >
+                                                        View asset
+                                                        <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                                                    </Link>
+                                                )}
+                                            </div>
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Derivative type</p>

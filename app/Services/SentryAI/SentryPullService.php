@@ -103,7 +103,8 @@ class SentryPullService
                 continue;
             }
 
-            $attributes = $this->mapIssueToAttributes($item, $environment);
+            $stackTrace = $this->fetchStackTraceForIssue($apiUrl, $orgSlug, $authToken, $sentryId);
+            $attributes = $this->mapIssueToAttributes($item, $environment, $stackTrace);
             $existing = SentryIssue::where('sentry_issue_id', $sentryId)->first();
 
             if ($existing) {
@@ -147,10 +148,106 @@ class SentryPullService
     }
 
     /**
+     * Fetch the latest event for an issue and extract exception stack trace as formatted text.
+     * On failure (network, non-2xx, or missing/odd payload) logs a warning and returns null.
+     *
+     * @return string|null Formatted "file:line function" lines, most recent frame first, or null
+     */
+    protected function fetchStackTraceForIssue(string $apiUrl, string $orgSlug, string $authToken, string $sentryId): ?string
+    {
+        $eventsUrl = "{$apiUrl}/organizations/{$orgSlug}/issues/{$sentryId}/events/?per_page=1&full=1";
+
+        try {
+            $response = Http::withToken($authToken)
+                ->timeout(15)
+                ->acceptJson()
+                ->get($eventsUrl);
+
+            if (! $response->successful()) {
+                Log::warning('[SentryPullService] Event fetch failed for issue', [
+                    'sentry_issue_id' => $sentryId,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $events = $response->json();
+            if (! is_array($events) || count($events) === 0) {
+                Log::warning('[SentryPullService] No events returned for issue', ['sentry_issue_id' => $sentryId]);
+
+                return null;
+            }
+
+            $event = $events[0];
+            $frames = $this->extractExceptionFrames($event);
+            if ($frames === null || count($frames) === 0) {
+                return null;
+            }
+
+            return $this->formatFramesAsStackTrace($frames);
+        } catch (\Throwable $e) {
+            Log::warning('[SentryPullService] Event fetch error for issue', [
+                'sentry_issue_id' => $sentryId,
+                'message' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * From a full event payload, get exception entry's first value stacktrace frames.
+     *
+     * @param array<string, mixed> $event Single event from events list (full=1)
+     * @return array<int, array<string, mixed>>|null
+     */
+    protected function extractExceptionFrames(array $event): ?array
+    {
+        $entries = $event['entries'] ?? null;
+        if (! is_array($entries)) {
+            return null;
+        }
+
+        foreach ($entries as $entry) {
+            if (isset($entry['type']) && (string) $entry['type'] === 'exception'
+                && isset($entry['data']['values']) && is_array($entry['data']['values'])
+            ) {
+                $first = $entry['data']['values'][0] ?? null;
+                if (is_array($first) && isset($first['stacktrace']['frames']) && is_array($first['stacktrace']['frames'])) {
+                    return $first['stacktrace']['frames'];
+                }
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Format frames as "file:line function", most recent (top of stack) first.
+     *
+     * @param array<int, array<string, mixed>> $frames
+     */
+    protected function formatFramesAsStackTrace(array $frames): string
+    {
+        $lines = [];
+        foreach (array_reverse($frames) as $frame) {
+            $file = $frame['filename'] ?? $frame['absPath'] ?? '?';
+            $line = $frame['lineNo'] ?? $frame['line_no'] ?? $frame['lineno'] ?? '?';
+            $function = $frame['function'] ?? '';
+            $lines[] = trim("{$file}:{$line} {$function}");
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * @param array<string, mixed> $item
+     * @param string|null $stackTrace
      * @return array<string, mixed>
      */
-    protected function mapIssueToAttributes(array $item, string $environment): array
+    protected function mapIssueToAttributes(array $item, string $environment, ?string $stackTrace = null): array
     {
         $firstSeen = $item['lifetime']['firstSeen'] ?? $item['firstSeen'] ?? null;
         $lastSeen = $item['lifetime']['lastSeen'] ?? $item['lastSeen'] ?? null;
@@ -163,7 +260,7 @@ class SentryPullService
             'occurrence_count' => $this->occurrenceCount($item),
             'first_seen' => $firstSeen ? Carbon::parse($firstSeen)->toDateTimeString() : null,
             'last_seen' => $lastSeen ? Carbon::parse($lastSeen)->toDateTimeString() : null,
-            'stack_trace' => null,
+            'stack_trace' => $stackTrace,
             'status' => 'open',
         ];
     }
