@@ -57,7 +57,15 @@ class EnsureCloudFrontSignedCookies
         // Admin multi-tenant mode: site_admin/site_owner on /app/admin/* with admin_tenants from controller
         $adminTenants = $request->attributes->get('admin_tenants');
         if ($this->isAdminMultiTenantContext($request, $adminTenants)) {
-            $this->attachAdminMultiTenantCookies($response, $adminTenants, $request);
+            try {
+                $this->attachAdminMultiTenantCookies($response, $adminTenants, $request);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('[CDN] Admin multi-tenant cookies failed', [
+                    'error' => $e->getMessage(),
+                    'tenant_count' => is_array($adminTenants) ? count($adminTenants) : 0,
+                ]);
+                report($e);
+            }
             return $response;
         }
 
@@ -120,22 +128,20 @@ class EnsureCloudFrontSignedCookies
         $expirySeconds = $this->cookieService->getExpirySeconds();
         $domain = config('cloudfront.cookie_domain') ?? config('cloudfront.domain');
 
+        $issued = 0;
         foreach ($uuids as $uuid) {
             try {
                 $cookies = $this->cookieService->generateForTenantUuid($uuid, $clientIp);
             } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[CDN] Admin multi-tenant cookie generation failed for tenant', [
+                    'tenant_uuid' => $uuid,
+                    'error' => $e->getMessage(),
+                ]);
                 report($e);
                 continue;
             }
 
             $path = '/tenants/' . $uuid . '/';
-            $expiresAt = time() + $expirySeconds;
-
-            \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Admin multi-tenant cookie issued', [
-                'tenant_uuid' => $uuid,
-                'expires_at' => $expiresAt,
-                'expires_at_iso' => date('c', $expiresAt),
-            ]);
 
             foreach ($cookies as $name => $value) {
                 $cookie = cookie(
@@ -151,7 +157,13 @@ class EnsureCloudFrontSignedCookies
                 );
                 $response->headers->setCookie($cookie);
             }
+            $issued++;
         }
+
+        \Illuminate\Support\Facades\Log::info('[CDN] Admin multi-tenant cookies completed', [
+            'issued' => $issued,
+            'total_uuids' => count($uuids),
+        ]);
     }
 
     /**
