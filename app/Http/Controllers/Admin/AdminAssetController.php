@@ -919,6 +919,8 @@ class AdminAssetController extends Controller
 
     /**
      * Admin grid: signed CloudFront URL for thumbnail (no cookies). Optional 5-min Redis cache.
+     * No ?v= query param — signed URLs are short-lived and unique; adding ?v= would require
+     * including it in the URL before signing or CloudFront returns 403.
      */
     protected function adminThumbnailSignedUrl(Asset $asset): ?string
     {

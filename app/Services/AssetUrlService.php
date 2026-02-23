@@ -72,6 +72,11 @@ class AssetUrlService
      * Generate a CloudFront signed URL for an arbitrary storage path (canned policy).
      * Used by admin routes so thumbnails load via signed URLs instead of signed cookies.
      *
+     * Signing must use the exact final URL the browser will request. CloudFront requires
+     * ALL query parameters to be present at signing time or it returns 403. We build the
+     * full CDN URL here; for admin thumbnails we do NOT append ?v= (cache busting is
+     * unnecessary — signed URLs are short-lived and unique).
+     *
      * @param string $path Storage path relative to CDN root (e.g. tenants/{uuid}/assets/.../thumb.webp)
      * @param int $ttlSeconds URL validity in seconds (default 600 = 10 min)
      * @return string Full signed URL: https://cdn-domain/path?Expires=...&Signature=...&Key-Pair-Id=...
@@ -91,6 +96,7 @@ class AssetUrlService
             throw new \RuntimeException('CloudFront signing is not configured.');
         }
 
+        // Sign the exact URL (no ?v= or other params for admin; add any before this call if ever needed)
         return $this->signedUrlService->sign(
             $cdnUrl,
             now()->addSeconds($ttlSeconds)->timestamp

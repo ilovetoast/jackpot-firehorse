@@ -9,6 +9,9 @@ class CdnUrl
      *
      * Returns https://{cloudfront_domain}/{path}. In local environment,
      * returns the Storage/S3 URL (no signing; existing logic unchanged).
+     * Does NOT append any query parameters (e.g. no ?v=). For signed URLs,
+     * any query string must be appended before signing so CloudFront sees
+     * the same resource URL; admin thumbnails intentionally use no ?v=.
      *
      * @param  string  $path  Path relative to CDN root (e.g. "assets/tenant/123/file.jpg")
      */
