@@ -180,12 +180,8 @@ class SentryPullService
             }
 
             $event = $events[0];
-            $frames = $this->extractExceptionFrames($event);
-            if ($frames === null || count($frames) === 0) {
-                return null;
-            }
 
-            return $this->formatFramesAsStackTrace($frames);
+            return $this->extractStackTrace($event);
         } catch (\Throwable $e) {
             Log::warning('[SentryPullService] Event fetch error for issue', [
                 'sentry_issue_id' => $sentryId,
@@ -194,6 +190,24 @@ class SentryPullService
 
             return null;
         }
+    }
+
+    /**
+     * Extract exception stack trace from a single event payload as formatted text.
+     * Looks in entries[] for type === "exception", then data.values[0].stacktrace.frames.
+     * Frames are reversed (most recent first) and formatted as "file:line function" per line.
+     *
+     * @param array<string, mixed> $event Single event from events list
+     * @return string|null Formatted stack trace or null if not found
+     */
+    protected function extractStackTrace(array $event): ?string
+    {
+        $frames = $this->extractExceptionFrames($event);
+        if ($frames === null || count($frames) === 0) {
+            return null;
+        }
+
+        return $this->formatFramesAsStackTrace($frames);
     }
 
     /**
