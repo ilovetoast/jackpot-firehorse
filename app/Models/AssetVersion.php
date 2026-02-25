@@ -75,4 +75,12 @@ class AssetVersion extends Model
     {
         return $this->hasMany(AssetMetadata::class, 'asset_version_id');
     }
+
+    /**
+     * Get rendered PDF pages for this version.
+     */
+    public function pdfPages(): HasMany
+    {
+        return $this->hasMany(AssetPdfPage::class, 'asset_version_id');
+    }
 }

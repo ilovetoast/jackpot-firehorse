@@ -6,6 +6,7 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
+use App\Jobs\FullPdfExtractionJob;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -261,6 +262,8 @@ class Asset extends Model
         'video_height', // Phase V-1: Video height in pixels
         'video_poster_url', // Phase V-1: URL to video poster thumbnail
         'video_preview_url', // Phase V-1: URL to hover preview video
+        'pdf_page_count',
+        'pdf_pages_rendered',
         'dominant_color_bucket', // Deprecated - kept for safety
         'dominant_hue_group', // Perceptual hue cluster for filtering
         'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
@@ -289,6 +292,8 @@ class Asset extends Model
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
             'approval_summary_generated_at' => 'datetime', // Phase AF-6
+            'pdf_page_count' => 'integer',
+            'pdf_pages_rendered' => 'boolean',
         ];
     }
 
@@ -665,6 +670,14 @@ class Asset extends Model
     }
 
     /**
+     * Get rendered PDF page derivatives for this asset.
+     */
+    public function pdfPages(): HasMany
+    {
+        return $this->hasMany(AssetPdfPage::class);
+    }
+
+    /**
      * Get the download groups that include this asset.
      * 
      * Phase 3.1 — Downloader Foundations
@@ -937,6 +950,37 @@ class Asset extends Model
             ->where('tenant_id', $this->tenant_id)
             ->where('brand_id', $this->brand_id)
             ->first();
+    }
+
+    /**
+     * Request full PDF page extraction (background).
+     */
+    public function requestFullPdfExtraction(?string $requestedBy = null): bool
+    {
+        $mime = strtolower((string) $this->mime_type);
+        if (!str_contains($mime, 'pdf')) {
+            return false;
+        }
+
+        $version = $this->relationLoaded('currentVersion')
+            ? $this->currentVersion
+            : $this->currentVersion()->first();
+
+        $metadata = $this->metadata ?? [];
+        $metadata['pdf_full_extraction_requested'] = true;
+        $metadata['pdf_full_extraction_requested_at'] = now()->toIso8601String();
+        if ($requestedBy) {
+            $metadata['pdf_full_extraction_requested_by'] = $requestedBy;
+        }
+
+        $this->forceFill([
+            'metadata' => $metadata,
+            'pdf_pages_rendered' => false,
+        ])->save();
+
+        FullPdfExtractionJob::dispatch($this->id, $version?->id);
+
+        return true;
     }
 
 }

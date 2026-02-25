@@ -71,6 +71,22 @@ class AssetDeliveryService
     }
 
     /**
+     * Get CDN URL for a rendered PDF page.
+     */
+    public function getPdfPageUrl(
+        Asset $asset,
+        int $page,
+        string $context = DeliveryContext::AUTHENTICATED->value
+    ): string {
+        return $this->url(
+            $asset,
+            AssetVariant::PDF_PAGE->value,
+            $context,
+            ['page' => max(1, $page)]
+        );
+    }
+
+    /**
      * Sign URL for public collection context.
      */
     protected function signForPublicCollection(string $cdnUrl, Asset $asset, string $variant): string

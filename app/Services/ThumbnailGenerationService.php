@@ -286,16 +286,27 @@ class ThumbnailGenerationService
         // Some file types (PDFs, videos, documents) do not have pixel dimensions
         $sourceImageWidth = null;
         $sourceImageHeight = null;
+        $pdfPageCount = null;
         
         if ($fileType === 'pdf') {
             // PDF validation: Check file size and basic PDF structure
             // Full PDF validation happens during thumbnail generation
             // PDFs do not have pixel dimensions - skip dimension capture
+            try {
+                $pdfPageCount = $this->detectPdfPageCount($tempPath);
+            } catch (\Throwable $e) {
+                Log::warning('[ThumbnailGenerationService] Failed to detect PDF page count; defaulting to page 1', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $pdfPageCount = 1;
+            }
             Log::info('[ThumbnailGenerationService] Source PDF file downloaded and verified', [
                 'asset_id' => $asset->id,
                 'temp_path' => $tempPath,
                 'source_file_size' => $sourceFileSize,
                 'file_type' => 'pdf',
+                'pdf_page_count' => $pdfPageCount,
             ]);
         } elseif ($fileType === 'tiff') {
             // TIFF validation: Use Imagick pingImage (headers only, no pixel load) to get dimensions
@@ -624,6 +635,7 @@ class ThumbnailGenerationService
                 'image_width' => $sourceImageWidth,
                 'image_height' => $sourceImageHeight,
                 'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
+                'pdf_page_count' => $pdfPageCount,
             ];
         } finally {
             // Clean up temporary file
@@ -1333,6 +1345,30 @@ class ThumbnailGenerationService
             ]);
             throw new \RuntimeException("AVIF thumbnail generation error: {$e->getMessage()}", 0, $e);
         }
+    }
+
+    /**
+     * Detect page count for a local PDF file.
+     */
+    protected function detectPdfPageCount(string $sourcePath): int
+    {
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('Imagick extension is required for PDF page counting');
+        }
+        if (!file_exists($sourcePath) || filesize($sourcePath) === 0) {
+            throw new \RuntimeException('PDF file is missing or empty');
+        }
+
+        $imagick = new \Imagick();
+        try {
+            $imagick->pingImage($sourcePath);
+            $pageCount = (int) $imagick->getNumberImages();
+        } finally {
+            $imagick->clear();
+            $imagick->destroy();
+        }
+
+        return max(1, $pageCount);
     }
 
     /**

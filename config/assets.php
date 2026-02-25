@@ -216,6 +216,17 @@ return [
              * This prevents stuck jobs from large or complex PDFs.
              */
             'timeout_seconds' => env('THUMBNAIL_PDF_TIMEOUT_SECONDS', 60),
+
+            /*
+             * Maximum number of pages for automatic full extraction.
+             * Large PDFs above this threshold are rendered on-demand only.
+             */
+            'auto_extract_max_pages' => (int) env('THUMBNAIL_PDF_AUTO_EXTRACT_MAX_PAGES', 150),
+
+            /*
+             * Rasterization DPI for rendered PDF pages (on-demand + full extraction).
+             */
+            'render_dpi' => (int) env('THUMBNAIL_PDF_RENDER_DPI', 220),
         ],
     ],
 
