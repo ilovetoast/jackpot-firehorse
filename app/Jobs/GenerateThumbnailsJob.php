@@ -624,13 +624,47 @@ class GenerateThumbnailsJob implements ShouldQueue
                     continue;
                 }
                 
-                // Verify thumbnail file exists in S3 and is valid
-                try {
-                    $result = $s3Client->headObject([
-                        'Bucket' => $bucket->name,
-                        'Key' => $thumbnailPath,
-                    ]);
-                    
+                // Verify thumbnail file exists in S3 and is valid.
+                // Retry headObject on 404 (up to 2 retries, 2s delay) to handle S3/network eventual consistency after upload.
+                $result = null;
+                $headAttempts = 0;
+                $headMaxAttempts = 3;
+                while ($headAttempts < $headMaxAttempts) {
+                    try {
+                        $result = $s3Client->headObject([
+                            'Bucket' => $bucket->name,
+                            'Key' => $thumbnailPath,
+                        ]);
+                        break;
+                    } catch (S3Exception $e) {
+                        $headAttempts++;
+                        if ($e->getStatusCode() === 404 && $headAttempts < $headMaxAttempts) {
+                            Log::warning('Thumbnail headObject 404, retrying (S3 eventual consistency)', [
+                                'asset_id' => $asset->id,
+                                'style' => $styleName,
+                                'attempt' => $headAttempts,
+                                'thumbnail_path' => $thumbnailPath,
+                            ]);
+                            sleep(2);
+                            continue;
+                        }
+                        if ($e->getStatusCode() === 404) {
+                            $allThumbnailsValid = false;
+                            $errorMsg = "Thumbnail file not found in S3 for style '{$styleName}'";
+                            $verificationErrors[] = $errorMsg;
+                            Log::error('Thumbnail file not found in S3 after generation', [
+                                'asset_id' => $asset->id,
+                                'style' => $styleName,
+                                'thumbnail_path' => $thumbnailPath,
+                                'bucket' => $bucket->name,
+                            ]);
+                            break;
+                        }
+                        throw $e;
+                    }
+                }
+
+                if ($result !== null) {
                     // Verify file size > minimum threshold (only catch broken/corrupted files)
                     $contentLength = $result['ContentLength'] ?? 0;
                     if ($contentLength < $minValidSize) {
@@ -645,21 +679,6 @@ class GenerateThumbnailsJob implements ShouldQueue
                             'content_length' => $contentLength,
                             'expected_min' => $minValidSize,
                         ]);
-                    }
-                } catch (S3Exception $e) {
-                    if ($e->getStatusCode() === 404) {
-                        $allThumbnailsValid = false;
-                        $errorMsg = "Thumbnail file not found in S3 for style '{$styleName}'";
-                        $verificationErrors[] = $errorMsg;
-                        Log::error('Thumbnail file not found in S3 after generation', [
-                            'asset_id' => $asset->id,
-                            'style' => $styleName,
-                            'thumbnail_path' => $thumbnailPath,
-                            'bucket' => $bucket->name,
-                        ]);
-                    } else {
-                        // Re-throw non-404 errors (network issues, permissions, etc.)
-                        throw $e;
                     }
                 }
             }

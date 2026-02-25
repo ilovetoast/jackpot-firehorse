@@ -72,17 +72,25 @@ class AssetDeliveryService
 
     /**
      * Get CDN URL for a rendered PDF page.
+     *
+     * In AUTHENTICATED context we always use a signed URL so PDF pages work even though
+     * CloudFront signed cookies are scoped to /tenants/{uuid}/* and PDF pages live under /assets/.
      */
     public function getPdfPageUrl(
         Asset $asset,
         int $page,
-        string $context = DeliveryContext::AUTHENTICATED->value
+        string $context = 'authenticated'
     ): string {
+        $options = ['page' => max(1, $page)];
+        if ((DeliveryContext::tryFrom($context) ?? DeliveryContext::AUTHENTICATED) === DeliveryContext::AUTHENTICATED) {
+            $options['signed'] = true;
+        }
+
         return $this->url(
             $asset,
             AssetVariant::PDF_PAGE->value,
             $context,
-            ['page' => max(1, $page)]
+            $options
         );
     }
 
