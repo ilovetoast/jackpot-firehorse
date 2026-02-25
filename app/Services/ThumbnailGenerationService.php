@@ -669,47 +669,56 @@ class ThumbnailGenerationService
                 'Bucket' => $bucket->name,
                 'Key' => $s3Key,
             ]);
-            
-            // Verify object exists and has content
+
             $body = $result['Body'];
-            $bodyContents = (string) $body;
-            $contentLength = strlen($bodyContents);
-            
-            if ($contentLength === 0) {
-                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes){$ctx}");
-            }
-            
-            Log::info('[ThumbnailGenerationService] Source file downloaded from S3', [
-                'asset_id' => $assetId,
-                'bucket' => $bucket->name,
-                's3_key' => $s3Key,
-                'content_length' => $contentLength,
-            ]);
+            $contentLength = isset($result['ContentLength']) ? (int) $result['ContentLength'] : null;
 
             // PDF: use temp path with .pdf extension so ImageMagick can select the PDF delegate
             if (str_ends_with(strtolower($s3Key), '.pdf')) {
                 do {
                     $tempPath = sys_get_temp_dir() . '/thumb_' . Str::random(32) . '.pdf';
                 } while (file_exists($tempPath));
-                file_put_contents($tempPath, $bodyContents);
-                if (!file_exists($tempPath) || filesize($tempPath) === 0) {
-                    @unlink($tempPath);
-                    throw new \RuntimeException('Downloaded PDF is missing or empty.');
-                }
-                if (filesize($tempPath) !== $contentLength) {
-                    @unlink($tempPath);
-                    throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
-                }
             } else {
                 $tempPath = tempnam(sys_get_temp_dir(), 'thumb_');
-                file_put_contents($tempPath, $bodyContents);
-                if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
-                    throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
-                }
             }
 
-            Log::info('[ThumbnailGenerationService] Source file saved to temp location', [
+            // Stream to file to avoid loading large files into memory (e.g. 178MB TIFF in FPM or worker)
+            $fp = fopen($tempPath, 'w');
+            if (!$fp) {
+                @unlink($tempPath);
+                throw new \RuntimeException("Failed to open temp file for write{$ctx}");
+            }
+            try {
+                while (!$body->eof()) {
+                    $chunk = $body->read(65536);
+                    if ($chunk === '') {
+                        break;
+                    }
+                    fwrite($fp, $chunk);
+                }
+                fclose($fp);
+                $fp = null;
+            } catch (\Throwable $e) {
+                if ($fp) {
+                    fclose($fp);
+                }
+                @unlink($tempPath);
+                throw $e;
+            }
+
+            if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+                @unlink($tempPath);
+                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes){$ctx}");
+            }
+            if ($contentLength !== null && filesize($tempPath) !== $contentLength) {
+                @unlink($tempPath);
+                throw new \RuntimeException("Downloaded file size mismatch (expected {$contentLength}, got " . filesize($tempPath) . "){$ctx}");
+            }
+
+            Log::info('[ThumbnailGenerationService] Source file streamed from S3 to temp location', [
                 'asset_id' => $assetId,
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
                 'temp_path' => $tempPath,
                 'file_size' => filesize($tempPath),
             ]);

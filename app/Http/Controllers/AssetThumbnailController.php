@@ -894,12 +894,14 @@ class AssetThumbnailController extends Controller
     }
 
     /**
-     * Regenerate specific thumbnail styles for an asset (admin only).
+     * Regenerate thumbnail styles for an asset (admin only).
      *
-     * Site roles (site_owner, site_admin, site_support, site_engineering) can:
-     * - Regenerate specific thumbnail styles
-     * - Troubleshoot thumbnail issues
-     * - Test new file types
+     * Dispatches GenerateThumbnailsJob only. No file download or processing in the request
+     * to avoid memory exhaustion on large files (e.g. 178MB TIFF). All file loading happens
+     * inside the queue job.
+     *
+     * Site roles can regenerate thumbnails for troubleshooting or testing. The job regenerates
+     * all configured styles; requested style names are validated for API consistency only.
      *
      * @param Request $request
      * @param Asset $asset
@@ -907,16 +909,13 @@ class AssetThumbnailController extends Controller
      */
     public function regenerateStyles(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
-        // Authorize: User must have admin regeneration permission (site role only)
         $this->authorize('regenerateThumbnailsAdmin', $asset);
 
         $user = $request->user();
         $styleNames = $request->input('styles', []);
 
-        // Validate style names
         $allStyles = config('assets.thumbnail_styles', []);
         $validStyles = [];
-        
         foreach ($styleNames as $styleName) {
             if (isset($allStyles[$styleName])) {
                 $validStyles[] = $styleName;
@@ -935,106 +934,49 @@ class AssetThumbnailController extends Controller
             ], 422);
         }
 
-        // Check if asset has required storage information
         if (!$asset->storage_root_path || !$asset->storageBucket) {
             Log::warning('[AssetThumbnailController] Asset missing storage information', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
             ]);
-
             return response()->json([
                 'error' => 'Asset storage information is missing',
             ], 422);
         }
 
+        $version = $asset->currentVersion;
+        $payloadId = $version ? (string) $version->id : (string) $asset->id;
+        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, true);
+
+        Log::info('[AssetThumbnailController] Thumbnail regeneration job dispatched (admin)', [
+            'asset_id' => $asset->id,
+            'user_id' => $user->id,
+            'requested_styles' => $validStyles,
+        ]);
+
         try {
-            // Admin override: Check if user wants to force ImageMagick (bypass file type checks)
-            $forceImageMagick = $request->input('force_imagick', false);
-            
-            // Regenerate specific styles (service returns data; controller persists)
-            $thumbnailService = app(\App\Services\ThumbnailGenerationService::class);
-            $result = $thumbnailService->regenerateThumbnailStyles($asset, $validStyles, $forceImageMagick);
-            $regenerated = $result['regenerated'] ?? $result;
-
-            // Persist returned metadata to asset (ThumbnailGenerationService does not mutate Asset)
-            $metadata = $asset->metadata ?? [];
-            if (!empty($result['preview_thumbnails'])) {
-                $metadata['preview_thumbnails'] = array_merge(
-                    $metadata['preview_thumbnails'] ?? [],
-                    $result['preview_thumbnails']
-                );
-            }
-            if (!empty($result['thumbnails'])) {
-                $metadata['thumbnails'] = array_merge(
-                    $metadata['thumbnails'] ?? [],
-                    $result['thumbnails']
-                );
-                $metadata['thumbnails_generated_at'] = now()->toIso8601String();
-            }
-            if (!empty($result['thumbnail_dimensions'])) {
-                $metadata['thumbnail_dimensions'] = array_merge(
-                    $metadata['thumbnail_dimensions'] ?? [],
-                    $result['thumbnail_dimensions']
-                );
-            }
-            $asset->update(['metadata' => $metadata]);
-
-            Log::info('[AssetThumbnailController] Thumbnail styles regenerated (admin)', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-                'styles' => $validStyles,
-                'regenerated_styles' => array_keys($regenerated),
-            ]);
-
-            // Log activity event for timeline
-            try {
-                // Separate preview and final styles for proper tracking
-                $previewStyles = [];
-                $finalStyles = [];
-                foreach (array_keys($regenerated) as $styleName) {
-                    if ($styleName === 'preview') {
-                        $previewStyles[] = $styleName;
-                    } else {
-                        $finalStyles[] = $styleName;
-                    }
-                }
-                
-                \App\Services\ActivityRecorder::logAsset(
-                    $asset,
-                    \App\Enums\EventType::ASSET_THUMBNAIL_COMPLETED,
-                    [
-                        'triggered_by' => 'admin_regeneration',
-                        'triggered_by_user_id' => $user->id,
-                        'styles' => $finalStyles, // Only final styles for timeline indicators
-                        'preview_styles' => $previewStyles, // Preview styles separately
-                        'thumbnail_count' => count($regenerated),
-                    ]
-                );
-            } catch (\Exception $e) {
-                Log::error('Failed to log thumbnail regeneration event', [
-                    'asset_id' => $asset->id,
-                    'user_id' => $user->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Thumbnail styles regenerated',
-                'regenerated_styles' => array_keys($regenerated),
-            ], 200);
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_THUMBNAIL_STARTED,
+                [
+                    'triggered_by' => 'admin_regeneration',
+                    'triggered_by_user_id' => $user->id,
+                    'requested_styles' => $validStyles,
+                ]
+            );
         } catch (\Exception $e) {
-            Log::error('[AssetThumbnailController] Thumbnail style regeneration failed', [
+            Log::error('Failed to log thumbnail regeneration queued event', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
-                'styles' => $validStyles,
                 'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'error' => 'Failed to regenerate thumbnail styles: ' . $e->getMessage(),
-            ], 500);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Thumbnail regeneration queued. Styles will be regenerated by a background job.',
+            'regenerated_styles' => [], // Filled when job completes; UI can refresh to see results
+        ], 200);
     }
 
     /**
