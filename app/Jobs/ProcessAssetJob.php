@@ -146,7 +146,7 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
-        PipelineLogger::error('PROCESS ASSET: HANDLE START', [
+        PipelineLogger::info('PROCESS ASSET: HANDLE START', [
             'asset_id' => $asset->id,
             'version_id' => $version?->id,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
@@ -303,7 +303,7 @@ class ProcessAssetJob implements ShouldQueue
             'asset_id' => $asset->id,
         ]);
 
-        PipelineLogger::error('PROCESS ASSET: ABOUT TO DISPATCH CHILD JOBS', [
+        PipelineLogger::info('PROCESS ASSET: ABOUT TO DISPATCH CHILD JOBS', [
             'asset_id' => $asset->id,
         ]);
 
@@ -332,6 +332,11 @@ class ProcessAssetJob implements ShouldQueue
         
         Bus::chain($chainJobs)->dispatch();
 
+        // Seed page 1 render for PDFs on dedicated queue.
+        if ($fileType === 'pdf') {
+            PdfPageRenderJob::dispatch($asset->id, 1);
+        }
+
         PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
             'asset_id' => $asset->id,
             'job_id' => $this->job?->getJobId() ?? 'unknown',
@@ -342,7 +347,7 @@ class ProcessAssetJob implements ShouldQueue
 
         // pipeline_status = 'complete' is set by chain jobs (e.g. GenerateThumbnailsJob) when they finish
 
-        PipelineLogger::error('PROCESS ASSET: HANDLE END', [
+        PipelineLogger::info('PROCESS ASSET: HANDLE END', [
             'asset_id' => $asset->id,
         ]);
         } catch (\Throwable $e) {

@@ -58,7 +58,10 @@ export function mergeAsset(prev, incoming) {
     if (
         prev.preview_thumbnail_url === incoming.preview_thumbnail_url &&
         prev.final_thumbnail_url === incoming.final_thumbnail_url &&
-        prev.thumbnail_version === incoming.thumbnail_version
+        prev.thumbnail_version === incoming.thumbnail_version &&
+        prev.pdf_page_count === incoming.pdf_page_count &&
+        prev.first_page_url === incoming.first_page_url &&
+        prev.pdf_page_api_endpoint === incoming.pdf_page_api_endpoint
     ) {
         return prev
     }
@@ -75,6 +78,10 @@ export function mergeAsset(prev, incoming) {
         thumbnail_status: incoming.thumbnail_status ?? prev.thumbnail_status,
         thumbnail_version: incoming.thumbnail_version ?? null,
         thumbnail_error: incoming.thumbnail_error ?? null,
+        is_pdf: incoming.is_pdf ?? prev.is_pdf ?? false,
+        pdf_page_count: incoming.pdf_page_count ?? prev.pdf_page_count ?? null,
+        first_page_url: incoming.first_page_url ?? prev.first_page_url ?? null,
+        pdf_page_api_endpoint: incoming.pdf_page_api_endpoint ?? prev.pdf_page_api_endpoint ?? null,
     }
 }
 

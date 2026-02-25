@@ -355,7 +355,7 @@ class AssetController extends Controller
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
         // Eager load relations used in the map to avoid N+1 and lazy-load errors on load_more (page 2+)
         $perPage = 36;
-        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion'])->paginate($perPage);
+        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion', 'tenant'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
         $t1 = microtime(true);
 
@@ -521,7 +521,7 @@ class AssetController extends Controller
                 $categorySlug = null;
                 if ($asset->metadata && isset($asset->metadata['category_id'])) {
                     $categoryId = $asset->metadata['category_id'];
-                    $category = Category::where('id', $categoryId)
+                    $category = Category::with('tenant')->where('id', $categoryId)
                         ->where('tenant_id', $tenant->id)
                         ->where('brand_id', $brand->id)
                         ->first();
@@ -556,6 +556,13 @@ class AssetController extends Controller
                 $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
+                $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'
+                    || strtolower((string) ($fileExtension ?? '')) === 'pdf';
+                $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
+                $pdfPageApiEndpoint = $isPdf
+                    ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
+                    : null;
+                $firstPageUrl = null;
 
                 $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
                 if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
@@ -576,6 +583,9 @@ class AssetController extends Controller
                             ]);
                         }
                     }
+                }
+                if ($isPdf) {
+                    $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
                 }
 
                 return [
@@ -1622,6 +1632,13 @@ class AssetController extends Controller
             }
         }
         $thumbnailUrl = $finalThumbnailUrl ?: $previewThumbnailUrl;
+        $fileExtension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf' || $fileExtension === 'pdf';
+        $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
+        $firstPageUrl = $isPdf ? ($finalThumbnailUrl ?: $previewThumbnailUrl) : null;
+        $pdfPageApiEndpoint = $isPdf
+            ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
+            : null;
 
         $asset->load(['collections' => fn ($q) => $q->select('collections.id', 'collections.name')]);
         $payload = [
@@ -1635,6 +1652,10 @@ class AssetController extends Controller
             'download_url' => route('assets.download', ['asset' => $asset->id]),
             'collection_only' => $collectionOnly,
             'collection' => $collection ? ['id' => $collection->id, 'name' => $collection->name] : null,
+            'is_pdf' => $isPdf,
+            'pdf_page_count' => $pdfPageCount,
+            'first_page_url' => $firstPageUrl,
+            'pdf_page_api_endpoint' => $pdfPageApiEndpoint,
         ];
 
         return Inertia::render('Assets/View', ['asset' => $payload]);

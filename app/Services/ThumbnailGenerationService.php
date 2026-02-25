@@ -10,6 +10,7 @@ use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Thumbnail Generation Service
@@ -684,21 +685,35 @@ class ThumbnailGenerationService
                 's3_key' => $s3Key,
                 'content_length' => $contentLength,
             ]);
-            
-            $tempPath = tempnam(sys_get_temp_dir(), 'thumb_');
-            file_put_contents($tempPath, $bodyContents);
-            
-            // Verify file was written correctly
-            if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
-                throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
+
+            // PDF: use temp path with .pdf extension so ImageMagick can select the PDF delegate
+            if (str_ends_with(strtolower($s3Key), '.pdf')) {
+                do {
+                    $tempPath = sys_get_temp_dir() . '/thumb_' . Str::random(32) . '.pdf';
+                } while (file_exists($tempPath));
+                file_put_contents($tempPath, $bodyContents);
+                if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+                    @unlink($tempPath);
+                    throw new \RuntimeException('Downloaded PDF is missing or empty.');
+                }
+                if (filesize($tempPath) !== $contentLength) {
+                    @unlink($tempPath);
+                    throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
+                }
+            } else {
+                $tempPath = tempnam(sys_get_temp_dir(), 'thumb_');
+                file_put_contents($tempPath, $bodyContents);
+                if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
+                    throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
+                }
             }
-            
+
             Log::info('[ThumbnailGenerationService] Source file saved to temp location', [
                 'asset_id' => $assetId,
                 'temp_path' => $tempPath,
                 'file_size' => filesize($tempPath),
             ]);
-            
+
             return $tempPath;
         } catch (S3Exception $e) {
             Log::error('[ThumbnailGenerationService] Failed to download asset from S3 for thumbnail generation', [
@@ -1402,7 +1417,7 @@ class ThumbnailGenerationService
         if (!extension_loaded('imagick')) {
             throw new \RuntimeException('PDF thumbnail generation requires Imagick PHP extension');
         }
-        
+
         // Verify ImageMagick can process PDFs (quick check)
         try {
             $imagick = new \Imagick();
@@ -1437,9 +1452,8 @@ class ThumbnailGenerationService
             if (!is_readable($sourcePath)) {
                 throw new \RuntimeException("PDF file is not readable: {$sourcePath}");
             }
-            
-            // Create PDF instance using spatie/pdf-to-image
-            // This uses ImageMagick/Ghostscript under the hood
+
+            // Create PDF instance using spatie/pdf-to-image (sourcePath has .pdf extension for ImageMagick delegate)
             try {
                 $pdf = new \Spatie\PdfToImage\Pdf($sourcePath);
             } catch (\Exception $pdfInitException) {

@@ -211,7 +211,7 @@ class DashboardController extends Controller
             
             $categories = collect();
             if (!empty($categoryIds)) {
-                $categories = Category::whereIn('id', $categoryIds)
+                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
@@ -309,7 +309,7 @@ class DashboardController extends Controller
             
             $categories = collect();
             if (!empty($categoryIds)) {
-                $categories = Category::whereIn('id', $categoryIds)
+                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()

@@ -21,6 +21,9 @@ class PdfPageRenderJob implements ShouldQueue
 
     public int $timeout = 300;
 
+    /** @var array<int,int> */
+    public $backoff = [30, 120, 300];
+
     public function __construct(
         public readonly string $assetId,
         public readonly int $page,
@@ -36,12 +39,17 @@ class PdfPageRenderJob implements ShouldQueue
             : null;
         $asset = $version?->asset ?: Asset::with(['storageBucket', 'tenant', 'currentVersion'])->findOrFail($this->assetId);
 
-        $mime = strtolower((string) $asset->mime_type);
-        if (!str_contains($mime, 'pdf')) {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $extension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $activeVersion = $version ?: $asset->currentVersion;
+        $pathExtension = $activeVersion?->file_path
+            ? strtolower(pathinfo($activeVersion->file_path, PATHINFO_EXTENSION))
+            : '';
+        $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
+        if (!$isPdf) {
             return;
         }
 
-        $activeVersion = $version ?: $asset->currentVersion;
         $versionNumber = $activeVersion?->version_number ?? 1;
         $page = max(1, $this->page);
 

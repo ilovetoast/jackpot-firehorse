@@ -267,6 +267,12 @@ class Asset extends Model
         'dominant_color_bucket', // Deprecated - kept for safety
         'dominant_hue_group', // Perceptual hue cluster for filtering
         'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
+        'pdf_page_count',
+        'pdf_unsupported_large',
+        'pdf_rendered_pages_count',
+        'pdf_rendered_storage_bytes',
+        'pdf_pages_rendered',
+        'full_pdf_extraction_batch_id',
     ];
 
     /**
@@ -293,6 +299,9 @@ class Asset extends Model
             'rejected_at' => 'datetime',
             'approval_summary_generated_at' => 'datetime', // Phase AF-6
             'pdf_page_count' => 'integer',
+            'pdf_unsupported_large' => 'boolean',
+            'pdf_rendered_pages_count' => 'integer',
+            'pdf_rendered_storage_bytes' => 'integer',
             'pdf_pages_rendered' => 'boolean',
         ];
     }
@@ -957,14 +966,18 @@ class Asset extends Model
      */
     public function requestFullPdfExtraction(?string $requestedBy = null): bool
     {
-        $mime = strtolower((string) $this->mime_type);
-        if (!str_contains($mime, 'pdf')) {
-            return false;
-        }
-
+        $mime = strtolower((string) ($this->mime_type ?? ''));
+        $extension = strtolower(pathinfo((string) ($this->original_filename ?? ''), PATHINFO_EXTENSION));
         $version = $this->relationLoaded('currentVersion')
             ? $this->currentVersion
             : $this->currentVersion()->first();
+        $pathExtension = $version?->file_path
+            ? strtolower(pathinfo($version->file_path, PATHINFO_EXTENSION))
+            : '';
+        $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
+        if (!$isPdf) {
+            return false;
+        }
 
         $metadata = $this->metadata ?? [];
         $metadata['pdf_full_extraction_requested'] = true;

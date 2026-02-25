@@ -117,6 +117,7 @@ class AssetVariantPathResolver
      */
     protected function resolvePdfPagePath(Asset $asset, array $options): string
     {
+        $basePath = $this->getBasePath($asset);
         $page = max(1, (int) ($options['page'] ?? 1));
         $versionNumber = $asset->relationLoaded('currentVersion')
             ? ($asset->currentVersion?->version_number ?? 1)
@@ -133,6 +134,6 @@ class AssetVariantPathResolver
             return $record->storage_path;
         }
 
-        return '';
+        return $basePath . 'pdf_pages/page-' . (int) $page . '.webp';
     }
 }

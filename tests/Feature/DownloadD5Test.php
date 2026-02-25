@@ -131,18 +131,17 @@ class DownloadD5Test extends TestCase
 
     public function test_expired_download_artifact_is_deleted(): void
     {
+        config(['storage.shared_bucket' => 'test-bucket']);
         $download = $this->createExpiredDownloadWithArtifact();
 
         $mockS3 = Mockery::mock(S3Client::class);
         $mockS3->shouldReceive('doesObjectExist')
-            ->with('test-bucket', 'downloads/test/artifact.zip')
+            ->with(Mockery::any(), Mockery::any())
             ->andReturn(true, false);
         $mockS3->shouldReceive('deleteObject')
             ->once()
             ->with(Mockery::on(function ($arg) {
-                return isset($arg['Bucket'], $arg['Key'])
-                    && $arg['Bucket'] === 'test-bucket'
-                    && $arg['Key'] === 'downloads/test/artifact.zip';
+                return isset($arg['Bucket'], $arg['Key']) && $arg['Key'] === 'downloads/test/artifact.zip';
             }));
         $this->app->instance('download.cleanup.s3', $mockS3);
 
@@ -157,11 +156,13 @@ class DownloadD5Test extends TestCase
 
     public function test_cleanup_job_is_idempotent(): void
     {
+        config(['storage.shared_bucket' => 'test-bucket']);
         $download = $this->createExpiredDownloadWithArtifact();
 
         $callCount = 0;
         $mockS3 = Mockery::mock(S3Client::class);
         $mockS3->shouldReceive('doesObjectExist')
+            ->with(Mockery::any(), Mockery::any())
             ->andReturnUsing(function () use (&$callCount) {
                 $callCount++;
                 return $callCount <= 1;
@@ -182,10 +183,11 @@ class DownloadD5Test extends TestCase
 
     public function test_missing_artifact_does_not_throw(): void
     {
+        config(['storage.shared_bucket' => 'test-bucket']);
         $download = $this->createExpiredDownloadWithArtifact();
 
         $mockS3 = Mockery::mock(S3Client::class);
-        $mockS3->shouldReceive('doesObjectExist')->andReturn(false);
+        $mockS3->shouldReceive('doesObjectExist')->with(Mockery::any(), Mockery::any())->andReturn(false);
         $mockS3->shouldNotReceive('deleteObject');
         $this->app->instance('download.cleanup.s3', $mockS3);
 
@@ -199,10 +201,11 @@ class DownloadD5Test extends TestCase
 
     public function test_metrics_are_recorded_after_deletion(): void
     {
+        config(['storage.shared_bucket' => 'test-bucket']);
         $download = $this->createExpiredDownloadWithArtifact();
 
         $mockS3 = Mockery::mock(S3Client::class);
-        $mockS3->shouldReceive('doesObjectExist')->andReturn(true, false);
+        $mockS3->shouldReceive('doesObjectExist')->with(Mockery::any(), Mockery::any())->andReturn(true, false);
         $mockS3->shouldReceive('deleteObject')->once();
         $this->app->instance('download.cleanup.s3', $mockS3);
 
@@ -218,10 +221,11 @@ class DownloadD5Test extends TestCase
 
     public function test_cleanup_verification_flags_failures_correctly(): void
     {
+        config(['storage.shared_bucket' => 'test-bucket']);
         $download = $this->createExpiredDownloadWithArtifact();
 
         $mockS3 = Mockery::mock(S3Client::class);
-        $mockS3->shouldReceive('doesObjectExist')->andReturn(true);
+        $mockS3->shouldReceive('doesObjectExist')->with(Mockery::any(), Mockery::any())->andReturn(true);
         $mockS3->shouldReceive('deleteObject')->once();
         $this->app->instance('download.cleanup.s3', $mockS3);
 

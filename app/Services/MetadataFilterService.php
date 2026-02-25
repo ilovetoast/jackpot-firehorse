@@ -445,8 +445,8 @@ class MetadataFilterService
                 continue;
             }
 
-            // Log field properties before exclusion check
-            \App\Support\Logging\PipelineLogger::error('SCHEMA CHECK', [
+            // Log field properties before exclusion check (debug)
+            \App\Support\Logging\PipelineLogger::info('SCHEMA CHECK', [
                 'field_key' => $field['key'] ?? null,
                 'field_id' => $field['field_id'] ?? null,
                 'is_filterable' => $field['is_filterable'] ?? false,

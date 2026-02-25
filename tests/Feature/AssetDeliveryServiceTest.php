@@ -139,8 +139,8 @@ class AssetDeliveryServiceTest extends TestCase
         $pathWithPage = $resolver->resolve($this->asset, AssetVariant::PDF_PAGE->value, ['page' => 3]);
         $pathDefault = $resolver->resolve($this->asset, AssetVariant::PDF_PAGE->value, []);
 
-        $this->assertStringContainsString('/pdf_pages/page-3.webp', $pathWithPage);
-        $this->assertSame('', $pathDefault);
+        $this->assertStringContainsString('pdf_pages/page-3.webp', $pathWithPage);
+        $this->assertStringContainsString('pdf_pages/page-1.webp', $pathDefault);
     }
 
     public function test_asset_variant_requires_options(): void

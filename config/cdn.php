@@ -37,4 +37,16 @@ return [
 
     'public_download_ttl' => (int) env('CDN_PUBLIC_DOWNLOAD_TTL', 900),
 
+    /*
+    |--------------------------------------------------------------------------
+    | PDF Page Signed URL TTLs (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | Admin/internal viewers use shorter signed URLs.
+    | Public viewers use a longer TTL to reduce regeneration churn.
+    |
+    */
+    'pdf_page_admin_ttl' => (int) env('CDN_PDF_PAGE_ADMIN_TTL', 300),
+    'pdf_page_public_ttl' => (int) env('CDN_PDF_PAGE_PUBLIC_TTL', 1800),
+
 ];

@@ -113,4 +113,15 @@ return [
     */
     'admin_signed_url_ttl' => (int) env('CLOUDFRONT_ADMIN_SIGNED_URL_TTL', 300),
 
+    /*
+    |--------------------------------------------------------------------------
+    | PDF Page Signed URL TTLs (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | Mirrored values for operational visibility; runtime reads cdn.php.
+    |
+    */
+    'pdf_page_admin_ttl' => (int) env('CLOUDFRONT_PDF_PAGE_ADMIN_TTL', env('CDN_PDF_PAGE_ADMIN_TTL', 300)),
+    'pdf_page_public_ttl' => (int) env('CLOUDFRONT_PDF_PAGE_PUBLIC_TTL', env('CDN_PDF_PAGE_PUBLIC_TTL', 1800)),
+
 ];

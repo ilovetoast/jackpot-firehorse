@@ -15,6 +15,41 @@ class PdfPageRenderingService
     }
 
     /**
+     * Get PDF page count for an asset (for thumbnail guardrails).
+     * Uses stored pdf_page_count when available; otherwise downloads and detects.
+     *
+     * @param bool $forceDetect If true, always detect from file; otherwise use stored count when > 0
+     * @return int Page count (0 if not a PDF or detection fails)
+     */
+    public function getPdfPageCount(Asset $asset, bool $forceDetect = false): int
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (!str_contains($mime, 'pdf')) {
+            return 0;
+        }
+
+        if (!$forceDetect) {
+            $stored = (int) ($asset->pdf_page_count ?? 0);
+            if ($stored > 0) {
+                return $stored;
+            }
+        }
+
+        $tempPath = null;
+        try {
+            $version = $asset->relationLoaded('currentVersion') ? $asset->currentVersion : $asset->currentVersion()->first();
+            $tempPath = $this->downloadSourcePdfToTemp($asset, $version);
+            return $this->detectPageCount($tempPath);
+        } catch (\Throwable $e) {
+            return 0;
+        } finally {
+            if ($tempPath && file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
+        }
+    }
+
+    /**
      * Download source PDF to a local temp path.
      */
     public function downloadSourcePdfToTemp(Asset $asset, ?AssetVersion $version = null): string

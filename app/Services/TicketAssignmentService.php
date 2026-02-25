@@ -150,15 +150,15 @@ class TicketAssignmentService
      * Uses Spatie permissions to query users with the role.
      *
      * @param string $roleName Role name (e.g., 'site_support', 'site_admin')
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return \Illuminate\Database\Eloquent\Collection<int, \App\Models\User>
      */
     protected function getUsersWithRole(string $roleName): \Illuminate\Database\Eloquent\Collection
     {
         $role = Role::where('name', $roleName)->first();
         if (!$role) {
-            return collect();
+            return new \Illuminate\Database\Eloquent\Collection([]);
         }
 
-        return $role->users;
+        return \Illuminate\Database\Eloquent\Collection::make($role->users->all());
     }
 }

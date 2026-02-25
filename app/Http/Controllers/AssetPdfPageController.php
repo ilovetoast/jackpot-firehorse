@@ -33,12 +33,17 @@ class AssetPdfPageController extends Controller
             return response()->json(['message' => 'Page must be >= 1.'], 422);
         }
 
-        $mime = strtolower((string) $asset->mime_type);
-        if (!str_contains($mime, 'pdf')) {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $extension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $asset->loadMissing('currentVersion');
+        $pathExtension = $asset->currentVersion?->file_path
+            ? strtolower(pathinfo($asset->currentVersion->file_path, PATHINFO_EXTENSION))
+            : '';
+        $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
+        if (!$isPdf) {
             return response()->json(['message' => 'Asset is not a PDF.'], 422);
         }
 
-        $asset->loadMissing('currentVersion');
         $versionNumber = $asset->currentVersion?->version_number ?? 1;
         $pageCount = (int) ($asset->pdf_page_count ?? 0);
 
@@ -57,13 +62,15 @@ class AssetPdfPageController extends Controller
             ->where('page_number', $page)
             ->first();
 
-        $url = $this->assetDeliveryService->getPdfPageUrl(
-            $asset,
-            $page,
-            DeliveryContext::AUTHENTICATED->value
-        );
+        // Only return "ready" with a URL when the page has been rendered (completed record).
+        // Otherwise we would return a URL for the expected path and the file may not exist yet
+        // (thumbnail/render failed or still processing), causing 404 in local/staging.
+        $isCompleted = $record && $record->status === 'completed' && !empty($record->storage_path);
+        $url = $isCompleted
+            ? $this->assetDeliveryService->getPdfPageUrl($asset, $page, DeliveryContext::AUTHENTICATED->value)
+            : '';
         $placeholder = (string) config('assets.delivery.placeholder_url', '');
-        $isReady = $url !== '' && $url !== $placeholder;
+        $isReady = $isCompleted && $url !== '' && $url !== $placeholder;
 
         if ($isReady) {
             return response()->json([
@@ -71,6 +78,16 @@ class AssetPdfPageController extends Controller
                 'page' => $page,
                 'page_count' => $pageCount > 0 ? $pageCount : null,
                 'url' => $url,
+            ]);
+        }
+
+        // Terminal failure: page render failed (e.g. Imagick error). Return 200 so client stops polling and shows error.
+        if ($record && $record->status === 'failed') {
+            return response()->json([
+                'status' => 'failed',
+                'page' => $page,
+                'page_count' => $pageCount > 0 ? $pageCount : null,
+                'message' => $record->error ?? 'PDF page could not be rendered.',
             ]);
         }
 
