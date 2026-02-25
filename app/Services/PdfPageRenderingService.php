@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\AssetVersion;
+use App\Services\AssetVariantPathResolver;
 use RuntimeException;
 
 class PdfPageRenderingService
@@ -152,7 +153,6 @@ class PdfPageRenderingService
             $imagick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
             $imagick->thumbnailImage($targetWidth, $targetHeight, true, true);
             $imagick->setImageFormat('webp');
-            $imagick->setImageCompression(\Imagick::COMPRESSION_WEBP);
             $imagick->setImageCompressionQuality($quality);
             $imagick->stripImage();
 
@@ -183,7 +183,7 @@ class PdfPageRenderingService
     }
 
     /**
-     * Upload rendered PDF page image to tenant bucket.
+     * Upload rendered PDF page to deterministic S3 path (permanent derivative; never deleted).
      */
     public function uploadRenderedPage(
         Asset $asset,
@@ -197,19 +197,7 @@ class PdfPageRenderingService
             throw new RuntimeException('Asset storage bucket is missing.');
         }
 
-        $versionNumber = $version?->version_number
-            ?? ($asset->relationLoaded('currentVersion')
-                ? ($asset->currentVersion?->version_number ?? 1)
-                : (int) ($asset->currentVersion()->value('version_number') ?? 1));
-
-        $extension = pathinfo($localPath, PATHINFO_EXTENSION) ?: 'webp';
-        $targetPath = $this->assetPathGenerator->generatePdfPagePath(
-            $asset->tenant,
-            $asset,
-            $versionNumber,
-            $page,
-            $extension
-        );
+        $targetPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page);
 
         $this->tenantBucketService->getS3Client()->putObject([
             'Bucket' => $bucket->name,

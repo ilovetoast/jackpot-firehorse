@@ -51,7 +51,7 @@ class AssetVariantPathResolver
             AssetVariant::THUMB_PREVIEW => $asset->metadata['preview_thumbnails']['preview']['path'] ?? '',
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
-            AssetVariant::PDF_PAGE => $basePath !== '' ? $this->resolvePdfPagePath($asset, $options) : '',
+            AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
         };
     }
 
@@ -113,11 +113,23 @@ class AssetVariantPathResolver
     }
 
     /**
-     * Resolve rendered PDF page path from database records.
+     * Deterministic S3 path for a PDF page derivative.
+     * Permanent path; no version or randomness. Used for store-once, never regenerate.
+     *
+     * Format: assets/{tenant_id}/{asset_id}/pdf-pages/page_{n}.webp
      */
-    protected function resolvePdfPagePath(Asset $asset, array $options): string
+    public static function resolvePdfPagePath(Asset $asset, int $pageNumber): string
     {
-        $basePath = $this->getBasePath($asset);
+        $page = max(1, $pageNumber);
+
+        return 'assets/' . $asset->tenant_id . '/' . $asset->id . '/pdf-pages/page_' . $page . '.webp';
+    }
+
+    /**
+     * Resolve rendered PDF page path: from DB record when available, else deterministic path.
+     */
+    protected function resolvePdfPagePathFromVariant(Asset $asset, array $options): string
+    {
         $page = max(1, (int) ($options['page'] ?? 1));
         $versionNumber = $asset->relationLoaded('currentVersion')
             ? ($asset->currentVersion?->version_number ?? 1)
@@ -134,6 +146,6 @@ class AssetVariantPathResolver
             return $record->storage_path;
         }
 
-        return $basePath . 'pdf_pages/page-' . (int) $page . '.webp';
+        return self::resolvePdfPagePath($asset, $page);
     }
 }

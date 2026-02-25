@@ -265,6 +265,14 @@ class TenantBucketService
     }
 
     /**
+     * Check if an object exists in S3 (for deterministic derivative skip-when-present).
+     */
+    public function objectExists(StorageBucket $bucket, string $key): bool
+    {
+        return $this->s3Client->doesObjectExist($bucket->name, $key);
+    }
+
+    /**
      * Resolve ACTIVE bucket if it exists (no throw). Used by getOrProvisionBucket in local/testing.
      */
     protected function resolveActiveBucketOrFailIfExists(Tenant $tenant): ?StorageBucket

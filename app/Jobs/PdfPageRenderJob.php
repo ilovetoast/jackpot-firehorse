@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Models\Asset;
 use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
+use App\Services\AssetVariantPathResolver;
 use App\Services\PdfPageRenderingService;
+use App\Services\TenantBucketService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -32,8 +34,10 @@ class PdfPageRenderJob implements ShouldQueue
         $this->onQueue(config('queue.pdf_processing_queue', 'pdf-processing'));
     }
 
-    public function handle(PdfPageRenderingService $pdfPageRenderingService): void
-    {
+    public function handle(
+        PdfPageRenderingService $pdfPageRenderingService,
+        TenantBucketService $tenantBucketService
+    ): void {
         $version = $this->assetVersionId
             ? AssetVersion::with(['asset.storageBucket', 'asset.tenant', 'asset.currentVersion'])->find($this->assetVersionId)
             : null;
@@ -52,6 +56,32 @@ class PdfPageRenderJob implements ShouldQueue
 
         $versionNumber = $activeVersion?->version_number ?? 1;
         $page = max(1, $this->page);
+
+        $deterministicPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page);
+        $bucket = $asset->storageBucket;
+
+        if ($bucket && $tenantBucketService->objectExists($bucket, $deterministicPath)) {
+            $pageRecord = AssetPdfPage::updateOrCreate(
+                [
+                    'asset_id' => $asset->id,
+                    'version_number' => $versionNumber,
+                    'page_number' => $page,
+                ],
+                [
+                    'tenant_id' => $asset->tenant_id,
+                    'asset_version_id' => $activeVersion?->id,
+                    'storage_path' => $deterministicPath,
+                    'status' => 'completed',
+                    'error' => null,
+                    'rendered_at' => now(),
+                ]
+            );
+            $pageCount = (int) ($asset->pdf_page_count ?? 0);
+            if ($pageCount > 0) {
+                $this->updateExtractionCompletionFlag($asset, $versionNumber, $pageCount);
+            }
+            return;
+        }
 
         $pageRecord = AssetPdfPage::updateOrCreate(
             [
@@ -118,6 +148,10 @@ class PdfPageRenderJob implements ShouldQueue
             ]);
 
             $this->updateExtractionCompletionFlag($asset, $versionNumber, $pageCount);
+
+            if ($page === 1 && !$asset->pdf_pages_rendered && $pageCount > 1) {
+                RenderRemainingPdfPagesJob::dispatch($asset->id, $activeVersion?->id);
+            }
         } catch (\Throwable $e) {
             Log::error('[PdfPageRenderJob] Failed to render PDF page', [
                 'asset_id' => $asset->id,

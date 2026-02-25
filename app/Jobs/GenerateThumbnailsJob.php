@@ -178,18 +178,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $asset = $version->asset;
                 $sourcePath = $version->file_path;
 
-                // Phase 7: Delete existing thumbnails for this version (idempotent rerun)
+                // Phase 7: Delete existing thumbnails for this version (idempotent rerun).
+                // PDF page derivatives are NOT deleted — they are permanent deterministic variants (assets/.../pdf-pages/).
                 $thumbnailsPrefix = dirname($version->file_path) . '/thumbnails/';
                 if ($asset->storageBucket) {
                     $s3Client = $this->createS3Client();
                     $this->deleteS3Prefix($s3Client, $asset->storageBucket->name, $thumbnailsPrefix);
-                    $pdfPagesPrefix = dirname($version->file_path) . '/pdf_pages/';
-                    $this->deleteS3Prefix($s3Client, $asset->storageBucket->name, $pdfPagesPrefix);
                 }
-                AssetPdfPage::query()
-                    ->where('asset_id', $asset->id)
-                    ->where('version_number', $version->version_number)
-                    ->delete();
 
                 Log::info('[GenerateThumbnailsJob] Version-aware mode', [
                     'asset_id' => $asset->id,

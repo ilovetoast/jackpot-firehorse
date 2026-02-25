@@ -132,4 +132,23 @@ class AssetVariantPathResolverTest extends TestCase
 
         $this->assertSame('tenants/abc/assets/123/v1/pdf_pages/page-5.webp', $path);
     }
+
+    public function test_resolve_pdf_page_deterministic_path(): void
+    {
+        $asset = $this->createAsset(['storage_root_path' => 'tenants/abc/assets/123/v1/original.pdf']);
+
+        $path = AssetVariantPathResolver::resolvePdfPagePath($asset, 3);
+
+        $this->assertSame('assets/' . $asset->tenant_id . '/' . $asset->id . '/pdf-pages/page_3.webp', $path);
+    }
+
+    public function test_resolve_pdf_page_fallback_when_no_record(): void
+    {
+        $asset = $this->createAsset(['storage_root_path' => 'tenants/abc/assets/123/v1/original.pdf']);
+
+        $resolver = app(AssetVariantPathResolver::class);
+        $path = $resolver->resolve($asset, AssetVariant::PDF_PAGE->value, ['page' => 2]);
+
+        $this->assertSame('assets/' . $asset->tenant_id . '/' . $asset->id . '/pdf-pages/page_2.webp', $path);
+    }
 }
