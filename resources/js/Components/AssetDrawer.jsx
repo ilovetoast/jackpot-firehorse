@@ -1680,6 +1680,16 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             src={pdfPageCache[pdfCurrentPage]}
                                             alt={`PDF page ${pdfCurrentPage}`}
                                             className="w-full h-full object-contain"
+                                            onError={() => {
+                                                setPdfPageCache(prev => {
+                                                    const next = { ...prev }
+                                                    delete next[pdfCurrentPage]
+                                                    return next
+                                                })
+                                                setPdfPageLoading(true)
+                                                setPdfPageError(null)
+                                                fetchPdfPage(pdfCurrentPage)
+                                            }}
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
