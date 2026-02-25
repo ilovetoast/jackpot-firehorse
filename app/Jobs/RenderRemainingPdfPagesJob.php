@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Renders remaining PDF pages in background after first page is viewed.
@@ -44,15 +45,28 @@ class RenderRemainingPdfPagesJob implements ShouldQueue
 
         $pageCount = (int) ($asset->pdf_page_count ?? 0);
         if ($pageCount < 2) {
+            Log::info('[RenderRemainingPdfPagesJob] Skipping - page count < 2', [
+                'asset_id' => $asset->id,
+                'pdf_page_count' => $pageCount,
+            ]);
             return;
         }
 
         $versionNumber = $asset->currentVersion?->version_number ?? 1;
+        $dispatched = [];
         for ($page = 1; $page <= $pageCount; $page++) {
             $path = AssetVariantPathResolver::resolvePdfPagePath($asset, $page, $versionNumber);
             if (!$tenantBucketService->objectExists($asset->storageBucket, $path)) {
                 PdfPageRenderJob::dispatch($asset->id, $page, $asset->currentVersion?->id);
+                $dispatched[] = $page;
             }
+        }
+        if ($dispatched !== []) {
+            Log::info('[RenderRemainingPdfPagesJob] Dispatched PDF page render jobs', [
+                'asset_id' => $asset->id,
+                'pages' => $dispatched,
+                'page_count' => $pageCount,
+            ]);
         }
     }
 }
