@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\MetadataCache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -53,6 +54,30 @@ class MetadataSchemaResolver
             throw new \InvalidArgumentException("Invalid asset_type: {$assetType}. Must be 'image', 'video', or 'document'.");
         }
 
+        $tagged = MetadataCache::taggedStore($tenantId);
+        if ($tagged !== null) {
+            $key = MetadataCache::schemaKey($tenantId, $brandId, $categoryId, $assetType);
+            return $tagged->rememberForever($key, fn () => $this->resolveUncached($tenantId, $brandId, $categoryId, $assetType));
+        }
+
+        return $this->resolveUncached($tenantId, $brandId, $categoryId, $assetType);
+    }
+
+    /**
+     * Resolve schema without cache (used by resolve() and as cache callback).
+     *
+     * @param int $tenantId
+     * @param int|null $brandId
+     * @param int|null $categoryId
+     * @param string $assetType
+     * @return array{fields: array}
+     */
+    protected function resolveUncached(
+        int $tenantId,
+        ?int $brandId,
+        ?int $categoryId,
+        string $assetType
+    ): array {
         // Load all metadata fields that apply to this asset type
         // Phase C3: Pass tenant_id to filter tenant-scoped fields
         $fields = $this->loadApplicableFields($assetType, $tenantId);
@@ -61,6 +86,15 @@ class MetadataSchemaResolver
         $fieldVisibility = $this->loadFieldVisibility($tenantId, $brandId, $categoryId, array_keys($fields));
         $optionVisibility = $this->loadOptionVisibility($tenantId, $brandId, $categoryId);
 
+        // Eager load all metadata_options for select/multiselect fields in one query (avoid N+1)
+        $selectMultiselectFieldIds = [];
+        foreach ($fields as $field) {
+            if (in_array($field->type ?? '', ['select', 'multiselect'], true)) {
+                $selectMultiselectFieldIds[] = $field->id;
+            }
+        }
+        $optionsByFieldId = $this->loadAllOptionsForFieldIds($selectMultiselectFieldIds);
+
         // Resolve each field
         $resolvedFields = [];
         foreach ($fields as $fieldId => $field) {
@@ -68,7 +102,8 @@ class MetadataSchemaResolver
                 $field,
                 $fieldVisibility[$fieldId] ?? [],
                 $optionVisibility,
-                $assetType
+                $assetType,
+                $optionsByFieldId[$fieldId] ?? []
             );
 
             // Only include fields that are visible (not hidden)
@@ -314,19 +349,48 @@ class MetadataSchemaResolver
     }
 
     /**
+     * Load all metadata_options for the given field IDs in one query.
+     * Returns map of field_id => list of option rows (ordered by system_label asc).
+     *
+     * @param int[] $fieldIds
+     * @return array<int, \Illuminate\Support\Collection>
+     */
+    protected function loadAllOptionsForFieldIds(array $fieldIds): array
+    {
+        if (empty($fieldIds)) {
+            return [];
+        }
+
+        $rows = DB::table('metadata_options')
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->orderBy('system_label', 'asc')
+            ->get();
+
+        $byFieldId = [];
+        foreach ($rows as $row) {
+            $byFieldId[$row->metadata_field_id] = $byFieldId[$row->metadata_field_id] ?? collect();
+            $byFieldId[$row->metadata_field_id]->push($row);
+        }
+
+        return $byFieldId;
+    }
+
+    /**
      * Resolve a single metadata field with its options.
      *
      * @param object $field Raw field data from database
      * @param array $visibilityOverrides Visibility flags from overrides
      * @param array $optionVisibility Option visibility map
      * @param string $assetType
+     * @param \Illuminate\Support\Collection|array $preloadedOptions Optional pre-loaded option rows for this field (avoids N+1)
      * @return array Resolved field schema
      */
     protected function resolveField(
         object $field,
         array $visibilityOverrides,
         array $optionVisibility,
-        string $assetType
+        string $assetType,
+        $preloadedOptions = []
     ): array {
         // Start with system defaults
         $isHidden = false; // Category suppression only (big toggle)
@@ -389,10 +453,13 @@ class MetadataSchemaResolver
         // Resolve display label (stub for future label override table)
         $displayLabel = $this->resolveDisplayLabel($field);
 
-        // Load and resolve options for select/multiselect fields
+        // Load and resolve options for select/multiselect fields (use pre-loaded when provided to avoid N+1)
         $options = [];
         if (in_array($field->type, ['select', 'multiselect'], true)) {
-            $options = $this->resolveOptions($field->id, $optionVisibility);
+            $optionRows = $preloadedOptions instanceof \Illuminate\Support\Collection
+                ? $preloadedOptions
+                : collect($preloadedOptions);
+            $options = $this->resolveOptionsFromRows($optionRows, $optionVisibility);
         }
 
         return [
@@ -443,7 +510,35 @@ class MetadataSchemaResolver
     }
 
     /**
-     * Resolve options for a select/multiselect field.
+     * Resolve options from pre-loaded option rows (visibility applied).
+     * Used when options are batch-loaded to avoid N+1.
+     *
+     * @param \Illuminate\Support\Collection|iterable $optionRows
+     * @param array $optionVisibility Map of option_id => is_hidden
+     * @return array Resolved options (only visible ones)
+     */
+    protected function resolveOptionsFromRows($optionRows, array $optionVisibility): array
+    {
+        $resolved = [];
+        foreach ($optionRows as $option) {
+            $isHidden = $optionVisibility[$option->id] ?? false;
+            if (!$isHidden) {
+                $resolved[] = [
+                    'option_id' => $option->id,
+                    'value' => $option->value,
+                    'display_label' => $option->system_label,
+                    'label' => $option->system_label,
+                    'color' => $option->color ?? null,
+                    'icon' => $option->icon ?? null,
+                ];
+            }
+        }
+        return $resolved;
+    }
+
+    /**
+     * Resolve options for a select/multiselect field (single-field query).
+     * Prefer batch-loading via loadAllOptionsForFieldIds + resolveOptionsFromRows to avoid N+1.
      *
      * @param int $fieldId
      * @param array $optionVisibility Map of option_id => is_hidden
@@ -453,26 +548,9 @@ class MetadataSchemaResolver
     {
         $options = DB::table('metadata_options')
             ->where('metadata_field_id', $fieldId)
-            ->orderBy('system_label')
+            ->orderBy('system_label', 'asc')
             ->get();
 
-        $resolved = [];
-        foreach ($options as $option) {
-            // Check if option is hidden by visibility override
-            $isHidden = $optionVisibility[$option->id] ?? false;
-
-            if (!$isHidden) {
-                $resolved[] = [
-                    'option_id' => $option->id,
-                    'value' => $option->value,
-                    'display_label' => $option->system_label, // TODO: Apply label overrides in future step
-                    'label' => $option->system_label,
-                    'color' => $option->color ?? null,
-                    'icon' => $option->icon ?? null,
-                ];
-            }
-        }
-
-        return $resolved;
+        return $this->resolveOptionsFromRows($options, $optionVisibility);
     }
 }

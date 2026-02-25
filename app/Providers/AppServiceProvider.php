@@ -15,6 +15,7 @@ use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
@@ -76,6 +77,12 @@ class AppServiceProvider extends ServiceProvider
         \App\Models\Ticket::observe(\App\Observers\TicketObserver::class);
         \App\Models\TicketMessage::observe(\App\Observers\TicketMessageObserver::class);
 
+        // Metadata schema cache invalidation (tenant-scoped tagged cache)
+        \App\Models\MetadataField::observe(\App\Observers\MetadataFieldObserver::class);
+        \App\Models\MetadataOption::observe(\App\Observers\MetadataOptionObserver::class);
+        \App\Models\MetadataFieldVisibility::observe(\App\Observers\MetadataFieldVisibilityObserver::class);
+        \App\Models\MetadataOptionVisibility::observe(\App\Observers\MetadataOptionVisibilityObserver::class);
+
         // Register event listeners
         Event::listen(AssetUploaded::class, ProcessAssetOnUpload::class);
         Event::listen(AssetPendingApproval::class, SendAssetPendingApprovalNotification::class);
@@ -88,6 +95,11 @@ class AppServiceProvider extends ServiceProvider
 
         // Unified Operations: Capture queue failures for asset-processing jobs
         Event::listen(JobFailed::class, QueueFailureListener::class);
+
+        // Surface N+1 lazy loading in non-production (Sentry/local)
+        if (! app()->isProduction()) {
+            Model::preventLazyLoading();
+        }
     }
 
     /**
