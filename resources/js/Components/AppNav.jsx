@@ -402,7 +402,7 @@ export default function AppNav({ brand, tenant }) {
 
                         {/* Main menu: Dashboard, Assets, Executions, Collections, Generative, Downloads (C12: flag + .app-nav-main-links for CSS) */}
                         {isAppPage ? (isCollectionOnlyNav ? (
-                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center" style={{ left: '18rem' }} data-collection-only="true">
+                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center left-64 xl:left-[18rem]" data-collection-only="true">
                                 {['Dashboard', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
                                     <span
                                         key={label}
@@ -480,7 +480,7 @@ export default function AppNav({ brand, tenant }) {
                                 </span>
                             </div>
                         ) : (
-                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
+                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute left-64 xl:left-[18rem]">
                                 <Link
                                     href="/app/dashboard"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
@@ -627,7 +627,7 @@ export default function AppNav({ brand, tenant }) {
                             </div>
                         )}
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 lg:gap-4">
                         {/* C12: Collection access link on the right when in collection-only mode */}
                         {isCollectionOnlyNav && effectiveCollection?.id && (
                             <Link
@@ -640,11 +640,11 @@ export default function AppNav({ brand, tenant }) {
                                 Collection access
                             </Link>
                         )}
-                        {/* Right-side nav: Brand Guidelines, Downloads */}
+                        {/* Right-side nav: Brand Guidelines, Downloads — text hidden below lg for responsive scaling */}
                         {isAppPage && (
                             <Link
                                 href="/app/brand-guidelines"
-                                className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                className="hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                 style={{
                                     color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                 }}
@@ -666,11 +666,11 @@ export default function AppNav({ brand, tenant }) {
                                     title="Downloads"
                                 >
                                     <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                                    <span className="hidden md:inline">Downloads</span>
+                                    <span className="hidden lg:inline">Downloads</span>
                                 </Link>
                                 <Link
                                     href="/app/brand-guidelines"
-                                    className="md:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className="lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                     style={{
                                         color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
                                             ? (activeBrand?.primary_color || '#4f46e5')
@@ -684,8 +684,8 @@ export default function AppNav({ brand, tenant }) {
                             </>
                         )}
                         
-                        {/* User Menu (Notifications next to user name) */}
-                        <div className="flex items-center gap-2">
+                        {/* User Menu (Notifications next to user name) — name/chevron hidden below md for icon-only */}
+                        <div className="flex items-center gap-2 lg:gap-4">
                             {/* Phase AF-3: Notification Bell - next to user name */}
                             <div className="hidden sm:block">
                                 <NotificationBell textColor={textColor} />
@@ -699,15 +699,15 @@ export default function AppNav({ brand, tenant }) {
                                     aria-haspopup="true"
                                 >
                                     <span className="sr-only">Open user menu</span>
-                                    <span className="text-sm font-medium hidden sm:block" style={{ color: textColor }}>
+                                    <span className="text-sm font-medium hidden md:block" style={{ color: textColor }}>
                                         {auth.user?.first_name && auth.user?.last_name
                                             ? `${auth.user.first_name} ${auth.user.last_name}`
                                             : auth.user?.first_name || auth.user?.email}
                                     </span>
-                                    <svg className="hidden sm:block ml-2 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <svg className="hidden md:block ml-2 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                         <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                                     </svg>
-                                    <div className="ml-0 sm:ml-3">
+                                    <div className="ml-0 md:ml-3">
                                         <Avatar
                                             avatarUrl={auth.user?.avatar_url}
                                             firstName={auth.user?.first_name}

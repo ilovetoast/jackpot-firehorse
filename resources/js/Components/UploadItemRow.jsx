@@ -757,7 +757,7 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
             {/* Phase 3.0: Enhanced expanded details section */}
             {isExpanded && (
                 <div 
-                    className={`px-4 py-3 border-t transition-colors ${
+                    className={`px-4 py-2 border-t transition-colors ${
                         isActive ? 'bg-blue-50/20 border-blue-100' :
                         isComplete ? 'bg-green-50/20 border-green-100' :
                         isFailed ? 'bg-red-50/20 border-red-100' :
@@ -765,17 +765,17 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                     }`}
                     onClick={(e) => e.stopPropagation()} // Prevent collapse when clicking inside
                 >
-                    <div className="space-y-6">
+                    <div className="space-y-3">
                         {/* File info */}
                         <div>
-                            <h4 className="text-xs font-medium text-gray-700 mb-2">File Information</h4>
-                            <dl className="grid grid-cols-2 gap-4 text-sm">
-                                <div>
-                                    <dt className="text-gray-500 mb-1">Original filename</dt>
+                            <h4 className="text-xs font-medium text-gray-700 mb-1">File Information</h4>
+                            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                                <div className="min-w-0">
+                                    <dt className="text-gray-500 text-xs mb-0.5">Original filename</dt>
                                     <dd className="text-gray-900 font-mono text-xs break-all">{originalFilename}</dd>
                                 </div>
-                                <div>
-                                    <dt className="text-gray-500 mb-1">Resolved filename</dt>
+                                <div className="min-w-0">
+                                    <dt className="text-gray-500 text-xs mb-0.5">Resolved filename</dt>
                                     <dd className="text-gray-900">
                                         {filenameEditing ? (
                                             <div>
@@ -822,24 +822,24 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                                                 )}
                                             </button>
                                         )}
-                                        <p className="mt-1 text-xs text-gray-400">Used for storage and URLs</p>
+                                        <p className="mt-0.5 text-xs text-gray-400">Used for storage and URLs</p>
                                     </dd>
                                 </div>
-                                <div>
-                                    <dt className="text-gray-500">File size</dt>
-                                    <dd className="text-gray-900">{item.file?.size ? formatFileSize(item.file.size) : 'Unknown'}</dd>
+                                <div className="flex items-baseline gap-2 min-w-0">
+                                    <dt className="text-gray-500 text-xs flex-shrink-0">File size</dt>
+                                    <dd className="text-gray-900 text-xs truncate">{item.file?.size ? formatFileSize(item.file.size) : 'Unknown'}</dd>
                                 </div>
-                                <div>
-                                    <dt className="text-gray-500">MIME type</dt>
-                                    <dd className="text-gray-900">{item.file?.type || 'Unknown'}</dd>
+                                <div className="flex items-baseline gap-2 min-w-0">
+                                    <dt className="text-gray-500 text-xs flex-shrink-0">MIME type</dt>
+                                    <dd className="text-gray-900 text-xs truncate">{item.file?.type || 'Unknown'}</dd>
                                 </div>
-                                <div>
-                                    <dt className="text-gray-500">Progress</dt>
-                                    <dd className="text-gray-900">{item.progress}%</dd>
+                                <div className="flex items-baseline gap-2 min-w-0">
+                                    <dt className="text-gray-500 text-xs flex-shrink-0">Progress</dt>
+                                    <dd className="text-gray-900 text-xs">{item.progress}%</dd>
                                 </div>
                                 {item.uploadSessionId && (
-                                    <div>
-                                        <dt className="text-gray-500">Session ID</dt>
+                                    <div className="min-w-0 col-span-2">
+                                        <dt className="text-gray-500 text-xs mb-0.5">Session ID</dt>
                                         <dd className="text-gray-900 font-mono text-xs break-all">
                                             {item.uploadSessionId}
                                         </dd>
@@ -851,15 +851,15 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                         {/* Effective metadata (read-only display) - safe access */}
                         {effectiveMetadata && Object.keys(effectiveMetadata).length > 0 && (
                             <div>
-                                <h4 className="text-xs font-medium text-gray-700 mb-2">Effective Metadata</h4>
-                                <dl className="space-y-2">
+                                <h4 className="text-xs font-medium text-gray-700 mb-1">Effective Metadata</h4>
+                                <dl className="space-y-1">
                                     {Object.entries(effectiveMetadata).map(([key, value]) => {
                                         const field = availableFields?.find?.(f => f.key === key);
                                         const isOverridden = isFieldOverridden(key);
                                         
                                         return (
-                                            <div key={key} className="flex items-start">
-                                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0 flex items-center gap-1">
+                                            <div key={key} className="flex items-start gap-2">
+                                                <dt className="text-xs text-gray-500 w-28 flex-shrink-0 flex items-center gap-1">
                                                     {field?.label || key}
                                                     {isOverridden && (
                                                         <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">
@@ -867,7 +867,7 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                                                         </span>
                                                     )}
                                                 </dt>
-                                                <dd className="text-sm text-gray-900 flex-1">
+                                                <dd className="text-xs text-gray-900 flex-1 min-w-0">
                                                     {Array.isArray(value) ? (
                                                         <span className="inline-flex flex-wrap gap-1">
                                                             {value.map((v, i) => (
@@ -896,8 +896,8 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
 
                         {/* Per-file overrides section - safe access */}
                         {Array.isArray(availableFields) && availableFields.length > 0 && (
-                            <div className="border-t border-gray-200 pt-4">
-                                <div className="flex items-center justify-between mb-3">
+                            <div className="border-t border-gray-200 pt-2">
+                                <div className="flex items-center justify-between mb-2">
                                     <h4 className="text-xs font-medium text-gray-700">
                                         Overrides (this file only)
                                     </h4>

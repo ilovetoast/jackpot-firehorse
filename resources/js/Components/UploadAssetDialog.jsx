@@ -4421,7 +4421,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                             {/* C9.2: Upload-time AI skip controls (Admin/Brand Manager only) */}
                             {isAdminOrBrandManager && v2Files.length > 0 && (
-                                <div className="mb-4 rounded-md bg-gray-50 border border-gray-200 p-4">
+                                <div className="mb-4 min-w-[42rem] rounded-md bg-gray-50 border border-gray-200 p-4">
                                     <h4 className="text-sm font-medium text-gray-900 mb-3">AI Processing Options</h4>
                                     <div className="space-y-3">
                                         <label className="flex items-start">

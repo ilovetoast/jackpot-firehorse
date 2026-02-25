@@ -660,12 +660,12 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
                 {/* Sidebar - Full Height */}
                 <div className="hidden lg:flex lg:flex-shrink-0">
-                    <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
-                        <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-                            <nav className="mt-5 flex-1 px-2 space-y-1">
+                    <div className="flex flex-col w-64 xl:w-72 h-full transition-[width] duration-200" style={{ backgroundColor: sidebarColor }}>
+                        <div className="flex-1 flex flex-col pt-4 pb-3 lg:pt-5 lg:pb-4 overflow-y-auto">
+                            <nav className="mt-3 lg:mt-5 flex-1 px-1.5 lg:px-2 space-y-1">
                                 {/* Add Asset Button - Persistent in sidebar (only show if user has upload permissions) */}
                                 {auth?.user && (
-                                    <div className="px-3 py-2 mb-4">
+                                    <div className="px-2 py-1.5 lg:px-3 lg:py-2 mb-3 lg:mb-4">
                                         <AddAssetButton 
                                             defaultAssetType="asset" 
                                             className="w-full"
@@ -678,16 +678,16 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 {/* IMPORTANT: Sidebar category navigation is independent of filter state */}
                                 {/* Categories - Always visible when categories exist */}
                                 {categories && categories.length > 0 && (
-                                    <div className="px-3 py-2">
-                                        <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                                    <div className="px-2 py-1.5 lg:px-3 lg:py-2">
+                                        <h3 className="px-2 lg:px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
                                             Categories
                                         </h3>
-                                        <div className="mt-2 space-y-1">
+                                        <div className="mt-1.5 lg:mt-2 space-y-1">
                                             {/* "All" button - only shown for non-free plans */}
                                             {show_all_button && (
                                                 <button
                                                     onClick={() => handleCategorySelect(null)}
-                                                    className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
+                                                    className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
                                                         backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
                                                         color: selectedCategoryId === null || selectedCategoryId === undefined ? activeTextColor : unselectedTextColor,
@@ -705,7 +705,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                         }
                                                     }}
                                                 >
-                                                    <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedIconColor }} />
+                                                    <TagIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedIconColor }} />
                                                     <span className="flex-1">All</span>
                                                     {total_asset_count > 0 && (
                                                         <span className="text-xs font-normal opacity-80" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedCountColor }}>
@@ -722,7 +722,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     <button
                                                         key={category.id}
                                                         onClick={() => handleCategorySelect(category)}
-                                                        className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
+                                                        className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
                                                         style={{
                                                             backgroundColor: isSelected ? activeBgColor : 'transparent',
                                                             color: isSelected ? activeTextColor : unselectedTextColor,
@@ -742,7 +742,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     >
                                                         <CategoryIcon 
                                                             iconId={category.icon || 'folder'} 
-                                                            className="mr-3 flex-shrink-0 h-5 w-5" 
+                                                            className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" 
                                                             style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
                                                         />
                                                         <span className="flex-1">{category.name}</span>
@@ -797,7 +797,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 )}
                             </nav>
                         </div>
-                        <div className="flex-shrink-0 px-2 pb-3">
+                        <div className="flex-shrink-0 px-1.5 lg:px-2 pb-2 lg:pb-3">
                             <OnlineUsersIndicator
                                 textColor={textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
                                 primaryColor={workspaceAccentColor}

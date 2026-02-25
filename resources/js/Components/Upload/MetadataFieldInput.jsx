@@ -43,7 +43,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         const { collections, collectionsLoading, selectedIds, onChange: onCollectionChange, showCreateButton, onCreateClick } = collectionProps
         return (
             <div className="flex items-start gap-2 min-w-0">
-                <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
+                <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
                     {field.display_label}
                     {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                 </label>
@@ -74,7 +74,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         
         return (
             <div className="flex items-start gap-2 min-w-0">
-                <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
+                <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
                     {field.display_label}
                     {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                 </label>
@@ -104,7 +104,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         case 'text':
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -131,7 +131,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         case 'number':
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -156,7 +156,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             if (field.display_widget === 'toggle') {
                 return (
                     <div className="flex items-center gap-2 min-w-0">
-                        <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                        <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                             {field.display_label}
                             {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                         </label>
@@ -176,7 +176,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             }
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -195,7 +195,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         case 'date':
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -240,7 +240,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
 
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -270,7 +270,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             if (!field.options || field.options.length === 0) {
                 return (
                     <div className="flex items-center gap-2 min-w-0">
-                        <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">{field.display_label}</label>
+                        <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">{field.display_label}</label>
                         <span className="text-xs text-gray-500">No options</span>
                     </div>
                 )
@@ -278,7 +278,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             const currentValues = Array.isArray(value) ? value : []
             return (
                 <div className="flex items-start gap-2 min-w-0">
-                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
+                    <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
@@ -312,7 +312,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         case 'rating':
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                    <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
