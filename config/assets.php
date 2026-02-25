@@ -167,27 +167,36 @@ return [
         'max_retries' => env('THUMBNAIL_MAX_RETRIES', 3),
 
         /*
-         * Job timeout in seconds. Laravel queue workers kill jobs after this duration.
-         * Default 600 (10 min) allows large TIFF/AI/PDF/video files to complete.
-         * Horizon default is 90s — thumbnail jobs MUST override via this config.
-         * Rule: QUEUE_WORKER_TIMEOUT >= this value (worker must not kill job early).
+         * Job timeout in seconds (normal assets). GenerateThumbnailsJob sets $this->timeout
+         * dynamically; large assets use large_asset_timeout_seconds.
+         * Rule: worker_timeout_seconds >= max(job_timeout_seconds, large_asset_timeout_seconds).
          */
-        'job_timeout_seconds' => (int) env('THUMBNAIL_JOB_TIMEOUT_SECONDS', 600),
+        'job_timeout_seconds' => (int) env('THUMBNAIL_JOB_TIMEOUT_SECONDS', 900),
 
         /*
-         * Timeout for thumbnail generation (minutes). Assets stuck in PROCESSING longer
-         * than this are marked FAILED by ThumbnailTimeoutGuard.
-         * Rule: THUMBNAIL_TIMEOUT_MINUTES >= job_timeout_seconds/60 (guard must not fire before job timeout).
-         * Staging/production: use 35 min so guard > 30 min job.
+         * Worker timeout in seconds. Horizon/supervisor must use this so jobs are not killed early.
+         * ThumbnailTimeoutGuard derives stuck threshold from this (worker_timeout/60 + buffer).
          */
-        'timeout_minutes' => (int) env('THUMBNAIL_TIMEOUT_MINUTES', 5),
+        'worker_timeout_seconds' => (int) env('QUEUE_WORKER_TIMEOUT', 900),
 
         /*
-         * Max pixel area (width × height) before degraded thumbnail mode.
-         * Files exceeding this (e.g. 700MB TIFF) get only preview + thumb; medium/large are skipped.
-         * Prevents OOM, Imagick pixel cache overflow, swap thrashing.
+         * Max pixel area (width × height). Assets exceeding this are SKIPPED (soft fail),
+         * not processed — prevents OOM and runaway memory.
          */
-        'max_pixels' => (int) env('THUMBNAIL_MAX_PIXELS', 200_000_000),
+        'max_pixels' => (int) env('THUMBNAIL_MAX_PIXELS', 100_000_000),
+
+        /*
+         * Pixel area above which an asset is treated as "large" and gets large_asset_timeout_seconds.
+         * 30M covers ~8K-ish TIFFs; below this, job_timeout_seconds applies.
+         */
+        'large_asset_threshold_pixels' => (int) env('THUMBNAIL_LARGE_THRESHOLD_PIXELS', 30_000_000),
+
+        /*
+         * Job timeout in seconds for large assets (pixel count > large_asset_threshold_pixels).
+         * Rule: worker_timeout_seconds >= this value.
+         */
+        'large_asset_timeout_seconds' => (int) env('THUMBNAIL_LARGE_TIMEOUT_SECONDS', 1800),
+
         'svg_timeout_minutes' => env('THUMBNAIL_SVG_TIMEOUT_MINUTES', 12),
 
         /*

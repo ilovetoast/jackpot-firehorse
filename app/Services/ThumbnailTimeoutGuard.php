@@ -30,16 +30,18 @@ use Illuminate\Support\Facades\Log;
 class ThumbnailTimeoutGuard
 {
     /**
-     * Default timeout threshold in minutes (fallback).
+     * Default buffer minutes added on top of worker timeout (guard must fire after worker would kill job).
      */
-    protected const DEFAULT_TIMEOUT_MINUTES = 5;
+    protected const STUCK_BUFFER_MINUTES = 5;
 
     /**
-     * Get timeout in minutes for an asset.
+     * Get stuck threshold in minutes. Derived from worker_timeout_seconds so the guard
+     * does not mark assets failed before the queue worker would kill the job.
      */
     protected function getTimeoutMinutes(?Asset $asset = null): int
     {
-        return (int) config('assets.thumbnail.timeout_minutes', self::DEFAULT_TIMEOUT_MINUTES);
+        $workerSeconds = (int) config('assets.thumbnail.worker_timeout_seconds', 900);
+        return (int) ceil($workerSeconds / 60) + self::STUCK_BUFFER_MINUTES;
     }
 
     /**

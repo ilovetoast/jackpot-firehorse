@@ -207,11 +207,10 @@ return [
             'maxProcesses' => 1,
             'maxTime' => 3600,
             'maxJobs' => 1000,
-            'memory' => 128,
+            'memory' => 1024,
             'tries' => 3,
-            // 5 min default — thumbnail/metadata jobs need time for large TIFF/AI/PDF/video
-            // GenerateThumbnailsJob overrides to 10 min via config
-            'timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 300),
+            // Must be >= max(job_timeout_seconds, large_asset_timeout_seconds) so thumbnail jobs are not killed early
+            'timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 1800),
             'nice' => 0,
         ],
         'supervisor-pdf-processing' => [

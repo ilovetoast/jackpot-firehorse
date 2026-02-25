@@ -108,7 +108,11 @@ class GenerateThumbnailsJob implements ShouldQueue
         public readonly string $assetVersionId,
         public readonly bool $force = false
     ) {
-        $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+        // Worker reads this when job starts; handle() may set a lower value for small assets.
+        // Use the larger of the two so large-asset jobs are never killed early.
+        $job = (int) config('assets.thumbnail.job_timeout_seconds', 900);
+        $large = (int) config('assets.thumbnail.large_asset_timeout_seconds', 1800);
+        $this->timeout = max($job, $large);
     }
 
     /**
@@ -218,12 +222,85 @@ class GenerateThumbnailsJob implements ShouldQueue
                 ]);
                 return;
             }
-            
+
+            // Dynamic timeout and pixel guardrails (before any heavy work)
+            // Never treat unknown dimensions as safe — could be extremely large and melt worker
+            if (!$asset->width || !$asset->height) {
+                Log::warning('[GenerateThumbnailsJob] Skipping thumbnail generation - dimensions unknown (soft fail)', [
+                    'asset_id' => $asset->id,
+                    'width' => $asset->width,
+                    'height' => $asset->height,
+                ]);
+                $metadata = $asset->metadata ?? [];
+                $metadata['thumbnail_skip_reason'] = 'dimensions_unknown';
+                $metadata['thumbnail_skip_message'] = 'Asset dimensions are not available; thumbnail generation skipped for safety.';
+                $metadata['thumbnails_generated'] = false;
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                    'thumbnail_error' => $metadata['thumbnail_skip_message'],
+                    'thumbnail_started_at' => null,
+                    'metadata' => $metadata,
+                ]);
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_skip_reason' => 'dimensions_unknown',
+                            'thumbnails_generated' => false,
+                        ]),
+                        'pipeline_status' => 'complete',
+                    ]);
+                }
+                return;
+            }
+
+            $width = (int) $asset->width;
+            $height = (int) $asset->height;
+            $pixelCount = $width * $height;
+            $maxPixels = (int) config('assets.thumbnail.max_pixels', 100_000_000);
+            $largeThreshold = (int) config('assets.thumbnail.large_asset_threshold_pixels', 30_000_000);
+
+            if ($pixelCount > $maxPixels) {
+                Log::warning('[GenerateThumbnailsJob] Skipping thumbnail generation - pixel count exceeds max_pixels (soft fail)', [
+                    'asset_id' => $asset->id,
+                    'pixel_count' => $pixelCount,
+                    'max_pixels' => $maxPixels,
+                    'width' => $width,
+                    'height' => $height,
+                ]);
+                $metadata = $asset->metadata ?? [];
+                $metadata['thumbnail_skip_reason'] = 'pixel_limit_exceeded';
+                $metadata['thumbnail_skip_message'] = "Asset dimensions ({$width}×{$height}) exceed maximum allowed for thumbnails.";
+                $metadata['thumbnails_generated'] = false;
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                    'thumbnail_error' => $metadata['thumbnail_skip_message'],
+                    'thumbnail_started_at' => null,
+                    'metadata' => $metadata,
+                ]);
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_skip_reason' => 'pixel_limit_exceeded',
+                            'thumbnails_generated' => false,
+                        ]),
+                        'pipeline_status' => 'complete',
+                    ]);
+                }
+                return;
+            }
+
+            $timeout = (int) config('assets.thumbnail.job_timeout_seconds', 900);
+            if ($pixelCount > $largeThreshold) {
+                $timeout = (int) config('assets.thumbnail.large_asset_timeout_seconds', 1800);
+            }
+            $this->timeout = $timeout;
+
             // TASK 2: Safety guard - if asset is in PROCESSING from a previous failed attempt,
             // we should set it to a terminal state (FAILED) before proceeding to prevent stuck state
             // This handles the case where a job was interrupted and left PROCESSING
             if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
-                $timeoutMinutes = (int) config('assets.thumbnail.timeout_minutes', 5);
+                $workerSeconds = (int) config('assets.thumbnail.worker_timeout_seconds', 900);
+                $timeoutMinutes = (int) ceil($workerSeconds / 60) + 5;
                 PipelineLogger::warning('THUMBNAILS: DETECTED STUCK PROCESSING', [
                     'asset_id' => $asset->id,
                     'thumbnail_started_at' => $asset->thumbnail_started_at?->toIso8601String() ?? 'null',
