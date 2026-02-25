@@ -97,6 +97,20 @@ class User extends Authenticatable
     }
 
     /**
+     * Check if the user belongs to a tenant (by tenant id).
+     * Uses loaded tenants when available to avoid N+1 tenant_user queries.
+     */
+    public function belongsToTenant(string|int $tenantId): bool
+    {
+        $tenantId = (string) $tenantId;
+        if ($this->relationLoaded('tenants')) {
+            return $this->tenants->contains(fn (Tenant $t) => (string) $t->id === $tenantId);
+        }
+
+        return $this->tenants()->where('tenants.id', $tenantId)->exists();
+    }
+
+    /**
      * Get the brands that this user belongs to.
      * 
      * Phase MI-1: This relationship includes all pivots (active and removed).
@@ -161,16 +175,21 @@ class User extends Authenticatable
 
     /**
      * Get the user's role for a specific tenant.
+     * Uses loaded tenants pivot when available to avoid repeated tenant_user queries.
      */
     public function getRoleForTenant(Tenant $tenant): ?string
     {
-        // Query the pivot table directly to get the role
-        // This ensures we always get the latest role value from the database
+        if ($this->relationLoaded('tenants')) {
+            $t = $this->tenants->firstWhere('id', $tenant->id);
+
+            return $t?->pivot?->role ?? null;
+        }
+
         $pivot = DB::table('tenant_user')
             ->where('user_id', $this->id)
             ->where('tenant_id', $tenant->id)
             ->first();
-        
+
         return $pivot?->role ?? null;
     }
 

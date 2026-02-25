@@ -13,6 +13,8 @@ class MetadataOptionVisibility extends Model
 {
     protected $table = 'metadata_option_visibility';
 
+    public $timestamps = true;
+
     protected $fillable = [
         'metadata_option_id',
         'tenant_id',

@@ -28,7 +28,7 @@ class AssetPolicy
     public function view(User $user, Asset $asset): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
 
@@ -146,7 +146,7 @@ class AssetPolicy
     public function delete(User $user, Asset $asset): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
 
@@ -181,7 +181,7 @@ class AssetPolicy
     public function publish(User $user, Asset $asset): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
 
@@ -279,7 +279,7 @@ class AssetPolicy
     public function unpublish(User $user, Asset $asset): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
 
@@ -327,7 +327,7 @@ class AssetPolicy
     public function archive(User $user, Asset $asset): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
 

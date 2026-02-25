@@ -13,6 +13,8 @@ class MetadataFieldVisibility extends Model
 {
     protected $table = 'metadata_field_visibility';
 
+    public $timestamps = true;
+
     protected $fillable = [
         'metadata_field_id',
         'tenant_id',

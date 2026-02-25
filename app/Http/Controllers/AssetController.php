@@ -61,6 +61,9 @@ class AssetController extends Controller
         $brand = app('brand');
         $user = $request->user();
 
+        // Eager load tenants once so policy checks (Asset, Category) avoid N+1 tenant_user queries
+        $user?->loadMissing('tenants');
+
         if (!$tenant || !$brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
             if ($request->get('format') === 'json') {

@@ -227,6 +227,14 @@ return [
              * Rasterization DPI for rendered PDF pages (on-demand + full extraction).
              */
             'render_dpi' => (int) env('THUMBNAIL_PDF_RENDER_DPI', 220),
+
+            /*
+             * Faster on-demand page rendering for the in-app viewer.
+             * Lower DPI and max size so page 2, 3, ... finish quickly.
+             * Override via THUMBNAIL_PDF_VIEWER_DPI and THUMBNAIL_PDF_VIEWER_MAX_SIZE.
+             */
+            'viewer_dpi' => (int) env('THUMBNAIL_PDF_VIEWER_DPI', 150),
+            'viewer_max_size' => (int) env('THUMBNAIL_PDF_VIEWER_MAX_SIZE', 1600),
         ],
     ],
 

@@ -42,6 +42,11 @@ class HandleInertiaRequests extends Middleware
         $user = $request->user();
         $currentTenantId = session('tenant_id');
 
+        // Eager load tenants once when we have a user (avoids N+1 in policy checks and membership checks)
+        if ($user && $currentTenantId) {
+            $user->loadMissing('tenants');
+        }
+
         // Resolve tenant if not already bound (HandleInertiaRequests runs before ResolveTenant middleware)
         $tenant = app()->bound('tenant') ? app('tenant') : null;
         if (! $tenant && $currentTenantId) {
@@ -49,7 +54,7 @@ class HandleInertiaRequests extends Middleware
             if ($tenant) {
                 // If user is no longer a member of this tenant (e.g. removed from company), clear session
                 // so we don't show their old company/brand in the header on /app/companies or errors.no-companies
-                if ($user && ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+                if ($user && ! $user->belongsToTenant($tenant->id)) {
                     session()->forget(['tenant_id', 'brand_id', 'collection_id']);
                     $tenant = null;
                 } else {

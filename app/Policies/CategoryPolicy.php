@@ -47,7 +47,7 @@ class CategoryPolicy
     public function view(User $user, Category $category): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($category->tenant_id)) {
             return false;
         }
 
@@ -123,7 +123,7 @@ class CategoryPolicy
     public function update(User $user, Category $category): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($category->tenant_id)) {
             return false;
         }
 
@@ -201,7 +201,7 @@ class CategoryPolicy
     public function delete(User $user, Category $category): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($category->tenant_id)) {
             return false;
         }
 
@@ -238,7 +238,7 @@ class CategoryPolicy
     public function upgrade(User $user, Category $category): bool
     {
         // User must belong to the tenant
-        if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
+        if (! $user->belongsToTenant($category->tenant_id)) {
             return false;
         }
 

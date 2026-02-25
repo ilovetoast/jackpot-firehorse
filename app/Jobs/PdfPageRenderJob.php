@@ -93,7 +93,8 @@ class PdfPageRenderJob implements ShouldQueue
             $rendered = $pdfPageRenderingService->renderPageToWebp(
                 $tempPdfPath,
                 $page,
-                config('assets.thumbnail_styles.large', [])
+                [],
+                true
             );
             $renderedPath = $rendered['local_path'];
             $storagePath = $pdfPageRenderingService->uploadRenderedPage(

@@ -117,9 +117,10 @@ class PdfPageRenderingService
     /**
      * Render one PDF page to a local WebP image.
      *
+     * @param  array<string, mixed>  $styleConfig  width, height, quality (ignored when $useViewerPreset is true)
      * @return array{local_path: string, width: int, height: int, size_bytes: int, mime_type: string}
      */
-    public function renderPageToWebp(string $localPdfPath, int $page, array $styleConfig = []): array
+    public function renderPageToWebp(string $localPdfPath, int $page, array $styleConfig = [], bool $useViewerPreset = false): array
     {
         if (!extension_loaded('imagick')) {
             throw new RuntimeException('Imagick extension is required for PDF rendering.');
@@ -128,10 +129,18 @@ class PdfPageRenderingService
             throw new RuntimeException('PDF page must be >= 1.');
         }
 
-        $dpi = (int) config('assets.thumbnail.pdf.render_dpi', 220);
-        $quality = (int) ($styleConfig['quality'] ?? config('assets.thumbnail_styles.large.quality', 92));
-        $targetWidth = (int) ($styleConfig['width'] ?? config('assets.thumbnail_styles.large.width', 4096));
-        $targetHeight = (int) ($styleConfig['height'] ?? config('assets.thumbnail_styles.large.height', 4096));
+        if ($useViewerPreset) {
+            $dpi = (int) config('assets.thumbnail.pdf.viewer_dpi', 150);
+            $maxSize = (int) config('assets.thumbnail.pdf.viewer_max_size', 1600);
+            $quality = 88;
+            $targetWidth = $maxSize;
+            $targetHeight = $maxSize;
+        } else {
+            $dpi = (int) config('assets.thumbnail.pdf.render_dpi', 220);
+            $quality = (int) ($styleConfig['quality'] ?? config('assets.thumbnail_styles.large.quality', 92));
+            $targetWidth = (int) ($styleConfig['width'] ?? config('assets.thumbnail_styles.large.width', 4096));
+            $targetHeight = (int) ($styleConfig['height'] ?? config('assets.thumbnail_styles.large.height', 4096));
+        }
 
         $imagick = new \Imagick();
         try {

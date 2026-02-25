@@ -54,16 +54,20 @@ class ResolveTenant
             abort(404, 'Tenant not found');
         }
 
-        // Verify authenticated user belongs to tenant
-        if ($request->user() && ! $request->user()->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            abort(403, 'User does not belong to this tenant');
+        // Verify authenticated user belongs to tenant (load tenants once to avoid N+1 in policies)
+        $user = $request->user();
+        if ($user) {
+            $user->loadMissing('tenants');
+            if (! $user->belongsToTenant($tenant->id)) {
+                abort(403, 'User does not belong to this tenant');
+            }
         }
 
         // Bind tenant to container
         app()->instance('tenant', $tenant);
 
-        // Resolve active brand
-        $user = $request->user();
+        // Resolve active brand ($user already set above when verifying tenant membership)
+        $user = $user ?? $request->user();
         $brandId = session('brand_id');
         
         // Get user's tenant role to determine access
