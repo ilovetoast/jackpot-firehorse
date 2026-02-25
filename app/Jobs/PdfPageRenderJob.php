@@ -57,7 +57,7 @@ class PdfPageRenderJob implements ShouldQueue
         $versionNumber = $activeVersion?->version_number ?? 1;
         $page = max(1, $this->page);
 
-        $deterministicPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page);
+        $deterministicPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page, $versionNumber);
         $bucket = $asset->storageBucket;
 
         if ($bucket && $tenantBucketService->objectExists($bucket, $deterministicPath)) {

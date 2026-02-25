@@ -197,7 +197,11 @@ class PdfPageRenderingService
             throw new RuntimeException('Asset storage bucket is missing.');
         }
 
-        $targetPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page);
+        $versionNumber = $version?->version_number
+            ?? ($asset->relationLoaded('currentVersion')
+                ? ($asset->currentVersion?->version_number ?? 1)
+                : (int) ($asset->currentVersion()->value('version_number') ?? 1));
+        $targetPath = AssetVariantPathResolver::resolvePdfPagePath($asset, $page, $versionNumber);
 
         $this->tenantBucketService->getS3Client()->putObject([
             'Bucket' => $bucket->name,

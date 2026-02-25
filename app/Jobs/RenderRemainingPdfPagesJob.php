@@ -34,9 +34,9 @@ class RenderRemainingPdfPagesJob implements ShouldQueue
     public function handle(TenantBucketService $tenantBucketService): void
     {
         $version = $this->assetVersionId
-            ? AssetVersion::with(['asset.storageBucket', 'asset.tenant'])->find($this->assetVersionId)
+            ? AssetVersion::with(['asset.storageBucket', 'asset.tenant', 'asset.currentVersion'])->find($this->assetVersionId)
             : null;
-        $asset = $version?->asset ?: Asset::with(['storageBucket', 'tenant'])->find($this->assetId);
+        $asset = $version?->asset ?: Asset::with(['storageBucket', 'tenant', 'currentVersion'])->find($this->assetId);
 
         if (!$asset || !$asset->storageBucket) {
             return;
@@ -47,8 +47,9 @@ class RenderRemainingPdfPagesJob implements ShouldQueue
             return;
         }
 
+        $versionNumber = $asset->currentVersion?->version_number ?? 1;
         for ($page = 1; $page <= $pageCount; $page++) {
-            $path = AssetVariantPathResolver::resolvePdfPagePath($asset, $page);
+            $path = AssetVariantPathResolver::resolvePdfPagePath($asset, $page, $versionNumber);
             if (!$tenantBucketService->objectExists($asset->storageBucket, $path)) {
                 PdfPageRenderJob::dispatch($asset->id, $page, $asset->currentVersion?->id);
             }

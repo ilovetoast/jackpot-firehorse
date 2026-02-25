@@ -114,15 +114,21 @@ class AssetVariantPathResolver
 
     /**
      * Deterministic S3 path for a PDF page derivative.
-     * Permanent path; no version or randomness. Used for store-once, never regenerate.
+     * Permanent path per version; no randomness. Used for store-once, never regenerate.
+     * Version in path ensures new asset versions get distinct pages (assets can change).
      *
-     * Format: assets/{tenant_id}/{asset_id}/pdf-pages/page_{n}.webp
+     * Format: assets/{tenant_id}/{asset_id}/v{version}/pdf-pages/page_{n}.webp
      */
-    public static function resolvePdfPagePath(Asset $asset, int $pageNumber): string
+    public static function resolvePdfPagePath(Asset $asset, int $pageNumber, ?int $versionNumber = null): string
     {
         $page = max(1, $pageNumber);
+        $version = $versionNumber ?? (
+            $asset->relationLoaded('currentVersion')
+                ? ($asset->currentVersion?->version_number ?? 1)
+                : (int) ($asset->currentVersion()->value('version_number') ?? 1)
+        );
 
-        return 'assets/' . $asset->tenant_id . '/' . $asset->id . '/pdf-pages/page_' . $page . '.webp';
+        return 'assets/' . $asset->tenant_id . '/' . $asset->id . '/v' . $version . '/pdf-pages/page_' . $page . '.webp';
     }
 
     /**
@@ -146,6 +152,6 @@ class AssetVariantPathResolver
             return $record->storage_path;
         }
 
-        return self::resolvePdfPagePath($asset, $page);
+        return self::resolvePdfPagePath($asset, $page, $versionNumber);
     }
 }
