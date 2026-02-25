@@ -23,20 +23,18 @@ class MetadataOptionObserver
 
     private function flushForOption(MetadataOption $option): void
     {
-        if (! method_exists(Cache::getStore(), 'tags')) {
-            return;
-        }
-
         $field = $option->relationLoaded('metadataField')
             ? $option->metadataField
             : \App\Models\MetadataField::find($option->metadata_field_id);
         $tenantId = $field?->tenant_id;
 
         if ($tenantId !== null) {
-            Cache::tags(MetadataCache::tags($tenantId))->flush();
+            MetadataCache::bumpVersion($tenantId);
             return;
         }
 
-        MetadataCache::flushGlobal();
+        if (method_exists(Cache::getStore(), 'tags')) {
+            MetadataCache::flushGlobal();
+        }
     }
 }

@@ -111,7 +111,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $fieldId = $this->fieldService->createField($tenant, $validated);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             if ($request->header('X-Inertia')) {
                 return back()->with('success', 'Metadata field created successfully.');
@@ -200,7 +200,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $this->fieldService->updateField($tenant, $field, $validated);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             return response()->json([
                 'success' => true,
@@ -334,7 +334,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $this->fieldService->disableField($tenant, $field);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             return response()->json([
                 'success' => true,
@@ -382,7 +382,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $this->fieldService->enableField($tenant, $field);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             return response()->json([
                 'success' => true,
@@ -436,7 +436,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $this->fieldService->archiveField($tenant, $field, $removeFromAssets);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             if ($request->header('X-Inertia')) {
                 return back()->with('success', 'Metadata field archived successfully.');
@@ -489,7 +489,7 @@ class TenantMetadataFieldController extends Controller
 
         try {
             $this->fieldService->restoreField($tenant, $field);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             if ($request->header('X-Inertia')) {
                 return back()->with('success', 'Metadata field restored successfully.');
@@ -599,7 +599,7 @@ class TenantMetadataFieldController extends Controller
                 $insertData['icon'] = $validated['icon'];
             }
             $optionId = DB::table('metadata_options')->insertGetId($insertData);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             Log::info('Metadata field value added', [
                 'tenant_id' => $tenant->id,
@@ -694,7 +694,7 @@ class TenantMetadataFieldController extends Controller
                     ->where('id', $field)
                     ->update(['ai_eligible' => false]);
             }
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             Log::info('Metadata field value removed', [
                 'tenant_id' => $tenant->id,
@@ -795,7 +795,7 @@ class TenantMetadataFieldController extends Controller
             DB::table('metadata_fields')
                 ->where('id', $field)
                 ->update(['ai_eligible' => $validated['ai_eligible']]);
-            MetadataCache::flushTenant($tenant->id);
+            MetadataCache::bumpVersion($tenant->id);
 
             Log::info('Metadata field AI eligibility updated', [
                 'tenant_id' => $tenant->id,

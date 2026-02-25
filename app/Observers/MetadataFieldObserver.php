@@ -23,16 +23,14 @@ class MetadataFieldObserver
 
     private function flushForField(MetadataField $field): void
     {
-        if (! method_exists(Cache::getStore(), 'tags')) {
-            return;
-        }
-
         $tenantId = $field->tenant_id;
         if ($tenantId !== null) {
-            Cache::tags(MetadataCache::tags($tenantId))->flush();
+            MetadataCache::bumpVersion($tenantId);
             return;
         }
 
-        MetadataCache::flushGlobal();
+        if (method_exists(Cache::getStore(), 'tags')) {
+            MetadataCache::flushGlobal();
+        }
     }
 }

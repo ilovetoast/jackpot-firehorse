@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\MetadataCache;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -54,13 +55,38 @@ class MetadataSchemaResolver
             throw new \InvalidArgumentException("Invalid asset_type: {$assetType}. Must be 'image', 'video', or 'document'.");
         }
 
-        $tagged = MetadataCache::taggedStore($tenantId);
-        if ($tagged !== null) {
-            $key = MetadataCache::schemaKey($tenantId, $brandId, $categoryId, $assetType);
-            return $tagged->rememberForever($key, fn () => $this->resolveUncached($tenantId, $brandId, $categoryId, $assetType));
+        $cacheKey = MetadataCache::schemaKey($tenantId, $brandId, $categoryId, $assetType);
+        $cached = cache()->has($cacheKey);
+
+        if (! app()->isProduction()) {
+            logger()->debug(
+                $cached ? 'Metadata schema cache HIT' : 'Metadata schema cache MISS',
+                [
+                    'tenant' => $tenantId,
+                    'brand' => $brandId,
+                    'category' => $categoryId,
+                    'asset_type' => $assetType,
+                    'key' => $cacheKey,
+                ]
+            );
         }
 
-        return $this->resolveUncached($tenantId, $brandId, $categoryId, $assetType);
+        $result = cache()->get($cacheKey);
+        if ($result !== null) {
+            return $result;
+        }
+
+        // Single rebuild per key to prevent thundering herd
+        $lockKey = 'metadata_schema_build:' . $cacheKey;
+        return Cache::lock($lockKey, 30)->block(30, function () use ($cacheKey, $tenantId, $brandId, $categoryId, $assetType) {
+            $result = cache()->get($cacheKey);
+            if ($result !== null) {
+                return $result;
+            }
+            $data = $this->resolveUncached($tenantId, $brandId, $categoryId, $assetType);
+            cache()->forever($cacheKey, $data);
+            return $data;
+        });
     }
 
     /**

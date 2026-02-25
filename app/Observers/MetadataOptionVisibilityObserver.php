@@ -4,7 +4,6 @@ namespace App\Observers;
 
 use App\Models\MetadataOptionVisibility;
 use App\Support\MetadataCache;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * Flush tenant-scoped metadata schema cache when metadata_option_visibility changes.
@@ -23,11 +22,6 @@ class MetadataOptionVisibilityObserver
 
     private function flushForVisibility(MetadataOptionVisibility $visibility): void
     {
-        if (! method_exists(Cache::getStore(), 'tags')) {
-            return;
-        }
-
-        $tenantId = $visibility->tenant_id;
-        Cache::tags(MetadataCache::tags($tenantId))->flush();
+        MetadataCache::bumpVersion($visibility->tenant_id);
     }
 }

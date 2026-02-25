@@ -39,24 +39,68 @@ class MetadataCache
     }
 
     /**
+     * Cache key for the tenant's schema version (used for invalidation).
+     *
+     * @param int $tenantId
+     * @return string
+     */
+    public static function versionKey(int $tenantId): string
+    {
+        return "tenant:{$tenantId}:metadata_schema_version";
+    }
+
+    /**
+     * Get current schema version for tenant (bumping invalidates all schema keys for that tenant).
+     *
+     * @param int $tenantId
+     * @return int
+     */
+    public static function getVersion(int $tenantId): int
+    {
+        return (int) cache()->rememberForever(
+            self::versionKey($tenantId),
+            fn () => 1
+        );
+    }
+
+    /**
+     * Bump tenant schema version so all cached schema entries for that tenant are considered stale.
+     *
+     * @param int $tenantId
+     * @return void
+     */
+    public static function bumpVersion(int $tenantId): void
+    {
+        $key = self::versionKey($tenantId);
+        $current = (int) cache()->get($key, 1);
+        cache()->forever($key, $current + 1);
+    }
+
+    /**
      * Cache key for resolved metadata schema.
-     * Unique per (tenant, brand, category, assetType).
+     * Unique per (tenant, version, brand, category, assetType). Version included for invalidation.
      *
      * @param int $tenantId
      * @param int|null $brandId
      * @param int|null $categoryId
-     * @param string $assetType
+     * @param string|null $assetType
      * @return string
      */
     public static function schemaKey(
         int $tenantId,
         ?int $brandId,
         ?int $categoryId,
-        string $assetType
+        ?string $assetType
     ): string {
-        $b = $brandId ?? 'n';
-        $c = $categoryId ?? 'n';
-        return "metadata_schema:{$tenantId}:{$b}:{$c}:{$assetType}";
+        $version = self::getVersion($tenantId);
+        return implode(':', [
+            'metadata_schema',
+            (string) $tenantId,
+            "v{$version}",
+            $brandId !== null ? (string) $brandId : 'null',
+            $categoryId !== null ? (string) $categoryId : 'null',
+            $assetType !== null ? $assetType : 'null',
+        ]);
     }
 
     /**
@@ -77,18 +121,14 @@ class MetadataCache
     }
 
     /**
-     * Flush metadata schema cache for a single tenant.
-     * Safe to call when cache driver does not support tags (no-op).
+     * Invalidate metadata schema cache for a single tenant (version-based).
+     * Replaced tag flush with version bump; no tag support required.
      *
      * @param int $tenantId
      */
     public static function flushTenant(int $tenantId): void
     {
-        $store = Cache::getStore();
-        if (! method_exists($store, 'tags')) {
-            return;
-        }
-        Cache::tags(self::tags($tenantId))->flush();
+        self::bumpVersion($tenantId);
     }
 
     /**
