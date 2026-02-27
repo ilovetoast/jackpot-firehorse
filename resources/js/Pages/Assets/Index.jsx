@@ -8,6 +8,7 @@ import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataPrimaryFilters'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
+import BulkActionsModal, { computeSelectionSummary } from '../../Components/BulkActionsModal'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
@@ -27,10 +28,11 @@ import {
     FolderIcon,
     TagIcon,
     LockClosedIcon,
+    TrashIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -132,7 +134,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     
     // Phase 2 – Step 7: Bulk selection state
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
-    const [showBulkEditModal, setShowBulkEditModal] = useState(false)
+    const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
+    const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
 
     // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext.
     const handleAssetClick = useCallback((asset) => {
@@ -689,11 +692,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     onClick={() => handleCategorySelect(null)}
                                                     className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
-                                                        backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
-                                                        color: selectedCategoryId === null || selectedCategoryId === undefined ? activeTextColor : unselectedTextColor,
+                                                        backgroundColor: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' ? activeBgColor : 'transparent',
+                                                        color: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' ? activeTextColor : unselectedTextColor,
                                                     }}
                                                     onMouseEnter={(e) => {
-                                                        if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
+                                                        if ((selectedCategoryId !== null && selectedCategoryId !== undefined) || lifecycle === 'deleted') {
                                                             e.currentTarget.style.backgroundColor = hoverBgColor
                                                             e.currentTarget.style.color = activeTextColor
                                                         }
@@ -792,6 +795,40 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     )
                                                 })
                                             }
+                                            {/* Phase B2: Trash at bottom - only when has items or already on trash view */}
+                                            {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
+                                                <>
+                                                    <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
+                                                    <button
+                                                        onClick={() => router.get('/app/assets', { lifecycle: 'deleted' })}
+                                                        className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
+                                                        style={{
+                                                            backgroundColor: lifecycle === 'deleted' ? activeBgColor : 'transparent',
+                                                            color: lifecycle === 'deleted' ? activeTextColor : unselectedTextColor,
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            if (lifecycle !== 'deleted') {
+                                                                e.currentTarget.style.backgroundColor = hoverBgColor
+                                                                e.currentTarget.style.color = activeTextColor
+                                                            }
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            if (lifecycle !== 'deleted') {
+                                                                e.currentTarget.style.backgroundColor = 'transparent'
+                                                                e.currentTarget.style.color = unselectedTextColor
+                                                            }
+                                                        }}
+                                                    >
+                                                        <TrashIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: lifecycle === 'deleted' ? activeTextColor : unselectedIconColor }} />
+                                                        <span className="flex-1">Trash</span>
+                                                        {trash_count > 0 && (
+                                                            <span className="text-xs font-normal opacity-80" style={{ color: lifecycle === 'deleted' ? activeTextColor : unselectedCountColor }}>
+                                                                {trash_count}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -870,6 +907,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 </button>
                                             )
                                         })}
+                                        {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
+                                            <>
+                                                <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
+                                                <button
+                                                    onClick={() => { router.get('/app/assets', { lifecycle: 'deleted' }); setMobileCategoriesOpen(false) }}
+                                                    className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
+                                                    style={{ backgroundColor: lifecycle === 'deleted' ? activeBgColor : 'transparent', color: lifecycle === 'deleted' ? activeTextColor : textColor }}
+                                                >
+                                                    <TrashIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: lifecycle === 'deleted' ? activeTextColor : textColor }} />
+                                                    <span className="flex-1">Trash</span>
+                                                    {trash_count > 0 && <span className="text-xs opacity-80">{trash_count}</span>}
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -896,7 +947,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         </button>
                     </div>
                     <div 
-                        className="flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0"
+                        className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0 ${lifecycle === 'deleted' ? 'bg-gray-100' : ''}`}
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -1132,24 +1183,49 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
                     category_id: a.metadata?.category_id ?? a.category_id ?? null,
                 }))}
+                onOpenBulkMetadataAdd={(ids) => {
+                    setBulkSelectedAssetIds(ids)
+                    setShowBulkMetadataModal(true)
+                }}
                 onOpenBulkEdit={(ids) => {
                     setBulkSelectedAssetIds(ids)
-                    setShowBulkEditModal(true)
+                    setShowBulkActionsModal(true)
                 }}
             />
 
-            {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
+            {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
+                <BulkActionsModal
+                    assetIds={bulkSelectedAssetIds}
+                    selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
+                    isTrashMode={lifecycle === 'deleted'}
+                    canForceDelete={auth?.user?.tenant_role === 'owner' || auth?.user?.tenant_role === 'admin' || auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin'}
+                    onClose={() => setShowBulkActionsModal(false)}
+                    onComplete={(result) => {
+                        router.reload({ only: ['assets', 'next_page_url'] })
+                        // Clear selection when items leave the view (trash or force delete)
+                        if (result?.actionId === 'SOFT_DELETE' || result?.actionId === 'FORCE_DELETE') {
+                            setBulkSelectedAssetIds([])
+                            setIsBulkMode(false)
+                            clearSelection()
+                        }
+                    }}
+                    onOpenMetadataEdit={(ids) => {
+                        setShowBulkActionsModal(false)
+                        setBulkSelectedAssetIds(ids)
+                        setShowBulkMetadataModal(true)
+                    }}
+                />
+            )}
+            {showBulkMetadataModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
-                    onClose={() => {
-                        setShowBulkEditModal(false)
-                    }}
+                    onClose={() => setShowBulkMetadataModal(false)}
                     onComplete={() => {
-                        // Refresh assets after bulk edit
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         setIsBulkMode(false)
                         clearSelection()
+                        setShowBulkMetadataModal(false)
                     }}
                 />
             )}

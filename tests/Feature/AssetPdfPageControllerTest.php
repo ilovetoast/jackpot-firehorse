@@ -128,6 +128,30 @@ class AssetPdfPageControllerTest extends TestCase
         });
     }
 
+    public function test_show_throttles_dispatch_so_second_request_does_not_dispatch_again(): void
+    {
+        Bus::fake();
+        $asset = $this->createAsset();
+        $user = $this->createTenantUser($asset->tenant, 'admin');
+        app()->instance('tenant', $asset->tenant);
+
+        $response1 = $this
+            ->withoutMiddleware()
+            ->actingAs($user)
+            ->getJson("/app/assets/{$asset->id}/pdf-page/2");
+
+        $response1->assertStatus(202)->assertJson(['status' => 'processing']);
+        $this->assertSame(1, Bus::dispatched(PdfPageRenderJob::class)->count());
+
+        $response2 = $this
+            ->withoutMiddleware()
+            ->actingAs($user)
+            ->getJson("/app/assets/{$asset->id}/pdf-page/2");
+
+        $response2->assertStatus(202)->assertJson(['status' => 'processing']);
+        $this->assertSame(1, Bus::dispatched(PdfPageRenderJob::class)->count(), 'Throttle should prevent second dispatch within 60s');
+    }
+
     public function test_request_full_extraction_queues_job_for_tenant_admin(): void
     {
         Bus::fake();

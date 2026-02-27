@@ -79,6 +79,15 @@ class LifecycleResolver
         
         return $query;
     }
+
+    /**
+     * Return normalized lifecycle state (or null if invalid/unauthorized).
+     * Phase B2: Used by controller to decide deleted_at condition before apply().
+     */
+    public function normalizeState(?string $lifecycleState, ?User $user, Tenant $tenant, Brand $brand): ?string
+    {
+        return $this->validateAndNormalizeState($lifecycleState, $user, $tenant, $brand);
+    }
     
     /**
      * Validate lifecycle state against user permissions and normalize.
@@ -109,9 +118,22 @@ class LifecycleResolver
         $canBypassApproval = $this->permissionResolver->has($user, $tenant, 'metadata.bypass_approval');
         $canArchive = $this->permissionResolver->has($user, $tenant, 'asset.archive') ||
             ($brand && $this->permissionResolver->hasForBrand($user, $brand, 'asset.archive'));
-        
-        
+        // Phase B2: Trash view – Tenant Admin or Brand Manager only
+        $canViewTrash = $user && (
+            in_array($user->getRoleForTenant($tenant), ['admin', 'owner'], true) ||
+            ($brand && $user->hasPermissionForBrand($brand, 'assets.delete'))
+        );
+
         // Validate state-specific permissions
+        if ($state === 'deleted' && !$canViewTrash) {
+            Log::warning('[LifecycleResolver] Unauthorized deleted (trash) filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_state' => $state,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            return null;
+        }
         if ($state === 'pending_approval' && !$canPublish) {
             Log::warning('[LifecycleResolver] Unauthorized pending_approval filter access attempt', [
                 'user_id' => $user?->id,
@@ -275,6 +297,9 @@ class LifecycleResolver
                 'brand_id' => $brand->id,
                 'can_archive' => $canArchive,
             ]);
+        } elseif ($state === 'deleted') {
+            // Phase B2: Trash view – deleted_at already set by controller (whereNotNull)
+            // No additional status/published filters; show all soft-deleted assets
         } else {
             // Default visibility rules (no lifecycle filter active)
             // CRITICAL: Unpublished assets should NEVER show unless filter is explicitly active
@@ -302,7 +327,10 @@ class LifecycleResolver
     protected function applyDefaultExclusions(Builder $query, ?string $state): void
     {
         // Phase L.3: Exclude archived assets by default (unless archived filter is active)
-        // Archived assets are hidden from the grid unless explicitly filtered
+        // Phase B2: In trash view, do not exclude by archived/expired – show all deleted
+        if ($state === 'deleted') {
+            return;
+        }
         if ($state !== 'archived') {
             $query->whereNull('archived_at');
         }

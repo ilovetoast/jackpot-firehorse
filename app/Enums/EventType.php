@@ -73,6 +73,7 @@ class EventType
     public const ASSET_UPDATED = 'asset.updated';
     public const ASSET_DELETED = 'asset.deleted';
     public const ASSET_RESTORED = 'asset.restored';
+    public const ASSET_FORCE_DELETED = 'asset.force_deleted'; // Phase B2: Permanent delete from trash
     public const ASSET_PUBLISHED = 'asset.published';
     public const ASSET_UNPUBLISHED = 'asset.unpublished';
     public const ASSET_PENDING_APPROVAL = 'asset.pending_approval'; // Phase L.5.1: Category-based approval
@@ -80,6 +81,7 @@ class EventType
     public const ASSET_REJECTED = 'asset.rejected'; // Phase AF-1: Brand-user approval workflow
     public const ASSET_ARCHIVED = 'asset.archived';
     public const ASSET_UNARCHIVED = 'asset.unarchived';
+    public const ASSET_BULK_ACTION_PERFORMED = 'asset.bulk_action_performed'; // Phase B1
     public const ASSET_VERSION_ADDED = 'asset.version_added';
     public const ASSET_VERSION_CREATED = 'asset.version.created';
     public const ASSET_VERSION_RESTORED = 'asset.version.restored';
@@ -279,6 +281,7 @@ class EventType
             self::ASSET_UPDATED,
             self::ASSET_DELETED,
             self::ASSET_RESTORED,
+            self::ASSET_FORCE_DELETED,
             self::ASSET_PUBLISHED,
             self::ASSET_UNPUBLISHED,
             self::ASSET_PENDING_APPROVAL,
@@ -286,6 +289,7 @@ class EventType
             self::ASSET_REJECTED,
             self::ASSET_ARCHIVED,
             self::ASSET_UNARCHIVED,
+            self::ASSET_BULK_ACTION_PERFORMED,
             self::ASSET_VERSION_ADDED,
             self::ASSET_VERSION_CREATED,
             self::ASSET_VERSION_RESTORED,

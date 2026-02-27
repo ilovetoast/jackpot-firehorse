@@ -94,6 +94,18 @@ class DeliverableController extends Controller
         // Security: only assets in categories the user can view (locked/private folder visibility)
         $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
 
+        // Phase B2: Lifecycle (trash) normalization and permission (match AssetController)
+        $lifecycleParam = $request->get('lifecycle');
+        $normalizedLifecycle = $this->lifecycleResolver->normalizeState($lifecycleParam, $user, $tenant, $brand);
+        $canViewTrash = $user && (
+            in_array($user->getRoleForTenant($tenant), ['admin', 'owner'], true) ||
+            ($brand && $user->hasPermissionForBrand($brand, 'assets.delete'))
+        );
+        if ($lifecycleParam === 'deleted' && $normalizedLifecycle !== 'deleted') {
+            abort(403, 'You do not have permission to view trash.');
+        }
+        $isTrashView = $normalizedLifecycle === 'deleted';
+
         // Get deliverable system category templates
         $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::DELIVERABLE)
             ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
@@ -175,12 +187,12 @@ class DeliverableController extends Controller
             $countQuery = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::DELIVERABLE)
-                ->whereNull('deleted_at')
+                ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q->whereNull('deleted_at'))
                 ->whereNotNull('metadata')
                 ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
             $this->lifecycleResolver->apply(
                 $countQuery,
-                $request->get('lifecycle'),
+                $normalizedLifecycle,
                 $user,
                 $tenant,
                 $brand
@@ -204,6 +216,23 @@ class DeliverableController extends Controller
                 : 0;
             return $category;
         });
+
+        // Phase B2: Trash count for sidebar (show "Trash" only when it has items or we're on trash view)
+        $trashCount = 0;
+        if ($canViewTrash) {
+            if ($isTrashView) {
+                $trashCount = $totalDeliverableCount;
+            } elseif (! empty($viewableCategoryIds)) {
+                $trashCount = Asset::query()
+                    ->onlyTrashed()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->where('type', AssetType::DELIVERABLE)
+                    ->whereNotNull('metadata')
+                    ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds))
+                    ->count();
+            }
+        }
 
         // Check if plan is not free (to show "All" button)
         $currentPlan = $this->planService->getCurrentPlan($tenant);
@@ -246,7 +275,7 @@ class DeliverableController extends Controller
         $assetsQuery = Asset::where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('assets.type', AssetType::DELIVERABLE)
-            ->whereNull('assets.deleted_at');
+            ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q->whereNull('assets.deleted_at'));
 
         // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
         if (empty($viewableCategoryIds)) {
@@ -271,10 +300,9 @@ class DeliverableController extends Controller
         // This is the SINGLE SOURCE OF TRUTH for lifecycle logic
         // CRITICAL: Lifecycle resolver MUST run LAST to override any other filters
         // Used by both AssetController and DeliverableController for consistency
-        $lifecycleFilter = $request->get('lifecycle');
         $this->lifecycleResolver->apply(
             $assetsQuery,
-            $lifecycleFilter,
+            $normalizedLifecycle,
             $user,
             $tenant,
             $brand
@@ -964,6 +992,9 @@ class DeliverableController extends Controller
             'compliance_filter' => $request->input('compliance_filter', ''),
             'show_compliance_filter' => $showComplianceFilter,
             'q' => $request->input('q', ''),
+            'lifecycle' => $lifecycleParam, // Phase B2: e.g. 'deleted' for trash view
+            'can_view_trash' => $canViewTrash,
+            'trash_count' => $trashCount,
         ]);
     }
 

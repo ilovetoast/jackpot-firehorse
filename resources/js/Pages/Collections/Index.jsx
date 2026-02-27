@@ -13,6 +13,7 @@ import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
+import BulkActionsModal, { computeSelectionSummary } from '../../Components/BulkActionsModal'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
@@ -110,7 +111,8 @@ export default function CollectionsIndex({
     const mobileTouchStartRef = useRef(null)
     const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     const [activeAssetId, setActiveAssetId] = useState(null)
-    const [showBulkEditModal, setShowBulkEditModal] = useState(false)
+    const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
+    const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const safeAssetsList = (assetsList || []).filter(Boolean)
     const activeAsset = activeAssetId ? safeAssetsList.find((a) => a?.id === activeAssetId) : null
@@ -667,20 +669,44 @@ export default function CollectionsIndex({
                     thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
                     category_id: a.metadata?.category_id ?? a.category_id ?? null,
                 }))}
+                onOpenBulkMetadataAdd={(ids) => {
+                    setBulkSelectedAssetIds(ids)
+                    setShowBulkMetadataModal(true)
+                }}
                 onOpenBulkEdit={(ids) => {
                     setBulkSelectedAssetIds(ids)
-                    setShowBulkEditModal(true)
+                    setShowBulkActionsModal(true)
                 }}
             />
 
-            {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
+            {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
+                <BulkActionsModal
+                    assetIds={bulkSelectedAssetIds}
+                    selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
+                    onClose={() => setShowBulkActionsModal(false)}
+                    onComplete={(result) => {
+                        router.reload({ only: ['assets', 'next_page_url'] })
+                        if (result?.actionId === 'SOFT_DELETE') {
+                            setBulkSelectedAssetIds([])
+                            clearSelection()
+                        }
+                    }}
+                    onOpenMetadataEdit={(ids) => {
+                        setShowBulkActionsModal(false)
+                        setBulkSelectedAssetIds(ids)
+                        setShowBulkMetadataModal(true)
+                    }}
+                />
+            )}
+            {showBulkMetadataModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
-                    onClose={() => setShowBulkEditModal(false)}
+                    onClose={() => setShowBulkMetadataModal(false)}
                     onComplete={() => {
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
+                        setShowBulkMetadataModal(false)
                     }}
                 />
             )}

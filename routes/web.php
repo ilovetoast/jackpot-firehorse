@@ -498,6 +498,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Asset metadata bulk operations (Phase 2 – Step 7)
             Route::post('/assets/metadata/bulk/preview', [\App\Http\Controllers\AssetMetadataController::class, 'previewBulk'])->name('assets.metadata.bulk.preview');
             Route::post('/assets/metadata/bulk/execute', [\App\Http\Controllers\AssetMetadataController::class, 'executeBulk'])->name('assets.metadata.bulk.execute');
+
+            // Phase B1: Bulk actions (lifecycle, approval, trash, metadata)
+            Route::post('/assets/bulk-action', [\App\Http\Controllers\AssetBulkActionController::class, '__invoke'])->name('assets.bulk-action');
             
             // Asset metadata filtering and saved views (Phase 2 – Step 8)
             Route::get('/assets/metadata/filterable-schema', [\App\Http\Controllers\AssetMetadataController::class, 'getFilterableSchema'])->name('assets.metadata.filterable-schema');
@@ -559,6 +562,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');
             Route::post('/assets/{asset}/restore', [\App\Http\Controllers\AssetController::class, 'restore'])->name('assets.restore');
             Route::post('/assets/{asset}/restore-from-trash', [\App\Http\Controllers\AssetController::class, 'restoreFromTrash'])->name('assets.restore-from-trash');
+            Route::delete('/assets/{asset}/force-delete', [\App\Http\Controllers\AssetController::class, 'forceDelete'])->name('assets.force-delete');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/executions', [\App\Http\Controllers\DeliverableController::class, 'index'])->name('executions.index');
             Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');

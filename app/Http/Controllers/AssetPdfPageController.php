@@ -10,6 +10,7 @@ use App\Services\AssetDeliveryService;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
@@ -138,13 +139,15 @@ class AssetPdfPageController extends Controller
             ];
         }
 
-        // Re-dispatch if no record, or not currently processing, or stuck in "processing" (e.g. job timed out)
+        // Re-dispatch if no record, or not currently processing, or stuck in "processing" (e.g. job timed out).
+        // Throttle: only one dispatch per asset+page per 60s to avoid storm when viewer polls every ~1.2s.
         $staleProcessingMinutes = 10;
         $shouldDispatch = !$record
             || $record->status !== 'processing'
             || ($record->updated_at && $record->updated_at->diffInMinutes(now()) >= $staleProcessingMinutes);
 
-        if ($shouldDispatch) {
+        $dispatchKey = 'pdf:render-dispatch:' . $asset->id . ':' . $page;
+        if ($shouldDispatch && Cache::add($dispatchKey, true, 60)) {
             if ($record && $record->status === 'processing') {
                 Log::info('[AssetPdfPageController] Re-dispatching stuck PDF page render', [
                     'asset_id' => $asset->id,

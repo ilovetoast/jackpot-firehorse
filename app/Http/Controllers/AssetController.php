@@ -188,16 +188,23 @@ class AssetController extends Controller
         $categoryIds = $allCategories->pluck('id')->filter()->toArray();
         $assetCounts = [];
         $totalAssetCount = 0;
+        $lifecycleParam = $request->get('lifecycle');
+        $normalizedLifecycle = $this->lifecycleResolver->normalizeState($lifecycleParam, $user, $tenant, $brand);
+        if ($lifecycleParam === 'deleted' && $normalizedLifecycle !== 'deleted') {
+            abort(403, 'You do not have permission to view trash.');
+        }
+        $isTrashView = $normalizedLifecycle === 'deleted';
         if (!empty($viewableCategoryIds)) {
-            $countQuery = Asset::where('tenant_id', $tenant->id)
+            $countQuery = Asset::query()
+                ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
+                ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::ASSET)
-                ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
                 ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
             $this->lifecycleResolver->apply(
                 $countQuery,
-                $request->get('lifecycle'),
+                $normalizedLifecycle,
                 $user,
                 $tenant,
                 $brand
@@ -223,6 +230,27 @@ class AssetController extends Controller
             return $category;
         });
 
+        // Phase B2: Trash count for sidebar (show "Trash" only when it has items or we're on trash view)
+        $trashCount = 0;
+        $canViewTrash = $user && (
+            in_array($user->getRoleForTenant($tenant), ['admin', 'owner'], true) ||
+            ($brand && $user->hasPermissionForBrand($brand, 'assets.delete'))
+        );
+        if ($canViewTrash) {
+            if ($isTrashView) {
+                $trashCount = $totalAssetCount;
+            } elseif (!empty($viewableCategoryIds)) {
+                $trashCount = Asset::query()
+                    ->onlyTrashed()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->where('type', AssetType::ASSET)
+                    ->whereNotNull('metadata')
+                    ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds))
+                    ->count();
+            }
+        }
+
         // Check if plan is not free (to show "All" button)
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $showAllButton = $currentPlan !== 'free';
@@ -247,13 +275,13 @@ class AssetController extends Controller
         $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
 
         // Query assets for this brand and asset type
+        // Phase B2: lifecycle=deleted shows trash (onlyTrashed); otherwise exclude deleted (default scope).
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
-        // CRITICAL: Do NOT add status filter here - unpublished/archived filters need HIDDEN assets.
         $assetsQuery = Asset::query()
+            ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
-            ->whereNull('deleted_at');
+            ->where('type', AssetType::ASSET);
 
         // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
         if (empty($viewableCategoryIds)) {
@@ -273,13 +301,10 @@ class AssetController extends Controller
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
-        // This is the SINGLE SOURCE OF TRUTH for lifecycle logic
-        // CRITICAL: Lifecycle resolver MUST run to ensure consistent asset scope
-        // Used by both AssetController and DeliverableController for consistency
-        $lifecycleFilter = $request->get('lifecycle');
+        // Phase B2: Resolver validates viewTrash for lifecycle=deleted and applies exclusions
         $this->lifecycleResolver->apply(
             $assetsQuery,
-            $lifecycleFilter,
+            $normalizedLifecycle,
             $user,
             $tenant,
             $brand
@@ -644,6 +669,10 @@ class AssetController extends Controller
                         'last_name' => $asset->archivedBy?->last_name ?? null,
                         'email' => $asset->archivedBy?->email ?? null,
                     ] : null,
+                    // Phase B2: Trash view and drawer "Deleted X days ago"
+                    'deleted_at' => $asset->deleted_at?->toIso8601String(),
+                    // Bulk actions contextual filtering: approval state (approved/pending/rejected; not_required excluded)
+                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? null),
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                     // Phase V-1: Video quick preview on hover (grid and drawer)
@@ -1194,6 +1223,9 @@ class AssetController extends Controller
             'sort' => $sort,
             'sort_direction' => $sortDirection,
             'q' => $request->input('q', ''),
+            'lifecycle' => $lifecycleParam, // Phase B2: e.g. 'deleted' for trash view
+            'can_view_trash' => $canViewTrash,
+            'trash_count' => $trashCount,
         ]);
     }
 
@@ -2143,6 +2175,44 @@ class AssetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to restore asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Phase B2: Permanently delete a soft-deleted asset (force delete from trash).
+     * DELETE /assets/{asset}/force-delete
+     */
+    public function forceDelete(string $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        $assetModel = Asset::withTrashed()->findOrFail($asset);
+
+        if ($assetModel->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        if (! $assetModel->trashed()) {
+            return response()->json(['message' => 'Asset is not in trash'], 409);
+        }
+
+        $this->authorize('forceDelete', $assetModel);
+
+        try {
+            $this->deletionService->forceDelete($assetModel, $user->id);
+            return response()->json([
+                'message' => 'Asset permanently deleted',
+                'asset_id' => $assetModel->id,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to permanently delete: ' . $e->getMessage(),
             ], 500);
         }
     }

@@ -83,6 +83,20 @@ class PdfPageRenderJob implements ShouldQueue
             return;
         }
 
+        // Already failed in a previous attempt — don't retry (stops FAIL → retry → FAIL loop)
+        $existing = AssetPdfPage::query()
+            ->where('asset_id', $asset->id)
+            ->where('version_number', $versionNumber)
+            ->where('page_number', $page)
+            ->first();
+        if ($existing && $existing->status === 'failed') {
+            Log::info('[PdfPageRenderJob] Skipping retry - page already marked failed', [
+                'asset_id' => $asset->id,
+                'page' => $page,
+            ]);
+            return;
+        }
+
         $pageRecord = AssetPdfPage::updateOrCreate(
             [
                 'asset_id' => $asset->id,

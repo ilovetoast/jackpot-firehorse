@@ -118,6 +118,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Asset delete (soft delete) confirmation state
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [deleteLoading, setDeleteLoading] = useState(false)
+    // Phase B2: Force delete from trash (type DELETE to confirm)
+    const [showForceDeleteConfirm, setShowForceDeleteConfirm] = useState(false)
+    const [forceDeleteConfirmText, setForceDeleteConfirmText] = useState('')
+    const [forceDeleteLoading, setForceDeleteLoading] = useState(false)
     
     // Phase J.3: Approval comments for rejection role display
     const [approvalComments, setApprovalComments] = useState([])
@@ -1186,6 +1190,51 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     }
     
     
+    // Phase B2: Restore from trash
+    const handleRestoreFromTrash = async () => {
+        if (!displayAsset?.id) return
+        try {
+            const response = await window.axios.post(`/app/assets/${displayAsset.id}/restore-from-trash`)
+            if (response.data?.message === 'Asset restored successfully') {
+                if (onAssetUpdate && response.data.asset) {
+                    onAssetUpdate(response.data.asset)
+                } else {
+                    router.reload({ only: ['assets'] })
+                }
+                onClose()
+            } else {
+                setToastMessage(response.data?.message || 'Failed to restore')
+                setToastType('error')
+            }
+        } catch (err) {
+            setToastMessage(err.response?.data?.message || err.message || 'Failed to restore')
+            setToastType('error')
+        }
+    }
+
+    // Phase B2: Force delete (permanent) from trash
+    const handleForceDeleteConfirm = async () => {
+        if (!displayAsset?.id || forceDeleteConfirmText !== 'DELETE' || forceDeleteLoading) return
+        setForceDeleteLoading(true)
+        try {
+            const response = await window.axios.delete(`/app/assets/${displayAsset.id}/force-delete`)
+            if (response.data?.message === 'Asset permanently deleted') {
+                setShowForceDeleteConfirm(false)
+                setForceDeleteConfirmText('')
+                onClose()
+                router.reload({ only: ['assets'] })
+            } else {
+                setToastMessage(response.data?.message || 'Failed to permanently delete')
+                setToastType('error')
+            }
+        } catch (err) {
+            setToastMessage(err.response?.data?.message || err.message || 'Failed to permanently delete')
+            setToastType('error')
+        } finally {
+            setForceDeleteLoading(false)
+        }
+    }
+
     // Handle asset delete (soft delete — permanent after grace period)
     const handleDeleteConfirm = async () => {
         if (!displayAsset?.id || !canDelete || deleteLoading) return
@@ -1929,7 +1978,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         </div>
                     )}
                     
-                    {/* Lifecycle badges - Unpublished, Archived, and Expired */}
+                    {/* Phase B2: Deleted (trash) banner */}
+                    {displayAsset.deleted_at && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
+                            <p className="text-sm font-medium text-red-800">
+                                Deleted {Math.max(0, Math.floor((Date.now() - new Date(displayAsset.deleted_at).getTime()) / (1000 * 60 * 60 * 24)))} days ago
+                            </p>
+                            {(auth?.deletion_grace_period_days ?? 30) > 0 && (
+                                <p className="text-xs text-red-700">
+                                    Permanently deleted in {Math.max(0, (auth?.deletion_grace_period_days ?? 30) - Math.floor((Date.now() - new Date(displayAsset.deleted_at).getTime()) / (1000 * 60 * 60 * 24)))} days
+                                </p>
+                            )}
+                        </div>
+                    )}
+                    {/* Lifecycle badges - Unpublished, Archived, and Expired (hidden when deleted) */}
+                    {!displayAsset.deleted_at && (
                     <div className="flex flex-wrap gap-2">
                         {/* Unpublished badge */}
                         {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
@@ -1978,6 +2041,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </span>
                         )}
                     </div>
+                    )}
                 </div>
 
                 {/* Analytics/Metrics & Action Buttons */}
@@ -2002,6 +2066,33 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     {/* Action Buttons */}
                     {displayAsset?.id && (
                         <div className="space-y-2">
+                            {/* Phase B2: When asset is in trash, show Restore and Permanently Delete */}
+                            {displayAsset.deleted_at && (
+                                <>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleRestoreFromTrash}
+                                            className="flex-1 inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                                        >
+                                            <ArrowUturnLeftIcon className="h-5 w-5 mr-2" />
+                                            Restore
+                                        </button>
+                                        {(auth?.user?.tenant_role === 'owner' || auth?.user?.tenant_role === 'admin' || auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin') && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setShowForceDeleteConfirm(true); setForceDeleteConfirmText(''); }}
+                                                className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2.5 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-50"
+                                            >
+                                                Permanently Delete
+                                            </button>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                            {/* All lifecycle actions below hidden when asset is in trash */}
+                            {!displayAsset.deleted_at && (
+                            <>
                             {/* Quick Review/Approve/Reject button - show FIRST for approvers viewing pending assets */}
                             {(() => {
                                 // Brand-based permission check (primary check)
@@ -2320,6 +2411,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     </div>
                                 )
                             })()}
+                            </>
+                            )}
                         </div>
                     )}
                 </div>
@@ -3912,6 +4005,59 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     type="button"
                                     onClick={() => !deleteLoading && setShowDeleteConfirm(false)}
                                     disabled={deleteLoading}
+                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Phase B2: Permanently delete from trash — type DELETE to confirm */}
+            {showForceDeleteConfirm && displayAsset && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            onClick={() => !forceDeleteLoading && (setShowForceDeleteConfirm(false), setForceDeleteConfirmText(''))}
+                        />
+                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                            <div className="sm:flex sm:items-start">
+                                <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                                    <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
+                                </div>
+                                <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                        Permanently delete asset?
+                                    </h3>
+                                    <p className="mt-2 text-sm text-gray-500">
+                                        This cannot be undone. Type <strong>DELETE</strong> to confirm.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        value={forceDeleteConfirmText}
+                                        onChange={(e) => setForceDeleteConfirmText(e.target.value)}
+                                        placeholder="DELETE"
+                                        className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-red-500 focus:ring-red-500"
+                                        autoFocus
+                                    />
+                                </div>
+                            </div>
+                            <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleForceDeleteConfirm}
+                                    disabled={forceDeleteConfirmText !== 'DELETE' || forceDeleteLoading}
+                                    className="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {forceDeleteLoading ? 'Deleting…' : 'Permanently Delete'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => !forceDeleteLoading && (setShowForceDeleteConfirm(false), setForceDeleteConfirmText(''))}
+                                    disabled={forceDeleteLoading}
                                     className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:opacity-50"
                                 >
                                     Cancel

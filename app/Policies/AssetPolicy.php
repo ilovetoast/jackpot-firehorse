@@ -412,4 +412,41 @@ class AssetPolicy
     {
         return $user->can('asset.restore');
     }
+
+    /**
+     * Phase B2: Determine if the user can view trash (deleted assets).
+     * Tenant Admin + Brand Manager only. Contributors and Viewers blocked.
+     */
+    public function viewTrash(User $user, ?Asset $asset = null): bool
+    {
+        if (! $user) {
+            return false;
+        }
+        $tenant = $asset?->tenant ?? app('tenant');
+        if (! $tenant || ! $user->belongsToTenant($tenant->id)) {
+            return false;
+        }
+        if (in_array($user->getRoleForTenant($tenant), ['admin', 'owner'], true)) {
+            return true;
+        }
+        $brand = $asset?->brand ?? (app()->bound('brand') ? app('brand') : null);
+        if ($brand && $user->hasPermissionForBrand($brand, 'assets.delete')) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Phase B2: Permanently delete (force delete) from trash. Tenant Admin only.
+     */
+    public function forceDelete(User $user, Asset $asset): bool
+    {
+        if (! $user->belongsToTenant($asset->tenant_id)) {
+            return false;
+        }
+        $tenant = $asset->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+
+        return in_array($tenantRole, ['admin', 'owner'], true);
+    }
 }

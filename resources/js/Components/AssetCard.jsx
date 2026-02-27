@@ -15,7 +15,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
-import { EyeSlashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import { EyeSlashIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
@@ -394,10 +394,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                         {asset.starred === true && (
                             <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
                         )}
-                        {/* Subtle unpublished icon */}
+                        {/* Phase B2: Trash badge when asset is deleted */}
+                        {asset.deleted_at && (
+                            <span className="inline-flex items-center rounded-md bg-red-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="In trash">
+                                <TrashIcon className="h-3 w-3" aria-label="In trash" />
+                            </span>
+                        )}
+                        {/* Subtle unpublished icon (hidden when in trash) */}
                         {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
-                        {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
-                        {!asset.archived_at && asset.is_published === false && (
+                        {!asset.deleted_at && !asset.archived_at && asset.is_published === false && (
                             <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
                         )}
                     </div>

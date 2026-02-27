@@ -16,7 +16,10 @@ import SelectedItemsDrawer from './SelectedItemsDrawer'
 export default function SelectionActionBar({
     currentPageIds = [],
     currentPageItems = [],
+    /** Open bulk actions modal (Publish, Archive, Trash, etc.) */
     onOpenBulkEdit = null,
+    /** Open metadata add modal directly — skips the "choose action" step when intent is add metadata */
+    onOpenBulkMetadataAdd = null,
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -45,6 +48,8 @@ export default function SelectionActionBar({
     const [mixedTypeMessage, setMixedTypeMessage] = useState('')
     const [showLargeSelectionConfirm, setShowLargeSelectionConfirm] = useState(false)
     const [pendingBulkEditIds, setPendingBulkEditIds] = useState([])
+    /** 'metadata' = open metadata add directly, 'actions' = open bulk actions modal */
+    const [pendingBulkEditIntent, setPendingBulkEditIntent] = useState('metadata')
     const [countJustChanged, setCountJustChanged] = useState(false)
 
     const TYPE_LABELS = { asset: 'Assets', execution: 'Executions', collection: 'Collections', generative: 'Generative' }
@@ -87,6 +92,23 @@ export default function SelectionActionBar({
         clearSelection()
     }, [clearSelection])
 
+    const handleOpenBulkActionsModal = useCallback(() => {
+        const ids = pageSelected.map((item) => item.id)
+        if (ids.length === 0) return
+        setPendingBulkEditIntent('actions')
+        if (selectedCount > 100) {
+            setPendingBulkEditIds(ids)
+            setShowLargeSelectionConfirm(true)
+            return
+        }
+        if (pageSelected.length !== selectedCount) {
+            setPendingBulkEditIds(ids)
+            setShowBulkEditConfirm(true)
+        } else {
+            onOpenBulkEdit?.(ids)
+        }
+    }, [pageSelected, selectedCount, onOpenBulkEdit])
+
     const handleBulkEditClick = useCallback(() => {
         const ids = pageSelected.map((item) => item.id)
         if (ids.length === 0) return
@@ -100,6 +122,7 @@ export default function SelectionActionBar({
             return
         }
 
+        setPendingBulkEditIntent('metadata')
         if (selectedCount > 100) {
             setPendingBulkEditIds(ids)
             setShowLargeSelectionConfirm(true)
@@ -110,17 +133,25 @@ export default function SelectionActionBar({
             setPendingBulkEditIds(ids)
             setShowBulkEditConfirm(true)
         } else {
-            onOpenBulkEdit?.(ids)
+            if (onOpenBulkMetadataAdd) {
+                onOpenBulkMetadataAdd(ids)
+            } else {
+                onOpenBulkEdit?.(ids)
+            }
         }
-    }, [pageSelected, selectedCount, onOpenBulkEdit, getSelectionTypeBreakdown])
+    }, [pageSelected, selectedCount, onOpenBulkEdit, onOpenBulkMetadataAdd, getSelectionTypeBreakdown])
 
     const handleConfirmBulkEdit = useCallback(() => {
         setShowBulkEditConfirm(false)
         if (pendingBulkEditIds.length > 0) {
-            onOpenBulkEdit?.(pendingBulkEditIds)
+            if (pendingBulkEditIntent === 'metadata' && onOpenBulkMetadataAdd) {
+                onOpenBulkMetadataAdd(pendingBulkEditIds)
+            } else {
+                onOpenBulkEdit?.(pendingBulkEditIds)
+            }
             setPendingBulkEditIds([])
         }
-    }, [pendingBulkEditIds, onOpenBulkEdit])
+    }, [pendingBulkEditIds, pendingBulkEditIntent, onOpenBulkEdit, onOpenBulkMetadataAdd])
 
     const handleConfirmLargeSelection = useCallback(() => {
         setShowLargeSelectionConfirm(false)
@@ -128,10 +159,14 @@ export default function SelectionActionBar({
         if (pageSelected.length !== selectedCount) {
             setShowBulkEditConfirm(true)
         } else {
-            onOpenBulkEdit?.(pendingBulkEditIds)
+            if (pendingBulkEditIntent === 'metadata' && onOpenBulkMetadataAdd) {
+                onOpenBulkMetadataAdd(pendingBulkEditIds)
+            } else {
+                onOpenBulkEdit?.(pendingBulkEditIds)
+            }
             setPendingBulkEditIds([])
         }
-    }, [pendingBulkEditIds, pageSelected.length, selectedCount, onOpenBulkEdit])
+    }, [pendingBulkEditIds, pendingBulkEditIntent, pageSelected.length, selectedCount, onOpenBulkEdit, onOpenBulkMetadataAdd])
 
     const items = selectedItems.map((item) => ({
         id: item.id,
@@ -192,24 +227,43 @@ export default function SelectionActionBar({
                         >
                             Create Download
                         </button>
-                        {canEditMetadata && onOpenBulkEdit && (
-                            <span
-                                title={isMixedType ? mixedTypeTooltip : undefined}
-                                className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
-                            >
-                                <button
-                                    type="button"
-                                    onClick={isMixedType ? undefined : handleBulkEditClick}
-                                    disabled={isMixedType}
-                                    className={`inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 ${
-                                        isMixedType
-                                            ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                                            : 'border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 active:scale-95'
-                                    }`}
-                                >
-                                    Bulk Edit
-                                </button>
-                            </span>
+                        {canEditMetadata && (onOpenBulkMetadataAdd || onOpenBulkEdit) && (
+                            <>
+                                {onOpenBulkMetadataAdd && (
+                                    <span
+                                        title={isMixedType ? mixedTypeTooltip : undefined}
+                                        className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={isMixedType ? undefined : handleBulkEditClick}
+                                            disabled={isMixedType}
+                                            className={`inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 ${
+                                                isMixedType
+                                                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                                                    : 'border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 active:scale-95'
+                                            }`}
+                                        >
+                                            Bulk Edit
+                                        </button>
+                                    </span>
+                                )}
+                                {onOpenBulkEdit && (
+                                    <span
+                                        title={isMixedType ? mixedTypeTooltip : undefined}
+                                        className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={isMixedType ? undefined : handleOpenBulkActionsModal}
+                                            disabled={isMixedType}
+                                            className="inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 active:scale-95"
+                                        >
+                                            {onOpenBulkMetadataAdd ? 'Actions' : 'Bulk Edit'}
+                                        </button>
+                                    </span>
+                                )}
+                            </>
                         )}
                     </div>
 

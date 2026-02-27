@@ -266,6 +266,7 @@ class Asset extends Model
         'pdf_pages_rendered',
         'dominant_color_bucket', // Deprecated - kept for safety
         'dominant_hue_group', // Perceptual hue cluster for filtering
+        'deleted_by_user_id', // Phase B2: User who soft-deleted the asset
         'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
         'pdf_page_count',
         'pdf_unsupported_large',
