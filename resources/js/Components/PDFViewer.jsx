@@ -11,7 +11,9 @@ function buildPageEndpoint(asset, page) {
 }
 
 export default function PDFViewer({ asset }) {
-    const totalPages = Math.max(1, Number(asset?.pdf_page_count || 1))
+    // Use page_count from API when available (full-screen zoom may receive asset from grid with stale pdf_page_count)
+    const [knownPageCount, setKnownPageCount] = useState(null)
+    const totalPages = Math.max(1, Number(knownPageCount ?? asset?.pdf_page_count ?? 1))
     const [currentPage, setCurrentPage] = useState(1)
     const [pageCache, setPageCache] = useState({})
     const [loadingPage, setLoadingPage] = useState(1)
@@ -45,6 +47,10 @@ export default function PDFViewer({ asset }) {
 
             const payload = await response.json()
 
+            if (payload?.page_count != null) {
+                setKnownPageCount(Number(payload.page_count))
+            }
+
             if (payload?.status === 'ready' && payload?.url) {
                 setPageCache((prev) => ({ ...prev, [page]: payload.url }))
                 setLoadingPage(null)
@@ -77,7 +83,7 @@ export default function PDFViewer({ asset }) {
 
     useEffect(() => {
         clearRetryTimers()
-
+        setKnownPageCount(null)
         setCurrentPage(1)
         setError(null)
         setLoadingPage(1)
