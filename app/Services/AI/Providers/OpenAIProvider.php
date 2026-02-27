@@ -101,9 +101,22 @@ class OpenAIProvider implements AIProviderInterface
         $model = $options['model'] ?? 'gpt-3.5-turbo';
         $maxTokens = $options['max_tokens'] ?? 1000;
         $temperature = $options['temperature'] ?? 0.7;
+        $responseFormat = $options['response_format'] ?? null;
 
         if (!$this->isModelAvailable($model)) {
             throw new \InvalidArgumentException("Model '{$model}' is not available or supported.");
+        }
+
+        $body = [
+            'model' => $model,
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt],
+            ],
+            'max_tokens' => $maxTokens,
+            'temperature' => $temperature,
+        ];
+        if ($responseFormat !== null) {
+            $body['response_format'] = $responseFormat;
         }
 
         try {
@@ -112,14 +125,7 @@ class OpenAIProvider implements AIProviderInterface
                     'Authorization' => 'Bearer ' . $this->apiKey,
                     'Content-Type' => 'application/json',
                 ])
-                ->post("{$this->baseUrl}/chat/completions", [
-                    'model' => $model,
-                    'messages' => [
-                        ['role' => 'user', 'content' => $prompt],
-                    ],
-                    'max_tokens' => $maxTokens,
-                    'temperature' => $temperature,
-                ]);
+                ->post("{$this->baseUrl}/chat/completions", $body);
 
             if ($response->failed()) {
                 $error = $response->json();

@@ -41,14 +41,15 @@ class LoginController extends Controller
                 ])->onlyInput('email');
             }
             
-            $tenants = $user->tenants;
+            $tenants = $user->tenants()->with('defaultBrand')->get();
 
             // Auto-select tenant if user has tenants
             if ($tenants->isNotEmpty()) {
                 // If user has only one tenant, auto-select it
                 // Otherwise, select the first one (we'll add tenant switching later)
                 $tenant = $tenants->first();
-                $defaultBrand = $tenant->defaultBrand;
+                // Use brand marked default, or fall back to first brand (first-time login may not have default set yet)
+                $defaultBrand = $tenant->defaultBrand ?? $tenant->brands()->first();
                 
                 if (! $defaultBrand) {
                     abort(500, 'Tenant must have at least one brand');

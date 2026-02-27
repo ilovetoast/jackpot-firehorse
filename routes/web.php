@@ -438,6 +438,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 ->name('assets.pdf-page.show');
             Route::post('/assets/{asset}/pdf-pages/full-extraction', [\App\Http\Controllers\AssetPdfPageController::class, 'requestFullExtraction'])
                 ->name('assets.pdf-pages.full-extraction');
+            Route::get('/assets/{asset}/pdf-text-extraction', [\App\Http\Controllers\AssetPdfTextExtractionController::class, 'show'])
+                ->name('assets.pdf-text-extraction.show');
+            Route::post('/assets/{asset}/pdf-text-extraction', [\App\Http\Controllers\AssetPdfTextExtractionController::class, 'store'])
+                ->name('assets.pdf-text-extraction.store');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             Route::get('/assets/{asset}/versions', [\App\Http\Controllers\AssetVersionController::class, 'index'])->name('assets.versions.index');

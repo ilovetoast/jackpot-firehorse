@@ -57,6 +57,9 @@ class AITaskType
     // Sentry AI: error analysis (summary, root cause, fix suggestion)
     public const SENTRY_ERROR_ANALYSIS = 'sentry_error_analysis';
 
+    // PDF text: structure extracted text (document_type, summary) for guidelines/specs
+    public const PDF_DOCUMENT_STRUCTURE = 'pdf_document_structure';
+
     /**
      * Get all task types as an array.
      *
@@ -83,6 +86,7 @@ class AITaskType
             self::BRAND_BOOTSTRAP_INFERENCE,
             self::BRAND_BOOTSTRAP_SIGNAL_EXTRACTION,
             self::SENTRY_ERROR_ANALYSIS,
+            self::PDF_DOCUMENT_STRUCTURE,
         ];
     }
     

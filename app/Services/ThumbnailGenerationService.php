@@ -672,9 +672,12 @@ class ThumbnailGenerationService
 
             $body = $result['Body'];
             $contentLength = isset($result['ContentLength']) ? (int) $result['ContentLength'] : null;
+            $contentType = isset($result['ContentType']) ? strtolower((string) $result['ContentType']) : '';
 
             // PDF: use temp path with .pdf extension so ImageMagick can select the PDF delegate
-            if (str_ends_with(strtolower($s3Key), '.pdf')) {
+            // (S3 key may not have .pdf e.g. "tenants/.../v1/original"; also check ContentType)
+            $isPdf = str_ends_with(strtolower($s3Key), '.pdf') || str_contains($contentType, 'pdf');
+            if ($isPdf) {
                 do {
                     $tempPath = sys_get_temp_dir() . '/thumb_' . Str::random(32) . '.pdf';
                 } while (file_exists($tempPath));

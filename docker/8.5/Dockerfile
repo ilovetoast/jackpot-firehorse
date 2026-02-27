@@ -94,9 +94,9 @@ RUN apt-get update && apt-get upgrade -y \
 # ghostscript: Required for ImageMagick to read/write PDF files
 #   - ImageMagick uses Ghostscript as a delegate to process PDF content
 #   - Without Ghostscript, ImageMagick cannot process PDFs even if policy allows it
-# poppler-utils: Optional fallback PDF tools (pdftoppm, pdfinfo)
-#   - Provides alternative methods for PDF processing if ImageMagick fails
-#   - Useful for extracting text, metadata, or converting PDFs via command-line tools
+# poppler-utils: PDF command-line tools (pdftotext, pdftoppm, pdfinfo)
+#   - pdftotext: Used by ExtractPdfTextJob for PDF text extraction (OCR) into pdf_text_extractions
+#   - Optional fallback for PDF processing if ImageMagick fails
 RUN apt-get update \
     && apt-get install -y \
         imagemagick \

@@ -1336,6 +1336,17 @@ class AssetMetadataController extends Controller
             'metadata' => $metadata,
         ]);
 
+        // Reset current version so ProcessAssetJob does not skip (idempotency check uses version.metadata.processing_started)
+        $version = $asset->currentVersion;
+        if ($version) {
+            $versionMetadata = $version->metadata ?? [];
+            unset($versionMetadata['processing_started'], $versionMetadata['processing_started_at']);
+            $version->update([
+                'pipeline_status' => 'pending',
+                'metadata' => $versionMetadata,
+            ]);
+        }
+
         ProcessAssetJob::dispatch($asset->id);
 
         return response()->json(['status' => 'queued', 'message' => 'Asset reprocessing started']);

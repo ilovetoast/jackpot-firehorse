@@ -1,14 +1,12 @@
 Must Have
 
-- replacment file support to multipart
-- big tiff error timeout success
-- sentry full loop
 
-- versioning fixed, test all options, restore, new verions file type diff, delete, restore
-- fix public files not being public (see collections)  see 
+
+- sentry full loop
+-delete, restore
 - performance stats
 - glacvier for version and archive
-- clean up pooling to much
+- clean up poling to much
 - generate all pages of pdf for ocr
 - combine down and selects with floating dialog like actions
 - change details view to be full screen dark, shopify esk with deatil on the side
@@ -92,4 +90,66 @@ Frontend:
 
 🚫 For Now: Bulk metadata submit is disabled until Phase 11 backend is wired.
 
----
+------------------------------------------------------------------------------------------------
+
+
+ai bg for ocr
+FUTURE PHASE — AI Structuring Layer
+
+Create pdf_text_ai_structures processing job (ProcessPdfTextWithAiJob)
+
+Structured JSON extraction for brand guideline documents
+
+AI confidence scoring model
+
+Manual “Analyze with AI” button in AssetDrawer
+
+Store AI model name + processing status
+
+Reprocess AI without re-running OCR
+
+Add document-type classification (guideline / deck / spec / unknown)
+
+Add structured summary generation (bullet summary)
+
+Add AI re-run audit trail
+
+📌 FUTURE PHASE — Tag & Metadata Integration
+
+Inject AI-derived metadata into asset_metadata_candidates
+
+Inject AI-derived tag candidates with confidence weighting
+
+Map detected primary/secondary colors to brand metadata candidates
+
+Inject “guideline” category when document_type = brand_guideline
+
+Inject governance flags when confidentiality detected
+
+Add candidate source type = pdf_ai
+
+Add AI confidence threshold before candidate injection
+
+Prevent AI from auto-writing committed metadata
+
+Add event: asset.pdf_ai_structured
+
+Integrate AI-derived data into compliance scoring engine
+
+📌 FUTURE PHASE — Brand DNA Integration
+
+Auto-detect brand guideline documents by filename/category
+
+Use AI structured JSON to pre-fill Brand DNA builder fields
+
+Diff structured JSON across versions to detect guideline changes
+
+Trigger asset.guideline_changed event
+
+Notify brand admins on guideline change
+
+Cache parsed brand rules for upload-time validation
+
+Use guideline colors to influence AI color validation
+
+Use guideline fonts to validate typography compliance

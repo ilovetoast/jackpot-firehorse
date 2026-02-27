@@ -38,7 +38,7 @@ class CompanyController extends Controller
     public function index(): Response
     {
         $user = Auth::user();
-        $companies = $user->tenants;
+        $companies = $user->tenants()->with('subscriptions')->get();
         $currentCompanyId = session('tenant_id');
 
         return Inertia::render('Companies/Index', [

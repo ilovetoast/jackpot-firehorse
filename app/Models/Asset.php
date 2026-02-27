@@ -687,6 +687,44 @@ class Asset extends Model
     }
 
     /**
+     * Get PDF text extraction records for this asset (OCR / pdftotext).
+     */
+    public function pdfTextExtractions(): HasMany
+    {
+        return $this->hasMany(PdfTextExtraction::class);
+    }
+
+    /**
+     * Get the latest PDF text extraction for this asset (by created_at).
+     * Prefer version-aware lookup via getLatestPdfTextExtractionForVersion().
+     */
+    public function latestPdfTextExtraction(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(PdfTextExtraction::class)->latestOfMany('created_at');
+    }
+
+    /**
+     * Get the latest PDF text extraction for this asset for a specific file version.
+     * Prevents re-using OCR from an outdated PDF after replacement.
+     *
+     * @param string|null $versionId asset_version_id (e.g. currentVersion->id); null = legacy/no version
+     */
+    public function getLatestPdfTextExtractionForVersion(?string $versionId = null): ?PdfTextExtraction
+    {
+        $query = PdfTextExtraction::query()
+            ->where('asset_id', $this->id)
+            ->orderByDesc('created_at');
+
+        if ($versionId === null) {
+            $query->whereNull('asset_version_id');
+        } else {
+            $query->where('asset_version_id', $versionId);
+        }
+
+        return $query->first();
+    }
+
+    /**
      * Get the download groups that include this asset.
      * 
      * Phase 3.1 — Downloader Foundations

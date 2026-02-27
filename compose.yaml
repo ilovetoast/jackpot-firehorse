@@ -135,12 +135,13 @@ services:
             - redis
         restart: unless-stopped
         # Queue worker configuration:
+        # --queue=default,pdf-processing: Process main pipeline and PDF jobs (ExtractPdfTextJob, PdfPageRenderJob, etc.)
         # --tries=3: Maximum retry attempts per job
         # --timeout=300: Default job timeout (thumbnail jobs override to 600s)
         # --sleep=3: Seconds to sleep when no jobs available
         # --max-jobs=1000: Restart worker after N jobs (prevents memory leaks)
         # --max-time=3600: Restart worker after 1 hour (prevents memory leaks)
-        command: php artisan queue:work --tries=3 --timeout=300 --sleep=3 --max-jobs=1000 --max-time=3600
+        command: php artisan queue:work --queue=default,pdf-processing --tries=3 --timeout=300 --sleep=3 --max-jobs=1000 --max-time=3600
 networks:
     sail:
         driver: bridge

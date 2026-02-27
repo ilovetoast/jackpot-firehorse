@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ThumbnailStatus;
 use App\Jobs\PdfPageRenderJob;
 use App\Models\Asset;
 use App\Models\AssetPdfPage;
@@ -30,8 +31,23 @@ class AssetPdfPageController extends Controller
         if (!$tenant || $asset->tenant_id !== $tenant->id) {
             return response()->json(['message' => 'Asset not found.'], 404);
         }
+
+        $result = $this->resolvePdfPage($asset, $page);
+        return response()->json($result['payload'], $result['http_status']);
+    }
+
+    /**
+     * Resolve PDF page response (same logic as show). Used by drawer and by artisan pdf:test-page.
+     *
+     * @return array{payload: array, http_status: int}
+     */
+    public function resolvePdfPage(Asset $asset, int $page): array
+    {
         if ($page < 1) {
-            return response()->json(['message' => 'Page must be >= 1.'], 422);
+            return [
+                'payload' => ['message' => 'Page must be >= 1.'],
+                'http_status' => 422,
+            ];
         }
 
         $mime = strtolower((string) ($asset->mime_type ?? ''));
@@ -42,19 +58,25 @@ class AssetPdfPageController extends Controller
             : '';
         $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
         if (!$isPdf) {
-            return response()->json(['message' => 'Asset is not a PDF.'], 422);
+            return [
+                'payload' => ['message' => 'Asset is not a PDF.'],
+                'http_status' => 422,
+            ];
         }
 
         $versionNumber = $asset->currentVersion?->version_number ?? 1;
         $pageCount = (int) ($asset->pdf_page_count ?? 0);
 
         if ($pageCount > 0 && $page > $pageCount) {
-            return response()->json([
-                'status' => 'failed',
-                'message' => "Page {$page} exceeds page count {$pageCount}.",
-                'page' => $page,
-                'page_count' => $pageCount,
-            ], 422);
+            return [
+                'payload' => [
+                    'status' => 'failed',
+                    'message' => "Page {$page} exceeds page count {$pageCount}.",
+                    'page' => $page,
+                    'page_count' => $pageCount,
+                ],
+                'http_status' => 422,
+            ];
         }
 
         $record = AssetPdfPage::query()
@@ -64,8 +86,6 @@ class AssetPdfPageController extends Controller
             ->first();
 
         // Only return "ready" with a URL when the page has been rendered (completed record).
-        // Otherwise we would return a URL for the expected path and the file may not exist yet
-        // (thumbnail/render failed or still processing), causing 404 in local/staging.
         $isCompleted = $record && $record->status === 'completed' && !empty($record->storage_path);
         $url = $isCompleted
             ? $this->assetDeliveryService->getPdfPageUrl($asset, $page, DeliveryContext::AUTHENTICATED->value)
@@ -74,22 +94,48 @@ class AssetPdfPageController extends Controller
         $isReady = $isCompleted && $url !== '' && $url !== $placeholder;
 
         if ($isReady) {
-            return response()->json([
-                'status' => 'ready',
-                'page' => $page,
-                'page_count' => $pageCount > 0 ? $pageCount : null,
-                'url' => $url,
-            ]);
+            return [
+                'payload' => [
+                    'status' => 'ready',
+                    'page' => $page,
+                    'page_count' => $pageCount > 0 ? $pageCount : null,
+                    'url' => $url,
+                ],
+                'http_status' => 200,
+            ];
         }
 
-        // Terminal failure: page render failed (e.g. Imagick error). Return 200 so client stops polling and shows error.
+        // Terminal failure: page render failed (e.g. Imagick error).
         if ($record && $record->status === 'failed') {
-            return response()->json([
-                'status' => 'failed',
-                'page' => $page,
-                'page_count' => $pageCount > 0 ? $pageCount : null,
-                'message' => $record->error ?? 'PDF page could not be rendered.',
-            ]);
+            return [
+                'payload' => [
+                    'status' => 'failed',
+                    'page' => $page,
+                    'page_count' => $pageCount > 0 ? $pageCount : null,
+                    'message' => $record->error ?? 'PDF page could not be rendered.',
+                ],
+                'http_status' => 200,
+            ];
+        }
+
+        // Do not dispatch on-demand when the pipeline is already running (e.g. user reprocessed with drawer open).
+        // ProcessAssetJob already dispatches PdfPageRenderJob(1) for PDFs, and GenerateThumbnailsJob creates
+        // AssetPdfPage for page 1 when done. Dispatching again here would duplicate work and can cause races.
+        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status
+            : ThumbnailStatus::tryFrom((string) $asset->thumbnail_status);
+        $pipelineRunning = $thumbnailStatus === ThumbnailStatus::PENDING || $thumbnailStatus === ThumbnailStatus::PROCESSING;
+        if ($pipelineRunning) {
+            return [
+                'payload' => [
+                    'status' => 'processing',
+                    'page' => $page,
+                    'page_count' => $pageCount > 0 ? $pageCount : null,
+                    'poll_after_ms' => 1200,
+                    'message' => 'Pipeline is running; page will be ready when thumbnails complete.',
+                ],
+                'http_status' => 202,
+            ];
         }
 
         // Re-dispatch if no record, or not currently processing, or stuck in "processing" (e.g. job timed out)
@@ -109,12 +155,15 @@ class AssetPdfPageController extends Controller
             PdfPageRenderJob::dispatch($asset->id, $page, $asset->currentVersion?->id);
         }
 
-        return response()->json([
-            'status' => 'processing',
-            'page' => $page,
-            'page_count' => $pageCount > 0 ? $pageCount : null,
-            'poll_after_ms' => 1200,
-        ], 202);
+        return [
+            'payload' => [
+                'status' => 'processing',
+                'page' => $page,
+                'page_count' => $pageCount > 0 ? $pageCount : null,
+                'poll_after_ms' => 1200,
+            ],
+            'http_status' => 202,
+        ];
     }
 
     /**

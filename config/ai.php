@@ -360,6 +360,16 @@ PROMPT
                 // Tenant-scoped, system-triggered in pipeline
             ],
         ],
+        'pdf_structure' => [
+            'name' => 'PDF Document Structure',
+            'description' => 'Classifies PDF text and extracts structure (document_type, summary) for guidelines/specs',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, runs from StructPdfTextWithAiJob after extraction completes
+            ],
+        ],
     ],
 
     /*

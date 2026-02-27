@@ -224,8 +224,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
 
             // Dynamic timeout and pixel guardrails (before any heavy work)
-            // Never treat unknown dimensions as safe — could be extremely large and melt worker
-            if (!$asset->width || !$asset->height) {
+            // Require dimensions for raster images (safety: avoid melting worker on huge unknown-size images).
+            // PDF/video/document types do not have dimensions on the asset until we render; ThumbnailGenerationService obtains dimensions from the generated output.
+            $fileTypeService = app(\App\Services\FileTypeService::class);
+            $mime = $version ? $version->mime_type : $asset->mime_type;
+            $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            $fileType = $fileTypeService->detectFileType($mime, $ext);
+            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video'], true);
+            if (!$dimensionsFromRendering && (!$asset->width || !$asset->height)) {
                 Log::warning('[GenerateThumbnailsJob] Skipping thumbnail generation - dimensions unknown (soft fail)', [
                     'asset_id' => $asset->id,
                     'width' => $asset->width,
@@ -253,8 +259,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                 return;
             }
 
-            $width = (int) $asset->width;
-            $height = (int) $asset->height;
+            $width = $asset->width ? (int) $asset->width : 0;
+            $height = $asset->height ? (int) $asset->height : 0;
             $pixelCount = $width * $height;
             $maxPixels = (int) config('assets.thumbnail.max_pixels', 100_000_000);
             $largeThreshold = (int) config('assets.thumbnail.large_asset_threshold_pixels', 30_000_000);

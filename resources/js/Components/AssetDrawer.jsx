@@ -145,6 +145,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [addToCollectionLoading, setAddToCollectionLoading] = useState(false)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false) // C9.1: Modal state
     const [showCollectionsModal, setShowCollectionsModal] = useState(false) // C9.1: Modal for inline collections edit
+    // PDF text extraction (OCR): extraction data, loading, trigger loading, preview modal
+    const [pdfTextExtraction, setPdfTextExtraction] = useState(null)
+    const [pdfTextExtractionLoading, setPdfTextExtractionLoading] = useState(false)
+    const [pdfOcrTriggerLoading, setPdfOcrTriggerLoading] = useState(false)
+    const [showPdfTextModal, setShowPdfTextModal] = useState(false)
+    const pdfOcrPollRef = useRef(null)
     /** C9.2: Collection field visibility (category-driven, matches Tags behavior) */
     // Collections follow the same visibility resolution as Tags - check if collection field appears in metadata schema
     const [collectionFieldVisible, setCollectionFieldVisible] = useState(false)
@@ -756,6 +762,69 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         onAssetUpdate,
         pdfFullExtractionLoading,
     ])
+
+    const fetchPdfTextExtraction = useCallback(async () => {
+        if (!isPdf || !displayAsset?.id) return
+        setPdfTextExtractionLoading(true)
+        try {
+            const response = await window.axios.get(
+                `/app/assets/${displayAsset.id}/pdf-text-extraction`,
+                { headers: { Accept: 'application/json' } }
+            )
+            setPdfTextExtraction(response?.data?.extraction ?? null)
+        } catch {
+            setPdfTextExtraction(null)
+        } finally {
+            setPdfTextExtractionLoading(false)
+        }
+    }, [displayAsset?.id, isPdf])
+
+    useEffect(() => {
+        if (!isPdf || !displayAsset?.id) {
+            setPdfTextExtraction(null)
+            return
+        }
+        fetchPdfTextExtraction()
+    }, [displayAsset?.id, isPdf, fetchPdfTextExtraction])
+
+    useEffect(() => {
+        if (!pdfTextExtraction || !['pending', 'processing'].includes(pdfTextExtraction.status)) {
+            if (pdfOcrPollRef.current) {
+                clearInterval(pdfOcrPollRef.current)
+                pdfOcrPollRef.current = null
+            }
+            return
+        }
+        pdfOcrPollRef.current = setInterval(fetchPdfTextExtraction, 2500)
+        return () => {
+            if (pdfOcrPollRef.current) {
+                clearInterval(pdfOcrPollRef.current)
+                pdfOcrPollRef.current = null
+            }
+        }
+    }, [pdfTextExtraction?.id, pdfTextExtraction?.status, fetchPdfTextExtraction])
+
+    const handleTriggerPdfOcr = useCallback(async () => {
+        if (!isPdf || !displayAsset?.id || pdfOcrTriggerLoading || !canRequestFullPdfExtraction) return
+        setPdfOcrTriggerLoading(true)
+        try {
+            await window.axios.post(
+                `/app/assets/${displayAsset.id}/pdf-text-extraction`,
+                {},
+                { headers: { Accept: 'application/json' } }
+            )
+            setToastMessage('Text extraction started.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 3000)
+            await fetchPdfTextExtraction()
+        } catch (err) {
+            setToastMessage(err?.response?.data?.message || 'Failed to start text extraction.')
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setPdfOcrTriggerLoading(false)
+        }
+    }, [canRequestFullPdfExtraction, displayAsset?.id, fetchPdfTextExtraction, isPdf, pdfOcrTriggerLoading])
 
     // Phase 3.1: Carousel navigation handlers with smooth transitions
     const handlePrevious = (e) => {
@@ -1815,6 +1884,46 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 ? 'Queued'
                                                 : 'Render all pages'}
                                     </button>
+                                </div>
+                            )}
+                            {canRequestFullPdfExtraction && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                    <p className="text-xs text-gray-500">
+                                        Extract text from PDF for search and AI (pdftotext).
+                                    </p>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        {pdfTextExtraction?.status === 'complete' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPdfTextModal(true)}
+                                                className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                            >
+                                                View
+                                            </button>
+                                        )}
+                                        {pdfTextExtraction?.status && (
+                                            <span className={[
+                                                'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                                                pdfTextExtraction.status === 'complete' && 'bg-green-100 text-green-700',
+                                                pdfTextExtraction.status === 'failed' && 'bg-red-100 text-red-700',
+                                                pdfTextExtraction.status === 'processing' && 'bg-amber-100 text-amber-700',
+                                                pdfTextExtraction.status === 'pending' && 'bg-gray-100 text-gray-600',
+                                            ].filter(Boolean).join(' ') || 'bg-gray-100 text-gray-600'}>
+                                                {pdfTextExtraction.status === 'complete' && 'Complete'}
+                                                {pdfTextExtraction.status === 'failed' && 'Failed'}
+                                                {pdfTextExtraction.status === 'processing' && 'Processing'}
+                                                {pdfTextExtraction.status === 'pending' && 'Pending'}
+                                            </span>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={handleTriggerPdfOcr}
+                                            disabled={pdfOcrTriggerLoading || pdfTextExtractionLoading}
+                                            className="inline-flex shrink-0 items-center rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {pdfOcrTriggerLoading ? 'Starting...' : pdfTextExtraction ? 'Re-Extract Text' : 'Extract Text (OCR)'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -3650,6 +3759,41 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 >
                                     Cancel
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PDF extracted text preview modal */}
+            {showPdfTextModal && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowPdfTextModal(false)} />
+                        <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
+                            <div className="bg-white px-4 pb-4 pt-5 sm:p-6">
+                                <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900">Extracted text</h3>
+                                    <button
+                                        type="button"
+                                        className="rounded-md text-gray-400 hover:text-gray-500"
+                                        onClick={() => setShowPdfTextModal(false)}
+                                    >
+                                        <XMarkIcon className="h-6 w-6" />
+                                    </button>
+                                </div>
+                                <div className="mt-3 max-h-[60vh] overflow-y-auto rounded border border-gray-200 bg-gray-50 p-3">
+                                    {pdfTextExtraction?.extracted_text ? (
+                                        <pre className="whitespace-pre-wrap break-words font-sans text-sm text-gray-800">
+                                            {pdfTextExtraction.extracted_text}
+                                        </pre>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">No text to display.</p>
+                                    )}
+                                </div>
+                                {pdfTextExtraction?.extraction_source && (
+                                    <p className="mt-2 text-xs text-gray-400">Source: {pdfTextExtraction.extraction_source}</p>
+                                )}
                             </div>
                         </div>
                     </div>
