@@ -372,6 +372,96 @@ class DashboardController extends Controller
                 ];
             })->filter()->take(15)->values(); // Take top 15 after filtering
         }
+
+        // Get trending assets (exponential decay over 14 days) - same algorithm as AssetSortService
+        $cutoff = now()->subDays(14)->toDateTimeString();
+        $driver = DB::connection()->getDriverName();
+        $decayExpr = $driver === 'pgsql'
+            ? "SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))"
+            : "SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))";
+
+        $trendingSub = DB::table('asset_metrics')
+            ->select('asset_id', DB::raw("{$decayExpr} as trending_score"))
+            ->where('created_at', '>=', $cutoff)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->groupBy('asset_id');
+
+        $mostTrendingAssetIds = DB::table(DB::raw("({$trendingSub->toSql()}) as am_trending"))
+            ->mergeBindings($trendingSub)
+            ->join('assets', 'assets.id', '=', 'am_trending.asset_id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.status', AssetStatus::VISIBLE)
+            ->whereNull('assets.deleted_at')
+            ->select('assets.id', 'am_trending.trending_score')
+            ->orderByDesc('am_trending.trending_score')
+            ->limit(25)
+            ->pluck('trending_score', 'id');
+
+        $mostTrendingAssets = collect();
+        if ($mostTrendingAssetIds->isNotEmpty()) {
+            $assets = Asset::whereIn('id', $mostTrendingAssetIds->keys())
+                ->get()
+                ->keyBy('id');
+
+            $categoryIds = $assets->map(fn ($a) => (is_array($a->metadata ?? null) && isset($a->metadata['category_id'])) ? $a->metadata['category_id'] : null)
+                ->filter()->unique()->values()->all();
+
+            $categories = collect();
+            if (!empty($categoryIds)) {
+                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->get()
+                    ->keyBy('id');
+            }
+
+            $mostTrendingAssets = $mostTrendingAssetIds->map(function ($trendingScore, $assetId) use ($assets, $categories, $user) {
+                $asset = $assets->get($assetId);
+                if (!$asset) {
+                    return null;
+                }
+
+                $metadata = $asset->metadata ?? [];
+                $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
+                $category = $categoryId ? $categories->get($categoryId) : null;
+
+                if ($category) {
+                    if (!$user->can('view', $category)) {
+                        return null;
+                    }
+                }
+
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
+                    : ($asset->thumbnail_status ?? 'pending');
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+                $finalThumbnailUrl = null;
+                if ($thumbnailStatus === 'completed') {
+                    $thumbnails = $metadata['thumbnails'] ?? [];
+                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
+                    $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
+                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                    if ($finalThumbnailUrl && $thumbnailVersion && !str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                    }
+                }
+
+                return [
+                    'id' => $asset->id,
+                    'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
+                    'original_filename' => $asset->original_filename,
+                    'final_thumbnail_url' => $finalThumbnailUrl,
+                    'preview_thumbnail_url' => $previewThumbnailUrl,
+                    'thumbnail_url' => $finalThumbnailUrl ?? null,
+                    'thumbnail_status' => $thumbnailStatus,
+                    'trending_score' => (float) $trendingScore,
+                    'category' => $category ? ['id' => $category->id, 'name' => $category->name, 'slug' => $category->slug] : null,
+                ];
+            })->filter()->take(15)->values();
+        }
         
         // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
         // Metadata approval is asset-centric and inline - no separate queue
@@ -633,7 +723,7 @@ class DashboardController extends Controller
         
         // Default widget visibility: company widgets visible to owner/admin/brand_manager, hidden for contributor/viewer
         // Widget config format: { role: { widget_name: true/false } }
-        // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'pending_ai_suggestions', 'pending_metadata_approvals'
+        // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'most_trending', 'pending_ai_suggestions', 'pending_metadata_approvals'
         $defaultWidgetVisibility = [
             'owner' => [
                 'total_assets' => true,
@@ -641,6 +731,7 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'most_trending' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
                 'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
@@ -651,6 +742,7 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'most_trending' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
                 'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
@@ -661,6 +753,7 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'most_trending' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
                 'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
@@ -671,6 +764,7 @@ class DashboardController extends Controller
                 'download_links' => false,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'most_trending' => true,
                 'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for contributors
                 'pending_metadata_approvals' => false,
                 'pending_asset_approvals' => false, // Phase J.3.1: Contributors don't see admin approval widget
@@ -681,6 +775,7 @@ class DashboardController extends Controller
                 'download_links' => false,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'most_trending' => true,
                 'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for viewers
                 'pending_metadata_approvals' => false,
                 'pending_asset_approvals' => false, // Phase J.3.1: Viewers don't see approval widgets
@@ -730,6 +825,7 @@ class DashboardController extends Controller
             'widget_visibility' => $userWidgetVisibility, // Widget visibility for current user's role
             'most_viewed_assets' => $mostViewedAssets,
             'most_downloaded_assets' => $mostDownloadedAssets,
+            'most_trending_assets' => $mostTrendingAssets,
             'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
             'recent_activity' => $recentActivity, // Recent company activity (permission-gated)
             'pending_ai_suggestions' => [

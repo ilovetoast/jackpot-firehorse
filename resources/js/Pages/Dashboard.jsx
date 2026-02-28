@@ -30,7 +30,7 @@ import PendingAssetTile from '../Components/PendingAssetTile'
 import RecentlyViewedCarousel from '../Components/RecentlyViewedCarousel'
 import AssetStatsCarousel from '../Components/AssetStatsCarousel'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], most_trending_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -47,6 +47,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
     const showDownloadLinks = widget_visibility.download_links !== false
     const showMostViewed = widget_visibility.most_viewed !== false
     const showMostDownloaded = widget_visibility.most_downloaded !== false
+    const showMostTrending = widget_visibility.most_trending !== false
     const showPendingAiSuggestions = widget_visibility.pending_ai_suggestions !== false
     const showPendingMetadataApprovals = widget_visibility.pending_metadata_approvals !== false
     const showPendingAssetApprovals = widget_visibility.pending_asset_approvals !== false // Phase J.3.1: Widget visibility for pending asset approvals
@@ -608,11 +609,12 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                 </div>
 
                 {/* Combined Most Viewed / Most Downloaded with Tabs */}
-                {(showMostViewed || showMostDownloaded) && (
+                {(showMostViewed || showMostDownloaded || showMostTrending) && (
                     <div className="mt-8 -mx-4 sm:-mx-6 lg:-mx-8 overflow-visible">
                         <AssetStatsCarousel
                             mostViewedAssets={showMostViewed ? most_viewed_assets : []}
                             mostDownloadedAssets={showMostDownloaded ? most_downloaded_assets : []}
+                            mostTrendingAssets={showMostTrending ? most_trending_assets : []}
                             maxItems={7}
                             viewAllLink="/app/assets"
                         />

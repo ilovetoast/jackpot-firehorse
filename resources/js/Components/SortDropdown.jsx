@@ -16,19 +16,19 @@ import { useState, useRef, useEffect } from 'react'
 import { BarsArrowUpIcon, BarsArrowDownIcon } from '@heroicons/react/24/outline'
 
 const SORT_OPTIONS = [
-    { value: 'featured', label: 'Featured' },
-    { value: 'created', label: 'Created' },
-    { value: 'quality', label: 'Quality' },
-    { value: 'modified', label: 'Modified' },
-    { value: 'alphabetical', label: 'Alphabetical' },
-    { value: 'most_downloaded', label: 'Most Downloaded' },
-    { value: 'most_viewed', label: 'Most Viewed' },
-    { value: 'trending', label: 'Trending' },
+    { value: 'featured', label: 'Featured', tooltip: 'Manual order set by admins' },
+    { value: 'created', label: 'Created', tooltip: 'Upload date' },
+    { value: 'quality', label: 'Quality', tooltip: 'Asset quality score' },
+    { value: 'modified', label: 'Modified', tooltip: 'Last modified date' },
+    { value: 'alphabetical', label: 'Alphabetical', tooltip: 'A–Z by title' },
+    { value: 'most_downloaded', label: 'Most Downloaded', tooltip: 'Total download count' },
+    { value: 'most_viewed', label: 'Most Viewed', tooltip: 'Total view count' },
+    { value: 'trending', label: 'Trending', tooltip: 'Views + downloads combined, recent weighted higher (14 days)' },
 ]
 
 const COMPLIANCE_OPTIONS = [
-    { value: 'compliance_high', label: 'Highest Brand Score' },
-    { value: 'compliance_low', label: 'Lowest Brand Score' },
+    { value: 'compliance_high', label: 'Highest Brand Score', tooltip: 'Best brand compliance first' },
+    { value: 'compliance_low', label: 'Lowest Brand Score', tooltip: 'Needs attention first' },
 ]
 
 export default function SortDropdown({
@@ -94,6 +94,8 @@ export default function SortDropdown({
                             type="button"
                             role="option"
                             aria-selected={sortBy === opt.value}
+                            aria-label={opt.tooltip ? `${opt.label}: ${opt.tooltip}` : opt.label}
+                            title={opt.tooltip}
                             onClick={() => handleCriteriaSelect(opt.value)}
                             className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
                                 sortBy === opt.value

@@ -14,6 +14,7 @@ const WIDGETS = [
     { key: 'download_links', label: 'Download Links', description: 'Shows download link usage' },
     { key: 'most_viewed', label: 'Most Viewed Assets', description: 'Shows most viewed assets' },
     { key: 'most_downloaded', label: 'Most Downloaded Assets', description: 'Shows most downloaded assets' },
+    { key: 'most_trending', label: 'Trending Assets', description: 'Shows trending assets (recent views + downloads)' },
     { key: 'pending_ai_suggestions', label: 'Pending AI Suggestions', description: 'Shows pending AI tag and metadata suggestions' },
     { key: 'pending_metadata_approvals', label: 'Pending Metadata Approvals', description: 'Shows pending metadata fields requiring approval' },
     { key: 'pending_asset_approvals', label: 'Pending Asset Approvals', description: 'Shows pending contributor asset uploads requiring approval' },
