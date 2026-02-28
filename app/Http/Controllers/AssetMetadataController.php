@@ -887,6 +887,20 @@ class AssetMetadataController extends Controller
         // Phase C2/C4: Apply category suppression and tenant override filtering via centralized resolver
         $visibleFields = $visibilityResolver->filterVisibleFields($candidateFields, $category, $tenant);
 
+        // Phase 4: Batch-load edit permissions to avoid N+1 (MetadataPermissionResolver::canEdit queries metadata_fields per field)
+        $visibleFieldIds = collect($visibleFields)->pluck('field_id')->filter()->unique()->values()->all();
+        $canEditByFieldId = [];
+        if (!empty($visibleFieldIds)) {
+            $canEditByFieldId = $this->permissionResolver->canEditMultiple(
+                $visibleFieldIds,
+                $userRole,
+                $tenant->id,
+                $brand->id,
+                $category->id,
+                $metadataFieldsById // Pass pre-loaded fields to avoid duplicate metadata_fields query
+            );
+        }
+
         // Continue with permission and other checks on visible fields
         $editableFields = [];
         foreach ($visibleFields as $field) {
@@ -918,7 +932,7 @@ class AssetMetadataController extends Controller
                 continue; // Non-readonly fields must be user-editable
             }
 
-            // Phase 4: Check edit permission
+            // Phase 4: Check edit permission (from batch-loaded map)
             // For readonly/automatic fields, we still want to show them (read-only display)
             // So we only check permission for non-readonly fields
             $canEdit = true; // Default for readonly/automatic fields (they're shown read-only)
@@ -934,15 +948,7 @@ class AssetMetadataController extends Controller
                                 !($fieldOverrideState[$field['field_id']]['is_pending'] ?? true);
             
             if (!$isReadonly) {
-                // NOTE: Permission check uses brand-level permissions (brand->id), not tenant-level
-                // This ensures permissions are scoped correctly to the brand context
-                $canEdit = $this->permissionResolver->canEdit(
-                    $field['field_id'],
-                    $userRole,
-                    $tenant->id,
-                    $brand->id, // Brand-level permission check
-                    $category->id
-                );
+                $canEdit = $canEditByFieldId[$field['field_id']] ?? false;
 
                 // For rating fields, show them even if user can't edit (so they can see the rating)
                 // For approved metadata, show it read-only even if user cannot edit

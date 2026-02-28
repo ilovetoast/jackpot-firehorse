@@ -146,11 +146,16 @@ class MetadataPermissionResolver
     /**
      * Check permissions for multiple fields at once.
      *
+     * ⚠️ N+1 WARNING: When called from a loop context (e.g. getEditableMetadata), you MUST pass
+     * $metadataFieldsById. Otherwise this method will query metadata_fields, and callers that
+     * invoke it per-field will cause N+1. Prefer: collect all field IDs → load once → pass here.
+     *
      * @param array $metadataFieldIds
      * @param string $role
      * @param int $tenantId
      * @param int|null $brandId
      * @param int|null $categoryId
+     * @param \Illuminate\Support\Collection|null $metadataFieldsById Pre-loaded fields (keyed by id). Strongly recommended to avoid N+1.
      * @return array Keyed by field_id, value is boolean (can_edit)
      */
     public function canEditMultiple(
@@ -158,7 +163,8 @@ class MetadataPermissionResolver
         string $role,
         int $tenantId,
         ?int $brandId = null,
-        ?int $categoryId = null
+        ?int $categoryId = null,
+        $metadataFieldsById = null
     ): array {
         if (empty($metadataFieldIds)) {
             return [];
@@ -166,12 +172,15 @@ class MetadataPermissionResolver
 
         // Owners and admins have full access (except system-locked fields)
         $isOwnerOrAdmin = in_array($role, ['owner', 'admin']);
-        
-        // Load field data to check for system-locked fields
-        $fields = DB::table('metadata_fields')
-            ->whereIn('id', $metadataFieldIds)
-            ->get()
-            ->keyBy('id');
+
+        // Use pre-loaded fields if provided, otherwise query
+        $fields = $metadataFieldsById;
+        if ($fields === null) {
+            $fields = DB::table('metadata_fields')
+                ->whereIn('id', $metadataFieldIds)
+                ->get()
+                ->keyBy('id');
+        }
 
         // Load all permissions in one query
         $query = DB::table('metadata_field_permissions')
