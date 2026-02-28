@@ -730,17 +730,36 @@ class AssetMetadataController extends Controller
             ->pluck('id')
             ->toArray();
 
+        // Eager load metadata_fields to avoid N+1 (used in resolvedState loop, pending loop, visibleFields loop)
+        $schemaFieldIds = collect($schema['fields'] ?? [])
+            ->pluck('field_id')
+            ->filter()
+            ->all();
+
+        $allFieldIds = collect(array_keys($resolvedState))
+            ->merge($schemaFieldIds)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $metadataFieldsById = collect();
+        if (!empty($allFieldIds)) {
+            $metadataFieldsById = DB::table('metadata_fields')
+                ->whereIn('id', $allFieldIds)
+                ->get()
+                ->keyBy('id');
+        }
+
         // Build map of field_id to current values and override state
         // Suppress low-confidence AI metadata values at read time
         $fieldValues = [];
         $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
         
         foreach ($resolvedState as $fieldId => $state) {
-            // Get field info for type and population mode
-            $fieldInfo = DB::table('metadata_fields')
-                ->where('id', $fieldId)
-                ->first();
-            
+            // Get field info for type and population mode (from eager-loaded map)
+            $fieldInfo = $metadataFieldsById[$fieldId] ?? null;
+
             if (!$fieldInfo) {
                 continue;
             }
@@ -824,11 +843,9 @@ class AssetMetadataController extends Controller
                 continue;
             }
             
-            // Check if field is automatic (exclude from pending approvals)
-            $fieldInfo = DB::table('metadata_fields')
-                ->where('id', $fieldId)
-                ->first();
-            
+            // Check if field is automatic (exclude from pending approvals) - use eager-loaded map
+            $fieldInfo = $metadataFieldsById[$fieldId] ?? null;
+
             if ($fieldInfo && $fieldInfo->population_mode === 'automatic') {
                 continue; // Exclude automatic fields
             }
@@ -874,10 +891,8 @@ class AssetMetadataController extends Controller
         $editableFields = [];
         foreach ($visibleFields as $field) {
 
-            // Load field definition from database (not in resolved schema)
-            $fieldDef = DB::table('metadata_fields')
-                ->where('id', $field['field_id'])
-                ->first();
+            // Load field definition from eager-loaded map
+            $fieldDef = $metadataFieldsById[$field['field_id']] ?? null;
 
             if (!$fieldDef) {
                 continue;
@@ -979,11 +994,21 @@ class AssetMetadataController extends Controller
         // appear in details view, even when not marked visible. Show labels with or without values.
         $existingKeys = array_column($editableFields, 'key');
         $systemFieldKeys = ['dominant_colors', 'dominant_hue_group', 'orientation', 'resolution_class'];
+        $systemFieldKeysToFetch = array_diff($systemFieldKeys, $existingKeys);
+
+        $systemFieldsByKey = collect();
+        if (!empty($systemFieldKeysToFetch)) {
+            $systemFieldsByKey = DB::table('metadata_fields')
+                ->whereIn('key', $systemFieldKeysToFetch)
+                ->get()
+                ->keyBy('key');
+        }
+
         foreach ($systemFieldKeys as $systemKey) {
             if (in_array($systemKey, $existingKeys, true)) {
                 continue;
             }
-            $fieldDef = DB::table('metadata_fields')->where('key', $systemKey)->first();
+            $fieldDef = $systemFieldsByKey[$systemKey] ?? null;
             if (!$fieldDef) {
                 continue;
             }
