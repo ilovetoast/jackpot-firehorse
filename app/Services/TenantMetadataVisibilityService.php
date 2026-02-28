@@ -66,6 +66,66 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Batch-check visibility for multiple fields. Avoids N+1 when filtering many fields.
+     *
+     * ⚠️ Use this instead of isVisibleForCategory() when processing multiple fields in a loop.
+     * Queries: 1 for tenant-level overrides; +1 for category suppression when category is set.
+     *
+     * @param Tenant $tenant
+     * @param array $fieldIds
+     * @param Category|null $category
+     * @return array Keyed by field_id, value is bool (true = visible)
+     */
+    public function getBatchVisibilityForCategory(Tenant $tenant, array $fieldIds, ?Category $category): array
+    {
+        if (empty($fieldIds)) {
+            return [];
+        }
+
+        // 1. Load tenant-level overrides (brand_id NULL, category_id NULL) - single query
+        $tenantOverrides = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNull('category_id')
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->get()
+            ->keyBy('metadata_field_id');
+
+        // 2. When category set: load category-specific suppression - single query
+        // Matches isVisibleForCategory: suppressed if (brand_id = category.brand_id) OR (brand_id IS NULL)
+        $categorySuppressed = [];
+        if ($category !== null) {
+            $suppressionQuery = DB::table('metadata_field_visibility')
+                ->where('tenant_id', $tenant->id)
+                ->where('category_id', $category->id)
+                ->where('is_hidden', true)
+                ->whereIn('metadata_field_id', $fieldIds)
+                ->where(function ($q) use ($category) {
+                    if ($category->brand_id) {
+                        $q->where('brand_id', $category->brand_id)->orWhereNull('brand_id');
+                    } else {
+                        $q->whereNull('brand_id');
+                    }
+                });
+
+            $categorySuppressed = $suppressionQuery->pluck('metadata_field_id')->flip()->all();
+        }
+
+        // 3. Combine: visible = not suppressed AND (no tenant override OR !is_hidden)
+        $result = [];
+        foreach ($fieldIds as $fieldId) {
+            if (isset($categorySuppressed[$fieldId])) {
+                $result[$fieldId] = false;
+                continue;
+            }
+            $override = $tenantOverrides[$fieldId] ?? null;
+            $result[$fieldId] = $override === null || !($override->is_hidden ?? false);
+        }
+
+        return $result;
+    }
+
+    /**
      * Set visibility override for a field at tenant level.
      *
      * @param Tenant $tenant

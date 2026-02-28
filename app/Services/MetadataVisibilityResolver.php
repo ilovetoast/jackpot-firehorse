@@ -52,35 +52,39 @@ class MetadataVisibilityResolver
      */
     public function filterVisibleFields(array $fields, ?Category $category = null, ?Tenant $tenant = null): array
     {
+        // Phase C4: Batch-load tenant visibility to avoid N+1 (metadata_field_visibility per field)
+        $tenantVisibilityByFieldId = [];
+        if ($tenant !== null) {
+            $fieldIds = collect($fields)->pluck('field_id')->filter()->unique()->values()->all();
+            if (!empty($fieldIds)) {
+                $tenantVisibilityByFieldId = $this->tenantVisibilityService->getBatchVisibilityForCategory(
+                    $tenant,
+                    $fieldIds,
+                    $category
+                );
+            }
+        }
+
         // Filter out suppressed fields
         $visibleFields = [];
         foreach ($fields as $field) {
-            // Field must have field_id to check suppression
             if (!isset($field['field_id'])) {
-                // If no field_id, include field (can't check suppression)
                 $visibleFields[] = $field;
                 continue;
             }
 
-            // Phase C4: Check tenant-level visibility first
+            // Phase C4: Check tenant-level visibility (from batch-loaded map)
             if ($tenant !== null) {
-                $isTenantVisible = $this->tenantVisibilityService->isVisibleForCategory(
-                    $tenant,
-                    $field['field_id'],
-                    $category
-                );
-
+                $isTenantVisible = $tenantVisibilityByFieldId[$field['field_id']] ?? true;
                 if (!$isTenantVisible) {
-                    // Suppressed by tenant override, skip field
                     continue;
                 }
             }
 
-            // Phase C2: Check system-level category suppression
+            // Phase C2: Check system-level category suppression (metadata_field_category_visibility)
             if ($category !== null) {
                 $systemCategoryId = $category->system_category_id;
 
-                // If category has system_category_id, check system suppression
                 if ($systemCategoryId !== null) {
                     $isSystemVisible = $this->visibilityService->isVisibleForCategory(
                         $field['field_id'],
@@ -88,13 +92,11 @@ class MetadataVisibilityResolver
                     );
 
                     if (!$isSystemVisible) {
-                        // Suppressed by system, skip field
                         continue;
                     }
                 }
             }
 
-            // Field passed all visibility checks
             $visibleFields[] = $field;
         }
 
