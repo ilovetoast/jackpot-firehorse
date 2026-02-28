@@ -4,6 +4,7 @@ import { useForm } from '@inertiajs/react'
 import { useState } from 'react'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandAvatar from '../../Components/BrandAvatar'
@@ -39,6 +40,7 @@ export default function BrandsIndex({ brands, limits }) {
 
     return (
         <div className="min-h-full flex flex-col">
+            <AppHead title="Brands" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="flex-1 bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

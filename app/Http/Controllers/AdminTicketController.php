@@ -25,7 +25,6 @@ use App\Services\TicketConversionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -243,10 +242,8 @@ class AdminTicketController extends Controller
             },
             'ticketLinks',
         ];
-        if (Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
-            $relations[] = 'convertedFrom:id,ticket_number,type,status';
-            $relations[] = 'convertedTo:id,ticket_number,type,status';
-        }
+        $relations[] = 'convertedFrom:id,ticket_number,type,status';
+        $relations[] = 'convertedTo:id,ticket_number,type,status';
         $ticket->load($relations);
 
         // Separate public and internal messages
@@ -855,22 +852,18 @@ class AdminTicketController extends Controller
     {
         $listData = $this->formatTicketForList($ticket);
         
-        $convertedFrom = null;
-        $convertedTo = [];
-        if (Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
-            $convertedFrom = $ticket->convertedFrom ? [
+        $convertedFrom = $ticket->convertedFrom ? [
                 'id' => $ticket->convertedFrom->id,
                 'ticket_number' => $ticket->convertedFrom->ticket_number,
                 'type' => $ticket->convertedFrom->type->value,
                 'status' => $ticket->convertedFrom->status->value,
             ] : null;
-            $convertedTo = $ticket->convertedTo->map(fn ($t) => [
-                'id' => $t->id,
-                'ticket_number' => $t->ticket_number,
-                'type' => $t->type->value,
-                'status' => $t->status->value,
-            ])->all();
-        }
+        $convertedTo = $ticket->convertedTo->map(fn ($t) => [
+            'id' => $t->id,
+            'ticket_number' => $t->ticket_number,
+            'type' => $t->type->value,
+            'status' => $t->status->value,
+        ])->all();
 
         return array_merge($listData, [
             'description' => $ticket->metadata['description'] ?? null,

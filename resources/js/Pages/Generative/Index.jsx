@@ -1,5 +1,6 @@
 import { usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import {
     SparklesIcon,
 } from '@heroicons/react/24/outline'
@@ -9,6 +10,7 @@ export default function GenerativeIndex({ generative_items = [] }) {
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
+            <AppHead title="Generative" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
+import AppHead from '../../../Components/AppHead'
 
 // Darken hex for gradient background
 function darkenHex(hex, amount = 0.3) {
@@ -47,6 +48,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
 
     return (
         <div className="min-h-full">
+            <AppHead title="Brand Guidelines" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-white">
                 {showCallout ? (

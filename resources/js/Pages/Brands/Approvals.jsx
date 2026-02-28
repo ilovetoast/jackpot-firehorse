@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/react/24/outline'
 
@@ -85,6 +86,7 @@ export default function Approvals({ brand }) {
     if (!approvalsEnabled) {
         return (
             <div className="min-h-full flex flex-col">
+                <AppHead title="Approval Queue" />
                 <AppNav brand={auth.activeBrand} tenant={auth.activeTenant} />
                 <main className="flex-1 bg-gray-50">
                     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
@@ -106,6 +108,7 @@ export default function Approvals({ brand }) {
 
     return (
         <div className="min-h-full flex flex-col">
+            <AppHead title="Approval Queue" />
             <AppNav brand={auth.activeBrand} tenant={auth.activeTenant} />
             <main className="flex-1 bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

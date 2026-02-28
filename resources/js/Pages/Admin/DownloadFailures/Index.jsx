@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Head, Link, router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import AuthenticatedLayout from '../../../Layouts/AuthenticatedLayout'
 import {
     ArrowDownTrayIcon,
@@ -78,7 +79,7 @@ export default function DownloadFailuresIndex({ auth, downloads, stats, filters 
                 </div>
             }
         >
-            <Head title="Download Failures - Admin" />
+            <AppHead title="Download Failures" suffix="Admin" />
 
             <div className="py-12">
                 <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">

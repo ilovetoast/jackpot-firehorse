@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Head, Link, router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import AuthenticatedLayout from '../../../Layouts/AuthenticatedLayout'
 import {
     PhotoIcon,
@@ -79,7 +80,7 @@ export default function DerivativeFailuresIndex({
                 </div>
             }
         >
-            <Head title="Derivative Failures - Admin" />
+            <AppHead title="Derivative Failures" suffix="Admin" />
 
             <div className="py-12">
                 <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">

@@ -23,7 +23,7 @@
         <meta property="og:image:width" content="1200">
         <meta property="og:image:height" content="630">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>{{ config('app.name', 'Jackpot') }}</title>
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">

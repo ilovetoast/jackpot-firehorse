@@ -5,9 +5,14 @@ namespace App\Services;
 use App\Support\MetadataCache;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
+ * ⚠️ ARCHITECTURE RULE:
+ * Schema::hasColumn() and other runtime schema introspection
+ * are forbidden in request lifecycle code.
+ *
+ * Schema is controlled by migrations and must be assumed valid.
+ *
  * Metadata Schema Resolver
  *
  * Phase 1.5 – Step 3: Read-only resolver for metadata schema.
@@ -215,7 +220,7 @@ class MetadataSchemaResolver
                 DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
                 DB::raw("COALESCE(readonly, false) as readonly"),
                 DB::raw("COALESCE(is_primary, false) as is_primary"),
-            ], Schema::hasColumn('metadata_fields', 'display_widget') ? ['display_widget'] : []))
+            ], ['display_widget']))
             ->get()
             ->keyBy('id');
 
@@ -246,20 +251,15 @@ class MetadataSchemaResolver
         }
 
         // Build OR conditions for all applicable scopes
-        // C9.2: Explicitly select columns, conditionally include is_edit_hidden if it exists
         $selectColumns = [
             'metadata_field_id',
             'is_hidden',
             'is_upload_hidden',
             'is_filter_hidden',
-            'is_primary', // Category-scoped primary filter placement
+            'is_primary',
+            'is_edit_hidden',
+            'is_required',
         ];
-        if (\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-            $selectColumns[] = 'is_edit_hidden'; // C9.2: Edit visibility (Quick View checkbox)
-        }
-        if (\Schema::hasColumn('metadata_field_visibility', 'is_required')) {
-            $selectColumns[] = 'is_required'; // Category-scoped required field for upload
-        }
         
         $query = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenantId)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { useAdminPermissions } from '../../hooks/useAdminPermissions'
 import {
@@ -166,6 +167,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
 
     return (
         <div className="min-h-full">
+            <AppHead title="Admin Dashboard" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-slate-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

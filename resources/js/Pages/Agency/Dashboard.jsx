@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import AppFooter from '../../Components/AppFooter'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 
 /**
  * Agency Dashboard
@@ -58,6 +59,7 @@ export default function AgencyDashboard({ auth, tenant, agency, rewards = [], cl
 
     return (
         <>
+            <AppHead title="Agency Dashboard" />
             <AppNav auth={auth} tenant={tenant} />
             
             <div className="min-h-screen bg-gray-50 py-8">

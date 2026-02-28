@@ -1,4 +1,5 @@
 import { usePage, Link } from '@inertiajs/react'
+import AppHead from '../Components/AppHead'
 import { 
     FolderIcon, 
     CloudArrowDownIcon,
@@ -239,6 +240,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
     return (
         <div className="min-h-full">
+            <AppHead title="Dashboard" />
             <AppNav brand={authFromPage?.activeBrand || auth.activeBrand} tenant={tenant} />
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 
 export default function AssetView({ asset }) {
     const { auth } = usePage().props
@@ -88,6 +89,7 @@ export default function AssetView({ asset }) {
 
     return (
         <div className="min-h-screen bg-gray-100">
+            <AppHead title="Asset" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
 
             <div className="max-w-5xl mx-auto py-6 px-4 sm:px-6 lg:px-8">

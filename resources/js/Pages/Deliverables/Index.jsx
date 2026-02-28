@@ -7,6 +7,7 @@ import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
@@ -628,6 +629,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
 
     return (
         <div key={pageKey} className="h-screen flex flex-col overflow-hidden" data-category-id={selectedCategoryId ?? 'all'}>
+            <AppHead title="Deliverables" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>

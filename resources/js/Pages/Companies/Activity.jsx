@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
 
@@ -156,6 +157,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
 
     return (
         <div className="min-h-full">
+            <AppHead title="Activity Log" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

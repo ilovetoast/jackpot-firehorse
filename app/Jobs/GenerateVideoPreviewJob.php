@@ -85,17 +85,6 @@ class GenerateVideoPreviewJob implements ShouldQueue
                 ]);
             }
 
-            // Check if video_preview_url column exists in the database
-            // This handles cases where the migration hasn't been run yet
-            if (!Schema::hasColumn('assets', 'video_preview_url')) {
-                Log::error('[GenerateVideoPreviewJob] Video preview column missing', [
-                    'asset_id' => $asset->id,
-                    'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
-                ]);
-                // Don't throw - preview generation failure should not block upload completion
-                return;
-            }
-
             // Check if asset is a video
             $fileTypeService = app(\App\Services\FileTypeService::class);
             $fileType = $fileTypeService->detectFileTypeFromAsset($asset);

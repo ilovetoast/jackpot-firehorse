@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 use Illuminate\Support\Facades\App;
@@ -99,6 +100,14 @@ class AppServiceProvider extends ServiceProvider
         // Surface N+1 lazy loading in non-production (Sentry/local)
         if (! app()->isProduction()) {
             Model::preventLazyLoading();
+        }
+
+        // Forbid Schema::hasColumn() during HTTP lifecycle (causes N+1 information_schema queries).
+        // Migrations and console commands may still use it.
+        if (app()->runningInConsole() === false) {
+            Schema::macro('hasColumn', function () {
+                throw new RuntimeException('Schema::hasColumn() is forbidden during HTTP lifecycle.');
+            });
         }
     }
 

@@ -1,5 +1,6 @@
 import { useForm, Link, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 
 export default function BrandsCreate() {
@@ -26,6 +27,7 @@ export default function BrandsCreate() {
 
     return (
         <div className="min-h-full">
+            <AppHead title="Create Brand" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

@@ -1,6 +1,7 @@
 import { router, Link, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 
 export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages }) {
@@ -246,6 +247,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
 
     return (
         <div className="min-h-full bg-white">
+            <AppHead title="Billing" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
             <main className="relative isolate">
                 {/* Gradient Background (like homepage) */}

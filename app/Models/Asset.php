@@ -15,7 +15,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -57,10 +56,6 @@ use Illuminate\Support\Facades\Storage;
 class Asset extends Model
 {
     use HasUuids, SoftDeletes;
-
-    protected static ?bool $collectionsHasPublicEnabledColumn = null;
-
-    protected static ?bool $collectionsHasPublicUrlColumn = null;
 
     /**
      * Boot the model.
@@ -412,17 +407,9 @@ class Asset extends Model
         $query = $this->collections()
             ->where('collections.is_public', true);
 
-        if (self::collectionsHasPublicEnabledColumn()) {
-            $query->where('collections.public_enabled', true);
-        }
-
-        if (self::collectionsHasPublicUrlColumn()) {
-            $query->whereNotNull('collections.public_url')
-                ->where('collections.public_url', '!=', '');
-        } else {
-            $query->whereNotNull('collections.slug')
-                ->where('collections.slug', '!=', '');
-        }
+        $query->where('collections.public_enabled', true)
+            ->whereNotNull('collections.public_url')
+            ->where('collections.public_url', '!=', '');
 
         return $query->exists();
     }
@@ -439,36 +426,6 @@ class Asset extends Model
     public function isExpired(): bool
     {
         return $this->expires_at !== null && $this->expires_at->isPast();
-    }
-
-    protected static function collectionsHasPublicEnabledColumn(): bool
-    {
-        if (self::$collectionsHasPublicEnabledColumn !== null) {
-            return self::$collectionsHasPublicEnabledColumn;
-        }
-
-        try {
-            self::$collectionsHasPublicEnabledColumn = Schema::hasColumn('collections', 'public_enabled');
-        } catch (\Throwable) {
-            self::$collectionsHasPublicEnabledColumn = false;
-        }
-
-        return self::$collectionsHasPublicEnabledColumn;
-    }
-
-    protected static function collectionsHasPublicUrlColumn(): bool
-    {
-        if (self::$collectionsHasPublicUrlColumn !== null) {
-            return self::$collectionsHasPublicUrlColumn;
-        }
-
-        try {
-            self::$collectionsHasPublicUrlColumn = Schema::hasColumn('collections', 'public_url');
-        } catch (\Throwable) {
-            self::$collectionsHasPublicUrlColumn = false;
-        }
-
-        return self::$collectionsHasPublicUrlColumn;
     }
 
     /**

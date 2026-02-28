@@ -1,6 +1,7 @@
 import { usePage, router } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import {
     ChartBarIcon,
@@ -91,6 +92,7 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
 
     return (
         <div className="min-h-full">
+            <AppHead title="Metadata Analytics" />
             <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

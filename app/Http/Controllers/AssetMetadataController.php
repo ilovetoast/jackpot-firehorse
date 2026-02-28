@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * ⚠️ ARCHITECTURE RULE:
+ * Schema::hasColumn() and other runtime schema introspection
+ * are forbidden in request lifecycle code.
+ *
+ * Schema is controlled by migrations and must be assumed valid.
+ */
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
@@ -1690,7 +1697,7 @@ class AssetMetadataController extends Controller
                     DB::raw("COALESCE(readonly, false) as readonly"),
                     DB::raw("COALESCE(is_primary, false) as is_primary"),
                 ],
-                \Illuminate\Support\Facades\Schema::hasColumn('metadata_fields', 'display_widget') ? ['display_widget'] : []
+                ['display_widget']
             ))
             ->get()
             ->keyBy('id');
@@ -1700,16 +1707,13 @@ class AssetMetadataController extends Controller
         $systemCategoryId = $category->system_category_id;
 
         // Load category-level visibility overrides (is_edit_hidden = Quick View)
-        $editVisibilityOverrides = [];
-        if (\Illuminate\Support\Facades\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-            $editVisibilityOverrides = DB::table('metadata_field_visibility')
-                ->where('tenant_id', $asset->tenant_id)
-                ->where('brand_id', $asset->brand_id)
-                ->where('category_id', $category->id)
-                ->whereIn('metadata_field_id', $fields->keys()->toArray())
-                ->pluck('is_edit_hidden', 'metadata_field_id')
-                ->toArray();
-        }
+        $editVisibilityOverrides = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $asset->tenant_id)
+            ->where('brand_id', $asset->brand_id)
+            ->where('category_id', $category->id)
+            ->whereIn('metadata_field_id', $fields->keys()->toArray())
+            ->pluck('is_edit_hidden', 'metadata_field_id')
+            ->toArray();
         
         // Load option visibility for select/multiselect fields
         $optionVisibility = [];

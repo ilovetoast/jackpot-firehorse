@@ -1,6 +1,7 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
 import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import Avatar from '../../Components/Avatar'
@@ -220,6 +221,7 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
 
     return (
         <div className="min-h-screen bg-gray-50">
+            <AppHead title="Team" />
             <AppNav />
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 {/* Header */}

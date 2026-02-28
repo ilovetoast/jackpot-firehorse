@@ -1,4 +1,5 @@
 import { Link, useForm, usePage, router } from '@inertiajs/react'
+import AppHead from '../../Components/AppHead'
 import { useState, useEffect, useCallback } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -313,6 +314,7 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
 
     return (
         <div className="min-h-full">
+            <AppHead title="Company Settings" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

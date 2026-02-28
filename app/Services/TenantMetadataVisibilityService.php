@@ -6,9 +6,14 @@ use App\Models\Category;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 /**
+ * ⚠️ ARCHITECTURE RULE:
+ * Schema::hasColumn() and other runtime schema introspection
+ * are forbidden in request lifecycle code.
+ *
+ * Schema is controlled by migrations and must be assumed valid.
+ *
  * Tenant Metadata Visibility Service
  *
  * Phase C4 + Phase G: Manages tenant-level visibility overrides for metadata fields.
@@ -39,20 +44,14 @@ class TenantMetadataVisibilityService
             return [];
         }
 
-        // C9.2: Explicitly select columns to avoid errors if is_edit_hidden doesn't exist yet
-        $selectColumns = ['id', 'metadata_field_id', 'tenant_id', 'brand_id', 'category_id', 
-                         'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary', 
-                         'created_at', 'updated_at'];
-        if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-            $selectColumns[] = 'is_edit_hidden';
-        }
-
         $overrides = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenant->id)
             ->whereNull('brand_id')
             ->whereNull('category_id')
             ->whereIn('metadata_field_id', $fieldIds)
-            ->select($selectColumns)
+            ->select(['id', 'metadata_field_id', 'tenant_id', 'brand_id', 'category_id',
+                'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary', 'is_edit_hidden',
+                'created_at', 'updated_at'])
             ->get()
             ->keyBy('metadata_field_id');
 
@@ -364,14 +363,10 @@ class TenantMetadataVisibilityService
             $query->where('brand_id', $brandId);
         }
         
-        $selectColumns = ['category_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
-        if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-            $selectColumns[] = 'is_edit_hidden';
-        }
-        if (Schema::hasColumn('metadata_field_visibility', 'is_required')) {
-            $selectColumns[] = 'is_required';
-        }
-        $overrides = $query->select($selectColumns)->get();
+        $overrides = $query->select([
+            'category_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden',
+            'is_primary', 'is_edit_hidden', 'is_required',
+        ])->get();
 
         $result = [];
         foreach ($overrides as $override) {
@@ -417,9 +412,6 @@ class TenantMetadataVisibilityService
 
         $targetBrandId = $targetCategory->brand_id;
         $targetCategoryId = $targetCategory->id;
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
-        $hasRequired = Schema::hasColumn('metadata_field_visibility', 'is_required');
         $count = 0;
 
         foreach ($sourceRows as $row) {
@@ -436,13 +428,13 @@ class TenantMetadataVisibilityService
                 'is_filter_hidden' => (bool) $row->is_filter_hidden,
                 'updated_at' => now(),
             ];
-            if ($hasPrimary && isset($row->is_primary)) {
+            if (isset($row->is_primary)) {
                 $data['is_primary'] = $row->is_primary;
             }
-            if ($hasEditHidden && isset($row->is_edit_hidden)) {
+            if (isset($row->is_edit_hidden)) {
                 $data['is_edit_hidden'] = $row->is_edit_hidden;
             }
-            if ($hasRequired && isset($row->is_required)) {
+            if (isset($row->is_required)) {
                 $data['is_required'] = $row->is_required;
             }
 
@@ -534,14 +526,12 @@ class TenantMetadataVisibilityService
             ->get(['id', 'key']);
 
         $rows = [];
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
         $brandId = $category->brand_id;
         $categoryId = $category->id;
 
         foreach ($fields as $field) {
             $enabled = in_array($field->key, $enabledFields, true);
-            $row = [
+            $rows[] = [
                 'metadata_field_id' => $field->id,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brandId,
@@ -549,16 +539,11 @@ class TenantMetadataVisibilityService
                 'is_hidden' => !$enabled,
                 'is_upload_hidden' => false,
                 'is_filter_hidden' => false,
+                'is_primary' => null,
+                'is_edit_hidden' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            if ($hasPrimary) {
-                $row['is_primary'] = null;
-            }
-            if ($hasEditHidden) {
-                $row['is_edit_hidden'] = false;
-            }
-            $rows[] = $row;
         }
 
         if (empty($rows)) {
@@ -622,8 +607,6 @@ class TenantMetadataVisibilityService
             ->get(['id', 'key', 'scope']);
 
         $rows = [];
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
 
         foreach ($fields as $field) {
             $key = $field->key;
@@ -643,7 +626,7 @@ class TenantMetadataVisibilityService
                 continue; // Skip (no row = fall back to field/tenant defaults)
             }
 
-            $row = [
+            $rows[] = [
                 'metadata_field_id' => $field->id,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brandId,
@@ -651,17 +634,11 @@ class TenantMetadataVisibilityService
                 'is_hidden' => $visibility['is_hidden'],
                 'is_upload_hidden' => $visibility['is_upload_hidden'],
                 'is_filter_hidden' => $visibility['is_filter_hidden'],
+                'is_primary' => $visibility['is_primary'] ?? null,
+                'is_edit_hidden' => $visibility['is_edit_hidden'] ?? false,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            // Always add optional columns when they exist so all rows have identical keys (bulk insert)
-            if ($hasPrimary) {
-                $row['is_primary'] = $visibility['is_primary'] ?? null;
-            }
-            if ($hasEditHidden) {
-                $row['is_edit_hidden'] = $visibility['is_edit_hidden'] ?? false;
-            }
-            $rows[] = $row;
         }
 
         // Delete existing category-level visibility, then insert defaults
@@ -726,10 +703,6 @@ class TenantMetadataVisibilityService
             ->whereNull('archived_at')
             ->get(['id', 'key', 'scope']);
 
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
-        $hasRequired = Schema::hasColumn('metadata_field_visibility', 'is_required');
-
         $existingKeys = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brandId)
@@ -771,18 +744,12 @@ class TenantMetadataVisibilityService
                 'is_hidden' => $visibility['is_hidden'],
                 'is_upload_hidden' => $visibility['is_upload_hidden'],
                 'is_filter_hidden' => $visibility['is_filter_hidden'],
+                'is_primary' => $visibility['is_primary'] ?? null,
+                'is_edit_hidden' => $visibility['is_edit_hidden'] ?? false,
+                'is_required' => $visibility['is_required'] ?? null,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            if ($hasPrimary) {
-                $row['is_primary'] = $visibility['is_primary'] ?? null;
-            }
-            if ($hasEditHidden) {
-                $row['is_edit_hidden'] = $visibility['is_edit_hidden'] ?? false;
-            }
-            if ($hasRequired) {
-                $row['is_required'] = $visibility['is_required'] ?? null;
-            }
 
             if (! $dryRun) {
                 DB::table('metadata_field_visibility')->insert($row);
@@ -845,9 +812,6 @@ class TenantMetadataVisibilityService
             ->get()
             ->keyBy('metadata_field_id');
 
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
-
         $updated = 0;
         $inserted = 0;
         $changes = [];
@@ -864,20 +828,16 @@ class TenantMetadataVisibilityService
                     'is_upload_hidden' => false,
                     'is_filter_hidden' => false,
                     'is_primary' => $settings['is_primary'] ?? null,
+                    'is_edit_hidden' => $settings['is_edit_hidden'] ?? false,
                 ];
-                if ($hasEditHidden) {
-                    $expected['is_edit_hidden'] = $settings['is_edit_hidden'] ?? false;
-                }
             } else {
                 $expected = [
                     'is_hidden' => true,
                     'is_upload_hidden' => true,
                     'is_filter_hidden' => true,
                     'is_primary' => null,
+                    'is_edit_hidden' => true,
                 ];
-                if ($hasEditHidden) {
-                    $expected['is_edit_hidden'] = true;
-                }
             }
 
             $existing = $existingRows[$field->id] ?? null;
@@ -886,23 +846,18 @@ class TenantMetadataVisibilityService
                 $needsUpdate = $existing->is_hidden != $expected['is_hidden']
                     || $existing->is_upload_hidden != $expected['is_upload_hidden']
                     || $existing->is_filter_hidden != $expected['is_filter_hidden']
-                    || ($hasPrimary && ($existing->is_primary ?? null) != ($expected['is_primary'] ?? null))
-                    || ($hasEditHidden && ($existing->is_edit_hidden ?? false) != ($expected['is_edit_hidden'] ?? false));
+                    || ($existing->is_primary ?? null) != ($expected['is_primary'] ?? null)
+                    || ($existing->is_edit_hidden ?? false) != ($expected['is_edit_hidden'] ?? false);
 
                 if ($needsUpdate && ! $dryRun) {
-                    $updateData = [
+                    DB::table('metadata_field_visibility')->where('id', $existing->id)->update([
                         'is_hidden' => $expected['is_hidden'],
                         'is_upload_hidden' => $expected['is_upload_hidden'],
                         'is_filter_hidden' => $expected['is_filter_hidden'],
+                        'is_primary' => $expected['is_primary'],
+                        'is_edit_hidden' => $expected['is_edit_hidden'],
                         'updated_at' => now(),
-                    ];
-                    if ($hasPrimary) {
-                        $updateData['is_primary'] = $expected['is_primary'];
-                    }
-                    if ($hasEditHidden) {
-                        $updateData['is_edit_hidden'] = $expected['is_edit_hidden'];
-                    }
-                    DB::table('metadata_field_visibility')->where('id', $existing->id)->update($updateData);
+                    ]);
                     Log::info('[metadata:repair-type-defaults] Updated type field visibility', [
                         'tenant_id' => $tenant->id,
                         'category_id' => $categoryId,
@@ -926,15 +881,11 @@ class TenantMetadataVisibilityService
                         'is_hidden' => $expected['is_hidden'],
                         'is_upload_hidden' => $expected['is_upload_hidden'],
                         'is_filter_hidden' => $expected['is_filter_hidden'],
+                        'is_primary' => $expected['is_primary'],
+                        'is_edit_hidden' => $expected['is_edit_hidden'],
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
-                    if ($hasPrimary) {
-                        $row['is_primary'] = $expected['is_primary'];
-                    }
-                    if ($hasEditHidden) {
-                        $row['is_edit_hidden'] = $expected['is_edit_hidden'];
-                    }
                     DB::table('metadata_field_visibility')->insert($row);
                     Log::info('[metadata:repair-type-defaults] Inserted type field visibility', [
                         'tenant_id' => $tenant->id,
@@ -1166,16 +1117,11 @@ class TenantMetadataVisibilityService
             throw new \InvalidArgumentException('Category must belong to the tenant.');
         }
 
-        $selectColumns = ['metadata_field_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
-        if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-            $selectColumns[] = 'is_edit_hidden';
-        }
-
         $rows = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $category->brand_id)
             ->where('category_id', $category->id)
-            ->get($selectColumns);
+            ->get(['metadata_field_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary', 'is_edit_hidden']);
 
         $snapshot = [];
         foreach ($rows as $row) {
@@ -1228,8 +1174,6 @@ class TenantMetadataVisibilityService
 
         $brandId = $category->brand_id;
         $categoryId = $category->id;
-        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
-        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
         $count = 0;
 
         foreach ($snapshot as $entry) {
@@ -1246,15 +1190,11 @@ class TenantMetadataVisibilityService
                 'is_hidden' => (bool) ($entry['is_hidden'] ?? false),
                 'is_upload_hidden' => (bool) ($entry['is_upload_hidden'] ?? false),
                 'is_filter_hidden' => (bool) ($entry['is_filter_hidden'] ?? false),
+                'is_primary' => array_key_exists('is_primary', $entry) ? ($entry['is_primary'] === null ? null : (bool) $entry['is_primary']) : null,
+                'is_edit_hidden' => array_key_exists('is_edit_hidden', $entry) ? (bool) $entry['is_edit_hidden'] : false,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            if ($hasPrimary && array_key_exists('is_primary', $entry)) {
-                $row['is_primary'] = $entry['is_primary'] === null ? null : (bool) $entry['is_primary'];
-            }
-            if ($hasEditHidden && array_key_exists('is_edit_hidden', $entry)) {
-                $row['is_edit_hidden'] = (bool) $entry['is_edit_hidden'];
-            }
 
             DB::table('metadata_field_visibility')->insert($row);
             $count++;

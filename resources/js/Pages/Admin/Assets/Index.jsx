@@ -1,4 +1,5 @@
-import { Head, Link, router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
@@ -312,7 +313,7 @@ export default function AdminAssetsIndex({
 
     return (
         <div className="min-h-full bg-slate-50">
-            <Head title="Asset Operations - Admin" />
+            <AppHead title="Asset Operations" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-6 flex items-center justify-between">

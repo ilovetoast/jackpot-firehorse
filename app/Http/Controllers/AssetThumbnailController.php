@@ -1508,22 +1508,6 @@ class AssetThumbnailController extends Controller
         }
 
         try {
-            // Check if video_preview_url column exists in the database
-            // This handles cases where the migration hasn't been run yet
-            $hasVideoPreviewColumn = \Illuminate\Support\Facades\Schema::hasColumn('assets', 'video_preview_url');
-            
-            if (!$hasVideoPreviewColumn) {
-                Log::error('[AssetThumbnailController] Video preview column missing', [
-                    'asset_id' => $asset->id,
-                    'user_id' => $user->id,
-                    'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
-                ]);
-
-                return response()->json([
-                    'error' => 'Video preview feature is not available. The database migration for video preview support has not been run. Please contact your administrator.',
-                ], 500);
-            }
-
             // Clear existing preview URL to allow regeneration
             $asset->update([
                 'video_preview_url' => null,

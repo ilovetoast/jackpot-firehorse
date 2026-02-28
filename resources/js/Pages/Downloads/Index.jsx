@@ -4,6 +4,7 @@ import { useDownloadErrors } from '../../hooks/useDownloadErrors'
 import { useProcessingDownloadsPolling } from '../../hooks/useProcessingDownloadsPolling'
 import { keyByDownloads, warnIfReplacingRootState } from '../../utils/downloadUtils'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import {
@@ -311,6 +312,7 @@ export default function DownloadsIndex({
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
+      <AppHead title="Downloads" />
       <AppNav />
       <main className="flex-1 py-6 px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">

@@ -26,7 +26,8 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon } from '@heroicons/react/24/outline'
+import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
@@ -586,43 +587,15 @@ export default function AssetGridSecondaryFilters({
                             ].filter(Boolean).join(' · ')}
                         </span>
                     )}
-                    {/* Sort: compact dropdown + direction (in filter bar) */}
+                    {/* Sort: Tailwind dropdown with criteria + direction at bottom */}
                     {onSortChange && (
                     <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="text-xs font-medium text-gray-500 hidden sm:inline">Sort</span>
-                        <label htmlFor="more-filters-sort-by" className="sr-only">Sort by</label>
-                        <select
-                            id="more-filters-sort-by"
-                            value={sortBy}
-                            onChange={(e) => onSortChange(e.target.value, sortDirection)}
-                            className="min-w-[7rem] rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            aria-label="Sort by"
-                        >
-                            <option value="featured">Featured</option>
-                            <option value="created">Created</option>
-                            <option value="quality">Quality</option>
-                            <option value="modified">Modified</option>
-                            <option value="alphabetical">Alphabetical</option>
-                            {showComplianceFilter && (
-                                <>
-                                    <option value="compliance_high">Highest Brand Score</option>
-                                    <option value="compliance_low">Lowest Brand Score</option>
-                                </>
-                            )}
-                        </select>
-                        <button
-                            type="button"
-                            onClick={() => onSortChange(sortBy, sortDirection === 'asc' ? 'desc' : 'asc')}
-                            className="p-1 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                            title={sortDirection === 'asc' ? 'Descending' : 'Ascending'}
-                            aria-label={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                        >
-                            {sortDirection === 'asc' ? (
-                                <BarsArrowUpIcon className="h-4 w-4" />
-                            ) : (
-                                <BarsArrowDownIcon className="h-4 w-4" />
-                            )}
-                        </button>
+                        <SortDropdown
+                            sortBy={sortBy}
+                            sortDirection={sortDirection}
+                            onSortChange={onSortChange}
+                            showComplianceFilter={showComplianceFilter}
+                        />
                     </div>
                     )}
                 </div>

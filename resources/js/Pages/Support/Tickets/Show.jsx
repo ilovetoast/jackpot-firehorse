@@ -1,6 +1,7 @@
 import { useForm, Link, usePage, router } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../../Components/AppNav'
+import AppHead from '../../../Components/AppHead'
 import AppFooter from '../../../Components/AppFooter'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
 import Avatar from '../../../Components/Avatar'
@@ -97,6 +98,7 @@ export default function TicketsShow({ ticket, plan_limits }) {
 
     return (
         <div className="min-h-full bg-gray-50">
+            <AppHead title="Support Ticket" />
             <AppNav brand={auth.activeBrand} tenant={auth.tenant} />
             <main className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-6">

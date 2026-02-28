@@ -1,4 +1,5 @@
-import { Head, Link } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import { ChartBarIcon, ServerIcon } from '@heroicons/react/24/outline'
@@ -15,7 +16,7 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
 
     return (
         <div className="min-h-full bg-slate-50">
-            <Head title="Performance - Admin" />
+            <AppHead title="Performance" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-6 flex items-center justify-between">

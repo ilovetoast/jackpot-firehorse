@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
+import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
@@ -658,6 +659,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
+            <AppHead title="Assets" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>

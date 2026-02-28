@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Enums\MetricType;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Phase L: Centralized asset sort logic.
@@ -10,12 +12,15 @@ use Illuminate\Database\Eloquent\Builder;
  * Single place for ORDER BY so sort behavior is deterministic and consistent
  * across Assets, Deliverables, and Collections. Composes after search and filters.
  *
- * Locked sort options (order in UI): featured | created | quality | modified | alphabetical
+ * Sort options: featured | created | quality | modified | alphabetical | most_downloaded | most_viewed | trending
  * - Featured: starred assets first, then non-starred; secondary sort created_at (asc/desc).
  * - Created: created_at (asc = oldest first, desc = newest first).
- * - Quality: user quality rating 1–4 stars; direction applies (asc = lowest first, desc = highest first); then created_at.
+ * - Quality: user quality rating 1–4 stars; direction applies; then created_at.
  * - Modified: updated_at (asc = oldest first, desc = newest first).
  * - Alphabetical: title (fallback original_filename), asc = A–Z, desc = Z–A.
+ * - Most Downloaded: download count from asset_metrics; direction applies to secondary (created_at).
+ * - Most Viewed: view count from asset_metrics; direction applies to secondary (created_at).
+ * - Trending: exponential decay score (recent activity weighted higher); 14-day window; fallback: no activity = 0.
  */
 class AssetSortService
 {
@@ -24,6 +29,9 @@ class AssetSortService
     public const SORT_QUALITY = 'quality';
     public const SORT_MODIFIED = 'modified';
     public const SORT_ALPHABETICAL = 'alphabetical';
+    public const SORT_MOST_DOWNLOADED = 'most_downloaded';
+    public const SORT_MOST_VIEWED = 'most_viewed';
+    public const SORT_TRENDING = 'trending';
     public const SORT_COMPLIANCE_HIGH = 'compliance_high';
     public const SORT_COMPLIANCE_LOW = 'compliance_low';
 
@@ -79,7 +87,74 @@ class AssetSortService
             return;
         }
 
+        if ($sort === self::SORT_MOST_DOWNLOADED) {
+            $this->applyMetricCountSort($query, MetricType::DOWNLOAD, $direction);
+            return;
+        }
+
+        if ($sort === self::SORT_MOST_VIEWED) {
+            $this->applyMetricCountSort($query, MetricType::VIEW, $direction);
+            return;
+        }
+
+        if ($sort === self::SORT_TRENDING) {
+            $this->applyTrendingSort($query, $direction);
+            return;
+        }
+
         $this->applyCreatedSort($query, $direction);
+    }
+
+    /**
+     * Most Downloaded / Most Viewed: sort by metric count from asset_metrics.
+     * Assets with no metrics get 0 (appear last when desc). Direction applies to secondary sort (created_at).
+     */
+    private function applyMetricCountSort(Builder $query, MetricType $metricType, string $direction): void
+    {
+        $alias = 'am_' . $metricType->value . '_sort';
+        $query->leftJoinSub(
+            DB::table('asset_metrics')
+                ->select('asset_id', DB::raw('COUNT(*) as metric_count'))
+                ->where('metric_type', $metricType->value)
+                ->groupBy('asset_id'),
+            $alias,
+            'assets.id',
+            '=',
+            "{$alias}.asset_id"
+        );
+        $order = $direction === self::DIRECTION_DESC ? 'DESC' : 'ASC';
+        $query->orderByRaw("COALESCE({$alias}.metric_count, 0) {$order}");
+        $query->orderBy('assets.created_at', $direction);
+    }
+
+    /**
+     * Trending: exponential decay score over last 14 days (downloads + views combined).
+     * Recent activity weighted higher. No activity in 14 days = 0 (fallback: sort by created_at).
+     * Decay λ=0.1 ≈ half-life 7 days. Industry practice: Reddit-style hot, Hacker News, etc.
+     */
+    private function applyTrendingSort(Builder $query, string $direction): void
+    {
+        $driver = $query->getConnection()->getDriverName();
+        $cutoff = now()->subDays(14)->toDateTimeString();
+
+        if ($driver === 'pgsql') {
+            $decayExpr = "SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))";
+        } else {
+            $decayExpr = "SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))";
+        }
+
+        $query->leftJoinSub(
+            DB::table('asset_metrics')
+                ->select('asset_id', DB::raw("{$decayExpr} as trending_score"))
+                ->where('created_at', '>=', $cutoff)
+                ->groupBy('asset_id'),
+            'am_trending_sort',
+            'assets.id',
+            '=',
+            'am_trending_sort.asset_id'
+        );
+        $query->orderByRaw('COALESCE(am_trending_sort.trending_score, 0) DESC');
+        $query->orderBy('assets.created_at', $direction);
     }
 
     /**
@@ -179,7 +254,11 @@ class AssetSortService
      */
     public function normalizeSort(?string $sort): string
     {
-        $allowed = [self::SORT_FEATURED, self::SORT_CREATED, self::SORT_QUALITY, self::SORT_MODIFIED, self::SORT_ALPHABETICAL, self::SORT_COMPLIANCE_HIGH, self::SORT_COMPLIANCE_LOW];
+        $allowed = [
+            self::SORT_FEATURED, self::SORT_CREATED, self::SORT_QUALITY, self::SORT_MODIFIED,
+            self::SORT_ALPHABETICAL, self::SORT_MOST_DOWNLOADED, self::SORT_MOST_VIEWED, self::SORT_TRENDING,
+            self::SORT_COMPLIANCE_HIGH, self::SORT_COMPLIANCE_LOW,
+        ];
         $sort = $sort ? strtolower(trim($sort)) : '';
         if ($sort === self::SORT_STARRED) {
             return self::SORT_FEATURED;

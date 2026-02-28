@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
+import AppHead from '../../../Components/AppHead'
 import AppFooter from '../../../Components/AppFooter'
 import Avatar from '../../../Components/Avatar'
 import BrandAvatar from '../../../Components/BrandAvatar'
@@ -47,6 +48,7 @@ export default function TicketsIndex({ tickets, pagination }) {
 
     return (
         <div className="min-h-full bg-gray-50">
+            <AppHead title="Support Tickets" />
             <AppNav brand={auth.activeBrand} tenant={auth.tenant} />
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8 flex items-center justify-between">

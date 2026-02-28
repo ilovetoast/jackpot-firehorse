@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
 import CollectionPublicBar from '../../Components/Collections/CollectionPublicBar'
 import CreateCollectionModal from '../../Components/Collections/CreateCollectionModal'
@@ -325,6 +326,7 @@ export default function CollectionsIndex({
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
+            <AppHead title="Collections" />
             <AppNav brand={auth.activeBrand} tenant={null} />
 
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>

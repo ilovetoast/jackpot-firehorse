@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import { Link } from '@inertiajs/react'
@@ -29,6 +30,7 @@ export default function CollectionOnlyView({ collection, assets = [] }) {
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
+            <AppHead title="Collection" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
 
             <div className="flex-1 overflow-hidden bg-gray-50">

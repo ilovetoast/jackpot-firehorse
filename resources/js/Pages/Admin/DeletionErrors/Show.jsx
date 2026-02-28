@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Head, Link, router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import AuthenticatedLayout from '../../../Layouts/AuthenticatedLayout'
 import { 
     ExclamationTriangleIcon, 
@@ -97,7 +98,7 @@ export default function Show({ auth, deletionError }) {
                 </div>
             }
         >
-            <Head title={`Deletion Error - ${deletionError.original_filename}`} />
+            <AppHead title={`Deletion Error - ${deletionError.original_filename}`} suffix="Admin" />
 
             <div className="py-12">
                 <div className="max-w-4xl mx-auto sm:px-6 lg:px-8">

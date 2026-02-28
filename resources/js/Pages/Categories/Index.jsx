@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react'
 import { useState, useRef, useEffect } from 'react'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
@@ -235,6 +236,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
 
     return (
         <div className="min-h-full">
+            <AppHead title="Categories" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

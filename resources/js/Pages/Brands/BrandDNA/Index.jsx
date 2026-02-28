@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
+import AppHead from '../../../Components/AppHead'
 import AssetImagePickerField from '../../../Components/media/AssetImagePickerField'
 import AssetImagePickerFieldMulti from '../../../Components/media/AssetImagePickerFieldMulti'
 import CollapsibleSection from '../../../Components/CollapsibleSection'
@@ -449,6 +450,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
 
     return (
         <div className="min-h-full">
+            <AppHead title="Brand DNA" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

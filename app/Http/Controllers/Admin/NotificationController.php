@@ -23,21 +23,9 @@ class NotificationController extends Controller
             abort(403, 'Only site owners can access this page.');
         }
 
-        // Check if category column exists
-        $hasCategoryColumn = \Schema::hasColumn('notification_templates', 'category');
-        
-        if ($hasCategoryColumn) {
-            $templates = NotificationTemplate::orderBy('category')->orderBy('name')->get();
-            // Group templates by category
-            $systemTemplates = $templates->where('category', 'system')->values();
-            $tenantTemplates = $templates->where('category', 'tenant')->values();
-        } else {
-            // Fallback if category column doesn't exist yet
-            $templates = NotificationTemplate::orderBy('name')->get();
-            // Default grouping - assume all are system for now
-            $systemTemplates = $templates->values();
-            $tenantTemplates = collect();
-        }
+        $templates = NotificationTemplate::orderBy('category')->orderBy('name')->get();
+        $systemTemplates = $templates->where('category', 'system')->values();
+        $tenantTemplates = $templates->where('category', 'tenant')->values();
         
         // Check if invite_member template exists, if not suggest seeding
         $hasInviteMember = $templates->where('key', 'invite_member')->isNotEmpty();

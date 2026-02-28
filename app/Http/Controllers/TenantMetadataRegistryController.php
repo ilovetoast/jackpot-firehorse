@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * ⚠️ ARCHITECTURE RULE:
+ * Schema::hasColumn() and other runtime schema introspection
+ * are forbidden in request lifecycle code.
+ *
+ * Schema is controlled by migrations and must be assumed valid.
+ */
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
@@ -13,7 +20,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -383,19 +389,12 @@ class TenantMetadataRegistryController extends Controller
                 // Use is_edit_hidden for Quick View checkbox
                 $updateData = ['updated_at' => now()];
                 if ($isUploadHidden !== null) $updateData['is_upload_hidden'] = $isUploadHidden;
-                // C9.2: Only update is_edit_hidden if column exists (defensive check for migration)
-                if ($isEditHidden !== null && \Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+                if ($isEditHidden !== null) {
                     $updateData['is_edit_hidden'] = $isEditHidden;
-                } elseif ($isEditHidden !== null) {
-                    // Fallback: If column doesn't exist yet, log warning but don't fail
-                    \Log::warning('[TenantMetadataRegistryController] is_edit_hidden column does not exist yet. Migration may not have run.', [
-                        'field_id' => $field,
-                        'category_id' => $categoryId,
-                    ]);
                 }
                 if ($isFilterHidden !== null) $updateData['is_filter_hidden'] = $isFilterHidden;
                 if ($isPrimary !== null) $updateData['is_primary'] = $isPrimary;
-                if ($isRequired !== null && \Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+                if ($isRequired !== null) {
                     $updateData['is_required'] = $isRequired;
                 }
                 
@@ -410,21 +409,12 @@ class TenantMetadataRegistryController extends Controller
             } else {
                 // Create new category override
                 // Inherit other visibility flags from tenant-level override if exists
-                // C9.2: Select columns explicitly to handle case where is_edit_hidden might not exist yet
-                $selectColumns = ['id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
-                if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-                    $selectColumns[] = 'is_edit_hidden';
-                }
-                if (Schema::hasColumn('metadata_field_visibility', 'is_required')) {
-                    $selectColumns[] = 'is_required';
-                }
-                
                 $tenantOverride = \DB::table('metadata_field_visibility')
                     ->where('metadata_field_id', $field)
                     ->where('tenant_id', $tenant->id)
                     ->whereNull('brand_id')
                     ->whereNull('category_id')
-                    ->select($selectColumns)
+                    ->select(['id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary', 'is_edit_hidden', 'is_required'])
                     ->first();
                 
                 $insertData = [
@@ -442,19 +432,8 @@ class TenantMetadataRegistryController extends Controller
                     'updated_at' => now(),
                 ];
                 
-                // C9.2: Only include is_edit_hidden if column exists (defensive check for migration)
-                if (\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
-                    $insertData['is_edit_hidden'] = $isEditHidden !== null ? $isEditHidden : ($tenantOverride ? (bool) ($tenantOverride->is_edit_hidden ?? false) : false);
-                } elseif ($isEditHidden !== null) {
-                    // Fallback: If column doesn't exist yet, log warning but don't fail
-                    \Log::warning('[TenantMetadataRegistryController] is_edit_hidden column does not exist yet. Migration may not have run.', [
-                        'field_id' => $field,
-                        'category_id' => $categoryId,
-                    ]);
-                }
-                if (\Schema::hasColumn('metadata_field_visibility', 'is_required')) {
-                    $insertData['is_required'] = $isRequired !== null ? $isRequired : ($tenantOverride ? (bool) ($tenantOverride->is_required ?? false) : false);
-                }
+                $insertData['is_edit_hidden'] = $isEditHidden !== null ? $isEditHidden : ($tenantOverride ? (bool) ($tenantOverride->is_edit_hidden ?? false) : false);
+                $insertData['is_required'] = $isRequired !== null ? $isRequired : ($tenantOverride ? (bool) ($tenantOverride->is_required ?? false) : false);
                 
                 \Log::info('[TenantMetadataRegistryController] Creating new category override', [
                     'insert_data' => $insertData,

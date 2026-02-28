@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 
 export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency, storage_info, storage_addon_packages }) {
@@ -71,6 +72,7 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
 
     return (
         <div className="min-h-full bg-gray-50">
+            <AppHead title="Billing & Invoices" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
             <main>
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

@@ -2,6 +2,7 @@ import { Link, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import React from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 
@@ -125,6 +126,7 @@ export default function CompanyPermissions({
 
     return (
         <div className="min-h-full">
+            <AppHead title="Company Permissions" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

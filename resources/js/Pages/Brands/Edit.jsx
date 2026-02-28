@@ -1,6 +1,7 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
@@ -701,6 +702,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
 
     return (
         <div className="min-h-full">
+            <AppHead title="Brand Settings" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

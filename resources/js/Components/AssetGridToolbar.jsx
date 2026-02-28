@@ -29,7 +29,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon } from '@heroicons/react/24/outline'
+import SortDropdown from './SortDropdown'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 
@@ -282,32 +283,12 @@ export default function AssetGridToolbar({
                         </div>
                         {onSortChange && !showMoreFilters && (
                             <div className="flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-0">
-                                <span className="text-xs font-medium text-gray-500">Sort</span>
-                                <select
-                                    value={sortBy}
-                                    onChange={(e) => onSortChange(e.target.value, sortDirection)}
-                                    className="min-w-[7.5rem] rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs sm:text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    aria-label="Sort by"
-                                >
-                                    <option value="featured">Featured</option>
-                                    <option value="created">Created</option>
-                                    <option value="quality">Quality</option>
-                                    <option value="modified">Modified</option>
-                                    <option value="alphabetical">Alphabetical</option>
-                                </select>
-                                <button
-                                    type="button"
-                                    onClick={() => onSortChange(sortBy, sortDirection === 'asc' ? 'desc' : 'asc')}
-                                    className="p-1 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    title={sortDirection === 'asc' ? 'Descending' : 'Ascending'}
-                                    aria-label={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                                >
-                                    {sortDirection === 'asc' ? (
-                                        <BarsArrowUpIcon className="h-4 w-4" />
-                                    ) : (
-                                        <BarsArrowDownIcon className="h-4 w-4" />
-                                    )}
-                                </button>
+                                <SortDropdown
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSortChange={onSortChange}
+                                    showComplianceFilter={false}
+                                />
                             </div>
                         )}
                     </div>

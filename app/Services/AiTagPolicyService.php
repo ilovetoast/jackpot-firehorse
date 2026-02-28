@@ -6,7 +6,6 @@ use App\Models\Asset;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * AI Tag Policy Service
@@ -223,14 +222,7 @@ class AiTagPolicyService
         }
 
         // Upsert settings
-        // Check if ai_best_practices_limit column exists (added in later migration)
-        $hasBestPracticesLimit = Schema::hasColumn('tenant_ai_tag_settings', 'ai_best_practices_limit');
-        
-        // Remove ai_best_practices_limit from update if column doesn't exist
         $settingsToUpdate = $filteredSettings;
-        if (!$hasBestPracticesLimit && isset($settingsToUpdate['ai_best_practices_limit'])) {
-            unset($settingsToUpdate['ai_best_practices_limit']);
-        }
         
         // Use updateOrInsert - it only sets created_at on insert, not on update
         $exists = DB::table('tenant_ai_tag_settings')
@@ -289,25 +281,14 @@ class AiTagPolicyService
                 ];
             }
 
-            // Check if ai_best_practices_limit column exists (added in later migration)
-            $hasBestPracticesLimit = Schema::hasColumn('tenant_ai_tag_settings', 'ai_best_practices_limit');
-            
-            $result = [
+            return [
                 'disable_ai_tagging' => (bool) $settings->disable_ai_tagging,
                 'enable_ai_tag_suggestions' => (bool) $settings->enable_ai_tag_suggestions,
                 'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
                 'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
                 'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
+                'ai_best_practices_limit' => $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT,
             ];
-            
-            // Only include ai_best_practices_limit if column exists
-            if ($hasBestPracticesLimit) {
-                $result['ai_best_practices_limit'] = $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT;
-            } else {
-                $result['ai_best_practices_limit'] = self::BEST_PRACTICES_AUTO_TAG_LIMIT; // Use default if column doesn't exist
-            }
-            
-            return $result;
         });
     }
 

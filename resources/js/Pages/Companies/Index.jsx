@@ -1,6 +1,7 @@
 import { router } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { usePage } from '@inertiajs/react'
 
@@ -29,6 +30,7 @@ export default function CompaniesIndex({ companies }) {
 
     return (
         <div className="min-h-full bg-gray-50">
+            <AppHead title="Companies" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">

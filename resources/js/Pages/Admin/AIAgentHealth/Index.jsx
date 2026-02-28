@@ -1,4 +1,5 @@
-import { Head, Link } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
+import AppHead from '../../../Components/AppHead'
 import AuthenticatedLayout from '../../../Layouts/AuthenticatedLayout'
 import { BoltIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 
@@ -36,7 +37,7 @@ export default function AIAgentHealthIndex({ auth, lastRunPerAgent, failuresLast
                 </div>
             }
         >
-            <Head title="AI Agent Health - Admin" />
+            <AppHead title="AI Agent Health" suffix="Admin" />
 
             <div className="py-12">
                 <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">

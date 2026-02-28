@@ -66,9 +66,7 @@ class TenantMetadataRegistryService
             'is_filterable', 'is_user_editable', 'is_ai_trainable', 'is_internal_only', 'is_primary',
             'ai_eligible',
         ];
-        if (\Schema::hasColumn('metadata_fields', 'display_widget')) {
-            $selectColumns[] = 'display_widget';
-        }
+        $selectColumns[] = 'display_widget';
         $fields = DB::table('metadata_fields')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')

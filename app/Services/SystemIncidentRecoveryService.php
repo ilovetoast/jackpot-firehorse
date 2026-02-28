@@ -115,16 +115,15 @@ class SystemIncidentRecoveryService
             $tenantId = null;
         }
 
-        $hasSeverityColumn = \Illuminate\Support\Facades\Schema::hasColumn('tickets', 'severity');
-
         try {
-            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severityValue, $creator, $tenantId, $hasSeverityColumn) {
-                $createData = [
+            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severityValue, $creator, $tenantId) {
+                $ticket = Ticket::create([
                     'type' => TicketType::INTERNAL,
                     'status' => TicketStatus::OPEN,
                     'tenant_id' => $tenantId,
                     'created_by_user_id' => $creator->id,
                     'assigned_team' => \App\Enums\TicketTeam::ENGINEERING,
+                    'severity' => $severityValue,
                     'metadata' => [
                         'subject' => $subject,
                         'description' => $description,
@@ -136,11 +135,7 @@ class SystemIncidentRecoveryService
                         'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
                         'severity' => $severityValue->value,
                     ],
-                ];
-                if ($hasSeverityColumn) {
-                    $createData['severity'] = $severityValue;
-                }
-                $ticket = Ticket::create($createData);
+                ]);
 
                 if ($asset?->brand_id) {
                     $ticket->brands()->attach([$asset->brand_id]);

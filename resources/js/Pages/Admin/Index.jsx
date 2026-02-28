@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, usePage, useForm, router } from '@inertiajs/react'
+import AppHead from '../../Components/AppHead'
 import { 
     BellIcon, 
     DocumentTextIcon, 
@@ -378,6 +379,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
 
     return (
         <div className="min-h-full">
+            <AppHead title="Admin Dashboard" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

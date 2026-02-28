@@ -1,5 +1,6 @@
 import { useForm, usePage, router } from '@inertiajs/react'
 import { useState, useRef, useEffect } from 'react'
+import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
@@ -234,6 +235,7 @@ export default function ProfileIndex({ user: userData }) {
 
     return (
         <div className="min-h-full">
+            <AppHead title="Profile" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
