@@ -595,6 +595,7 @@ export default function AssetGridSecondaryFilters({
                             sortDirection={sortDirection}
                             onSortChange={onSortChange}
                             showComplianceFilter={showComplianceFilter}
+                            primaryColor={brandPrimary}
                         />
                     </div>
                     )}

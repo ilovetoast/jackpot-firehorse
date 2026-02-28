@@ -6,10 +6,13 @@
  */
 
 import { useState } from 'react'
+import { usePage } from '@inertiajs/react'
 import { StarIcon } from '@heroicons/react/24/solid'
 import { StarIcon as StarIconOutline } from '@heroicons/react/24/outline'
 
-export default function StarRating({ value, onChange, editable = true, maxStars = 5, size = 'md' }) {
+export default function StarRating({ value, onChange, editable = true, maxStars = 5, size = 'md', primaryColor }) {
+    const { auth } = usePage().props
+    const accent = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const [hoveredStar, setHoveredStar] = useState(null)
     
     const currentRating = value ? parseInt(value, 10) : 0
@@ -47,6 +50,7 @@ export default function StarRating({ value, onChange, editable = true, maxStars 
     return (
         <div 
             className="flex items-center gap-0.5"
+            style={{ '--star-accent': accent }}
             onMouseLeave={handleMouseLeave}
         >
             {Array.from({ length: maxStars }, (_, index) => {
@@ -64,16 +68,16 @@ export default function StarRating({ value, onChange, editable = true, maxStars 
                         className={`
                             ${starSize} 
                             ${isInteractive ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'}
-                            ${isInteractive ? 'text-yellow-400 hover:text-yellow-500' : 'text-yellow-400'}
-                            focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-1 rounded
+                            focus:outline-none focus:ring-2 focus:ring-[var(--star-accent)] focus:ring-offset-1 rounded
                         `}
+                        style={isFilled ? { color: accent } : {}}
                         aria-label={`Rate ${starNumber} out of ${maxStars}`}
                         title={editable ? `Click to rate ${starNumber} out of ${maxStars}` : `${currentRating} out of ${maxStars} stars`}
                     >
                         {isFilled ? (
-                            <StarIcon className="w-full h-full" />
+                            <StarIcon className="w-full h-full" style={{ color: 'inherit' }} />
                         ) : (
-                            <StarIconOutline className="w-full h-full" />
+                            <StarIconOutline className="w-full h-full text-gray-300" />
                         )}
                     </button>
                 )

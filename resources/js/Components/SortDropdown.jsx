@@ -13,10 +13,11 @@
  * @param {string} [props.className] - Additional classes for container
  */
 import { useState, useRef, useEffect } from 'react'
+import { usePage } from '@inertiajs/react'
 import { BarsArrowUpIcon, BarsArrowDownIcon } from '@heroicons/react/24/outline'
 
 const SORT_OPTIONS = [
-    { value: 'featured', label: 'Featured', tooltip: 'Manual order set by admins' },
+    { value: 'featured', label: 'Featured', tooltip: 'Starred items first, then by upload date' },
     { value: 'created', label: 'Created', tooltip: 'Upload date' },
     { value: 'quality', label: 'Quality', tooltip: 'Asset quality score' },
     { value: 'modified', label: 'Modified', tooltip: 'Last modified date' },
@@ -36,8 +37,11 @@ export default function SortDropdown({
     sortDirection = 'desc',
     onSortChange = () => {},
     showComplianceFilter = false,
+    primaryColor,
     className = '',
 }) {
+    const { auth } = usePage().props
+    const accent = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const [isOpen, setIsOpen] = useState(false)
     const containerRef = useRef(null)
 
@@ -67,11 +71,11 @@ export default function SortDropdown({
     }
 
     return (
-        <div ref={containerRef} className={`relative ${className}`}>
+        <div ref={containerRef} className={`relative ${className}`} style={{ '--sort-accent': accent }}>
             <button
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
-                className="p-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                className="p-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-[var(--sort-accent)]"
                 aria-label="Sort"
                 aria-expanded={isOpen}
                 aria-haspopup="listbox"
@@ -104,12 +108,11 @@ export default function SortDropdown({
                             }`}
                         >
                             <span
-                                className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${
-                                    sortBy === opt.value ? 'border-indigo-600' : 'border-gray-300'
-                                }`}
+                                className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${sortBy !== opt.value ? 'border-gray-300' : ''}`}
+                                style={sortBy === opt.value ? { borderColor: accent } : {}}
                             >
                                 {sortBy === opt.value && (
-                                    <span className="w-2 h-2 rounded-full bg-indigo-600" />
+                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: accent }} />
                                 )}
                             </span>
                             {opt.label}

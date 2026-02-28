@@ -704,6 +704,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                 {isRating ? (
                                                     <StarRating
                                                         value={field.current_value}
+                                                        primaryColor={brandPrimary}
                                                         onChange={async (newValue) => {
                                                             // Save rating directly without modal
                                                             try {

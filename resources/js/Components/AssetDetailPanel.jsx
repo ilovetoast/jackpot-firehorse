@@ -1107,6 +1107,7 @@ export default function AssetDetailPanel({
                                                                                 editable
                                                                                 maxStars={5}
                                                                                 size="md"
+                                                                                primaryColor={brandPrimary}
                                                                             />
                                                                         ) : isToggleBoolean ? (
                                                                             <label className="flex items-center gap-2 cursor-pointer">
@@ -1187,6 +1188,7 @@ export default function AssetDetailPanel({
                                                                             editable={false}
                                                                             maxStars={5}
                                                                             size="md"
+                                                                            primaryColor={brandPrimary}
                                                                         />
                                                                     </span>
                                                                 ) : isToggleBoolean ? (

@@ -288,6 +288,7 @@ export default function AssetGridToolbar({
                                     sortDirection={sortDirection}
                                     onSortChange={onSortChange}
                                     showComplianceFilter={false}
+                                    primaryColor={primaryColor}
                                 />
                             </div>
                         )}
