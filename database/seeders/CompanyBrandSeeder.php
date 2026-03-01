@@ -83,7 +83,7 @@ class CompanyBrandSeeder extends Seeder
         // Canonical: Company ID 1 = Velvet Hammer (primary agency)
         $initialCompany = Tenant::firstOrCreate(
             ['slug' => 'velvethammerbranding'],
-            ['name' => 'Velvet Hammer']
+            ['name' => 'Velvet Hammer', 'uuid' => Str::uuid()->toString()]
         );
         $initialCompany->update(['name' => 'Velvet Hammer']);
 
@@ -187,7 +187,7 @@ class CompanyBrandSeeder extends Seeder
             // Create or get tenant - the boot() method will auto-create a default brand
             $tenant = Tenant::firstOrCreate(
                 ['slug' => $companySlug],
-                ['name' => $companyName]
+                ['name' => $companyName, 'uuid' => Str::uuid()->toString()]
             );
 
             // Update name if it changed

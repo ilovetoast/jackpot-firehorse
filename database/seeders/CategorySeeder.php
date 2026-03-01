@@ -23,7 +23,7 @@ class CategorySeeder extends Seeder
         $seeder = app(SystemCategorySeeder::class);
 
         // Seed system categories for ALL brands (not just default)
-        $tenants = Tenant::all();
+        $tenants = Tenant::with('brands.tenant')->get();
 
         foreach ($tenants as $tenant) {
             $brands = $tenant->brands;

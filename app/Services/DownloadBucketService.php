@@ -35,7 +35,9 @@ class DownloadBucketService
             return false;
         }
 
-        $asset = Asset::query()->find($assetId);
+        $asset = Asset::query()
+            ->with(['tenant', 'brand'])
+            ->find($assetId);
         if (! $asset) {
             return false;
         }
@@ -74,7 +76,9 @@ class DownloadBucketService
                 continue;
             }
 
-            $asset = Asset::query()->find($assetId);
+            $asset = Asset::query()
+                ->with(['tenant', 'brand'])
+                ->find($assetId);
             if (! $asset || ! Gate::forUser($this->user)->allows('view', $asset)) {
                 continue;
             }
@@ -140,6 +144,7 @@ class DownloadBucketService
         }
 
         $assets = Asset::query()
+            ->with(['tenant', 'brand'])
             ->whereIn('id', $ids)
             ->get()
             ->filter(fn (Asset $asset) => Gate::forUser($this->user)->allows('view', $asset)

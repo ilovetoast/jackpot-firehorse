@@ -67,6 +67,9 @@
         "test:sail": [
             "./vendor/bin/sail test"
         ],
+        "test:db-fresh": [
+            "bash scripts/test-db-fresh.sh"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

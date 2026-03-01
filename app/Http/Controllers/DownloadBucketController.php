@@ -121,6 +121,7 @@ class DownloadBucketController extends Controller
      */
     public function remove(Asset $asset): JsonResponse
     {
+        $asset->loadMissing(['tenant', 'brand']);
         $this->authorize('view', $asset);
         $service = app(DownloadBucketService::class);
         $service->remove($asset->id);

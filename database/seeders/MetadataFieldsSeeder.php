@@ -878,7 +878,7 @@ class MetadataFieldsSeeder extends Seeder
     protected function configureCategorySettings(): void
     {
         $visibilityService = app(\App\Services\TenantMetadataVisibilityService::class);
-        $tenants = \App\Models\Tenant::all();
+        $tenants = \App\Models\Tenant::with('brands')->get();
 
         foreach ($tenants as $tenant) {
             $brands = $tenant->brands;

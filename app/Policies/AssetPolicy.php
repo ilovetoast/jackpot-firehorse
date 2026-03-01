@@ -10,6 +10,10 @@ use App\Support\Roles\PermissionMap;
  * Asset Policy
  *
  * Handles authorization for asset operations.
+ *
+ * IMPORTANT:
+ * All relationships accessed in this policy MUST be eager loaded.
+ * Lazy loading is disabled in this application by design.
  */
 class AssetPolicy
 {
@@ -34,7 +38,10 @@ class AssetPolicy
 
         // User must be assigned to the brand (or be tenant admin/owner), or have collection-only access to a collection containing this asset
         if ($asset->brand_id) {
-            $tenant = $asset->tenant;
+            $tenant = $asset->getRelationValue('tenant');
+            if (! $tenant) {
+                return false;
+            }
             $tenantRole = $user->getRoleForTenant($tenant);
 
             // Tenant admins/owners have access to all brands
@@ -43,7 +50,8 @@ class AssetPolicy
             }
 
             // Phase MI-1: Check active brand membership
-            if ($user->activeBrandMembership($asset->brand)) {
+            $brand = $asset->getRelationValue('brand');
+            if ($brand && $user->activeBrandMembership($brand)) {
                 return true;
             }
 

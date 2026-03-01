@@ -1,0 +1,25 @@
+---
+description: Prevents accidental main database destruction from migrate:fresh
+alwaysApply: true
+---
+
+# Database Safety — NEVER Run migrate:fresh Directly
+
+## Critical
+
+**NEVER run `migrate:fresh` or `migrate:fresh --env=testing` directly.**  
+With Sail, `--env=testing` does NOT switch databases — the main DB (from .env) is used and will be destroyed.
+
+## Safe Test DB Refresh
+
+To refresh only the testing database:
+
+```bash
+./scripts/test-db-fresh.sh
+# or
+composer test:db-fresh
+```
+
+## Main Database
+
+For the main/development database, use `migrate` (not migrate:fresh) unless the user explicitly requests a full reset.
