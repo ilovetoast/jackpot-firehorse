@@ -103,11 +103,19 @@ class AssetPolicy
 
     /**
      * Determine if user can request full PDF extraction.
+     * Builder-staged guidelines_pdf: allow if user can update the brand.
      */
     public function requestFullPdfExtraction(User $user, Asset $asset): bool
     {
         if (!$this->view($user, $asset)) {
             return false;
+        }
+
+        if ($asset->builder_staged && ($asset->builder_context ?? '') === 'guidelines_pdf') {
+            $brand = $asset->brand ?? $asset->getRelationValue('brand');
+            if ($brand && \Illuminate\Support\Facades\Gate::forUser($user)->allows('update', $brand)) {
+                return true;
+            }
         }
 
         $tenantRole = $user->getRoleForTenant($asset->tenant);

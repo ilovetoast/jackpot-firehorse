@@ -32,8 +32,8 @@ class EnsureCloudFrontSignedCookies
      */
     public function handle(Request $request, Closure $next): Response
     {
-        // Local environment: skip entirely
-        if (app()->environment('local')) {
+        // Local and testing: skip entirely (no CloudFront key in CI/test env)
+        if (app()->environment('local', 'testing')) {
             return $next($request);
         }
 

@@ -88,13 +88,17 @@ class UploadInitiationService
      * @throws PlanLimitExceededException
      * @throws \Exception
      */
+    /**
+     * @param  array{builder_staged?: bool, builder_context?: string}  $builderOptions  Brand Guidelines Builder staging
+     */
     public function initiate(
         Tenant $tenant,
         ?Brand $brand,
         string $fileName,
         int $fileSize,
         ?string $mimeType = null,
-        ?string $clientReference = null
+        ?string $clientReference = null,
+        array $builderOptions = []
     ): array {
         // Validate plan limits
         $this->validatePlanLimits($tenant, $fileSize);
@@ -119,6 +123,13 @@ class UploadInitiationService
         // Calculate expiration time
         $expiresAt = now()->addMinutes(self::DEFAULT_EXPIRATION_MINUTES);
 
+        // Build upload_options for builder staging (Brand Guidelines Builder)
+        $uploadOptions = [];
+        if (! empty($builderOptions['builder_staged']) && ! empty($builderOptions['builder_context'])) {
+            $uploadOptions['builder_staged'] = true;
+            $uploadOptions['builder_context'] = (string) $builderOptions['builder_context'];
+        }
+
         // Create upload session (represents upload attempt, not resulting asset)
         // One UploadSession per file - each file gets its own session
         $uploadSession = UploadSession::create([
@@ -133,6 +144,7 @@ class UploadInitiationService
             'failure_reason' => null,
             'client_reference' => $clientReference, // Optional client reference for frontend mapping
             'last_activity_at' => now(), // Initialize activity tracking for abandoned session detection
+            'upload_options' => ! empty($uploadOptions) ? $uploadOptions : null,
         ]);
 
         // Generate S3 path using immutable contract: temp/uploads/{upload_session_id}/original
@@ -166,6 +178,7 @@ class UploadInitiationService
 
         return [
             'upload_session_id' => $uploadSession->id,
+            'upload_key' => $path, // S3 key for finalize manifest; matches generateTempUploadPath contract
             'client_reference' => $clientReference, // Return for frontend mapping
             'upload_session_status' => $uploadSession->status->value, // Current status (should be "initiating")
             'upload_type' => $uploadType->value,

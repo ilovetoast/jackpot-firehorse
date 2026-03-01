@@ -588,6 +588,13 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                 Activate Draft
                             </button>
                         )}
+                        <button
+                            type="button"
+                            onClick={() => router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))}
+                            className="rounded-md bg-indigo-100 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-200"
+                        >
+                            Run Builder Again
+                        </button>
                         <div>
                             <Link
                                 href={typeof route === 'function' ? route('brands.dna.bootstrap.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna/bootstrap`}

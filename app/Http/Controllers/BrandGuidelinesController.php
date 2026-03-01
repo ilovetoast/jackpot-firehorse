@@ -41,6 +41,7 @@ class BrandGuidelinesController extends Controller
         $activeVersion = $brandModel?->activeVersion;
         $modelPayload = $activeVersion?->model_payload ?? [];
         $isEnabled = $brandModel?->is_enabled ?? false;
+        $hasDraft = $brandModel?->versions()->where('status', 'draft')->exists() ?? false;
 
         return Inertia::render('Brands/BrandGuidelines/Index', [
             'brand' => [
@@ -55,6 +56,7 @@ class BrandGuidelinesController extends Controller
             ],
             'modelPayload' => $modelPayload,
             'hasActiveVersion' => $activeVersion !== null,
+            'hasDraft' => $hasDraft,
         ]);
     }
 }

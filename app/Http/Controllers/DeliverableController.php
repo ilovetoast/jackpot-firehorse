@@ -184,7 +184,9 @@ class DeliverableController extends Controller
         $assetCounts = [];
         $totalDeliverableCount = 0;
         if (! empty($viewableCategoryIds)) {
-            $countQuery = Asset::where('tenant_id', $tenant->id)
+            $countQuery = Asset::query()
+                ->excludeBuilderStaged()
+                ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::DELIVERABLE)
                 ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q->whereNull('deleted_at'))
@@ -224,6 +226,7 @@ class DeliverableController extends Controller
                 $trashCount = $totalDeliverableCount;
             } elseif (! empty($viewableCategoryIds)) {
                 $trashCount = Asset::query()
+                    ->excludeBuilderStaged()
                     ->onlyTrashed()
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
@@ -272,7 +275,9 @@ class DeliverableController extends Controller
 
         // Query deliverables - match Assets page behavior with lifecycle filters
         // Use qualified column names to avoid ambiguity when compliance join is added
-        $assetsQuery = Asset::where('assets.tenant_id', $tenant->id)
+        $assetsQuery = Asset::query()
+            ->excludeBuilderStaged()
+            ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('assets.type', AssetType::DELIVERABLE)
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q->whereNull('assets.deleted_at'));

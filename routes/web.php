@@ -638,6 +638,14 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/dna/versions/{version}/activate', [\App\Http\Controllers\BrandDNAController::class, 'activateVersion'])->name('brands.dna.versions.activate');
             Route::post('/brands/{brand}/dna/visual-references', [\App\Http\Controllers\BrandDNAController::class, 'storeVisualReferences'])->name('brands.dna.visual_references.store');
 
+            // Brand Guidelines Builder v1 (wizard + API)
+            Route::get('/brands/{brand}/brand-guidelines/builder', [\App\Http\Controllers\BrandDNABuilderController::class, 'show'])->name('brands.brand-guidelines.builder');
+            Route::post('/brands/{brand}/brand-dna/builder/start', [\App\Http\Controllers\BrandDNABuilderController::class, 'start'])->name('brands.brand-dna.builder.start');
+            Route::post('/brands/{brand}/brand-dna/builder/patch', [\App\Http\Controllers\BrandDNABuilderController::class, 'patch'])->name('brands.brand-dna.builder.patch');
+            Route::post('/brands/{brand}/brand-dna/builder/prefill-from-guidelines-pdf', [\App\Http\Controllers\BrandGuidelinesPdfPrefillController::class, 'store'])->name('brands.brand-dna.builder.prefill-from-guidelines-pdf');
+            Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');
+            Route::post('/brands/{brand}/brand-dna/unpublish', [\App\Http\Controllers\BrandDNABuilderController::class, 'unpublish'])->name('brands.brand-dna.unpublish');
+
             // Brand Bootstrap (foundation only)
             Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');
             Route::post('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'store'])->name('brands.dna.bootstrap.store');

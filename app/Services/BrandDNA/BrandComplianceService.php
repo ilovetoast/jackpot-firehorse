@@ -59,6 +59,10 @@ class BrandComplianceService
         if (! $brandModel || ! $brandModel->is_enabled) {
             return null;
         }
+        // Scoring toggle: when disabled, treat as not configured (no crashes)
+        if (! ($brandModel->brand_dna_scoring_enabled ?? true)) {
+            return null;
+        }
 
         $activeVersion = $brandModel->activeVersion;
         if (! $activeVersion) {

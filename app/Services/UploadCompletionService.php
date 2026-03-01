@@ -344,10 +344,14 @@ class UploadCompletionService
             ]);
         }
         
+        // Brand Guidelines Builder: staged uploads get builder_staged, builder_context, source
+        $uploadOptions = $uploadSession->upload_options ?? [];
+        $isBuilderStaged = ! empty($uploadOptions['builder_staged']) && ! empty($uploadOptions['builder_context']);
+
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
-        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId) {
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId, $isBuilderStaged, $uploadOptions) {
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
             if ($existingAsset) {
@@ -392,7 +396,7 @@ class UploadCompletionService
                 // Default to not_required, will be updated after creation if needed
                 $initialApprovalStatus = \App\Enums\ApprovalStatus::NOT_REQUIRED;
                 
-                $asset = Asset::create([
+                $assetData = [
                     'tenant_id' => $uploadSession->tenant_id,
                     'brand_id' => $targetBrandId,
                     'user_id' => $userId, // User who uploaded the asset
@@ -412,7 +416,16 @@ class UploadCompletionService
                     'thumbnail_status' => $initialThumbnailStatus,
                     // Phase AF-1: Set initial approval_status (will be updated after creation if user requires approval)
                     'approval_status' => $initialApprovalStatus,
-                ]);
+                ];
+
+                // Brand Guidelines Builder: staged assets are hidden from main grid until finalized
+                if ($isBuilderStaged) {
+                    $assetData['builder_staged'] = true;
+                    $assetData['builder_context'] = (string) ($uploadOptions['builder_context'] ?? '');
+                    $assetData['source'] = 'builder';
+                }
+
+                $asset = Asset::create($assetData);
                 
             } catch (\Illuminate\Database\QueryException $e) {
                 // Handle unique constraint violation (duplicate asset detected)

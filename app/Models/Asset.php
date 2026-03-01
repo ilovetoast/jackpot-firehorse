@@ -269,6 +269,9 @@ class Asset extends Model
         'pdf_rendered_storage_bytes',
         'pdf_pages_rendered',
         'full_pdf_extraction_batch_id',
+        'builder_staged', // Brand Guidelines Builder: hidden from grid until finalized
+        'builder_context', // e.g. logo_primary, photo_reference, texture_reference
+        'source', // e.g. builder, crawler, upload
     ];
 
     /**
@@ -299,6 +302,7 @@ class Asset extends Model
             'pdf_rendered_pages_count' => 'integer',
             'pdf_rendered_storage_bytes' => 'integer',
             'pdf_pages_rendered' => 'boolean',
+            'builder_staged' => 'boolean',
         ];
     }
 
@@ -746,6 +750,17 @@ class Asset extends Model
                 ->from('brand_compliance_scores')
                 ->whereColumn('brand_compliance_scores.asset_id', 'assets.id')
                 ->whereColumn('brand_compliance_scores.brand_id', 'assets.brand_id');
+        });
+    }
+
+    /**
+     * Scope: exclude builder-staged assets (Brand Guidelines Builder uploads).
+     * Staged assets are hidden from main library grid until finalized.
+     */
+    public function scopeExcludeBuilderStaged(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(function ($q) {
+            $q->where('builder_staged', false)->orWhereNull('builder_staged');
         });
     }
 

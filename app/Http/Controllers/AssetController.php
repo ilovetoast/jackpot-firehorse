@@ -196,6 +196,7 @@ class AssetController extends Controller
         $isTrashView = $normalizedLifecycle === 'deleted';
         if (!empty($viewableCategoryIds)) {
             $countQuery = Asset::query()
+                ->excludeBuilderStaged()
                 ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
@@ -241,6 +242,7 @@ class AssetController extends Controller
                 $trashCount = $totalAssetCount;
             } elseif (!empty($viewableCategoryIds)) {
                 $trashCount = Asset::query()
+                    ->excludeBuilderStaged()
                     ->onlyTrashed()
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
@@ -278,6 +280,7 @@ class AssetController extends Controller
         // Phase B2: lifecycle=deleted shows trash (onlyTrashed); otherwise exclude deleted (default scope).
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
         $assetsQuery = Asset::query()
+            ->excludeBuilderStaged()
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, usePage } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 
@@ -19,7 +19,7 @@ function copyToClipboard(text) {
     })
 }
 
-export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, hasActiveVersion }) {
+export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, hasActiveVersion, hasDraft }) {
     const { auth } = usePage().props
     const [copiedHex, setCopiedHex] = useState(null)
     const isEnabled = brandModel?.is_enabled ?? false
@@ -59,16 +59,28 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         >
                             ← Back to Brand Settings
                         </Link>
-                        <div className="max-w-md text-center">
-                            <h1 className="text-2xl font-bold text-gray-900">Enable Brand DNA</h1>
-                            <p className="mt-4 text-gray-600">
-                                Configure your Brand DNA in Brand Settings to generate guidelines.
+                        <div className="max-w-lg text-center space-y-6">
+                            <h1 className="text-2xl font-bold text-gray-900">Create Brand Guidelines</h1>
+                            <p className="text-gray-600">
+                                {hasActiveVersion ? 'Update your brand guidelines or run the builder again.' : 'Start the Brand Guidelines Builder to define your brand DNA.'}
                             </p>
+                            <div className="flex flex-col items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))}
+                                    className="inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+                                >
+                                    {hasDraft ? 'Continue Brand Guidelines' : 'Start Brand Guidelines'}
+                                </button>
+                                <p className="text-sm text-gray-500">
+                                    You can import a PDF or start from scratch on the first step.
+                                </p>
+                            </div>
                             <Link
                                 href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna`}
-                                className="mt-6 inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+                                className="block text-sm text-gray-500 hover:text-gray-700"
                             >
-                                Configure Brand DNA
+                                Or configure Brand DNA in Settings
                             </Link>
                         </div>
                     </div>

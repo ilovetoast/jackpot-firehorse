@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Services\BrandDNA;
+
+/**
+ * Brand DNA Payload Normalizer — ensures defaults exist for model_payload keys.
+ * Additive only: never removes or renames existing keys.
+ * Used when loading/saving drafts for the Brand Guidelines Builder.
+ */
+class BrandDnaPayloadNormalizer
+{
+    /**
+     * Default structure for new keys. Existing keys are preserved.
+     * Schema additions per Brand Guidelines Builder v1:
+     * - personality: primary_archetype, candidate_archetypes, rejected_archetypes
+     * - identity: beliefs, values
+     * - visual: visual_density, textures
+     */
+    protected static function defaults(): array
+    {
+        return [
+            'sources' => [
+                'website_url' => null,
+                'social_urls' => [],
+                'notes' => null,
+            ],
+            'personality' => [
+                'primary_archetype' => null,
+                'candidate_archetypes' => [],
+                'rejected_archetypes' => [],
+                'archetype' => null, // legacy; keep compatible
+                'traits' => [],
+                'tone' => null,
+                'voice' => null,
+                'voice_description' => null,
+            ],
+            'identity' => [
+                'beliefs' => [],
+                'values' => [],
+                'tagline' => null,
+                'mission' => null,
+                'positioning' => null,
+                'industry' => null,
+                'target_audience' => null,
+            ],
+            'visual' => [
+                'visual_density' => null,
+                'textures' => [],
+                'approved_references' => [],
+                'style' => null,
+                'composition' => null,
+                'color_temperature' => null,
+                'photography_style' => null,
+                'composition_style' => null,
+                'color_system' => [],
+            ],
+            'typography' => [
+                'primary_font' => null,
+                'primary_font_style' => null,
+                'secondary_font' => null,
+                'secondary_font_style' => null,
+                'font_mood' => null,
+                'heading_style' => null,
+                'body_style' => null,
+            ],
+            'scoring_rules' => [
+                'allowed_color_palette' => [],
+                'allowed_fonts' => [],
+                'banned_colors' => [],
+                'tone_keywords' => [],
+                'banned_keywords' => [],
+                'photography_attributes' => [],
+            ],
+            'scoring_config' => [
+                'color_weight' => 10,
+                'typography_weight' => 20,
+                'tone_weight' => 20,
+                'imagery_weight' => 50,
+            ],
+        ];
+    }
+
+    /**
+     * Normalize payload: merge defaults into existing, preserving all existing values.
+     * Only adds missing keys; never overwrites.
+     */
+    public function normalize(array $payload): array
+    {
+        $defaults = self::defaults();
+        $result = $payload;
+
+        foreach ($defaults as $section => $sectionDefaults) {
+            if (! is_array($sectionDefaults)) {
+                continue;
+            }
+            $existing = $result[$section] ?? [];
+            if (! is_array($existing)) {
+                $existing = [];
+            }
+            foreach ($sectionDefaults as $key => $defaultValue) {
+                if (! array_key_exists($key, $existing)) {
+                    $existing[$key] = $defaultValue;
+                }
+            }
+            $result[$section] = $existing;
+        }
+
+        return $result;
+    }
+}

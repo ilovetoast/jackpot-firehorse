@@ -15,6 +15,7 @@ class BrandModel extends Model
     protected $fillable = [
         'brand_id',
         'is_enabled',
+        'brand_dna_scoring_enabled',
         'active_version_id',
     ];
 
@@ -22,6 +23,7 @@ class BrandModel extends Model
     {
         return [
             'is_enabled' => 'boolean',
+            'brand_dna_scoring_enabled' => 'boolean',
         ];
     }
 

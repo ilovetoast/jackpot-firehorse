@@ -92,6 +92,8 @@ class UploadController extends Controller
             'mime_type' => 'nullable|string|max:255',
             'brand_id' => 'nullable|exists:brands,id',
             'client_reference' => 'nullable|uuid', // Optional client reference for frontend mapping
+            'builder_staged' => 'nullable|boolean',
+            'builder_context' => 'nullable|string|max:64', // e.g. logo_primary, photo_reference, texture_reference
         ]);
 
         // Verify brand belongs to tenant if provided
@@ -105,6 +107,14 @@ class UploadController extends Controller
             $brand = $tenant->defaultBrand;
         }
 
+        $builderOptions = [];
+        if (! empty($validated['builder_staged']) && ! empty($validated['builder_context'])) {
+            $builderOptions = [
+                'builder_staged' => true,
+                'builder_context' => $validated['builder_context'],
+            ];
+        }
+
         try {
             $result = $this->uploadService->initiate(
                 $tenant,
@@ -112,11 +122,13 @@ class UploadController extends Controller
                 $validated['file_name'],
                 $validated['file_size'],
                 $validated['mime_type'] ?? null,
-                $validated['client_reference'] ?? null
+                $validated['client_reference'] ?? null,
+                $builderOptions
             );
 
             return response()->json([
                 'upload_session_id' => $result['upload_session_id'],
+                'upload_key' => $result['upload_key'] ?? null,
                 'client_reference' => $result['client_reference'],
                 'upload_session_status' => $result['upload_session_status'],
                 'upload_type' => $result['upload_type'],
@@ -1694,13 +1706,16 @@ class UploadController extends Controller
 
                 // Phase J.3.1: For replace mode, skip category validation and metadata persistence
                 $isReplaceMode = $uploadSession->mode === 'replace' && $uploadSession->asset_id;
+                // Brand Guidelines Builder: staged uploads (logo, photo refs, textures) don't require category
+                $isBuilderStaged = ! empty($uploadSession->upload_options['builder_staged'] ?? null)
+                    && ! empty($uploadSession->upload_options['builder_context'] ?? null);
 
                 // CRITICAL: Verify category belongs to tenant and ACTIVE BRAND (not upload_session->brand_id)
                 // The user is selecting a category in the UI, which is scoped to the active brand
                 // Assets are created with the active brand_id to match UI queries
-                // Phase J.3.1: Skip category validation for replace mode or existing assets
+                // Phase J.3.1: Skip category validation for replace mode, builder staged, or existing assets
                 $category = null;
-                if (!$isReplaceMode && !$existingAsset) {
+                if (!$isReplaceMode && !$isBuilderStaged && !$existingAsset) {
                     // C9.1: DEBUG - Log category_id check
                     Log::info('[UploadController::finalize] Category validation check', [
                         'upload_key' => $uploadKey,
