@@ -16,10 +16,8 @@ import SelectedItemsDrawer from './SelectedItemsDrawer'
 export default function SelectionActionBar({
     currentPageIds = [],
     currentPageItems = [],
-    /** Open bulk actions modal (Publish, Archive, Trash, etc.) */
+    /** Open bulk actions modal (Publish, Archive, Trash, Metadata, etc.) */
     onOpenBulkEdit = null,
-    /** Open metadata add modal directly — skips the "choose action" step when intent is add metadata */
-    onOpenBulkMetadataAdd = null,
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -48,8 +46,6 @@ export default function SelectionActionBar({
     const [mixedTypeMessage, setMixedTypeMessage] = useState('')
     const [showLargeSelectionConfirm, setShowLargeSelectionConfirm] = useState(false)
     const [pendingBulkEditIds, setPendingBulkEditIds] = useState([])
-    /** 'metadata' = open metadata add directly, 'actions' = open bulk actions modal */
-    const [pendingBulkEditIntent, setPendingBulkEditIntent] = useState('metadata')
     const [countJustChanged, setCountJustChanged] = useState(false)
 
     const TYPE_LABELS = { asset: 'Assets', execution: 'Executions', collection: 'Collections', generative: 'Generative' }
@@ -95,7 +91,6 @@ export default function SelectionActionBar({
     const handleOpenBulkActionsModal = useCallback(() => {
         const ids = pageSelected.map((item) => item.id)
         if (ids.length === 0) return
-        setPendingBulkEditIntent('actions')
         if (selectedCount > 100) {
             setPendingBulkEditIds(ids)
             setShowLargeSelectionConfirm(true)
@@ -109,49 +104,13 @@ export default function SelectionActionBar({
         }
     }, [pageSelected, selectedCount, onOpenBulkEdit])
 
-    const handleBulkEditClick = useCallback(() => {
-        const ids = pageSelected.map((item) => item.id)
-        if (ids.length === 0) return
-
-        const breakdown = getSelectionTypeBreakdown()
-        const types = Object.keys(breakdown)
-        if (types.length > 1) {
-            const parts = types.map((t) => `${TYPE_LABELS[t] || t} (${breakdown[t]})`).join(', ')
-            setMixedTypeMessage(`Bulk edit can only be applied to one type at a time. You have selected: ${parts}. Please refine your selection.`)
-            setShowMixedTypeModal(true)
-            return
-        }
-
-        setPendingBulkEditIntent('metadata')
-        if (selectedCount > 100) {
-            setPendingBulkEditIds(ids)
-            setShowLargeSelectionConfirm(true)
-            return
-        }
-
-        if (pageSelected.length !== selectedCount) {
-            setPendingBulkEditIds(ids)
-            setShowBulkEditConfirm(true)
-        } else {
-            if (onOpenBulkMetadataAdd) {
-                onOpenBulkMetadataAdd(ids)
-            } else {
-                onOpenBulkEdit?.(ids)
-            }
-        }
-    }, [pageSelected, selectedCount, onOpenBulkEdit, onOpenBulkMetadataAdd, getSelectionTypeBreakdown])
-
     const handleConfirmBulkEdit = useCallback(() => {
         setShowBulkEditConfirm(false)
         if (pendingBulkEditIds.length > 0) {
-            if (pendingBulkEditIntent === 'metadata' && onOpenBulkMetadataAdd) {
-                onOpenBulkMetadataAdd(pendingBulkEditIds)
-            } else {
-                onOpenBulkEdit?.(pendingBulkEditIds)
-            }
+            onOpenBulkEdit?.(pendingBulkEditIds)
             setPendingBulkEditIds([])
         }
-    }, [pendingBulkEditIds, pendingBulkEditIntent, onOpenBulkEdit, onOpenBulkMetadataAdd])
+    }, [pendingBulkEditIds, onOpenBulkEdit])
 
     const handleConfirmLargeSelection = useCallback(() => {
         setShowLargeSelectionConfirm(false)
@@ -159,14 +118,10 @@ export default function SelectionActionBar({
         if (pageSelected.length !== selectedCount) {
             setShowBulkEditConfirm(true)
         } else {
-            if (pendingBulkEditIntent === 'metadata' && onOpenBulkMetadataAdd) {
-                onOpenBulkMetadataAdd(pendingBulkEditIds)
-            } else {
-                onOpenBulkEdit?.(pendingBulkEditIds)
-            }
+            onOpenBulkEdit?.(pendingBulkEditIds)
             setPendingBulkEditIds([])
         }
-    }, [pendingBulkEditIds, pendingBulkEditIntent, pageSelected.length, selectedCount, onOpenBulkEdit, onOpenBulkMetadataAdd])
+    }, [pendingBulkEditIds, pageSelected.length, selectedCount, onOpenBulkEdit])
 
     const items = selectedItems.map((item) => ({
         id: item.id,
@@ -181,7 +136,7 @@ export default function SelectionActionBar({
     const types = Object.keys(breakdown)
     const isMixedType = types.length > 1
     const mixedTypeTooltip = isMixedType
-        ? `Bulk edit can only be applied to one type at a time. You have selected: ${types.map((t) => `${TYPE_LABELS[t] || t} (${breakdown[t]})`).join(', ')}. Please refine your selection.`
+        ? `Actions can only be applied to one type at a time. You have selected: ${types.map((t) => `${TYPE_LABELS[t] || t} (${breakdown[t]})`).join(', ')}. Please refine your selection.`
         : null
 
     return (
@@ -197,90 +152,75 @@ export default function SelectionActionBar({
                         onClose={() => setDrawerOpen(false)}
                         canEditMetadata={canEditMetadata}
                         onCreateDownload={handleCreateDownload}
-                        onBulkEdit={handleBulkEditClick}
+                        onOpenActions={onOpenBulkEdit ? handleOpenBulkActionsModal : null}
                     />
                     <div
-                        className="flex flex-row items-center justify-between gap-2 sm:gap-4 px-3 py-2 sm:px-4 sm:py-3 bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 w-full max-w-[900px] transition-shadow duration-200 hover:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"
+                        className="flex flex-row items-center justify-between gap-1.5 sm:gap-4 px-2.5 py-1.5 sm:px-4 sm:py-3 bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 w-full max-w-[900px] transition-shadow duration-200 hover:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"
                         style={{ maxWidth: 'min(900px, calc(100vw - 2rem))' }}
                     >
-                    {/* Cluster 1: Selection info */}
-                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    {/* Cluster 1: Selection info — compact on mobile */}
+                    <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
                         <span className={`text-xs sm:text-sm font-semibold text-gray-700 tabular-nums transition-transform duration-150 shrink-0 ${countJustChanged ? 'scale-110' : 'scale-100'}`}>
-                            {selectedCount} selected
+                            <span className="sm:hidden">{selectedCount}</span>
+                            <span className="hidden sm:inline">{selectedCount} selected</span>
                         </span>
                         <button
                             type="button"
                             onClick={() => setDrawerOpen(true)}
-                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95 shrink-0"
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95 shrink-0"
+                            title="Preview selected items"
                         >
                             Preview
                         </button>
                     </div>
 
-                    {/* Cluster 2: Primary actions (Create Download) + Secondary (Bulk Edit) */}
-                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                        <button
-                            type="button"
-                            onClick={handleCreateDownload}
-                            className="inline-flex items-center rounded-md px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-all duration-100 active:scale-95"
-                            style={{ backgroundColor: primaryColor, ['--tw-ring-color']: primaryColor }}
-                        >
-                            Create Download
-                        </button>
-                        {canEditMetadata && (onOpenBulkMetadataAdd || onOpenBulkEdit) && (
-                            <>
-                                {onOpenBulkMetadataAdd && (
-                                    <span
-                                        title={isMixedType ? mixedTypeTooltip : undefined}
-                                        className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
-                                    >
-                                        <button
-                                            type="button"
-                                            onClick={isMixedType ? undefined : handleBulkEditClick}
-                                            disabled={isMixedType}
-                                            className={`inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 ${
-                                                isMixedType
-                                                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                                                    : 'border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 active:scale-95'
-                                            }`}
-                                        >
-                                            Bulk Edit
-                                        </button>
-                                    </span>
-                                )}
-                                {onOpenBulkEdit && (
-                                    <span
-                                        title={isMixedType ? mixedTypeTooltip : undefined}
-                                        className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
-                                    >
-                                        <button
-                                            type="button"
-                                            onClick={isMixedType ? undefined : handleOpenBulkActionsModal}
-                                            disabled={isMixedType}
-                                            className="inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 active:scale-95"
-                                        >
-                                            {onOpenBulkMetadataAdd ? 'Actions' : 'Bulk Edit'}
-                                        </button>
-                                    </span>
-                                )}
-                            </>
-                        )}
-                    </div>
-
-                    {/* Cluster 3: Secondary controls */}
+                    {/* Cluster 2: Primary actions — "Download" on mobile, "Create Download" on desktop */}
                     <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                         <button
                             type="button"
-                            onClick={handleSelectAllPage}
-                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
+                            onClick={handleCreateDownload}
+                            className="inline-flex items-center rounded-md px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-all duration-100 active:scale-95 shrink-0"
+                            style={{ backgroundColor: primaryColor, ['--tw-ring-color']: primaryColor }}
+                            title="Create download link"
                         >
-                            <span className="hidden sm:inline">{allPageSelected ? 'Deselect all' : 'Select all (page)'}</span>
-                            <span className="sm:hidden">{allPageSelected ? 'Deselect' : 'Select all'}</span>
+                            <span className="sm:hidden">Download</span>
+                            <span className="hidden sm:inline">Create Download</span>
+                        </button>
+                        {canEditMetadata && onOpenBulkEdit && (
+                            <span
+                                title={isMixedType ? mixedTypeTooltip : undefined}
+                                className={isMixedType ? 'inline-flex cursor-not-allowed' : 'inline-flex'}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={isMixedType ? undefined : handleOpenBulkActionsModal}
+                                    disabled={isMixedType}
+                                    className="inline-flex items-center rounded-md px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-100 active:scale-95 shrink-0"
+                                    title="Bulk actions"
+                                >
+                                    Actions
+                                </button>
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Cluster 3: Secondary controls — shorter labels on mobile */}
+                    <div className="flex items-center gap-1 shrink-0">
+                        <button
+                            type="button"
+                            onClick={handleSelectAllPage}
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95 shrink-0"
+                            title={allPageSelected ? 'Deselect all' : 'Select all on page'}
+                        >
+                            <span className="hidden md:inline">{allPageSelected ? 'Deselect all' : 'Select all (page)'}</span>
+                            <span className="hidden sm:inline md:hidden">{allPageSelected ? 'Deselect' : 'Select all'}</span>
+                            <span className="sm:hidden">{allPageSelected ? 'Deselect' : 'All'}</span>
                         </button>
                         <button
                             type="button"
                             onClick={clearSelection}
-                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95"
+                            className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-1 py-0.5 sm:px-2 sm:py-1 transition-all duration-100 hover:bg-gray-100 active:scale-95 shrink-0"
+                            title="Clear selection"
                         >
                             Clear
                         </button>
@@ -301,8 +241,8 @@ export default function SelectionActionBar({
                 open={showBulkEditConfirm}
                 onClose={() => setShowBulkEditConfirm(false)}
                 onConfirm={handleConfirmBulkEdit}
-                title="Bulk edit scope"
-                message={`Bulk edit applies only to items on this page. Continue with ${pendingBulkEditIds.length} items?`}
+                title="Actions scope"
+                message={`Actions apply only to items on this page. Continue with ${pendingBulkEditIds.length} items?`}
                 confirmText="Continue"
                 cancelText="Cancel"
                 variant="info"

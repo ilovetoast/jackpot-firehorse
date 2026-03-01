@@ -178,6 +178,25 @@ nav.app-nav[data-collection-only="true"] .app-nav-main-links .nav-link-disabled,
 
 /* Optional: use the CSS variable for your own overrides, e.g. .my-thing { opacity: var(--collection-only-user, 1); } */
 
+/* Selected items preview drawer: fit above bottom nav + selection bar on mobile */
+.selected-items-drawer-max-h {
+    max-height: min(50vh, calc(100vh - 12rem - env(safe-area-inset-bottom, 0px)));
+}
+@media (min-width: 640px) {
+    .selected-items-drawer-max-h {
+        max-height: 50vh;
+    }
+}
+
+/* Executions category bar: hide scrollbar, prevent overlap */
+.executions-category-tabs {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.executions-category-tabs::-webkit-scrollbar {
+    display: none;
+}
+
 /* PWA/mobile safe-area support */
 .safe-area-pb {
     padding-bottom: env(safe-area-inset-bottom);

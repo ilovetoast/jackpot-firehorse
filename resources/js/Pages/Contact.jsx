@@ -1,4 +1,5 @@
 import { Link, usePage } from '@inertiajs/react'
+import JackpotLogo from '../Components/JackpotLogo'
 
 export default function Contact({ plan }) {
     const { auth, flash, signup_enabled } = usePage().props
@@ -10,8 +11,8 @@ export default function Contact({ plan }) {
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div className="flex h-16 justify-between">
                         <div className="flex items-center">
-                            <Link href="/" className="text-xl font-bold text-gray-900">
-                                Jackpot
+                            <Link href="/" className="flex items-center">
+                                <JackpotLogo className="h-8 w-auto" />
                             </Link>
                         </div>
                         <div className="flex items-center gap-4">

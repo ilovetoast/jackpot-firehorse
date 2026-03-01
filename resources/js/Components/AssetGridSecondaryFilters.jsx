@@ -29,7 +29,7 @@ import { usePage, router, Link } from '@inertiajs/react'
 import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
-import { getSecondaryFilters } from '../utils/filterTierResolver'
+import { getSecondaryFilters, getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
 import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterParam } from '../utils/filterUrlUtils'
@@ -334,6 +334,18 @@ export default function AssetGridSecondaryFilters({
         return filterFields.filter(field => isFilterCompatible(field, visibilityContext))
     }, [secondaryFilters, visibilityContext, filterable_schema, selectedCategoryId, available_values])
     
+    // Primary metadata filters (is_primary === true) — shown in More filters panel on mobile only
+    const primaryFilterClassifications = useMemo(() => getPrimaryFilters(normalizedConfig), [normalizedConfig])
+    const visiblePrimaryFilters = useMemo(() => {
+        const filterFields = primaryFilterClassifications.map(classification => classification.field || classification)
+        const metadataFields = filterFields.filter(field => {
+            const fieldKey = field.field_key || field.key
+            return fieldKey !== 'search' && fieldKey !== 'category' && fieldKey !== 'asset_type' && fieldKey !== 'brand'
+        })
+        const primaryMetadataFields = metadataFields.filter(field => field.is_primary === true)
+        return getVisibleFilters(primaryMetadataFields, visibilityContext)
+    }, [primaryFilterClassifications, visibilityContext, filterable_schema, selectedCategoryId, available_values])
+    
     // Get hidden secondary filter count using existing helper
     // This is used for awareness messaging only (does not reveal hidden filters)
     const hiddenFilterCount = useMemo(() => {
@@ -434,20 +446,21 @@ export default function AssetGridSecondaryFilters({
     // Show empty state if no filters available for current category
     return (
         <div>
-            {/* Bar: More filters (left) + active filter pills (center) + Sort (right) */}
+            {/* Bar: More filters (left) + active filter pills (center) + Sort (right) — 1 row on mobile */}
             <div
-                className="px-3 py-1.5 sm:px-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between text-left border-b border-gray-200"
+                className="px-3 py-1.5 sm:px-4 flex flex-row flex-wrap items-center gap-2 sm:justify-between text-left border-b border-gray-200 min-h-[2.25rem]"
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
-                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 flex-wrap">
                     <button
                         type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
-                        className="flex items-center gap-2 min-w-0 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
+                        className="flex items-center gap-1.5 sm:gap-2 min-w-0 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
                         style={{ ['--tw-ring-color']: brandPrimary }}
+                        aria-label={isExpanded ? 'Collapse filters' : 'Expand more filters'}
                     >
-                        <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-sm font-medium text-gray-700 truncate">
+                        <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" aria-hidden />
+                        <span className="text-sm font-medium text-gray-700 truncate hidden sm:inline">
                             More filters
                         </span>
                         {activeFilterCount > 0 && (
@@ -571,8 +584,8 @@ export default function AssetGridSecondaryFilters({
                     )}
                 </div>
 
-                {/* Right: optional trailing content (e.g. Select Multiple, Select all) + count + Sort — same pane */}
-                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:justify-end min-w-0">
+                {/* Right: optional trailing content + count + Sort — compact row on mobile */}
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 sm:justify-end min-w-0">
                     {barTrailingContent != null && barTrailingContent}
                     {/* Indicator: result count and filter count in selected category */}
                     {(assetResultCount != null || activeFilterCount > 0) && (
@@ -609,6 +622,31 @@ export default function AssetGridSecondaryFilters({
             >
                 <div className="min-h-0 overflow-hidden">
                     <div className="px-3 py-3 sm:px-4 border-t border-gray-200">
+                    {/* Primary metadata filters (e.g. Logo Type) — mobile only; desktop shows them in toolbar */}
+                    {visiblePrimaryFilters.length > 0 && (
+                        <div className="mb-3 pb-3 border-b border-gray-200 lg:hidden">
+                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Primary Filters</label>
+                            <div className="grid grid-cols-1 gap-3">
+                                {visiblePrimaryFilters.map((field) => {
+                                    const fieldKey = field.field_key || field.key
+                                    const currentFilter = filters[fieldKey] || {}
+                                    const currentValue = currentFilter.value ?? null
+                                    const currentOperator = currentFilter.operator ?? (field.operators?.[0]?.value || 'equals')
+                                    return (
+                                        <FilterFieldInput
+                                            key={fieldKey}
+                                            field={field}
+                                            value={currentValue}
+                                            operator={currentOperator}
+                                            availableValues={available_values[fieldKey] || []}
+                                            onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                                            variant="secondary"
+                                        />
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
                     {/* Brand DNA Compliance Filter - Deliverables only */}
                     {showComplianceFilter && onComplianceFilterChange && (
                         <div className="mb-3 pb-3 border-b border-gray-200">

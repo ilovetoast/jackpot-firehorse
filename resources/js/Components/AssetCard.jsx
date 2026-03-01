@@ -98,6 +98,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const [previewLoaded, setPreviewLoaded] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+    const touchStartRef = useRef(null)
+    const touchHandledRef = useRef(false)
     
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures memoized components re-render when thumbnail availability changes
@@ -186,7 +188,48 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     }
     
     // UX invariant: Click on card always opens drawer. Only the checkbox adds/removes from download bucket.
+    // Mobile: tap = toggle selection, long-press = open detail (best practice for grid selection)
+    const LONG_PRESS_MS = 400
+    const hasSelection = Boolean(onBulkSelect || (selection || onBucketToggle))
+    const handleTouchStart = () => {
+        if (!isMobile || !hasSelection || !onClick) return
+        touchStartRef.current = Date.now()
+        touchHandledRef.current = false
+    }
+    const handleTouchCancel = () => {
+        touchStartRef.current = null
+    }
+    const handleTouchEnd = (e) => {
+        if (!isMobile || !hasSelection || !onClick || !touchStartRef.current) return
+        const duration = Date.now() - touchStartRef.current
+        touchStartRef.current = null
+        if (duration >= LONG_PRESS_MS) {
+            touchHandledRef.current = true
+            onClick(asset, e)
+        } else {
+            touchHandledRef.current = true
+            if (onBulkSelect) {
+                onBulkSelect()
+            } else if (selection) {
+                selection.toggleItem({
+                    id: asset.id,
+                    type: selectionAssetType,
+                    name: asset.title ?? asset.original_filename ?? '',
+                    thumbnail_url: asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? null,
+                    category_id: asset.metadata?.category_id ?? asset.category_id ?? null,
+                })
+            } else if (onBucketToggle) {
+                onBucketToggle(asset.id)
+            }
+        }
+    }
     const handleClick = (e) => {
+        if (isMobile && hasSelection && touchHandledRef.current) {
+            touchHandledRef.current = false
+            e.preventDefault()
+            e.stopPropagation()
+            return
+        }
         if (onClick) {
             onClick(asset, e)
         }
@@ -231,6 +274,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     return (
         <div
             onClick={handleClick}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchCancel}
             onMouseEnter={() => setIsCardHovering(true)}
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
@@ -330,7 +376,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
 
                 {/* Phase D1/D3: Download bucket checkbox. SelectionContext is source of truth. Show when selection exists (or legacy onBucketToggle). */}
                 {!onBulkSelect && (selection || onBucketToggle) && (
-                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isCardHovering || (selection?.isSelected(asset.id) ?? isInBucket) ? 'opacity-100' : 'opacity-0'} ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'scale-105' : 'scale-100'}`}>
+                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (selection?.isSelected(asset.id) ?? isInBucket) ? 'opacity-100' : 'opacity-0'} ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'scale-105' : 'scale-100'}`}>
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
                                 (selection?.isSelected(asset.id) ?? isInBucket) ? 'bg-[var(--primary-color)]' : 'bg-white'
@@ -431,6 +477,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                 )
             )}
             
+            {/* Mobile: subtle hint when selected — long-press opens details */}
+            {isMobile && hasSelection && onClick && (selection ? selection.isSelected(asset.id) : isBulkSelected || isInBucket) && (
+                <div className="absolute bottom-0 left-0 right-0 py-1.5 px-2 flex justify-center pointer-events-none md:hidden">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-black/50 backdrop-blur-sm px-2.5 py-1 text-[10px] font-medium text-white/90">
+                        Hold for details
+                    </span>
+                </div>
+            )}
+
             {/* Phase L.6.2: Visual indicator for unpublished assets - user clicks asset to open drawer */}
             {isPendingApprovalMode && (
                 <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-10 pointer-events-none">

@@ -21,7 +21,7 @@ export default function SelectedItemsDrawer({
     onClose,
     canEditMetadata = false,
     onCreateDownload = null,
-    onBulkEdit = null,
+    onOpenActions = null,
 }) {
     const { selectedItems, selectedCount, deselectItem, clearSelection } = useSelection()
     const [isVisible, setIsVisible] = useState(false)
@@ -75,7 +75,7 @@ export default function SelectedItemsDrawer({
 
     return (
         <div
-            className={`absolute bottom-full mb-3 left-1/2 -translate-x-1/2 w-[520px] max-h-[50vh] bg-white rounded-xl shadow-xl border border-gray-200 flex flex-col overflow-hidden transition-all duration-150 ease-out ${
+            className={`absolute bottom-full mb-3 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] sm:w-[520px] selected-items-drawer-max-h bg-white rounded-xl shadow-xl border border-gray-200 flex flex-col overflow-hidden transition-all duration-150 ease-out ${
                 panelVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-95 pointer-events-none'
             }`}
             role="dialog"
@@ -180,16 +180,16 @@ export default function SelectedItemsDrawer({
                     Clear
                 </button>
                 <div className="flex gap-4 items-center">
-                    {canEditMetadata && onBulkEdit && (
+                    {canEditMetadata && onOpenActions && (
                         <button
                             type="button"
                             onClick={() => {
-                                onBulkEdit()
+                                onOpenActions()
                                 onClose()
                             }}
                             className="text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded transition-all duration-100 hover:bg-gray-100 active:scale-95"
                         >
-                            Bulk Edit
+                            Actions
                         </button>
                     )}
                     <button

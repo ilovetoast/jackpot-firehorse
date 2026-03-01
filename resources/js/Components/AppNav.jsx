@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 import AppBrandLogo from './AppBrandLogo'
+import JackpotLogo from './JackpotLogo'
 import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
 import NotificationBell from './NotificationBell'
@@ -219,41 +220,11 @@ export default function AppNav({ brand, tenant }) {
 
     // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
-        {
-            href: '/app/dashboard',
-            label: 'Dashboard',
-            shortLabel: 'Dashboard',
-            icon: HomeIcon,
-            isActive: (url) => url === '/app/dashboard',
-        },
-        {
-            href: '/app/assets',
-            label: 'Assets',
-            shortLabel: 'Assets',
-            icon: PhotoIcon,
-            isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions'),
-        },
-        {
-            href: '/app/executions',
-            label: DELIVERABLES_PAGE_LABEL,
-            shortLabel: DELIVERABLES_PAGE_LABEL,
-            icon: Squares2X2Icon,
-            isActive: (url) => url.startsWith('/app/executions'),
-        },
-        {
-            href: '/app/generative',
-            label: 'Generate',
-            shortLabel: 'Generate',
-            icon: SparklesIcon,
-            isActive: (url) => url.startsWith('/app/generative'),
-        },
-        {
-            href: '/app/collections',
-            label: 'Collections',
-            shortLabel: 'Collections',
-            icon: FolderIcon,
-            isActive: (url) => url.startsWith('/app/collections'),
-        },
+        { href: '/app/dashboard', label: 'Dashboard', shortLabel: 'Home', icon: HomeIcon, isActive: (url) => url === '/app/dashboard' },
+        { href: '/app/assets', label: 'Assets', shortLabel: 'Assets', icon: PhotoIcon, isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions') },
+        { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL, shortLabel: 'Exec', icon: Squares2X2Icon, isActive: (url) => url.startsWith('/app/executions') },
+        { href: '/app/generative', label: 'Generate', shortLabel: 'Gen', icon: SparklesIcon, isActive: (url) => url.startsWith('/app/generative') },
+        { href: '/app/collections', label: 'Collections', shortLabel: 'Coll', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
     ]
     
     return (
@@ -393,9 +364,7 @@ export default function AppNav({ brand, tenant }) {
                                 />
                             )) : (
                                 <Link href="/" className="flex items-center">
-                                    <h1 className="text-xl font-bold text-gray-900">
-                                        Jackpot
-                                    </h1>
+                                    <JackpotLogo className="h-8 w-auto" />
                                 </Link>
                             )}
                         </div>
@@ -1052,26 +1021,26 @@ export default function AppNav({ brand, tenant }) {
             {/* Mobile PWA bottom app navigation */}
             {isAppPage && !isCollectionOnlyNav && !isAdminPage && (
                 <div className="fixed inset-x-0 bottom-0 z-[95] border-t border-gray-200 bg-white/95 backdrop-blur sm:hidden safe-area-pb">
-                    <div className="grid grid-cols-5 gap-0.5 px-1 py-1.5">
+                    <nav className="grid grid-cols-5 gap-0 min-w-0 px-0.5 py-1.5" aria-label="App navigation">
                         {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
                             const active = isActive(currentUrl)
                             return (
                                 <Link
                                     key={href}
                                     href={href}
-                                    className={`flex flex-col items-center justify-center rounded-md px-0.5 py-1.5 text-[10px] font-medium transition-colors ${
+                                    className={`flex flex-col items-center justify-center gap-0.5 min-w-0 rounded-md py-1 px-0.5 text-[10px] font-medium transition-colors ${
                                         active ? 'text-indigo-700 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'
                                     }`}
                                     aria-label={label}
                                     aria-current={active ? 'page' : undefined}
                                     style={active ? { color: activeBrand?.primary_color || '#4338ca' } : undefined}
                                 >
-                                    <Icon className="h-5 w-5" aria-hidden="true" />
-                                    <span className="mt-0.5 leading-none truncate max-w-full">{shortLabel}</span>
+                                    <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                    <span className="leading-none truncate w-full text-center">{shortLabel}</span>
                                 </Link>
                             )
                         })}
-                    </div>
+                    </nav>
                 </div>
             )}
             </nav>

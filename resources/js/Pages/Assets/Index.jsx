@@ -25,11 +25,13 @@ import { usePermission } from '../../hooks/usePermission'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
+import { motion } from 'framer-motion'
 import {
     FolderIcon,
     TagIcon,
     LockClosedIcon,
     TrashIcon,
+    ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
@@ -137,6 +139,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
+    const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
 
     // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext.
     const handleAssetClick = useCallback((asset) => {
@@ -475,6 +478,68 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             }
         )
     }, [])
+
+    // Mobile category tabs (same pattern as Deliverables)
+    const visibleMobileCategories = useMemo(() => filterActiveCategories(categories || []), [categories])
+    const mobileCategoryTabs = useMemo(() => {
+        const tabs = []
+        if (show_all_button) {
+            tabs.push({ key: 'all', label: 'All', count: total_asset_count > 0 ? total_asset_count : null, category: null, categoryId: null, isTrash: false })
+        }
+        visibleMobileCategories.forEach((cat) => {
+            tabs.push({ key: String(cat.id), label: cat.name, count: cat.asset_count > 0 ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false })
+        })
+        if (can_view_trash && (trash_count > 0 || lifecycle === 'deleted')) {
+            tabs.push({ key: 'trash', label: 'Trash', count: trash_count > 0 ? trash_count : null, category: null, categoryId: null, isTrash: true })
+        }
+        return tabs
+    }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle])
+
+    const activeMobileCategoryTabIndex = useMemo(() => (
+        mobileCategoryTabs.findIndex((tab) => {
+            if (tab.isTrash) return lifecycle === 'deleted'
+            if (tab.categoryId == null && !tab.isTrash) return selectedCategoryId == null && lifecycle !== 'deleted'
+            return String(tab.categoryId) === String(selectedCategoryId)
+        })
+    ), [mobileCategoryTabs, selectedCategoryId, lifecycle])
+
+    const safeActiveMobileCategoryTabIndex = activeMobileCategoryTabIndex >= 0 ? activeMobileCategoryTabIndex : (mobileCategoryTabs.length > 0 ? 0 : -1)
+
+    const activeTabRef = useRef(null)
+    const tabsScrollRef = useRef(null)
+    const [tabsCanScrollRight, setTabsCanScrollRight] = useState(false)
+    const updateTabsScrollState = useCallback(() => {
+        const el = tabsScrollRef.current
+        if (!el) return
+        const { scrollLeft, scrollWidth, clientWidth } = el
+        setTabsCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2)
+    }, [])
+    useEffect(() => {
+        const el = tabsScrollRef.current
+        if (!el) return
+        updateTabsScrollState()
+        el.addEventListener('scroll', updateTabsScrollState)
+        const ro = new ResizeObserver(updateTabsScrollState)
+        ro.observe(el)
+        return () => { el.removeEventListener('scroll', updateTabsScrollState); ro.disconnect() }
+    }, [updateTabsScrollState, mobileCategoryTabs.length])
+
+    useEffect(() => {
+        activeTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }, [safeActiveMobileCategoryTabIndex])
+
+    const handleMobileCategoryTabChange = useCallback((targetIndex) => {
+        if (targetIndex < 0 || targetIndex >= mobileCategoryTabs.length) return
+        const tab = mobileCategoryTabs[targetIndex]
+        if (!tab) return
+        if (tab.isTrash) {
+            router.get('/app/assets', { lifecycle: 'deleted' })
+            setMobileCategoriesOpen(false)
+        } else {
+            handleCategorySelect(tab.category)
+            setMobileCategoriesOpen(false)
+        }
+    }, [mobileCategoryTabs, handleCategorySelect])
 
     // Handle finalize complete - refresh asset grid after successful upload finalize
     const handleFinalizeComplete = useCallback(() => {
@@ -932,21 +997,52 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative flex flex-col">
-                    {/* Mobile: Categories trigger (below nav, only when sidebar is hidden) */}
-                    <div className="lg:hidden flex items-center justify-start gap-2 py-2 px-4 sm:px-6 border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
-                        <button
-                            type="button"
-                            onClick={() => setMobileCategoriesOpen(true)}
-                            className="inline-flex max-w-full items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg bg-white border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                        >
-                            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-                            </svg>
-                            <span>Categories</span>
-                            {selectedCategoryId != null && categories?.find(c => c.id === selectedCategoryId) && (
-                                <span className="text-gray-500 truncate max-w-[140px]">— {categories.find(c => c.id === selectedCategoryId).name}</span>
+                    {/* Mobile: Category tabs (same style as Deliverables) */}
+                    <div className="lg:hidden border-b border-gray-200 bg-gray-100 shrink-0 sticky top-0 z-20">
+                        <div className="px-3 sm:px-6 py-2 relative">
+                            <div
+                                ref={tabsScrollRef}
+                                className="executions-category-tabs flex flex-nowrap items-center gap-1 sm:gap-0.5 overflow-x-auto overflow-y-hidden pb-1 -mb-1"
+                            >
+                                {mobileCategoryTabs.length > 0 ? mobileCategoryTabs.map((tab, index) => {
+                                    const isActive = index === safeActiveMobileCategoryTabIndex
+                                    return (
+                                        <motion.button
+                                            key={tab.key}
+                                            ref={isActive ? activeTabRef : null}
+                                            type="button"
+                                            onClick={() => handleMobileCategoryTabChange(index)}
+                                            className={`relative shrink-0 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-100 ${
+                                                isActive
+                                                    ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60'
+                                                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                            }`}
+                                            aria-pressed={isActive}
+                                            whileTap={{ scale: 0.98 }}
+                                            transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                                        >
+                                            <span className="inline-flex items-center gap-1">
+                                                {tab.label}
+                                                {tab.count != null && tab.count > 0 ? (
+                                                    <span className="text-xs opacity-70">({tab.count})</span>
+                                                ) : null}
+                                            </span>
+                                        </motion.button>
+                                    )
+                                }) : (
+                                    <span className="px-3 text-sm text-gray-500">No categories yet</span>
+                                )}
+                            </div>
+                            {tabsCanScrollRight && mobileCategoryTabs.length > 1 && (
+                                <div
+                                    className="absolute right-0 top-0 bottom-0 w-12 sm:w-16 pointer-events-none flex items-center justify-end pr-1"
+                                    style={{ background: 'linear-gradient(to right, transparent, rgb(243 244 246 / 0.95))' }}
+                                    aria-hidden
+                                >
+                                    <ChevronRightIcon className="h-5 w-5 text-gray-400" />
+                                </div>
                             )}
-                        </button>
+                        </div>
                     </div>
                     <div 
                         className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0 ${lifecycle === 'deleted' ? 'bg-gray-100' : ''}`}
@@ -1185,10 +1281,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
                     category_id: a.metadata?.category_id ?? a.category_id ?? null,
                 }))}
-                onOpenBulkMetadataAdd={(ids) => {
-                    setBulkSelectedAssetIds(ids)
-                    setShowBulkMetadataModal(true)
-                }}
                 onOpenBulkEdit={(ids) => {
                     setBulkSelectedAssetIds(ids)
                     setShowBulkActionsModal(true)
@@ -1211,9 +1303,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             clearSelection()
                         }
                     }}
-                    onOpenMetadataEdit={(ids) => {
+                    onOpenMetadataEdit={(ids, op) => {
                         setShowBulkActionsModal(false)
                         setBulkSelectedAssetIds(ids)
+                        setBulkMetadataInitialOp(op)
                         setShowBulkMetadataModal(true)
                     }}
                 />
@@ -1221,13 +1314,18 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             {showBulkMetadataModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
-                    onClose={() => setShowBulkMetadataModal(false)}
+                    initialOperation={bulkMetadataInitialOp}
+                    onClose={() => {
+                        setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
+                    }}
                     onComplete={() => {
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         setIsBulkMode(false)
                         clearSelection()
                         setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
                     }}
                 />
             )}

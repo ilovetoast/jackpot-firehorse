@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -27,6 +28,7 @@ import {
     SparklesIcon,
     LockClosedIcon,
     TrashIcon,
+    ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
@@ -38,11 +40,6 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
-    const [mobileContentTranslateX, setMobileContentTranslateX] = useState(0)
-    const [mobileContentAnimating, setMobileContentAnimating] = useState(false)
-    const mobileContentAnimationTimeoutRef = useRef(null)
-    const mobileTouchStartRef = useRef(null)
-    const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
@@ -59,14 +56,6 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
-
-    useEffect(() => {
-        return () => {
-            if (mobileContentAnimationTimeoutRef.current) {
-                clearTimeout(mobileContentAnimationTimeoutRef.current)
-            }
-        }
-    }, [])
 
     useEffect(() => {
         const list = Array.isArray(assets) ? assets.filter(Boolean) : []
@@ -117,6 +106,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
+    const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
@@ -401,29 +391,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         ? activeMobileCategoryTabIndex
         : (mobileCategoryTabs.length > 0 ? 0 : -1)
 
-    const animateMobileContentSwipe = useCallback((direction) => {
-        if (!direction) {
-            return
-        }
-
-        if (mobileContentAnimationTimeoutRef.current) {
-            clearTimeout(mobileContentAnimationTimeoutRef.current)
-        }
-
-        setMobileContentAnimating(false)
-        setMobileContentTranslateX(direction > 0 ? 32 : -32)
-
-        if (typeof window !== 'undefined') {
-            window.requestAnimationFrame(() => {
-                setMobileContentAnimating(true)
-                setMobileContentTranslateX(0)
-            })
-        }
-
-        mobileContentAnimationTimeoutRef.current = setTimeout(() => {
-            setMobileContentAnimating(false)
-        }, 220)
-    }, [])
+    const activeTabRef = useRef(null)
+    useEffect(() => {
+        activeTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }, [safeActiveMobileCategoryTabIndex])
 
     const handleMobileCategoryTabChange = useCallback((targetIndex) => {
         if (targetIndex < 0 || targetIndex >= mobileCategoryTabs.length) {
@@ -435,74 +406,63 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             return
         }
 
-        const fallbackIndex = safeActiveMobileCategoryTabIndex
-        const baseIndex = currentIndex >= 0 ? currentIndex : fallbackIndex
-        const direction = targetIndex > baseIndex ? 1 : -1
-        animateMobileContentSwipe(direction)
-
         const targetTab = mobileCategoryTabs[targetIndex]
         if (!targetTab) {
             return
         }
 
         handleCategorySelect(targetTab.category)
-    }, [mobileCategoryTabs, activeMobileCategoryTabIndex, safeActiveMobileCategoryTabIndex, animateMobileContentSwipe, handleCategorySelect])
+    }, [mobileCategoryTabs, activeMobileCategoryTabIndex, handleCategorySelect])
 
-    const handleMobileContentTouchStart = useCallback((event) => {
-        if (mobileCategoryTabs.length <= 1) {
-            return
-        }
-
-        const touch = event.changedTouches?.[0]
-        if (!touch) {
-            return
-        }
-
-        mobileTouchStartRef.current = {
-            x: touch.clientX,
-            y: touch.clientY,
-        }
-        mobileTouchDeltaRef.current = { x: 0, y: 0 }
-    }, [mobileCategoryTabs.length])
-
-    const handleMobileContentTouchMove = useCallback((event) => {
-        if (!mobileTouchStartRef.current) {
-            return
-        }
-
-        const touch = event.changedTouches?.[0]
-        if (!touch) {
-            return
-        }
-
-        mobileTouchDeltaRef.current = {
-            x: touch.clientX - mobileTouchStartRef.current.x,
-            y: touch.clientY - mobileTouchStartRef.current.y,
-        }
+    // Framer Motion swipe: Instagram-style full-frame drag with velocity-aware control
+    const SWIPE_THRESHOLD = 80
+    const SWIPE_VELOCITY_THRESHOLD = 250
+    const [viewportWidth, setViewportWidth] = useState(400)
+    useEffect(() => {
+        const update = () => setViewportWidth(window.innerWidth)
+        update()
+        window.addEventListener('resize', update)
+        return () => window.removeEventListener('resize', update)
     }, [])
+    const dragConstraint = Math.min(viewportWidth * 0.5, 200)
 
-    const handleMobileContentTouchEnd = useCallback(() => {
-        if (!mobileTouchStartRef.current || mobileCategoryTabs.length <= 1 || safeActiveMobileCategoryTabIndex < 0) {
-            mobileTouchStartRef.current = null
-            mobileTouchDeltaRef.current = { x: 0, y: 0 }
-            return
+    const [dragOffsetX, setDragOffsetX] = useState(0)
+    const [tabsCanScrollRight, setTabsCanScrollRight] = useState(false)
+    const tabsScrollRef = useRef(null)
+    const updateTabsScrollState = useCallback(() => {
+        const el = tabsScrollRef.current
+        if (!el) return
+        const { scrollLeft, scrollWidth, clientWidth } = el
+        setTabsCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2)
+    }, [])
+    useEffect(() => {
+        const el = tabsScrollRef.current
+        if (!el) return
+        updateTabsScrollState()
+        el.addEventListener('scroll', updateTabsScrollState)
+        const ro = new ResizeObserver(updateTabsScrollState)
+        ro.observe(el)
+        return () => {
+            el.removeEventListener('scroll', updateTabsScrollState)
+            ro.disconnect()
         }
+    }, [updateTabsScrollState, mobileCategoryTabs.length])
 
-        const { x, y } = mobileTouchDeltaRef.current
-        mobileTouchStartRef.current = null
-        mobileTouchDeltaRef.current = { x: 0, y: 0 }
+    const handleSwipeDragEnd = useCallback((_, info) => {
+        setDragOffsetX(0)
+        const { offset, velocity } = info
+        const vx = velocity.x
+        const ox = offset.x
+        const nextIndex = safeActiveMobileCategoryTabIndex + 1
+        const prevIndex = safeActiveMobileCategoryTabIndex - 1
 
-        const isHorizontalSwipe = Math.abs(x) >= 60 && Math.abs(x) > Math.abs(y) * 1.2
-        if (!isHorizontalSwipe) {
-            return
+        if (ox < -SWIPE_THRESHOLD || vx < -SWIPE_VELOCITY_THRESHOLD) {
+            handleMobileCategoryTabChange(nextIndex)
+        } else if (ox > SWIPE_THRESHOLD || vx > SWIPE_VELOCITY_THRESHOLD) {
+            handleMobileCategoryTabChange(prevIndex)
         }
+    }, [safeActiveMobileCategoryTabIndex, handleMobileCategoryTabChange])
 
-        const nextIndex = x < 0
-            ? safeActiveMobileCategoryTabIndex + 1
-            : safeActiveMobileCategoryTabIndex - 1
-
-        handleMobileCategoryTabChange(nextIndex)
-    }, [mobileCategoryTabs.length, safeActiveMobileCategoryTabIndex, handleMobileCategoryTabChange])
     
     // Key only by remountKey so category changes do NOT remount (avoids double flash).
     // Assets does not use a category-dependent key; matching that here fixes Executions flashing twice.
@@ -826,56 +786,71 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
 
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative flex flex-col">
-                    <div className="lg:hidden border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
-                        <div className="px-4 sm:px-6 py-2">
-                            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                    <div className="lg:hidden border-b border-gray-200 bg-gray-100 shrink-0 sticky top-0 z-20">
+                        <div className="px-3 sm:px-6 py-2 relative">
+                            <div
+                                ref={tabsScrollRef}
+                                className="executions-category-tabs flex flex-nowrap items-center gap-1 sm:gap-0.5 overflow-x-auto overflow-y-hidden pb-1 -mb-1"
+                            >
                                 {mobileCategoryTabs.length > 0 ? mobileCategoryTabs.map((tab, index) => {
                                     const isActive = index === safeActiveMobileCategoryTabIndex
                                     return (
-                                        <button
+                                        <motion.button
                                             key={tab.key}
+                                            ref={isActive ? activeTabRef : null}
                                             type="button"
                                             onClick={() => handleMobileCategoryTabChange(index)}
-                                            className="inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
-                                            style={isActive ? {
-                                                backgroundColor: activeBgColor,
-                                                borderColor: activeBgColor,
-                                                color: activeTextColor,
-                                            } : {
-                                                backgroundColor: '#ffffff',
-                                                borderColor: '#d1d5db',
-                                                color: '#374151',
-                                            }}
+                                            className={`relative shrink-0 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-100 ${
+                                                isActive
+                                                    ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60'
+                                                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                            }`}
                                             aria-pressed={isActive}
+                                            whileTap={{ scale: 0.98 }}
+                                            transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                                         >
-                                            <span>{tab.label}</span>
-                                            {tab.count ? <span className="text-xs opacity-80">{tab.count}</span> : null}
-                                        </button>
+                                            <span className="inline-flex items-center gap-1">
+                                                {tab.label}
+                                                {tab.count != null && tab.count > 0 ? (
+                                                    <span className="text-xs opacity-70">({tab.count})</span>
+                                                ) : null}
+                                            </span>
+                                        </motion.button>
                                     )
                                 }) : (
-                                    <span className="px-1 text-sm text-gray-500">No execution categories yet</span>
+                                    <span className="px-3 text-sm text-gray-500">No execution categories yet</span>
                                 )}
                             </div>
+                            {/* Gradient + chevron indicator when more tabs are off-screen to the right */}
+                            {tabsCanScrollRight && mobileCategoryTabs.length > 1 && (
+                                <div
+                                    className="absolute right-0 top-0 bottom-0 w-12 sm:w-16 pointer-events-none flex items-center justify-end pr-1"
+                                    style={{
+                                        background: 'linear-gradient(to right, transparent, rgb(243 244 246 / 0.95))',
+                                    }}
+                                    aria-hidden
+                                >
+                                    <ChevronRightIcon className="h-5 w-5 text-gray-400" />
+                                </div>
+                            )}
                         </div>
                     </div>
-                    <div 
-                        className="flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0"
+                    <motion.div
+                        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden transition-[padding-right] duration-300 ease-in-out relative pb-0 touch-pan-y"
                         style={{ 
-                            // Freeze grid layout during drawer animation to prevent mid-animation reflow
-                            // CSS Grid recalculates columns immediately on width change
-                            // By delaying padding change until after animation, we get one controlled snap instead of dropping items mid-animation
-                            // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
                             paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0',
                             touchAction: 'pan-y',
                         }}
+                        drag={mobileCategoryTabs.length > 1 ? 'x' : false}
+                        dragConstraints={{ left: -dragConstraint, right: dragConstraint }}
+                        dragElastic={0.12}
+                        onDrag={(_, info) => setDragOffsetX(info.offset.x)}
+                        onDragEnd={handleSwipeDragEnd}
+                        dragTransition={{ bounceStiffness: 400, bounceDamping: 35 }}
                         onDragOver={canUpload ? handleDragOver : undefined}
                         onDragEnter={canUpload ? handleDragEnter : undefined}
                         onDragLeave={canUpload ? handleDragLeave : undefined}
                         onDrop={canUpload ? handleDrop : undefined}
-                        onTouchStart={handleMobileContentTouchStart}
-                        onTouchMove={handleMobileContentTouchMove}
-                        onTouchEnd={handleMobileContentTouchEnd}
-                        onTouchCancel={handleMobileContentTouchEnd}
                     >
                         {/* Drag and drop overlay */}
                         {isDraggingOver && (() => {
@@ -902,14 +877,17 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 </div>
                             )
                         })()}
-                        <div
-                            className="py-6 px-4 sm:px-6 lg:px-8"
-                            style={{
-                                transform: `translateX(${mobileContentTranslateX}px)`,
-                                transition: mobileContentAnimating ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
-                                willChange: mobileContentAnimating ? 'transform' : 'auto',
-                            }}
-                        >
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={selectedCategoryId ?? 'all'}
+                                initial={{ opacity: 0 }}
+                                animate={{ 
+                                    opacity: Math.max(0.55, 1 - Math.min(Math.abs(dragOffsetX) / 100, 0.45)),
+                                }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                                className="py-6 px-4 sm:px-6 lg:px-8"
+                            >
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Matches Assets/Index behavior - toolbar always visible, even when no assets */}
                         <div className="mb-8">
@@ -1037,8 +1015,9 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 </div>
                             </div>
                         )}
-                        </div>
-                    </div>
+                            </motion.div>
+                        </AnimatePresence>
+                    </motion.div>
 
                     {/* Asset Drawer - Desktop (pushes grid) */}
                     {activeAsset && (
@@ -1099,10 +1078,6 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
                     category_id: a.metadata?.category_id ?? a.category_id ?? null,
                 }))}
-                onOpenBulkMetadataAdd={(ids) => {
-                    setBulkSelectedAssetIds(ids)
-                    setShowBulkMetadataModal(true)
-                }}
                 onOpenBulkEdit={(ids) => {
                     setBulkSelectedAssetIds(ids)
                     setShowBulkActionsModal(true)
@@ -1121,9 +1096,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             clearSelection()
                         }
                     }}
-                    onOpenMetadataEdit={(ids) => {
+                    onOpenMetadataEdit={(ids, op) => {
                         setShowBulkActionsModal(false)
                         setBulkSelectedAssetIds(ids)
+                        setBulkMetadataInitialOp(op)
                         setShowBulkMetadataModal(true)
                     }}
                 />
@@ -1131,12 +1107,17 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             {showBulkMetadataModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
-                    onClose={() => setShowBulkMetadataModal(false)}
+                    initialOperation={bulkMetadataInitialOp}
+                    onClose={() => {
+                        setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
+                    }}
                     onComplete={() => {
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
                     }}
                 />
             )}

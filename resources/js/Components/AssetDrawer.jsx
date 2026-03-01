@@ -1715,8 +1715,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 {/* Large Preview */}
                 <div className="space-y-3">                    
                     
-                    {/* Phase 3.0C: Thumbnail preview with state machine and fade-in */}
-                    <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
+                    {/* Phase 3.0C: Thumbnail preview with state machine and fade-in — responsive width */}
+                    <div className="w-full max-w-full min-w-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative aspect-video">
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >

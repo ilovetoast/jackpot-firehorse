@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, router } from '@inertiajs/react'
 import { getContrastTextColor } from '../utils/colorUtils'
+import JackpotLogo from './JackpotLogo'
 
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
@@ -64,10 +65,10 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
             )
         }
         
-        // No brands available — show app name (e.g. on no-company / errors page)
+        // No brands available — show Jackpot logo (e.g. on no-company / errors page)
         return (
-            <Link href="/" className="flex items-center text-xl font-bold text-gray-900 hover:text-gray-700">
-                Jackpot
+            <Link href="/" className="flex items-center hover:opacity-90">
+                <JackpotLogo className="h-12 w-auto" />
             </Link>
         )
     }

@@ -310,7 +310,7 @@ export default function BulkActionsModal({
         : `${n} selected. Some may be skipped if already in the desired state or if you don't have permission.`
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
+        <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-4 pt-8 sm:pt-4 bg-black/50 overflow-y-auto" onClick={handleClose}>
             <div
                 className="bg-white rounded-xl shadow-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
                 style={{

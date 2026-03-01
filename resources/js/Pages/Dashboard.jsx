@@ -246,13 +246,13 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h2>
                             <p className="mt-2 text-sm text-gray-700">Welcome to your asset management dashboard</p>
                         </div>
                         {plan?.show_badge && plan?.name && (
-                            <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
+                            <span className="inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
                                 {plan.name} Plan
                             </span>
                         )}

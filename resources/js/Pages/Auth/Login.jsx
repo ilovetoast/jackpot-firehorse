@@ -1,5 +1,6 @@
 import { useForm, usePage } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
+import JackpotLogo from '../../Components/JackpotLogo'
 
 export default function Login() {
     const { signup_enabled } = usePage().props
@@ -46,8 +47,8 @@ export default function Login() {
             <div className="w-full max-w-md">
                 <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-8">
                     <div className="text-center mb-8">
-                        <Link href="/" className="text-2xl font-bold text-gray-900 inline-block mb-2">
-                            Jackpot
+                        <Link href="/" className="inline-block mb-2">
+                            <JackpotLogo className="h-10 w-auto" textClassName="text-2xl font-bold text-gray-900" />
                         </Link>
                         <h2 className="text-2xl font-bold leading-9 tracking-tight text-gray-900">
                             Sign in to your account

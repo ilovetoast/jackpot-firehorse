@@ -114,6 +114,7 @@ export default function CollectionsIndex({
     const [activeAssetId, setActiveAssetId] = useState(null)
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
+    const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const safeAssetsList = (assetsList || []).filter(Boolean)
     const activeAsset = activeAssetId ? safeAssetsList.find((a) => a?.id === activeAssetId) : null
@@ -671,10 +672,6 @@ export default function CollectionsIndex({
                     thumbnail_url: a.final_thumbnail_url ?? a.thumbnail_url ?? a.preview_thumbnail_url ?? null,
                     category_id: a.metadata?.category_id ?? a.category_id ?? null,
                 }))}
-                onOpenBulkMetadataAdd={(ids) => {
-                    setBulkSelectedAssetIds(ids)
-                    setShowBulkMetadataModal(true)
-                }}
                 onOpenBulkEdit={(ids) => {
                     setBulkSelectedAssetIds(ids)
                     setShowBulkActionsModal(true)
@@ -693,9 +690,10 @@ export default function CollectionsIndex({
                             clearSelection()
                         }
                     }}
-                    onOpenMetadataEdit={(ids) => {
+                    onOpenMetadataEdit={(ids, op) => {
                         setShowBulkActionsModal(false)
                         setBulkSelectedAssetIds(ids)
+                        setBulkMetadataInitialOp(op)
                         setShowBulkMetadataModal(true)
                     }}
                 />
@@ -703,12 +701,17 @@ export default function CollectionsIndex({
             {showBulkMetadataModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkMetadataEditModal
                     assetIds={bulkSelectedAssetIds}
-                    onClose={() => setShowBulkMetadataModal(false)}
+                    initialOperation={bulkMetadataInitialOp}
+                    onClose={() => {
+                        setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
+                    }}
                     onComplete={() => {
                         router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)
+                        setBulkMetadataInitialOp(null)
                     }}
                 />
             )}

@@ -252,25 +252,25 @@ export default function AssetGridToolbar({
                 </div>
             )}
             
-            {/* Primary Toolbar Row */}
-            <div className="px-3 py-2.5 sm:px-4">
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                    {/* Search: decoupled component keeps focus across Inertia reloads; stable key */}
-                    <div className="flex flex-wrap items-center gap-2 min-w-0">
-                        <div className="w-full sm:flex-1 sm:min-w-[180px] max-w-full sm:max-w-sm">
+            {/* Primary Toolbar Row — mobile: 1 line (search + controls); desktop: same as before */}
+            <div className="px-3 py-2 sm:py-2.5 sm:px-4">
+                <div className="flex flex-row flex-wrap items-center gap-2 min-w-0 lg:flex-nowrap lg:justify-between">
+                    {/* Left: Search + primary filters + sort. Mobile: Search + sort; Desktop: + primary filters */}
+                    <div className="flex flex-row items-center gap-2 min-w-0 flex-1 lg:flex-initial lg:flex-wrap">
+                        <div className="flex-1 min-w-0 lg:flex-initial lg:min-w-[180px] lg:max-w-sm">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
                                 onSearchApply={applySearch}
                                 isSearchPending={searchLoading}
                                 placeholder="Search items…"
-                                inputClassName="py-1 text-xs sm:text-sm"
+                                inputClassName="py-1.5 text-xs sm:text-sm"
                                 inputRef={searchInputRef}
                             />
                         </div>
                         
-                        {/* Primary Metadata Filters - Between search and controls */}
-                        <div className="flex items-center gap-2 min-w-0">
+                        {/* Primary Metadata Filters — hidden on mobile (saves space), inline on desktop */}
+                        <div className="hidden lg:flex items-center gap-2 min-w-0">
                             <AssetGridMetadataPrimaryFilters
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
@@ -278,11 +278,9 @@ export default function AssetGridToolbar({
                                 assetType="image"
                                 compact={true}
                             />
-                            
-                            {/* When no More filters bar: show Sort in toolbar (e.g. Collections) */}
                         </div>
                         {onSortChange && !showMoreFilters && (
-                            <div className="flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-0">
+                            <div className="flex items-center gap-1 flex-shrink-0 md:ml-0">
                                 <SortDropdown
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -294,11 +292,11 @@ export default function AssetGridToolbar({
                         )}
                     </div>
 
-                    {/* Controls - Right Side on Desktop */}
-                    <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
+                    {/* Right: Info + Grid — compact, flex-shrink-0 */}
+                    <div className="flex flex-shrink-0 items-center gap-2 lg:justify-end">
                         {/* Show Info Toggle */}
-                        <label className="flex items-center gap-2 cursor-pointer">                        
-                            <InformationCircleIcon className="h-4 w-4 text-gray-700" title="Show info" />
+                        <label className="flex items-center gap-1.5 sm:gap-2 cursor-pointer">                        
+                            <InformationCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-700 flex-shrink-0" title="Show info" />
 
                             <button
                                 type="button"
@@ -337,7 +335,7 @@ export default function AssetGridToolbar({
                                             type="button"
                                             onClick={() => onCardSizeChange(size)}
                                             className={`
-                                                px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-all
+                                                px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
                                                 flex items-center justify-center
                                                 ${index === 0 ? 'rounded-l-md' : ''}
                                                 ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
