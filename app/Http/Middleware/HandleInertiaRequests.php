@@ -160,23 +160,23 @@ class HandleInertiaRequests extends Middleware
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
                 }
-                
+
+                // Load all brands at query time. activeBrandMembership() uses brand->tenant_id only.
+                // See docs/EAGER_LOADING_RULES.md
+                $allBrands = $tenant->brands()
+                    ->orderBy('is_default', 'desc')
+                    ->orderBy('name')
+                    ->get();
+
                 // Phase MI-1: Get brands the user has active membership for (removed_at IS NULL)
                 $userBrandIds = [];
                 if ($user) {
-                    foreach ($tenant->brands as $brand) {
+                    foreach ($allBrands as $brand) {
                         if ($user->activeBrandMembership($brand)) {
                             $userBrandIds[] = $brand->id;
                         }
                     }
                 }
-                
-                // Get all brands for the tenant
-                // Order by default first, then by name for consistent ordering
-                $allBrands = $tenant->brands()
-                    ->orderBy('is_default', 'desc')
-                    ->orderBy('name')
-                    ->get();
 
 
                 // Filter brands based on user role and access
@@ -202,7 +202,6 @@ class HandleInertiaRequests extends Middleware
                     // orphaned brand access where session has a brand_id but user was removed from brand
                     return false;
                 });
-
 
                 // Determine which brands are disabled (those beyond the limit)
                 // If limit is exceeded, brands beyond the limit count are disabled
@@ -259,7 +258,6 @@ class HandleInertiaRequests extends Middleware
                     'is_user_disabled' => $isUserDisabled,
                 ];
             } catch (\Exception $e) {
-                // If there's an error loading brands, just use empty array
                 $brands = [];
                 $planLimitInfo = null;
             }
@@ -419,7 +417,7 @@ class HandleInertiaRequests extends Middleware
                 ] : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
                 // User is in company but has no brand access (removed from all brands)
-                'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && (is_array($brands) && count($brands) === 0),
+                'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && count($brands) === 0,
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'effective_permissions' => $effectivePermissions, // Always array; [] when no tenant
                 // Computed permission flags for UI (derived from effective_permissions)

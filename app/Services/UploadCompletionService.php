@@ -352,6 +352,7 @@ class UploadCompletionService
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
         return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId, $isBuilderStaged, $uploadOptions) {
+            $skipPublishForBuilderStaged = $isBuilderStaged;
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
             if ($existingAsset) {
@@ -509,8 +510,17 @@ class UploadCompletionService
                 }
             }
 
+            // Brand Guidelines Builder: staged assets stay unpublished until user publishes from Assets
+            if ($skipPublishForBuilderStaged) {
+                $asset->published_at = null;
+                $asset->published_by_id = null;
+                $asset->save();
+                Log::info('[UploadCompletionService] Builder-staged asset kept unpublished (reference material)', [
+                    'asset_id' => $asset->id,
+                    'builder_context' => $uploadOptions['builder_context'] ?? null,
+                ]);
+            } elseif ($categoryId !== null && $userId !== null) {
             // Phase L.5.1: Category-based approval rules
-            if ($categoryId !== null && $userId !== null) {
                 $category = Category::find($categoryId);
                 $user = \App\Models\User::find($userId);
                 
@@ -610,14 +620,14 @@ class UploadCompletionService
                 }
             }
 
-            // Phase AF-1: Check brand_user.requires_approval flag
+            // Phase AF-1: Check brand_user.requires_approval flag (skip for builder-staged; they stay unpublished)
             // Phase MI-1: Only check active membership (removed_at IS NULL)
             // Phase AF-5: Gate approval workflow based on plan feature
             // This is separate from category-based approval (which is locked phase)
             // Approval is required ONLY if uploader.brand_user.requires_approval === true AND approvals.enabled = true
             // CRITICAL: Brand/user approval check runs AFTER category check, so it can override category publish decision
             // If category already published, brand/user approval can still unpublish if approval is required
-            if ($userId !== null && $targetBrandId !== null) {
+            if (! $skipPublishForBuilderStaged && $userId !== null && $targetBrandId !== null) {
                 $user = \App\Models\User::find($userId);
                 $brand = \App\Models\Brand::find($targetBrandId);
                 $tenant = $brand?->tenant;

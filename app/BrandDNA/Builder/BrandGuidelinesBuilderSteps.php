@@ -17,15 +17,16 @@ class BrandGuidelinesBuilderSteps
 
     /**
      * All step keys in order.
+     * Order: Background → Archetype → Purpose → Expression → Positioning → Standards
      */
     public static function stepKeys(): array
     {
         return [
             self::STEP_BACKGROUND,
-            self::STEP_POSITIONING,
             self::STEP_ARCHETYPE,
             self::STEP_PURPOSE_PROMISE,
             self::STEP_EXPRESSION,
+            self::STEP_POSITIONING,
             self::STEP_STANDARDS,
         ];
     }
@@ -47,14 +48,6 @@ class BrandGuidelinesBuilderSteps
                 'required_on_publish_paths' => [],
             ],
             [
-                'key' => self::STEP_POSITIONING,
-                'title' => 'Positioning',
-                'description' => 'Mission, positioning, tagline, target audience, industry',
-                'skippable' => false,
-                'allowed_paths' => ['identity'],
-                'required_on_publish_paths' => ['identity.mission', 'identity.positioning'],
-            ],
-            [
                 'key' => self::STEP_ARCHETYPE,
                 'title' => 'Archetype',
                 'description' => 'Primary archetype and candidates',
@@ -64,8 +57,8 @@ class BrandGuidelinesBuilderSteps
             ],
             [
                 'key' => self::STEP_PURPOSE_PROMISE,
-                'title' => 'Purpose & Promise',
-                'description' => 'Why, what, beliefs, values',
+                'title' => 'Purpose',
+                'description' => 'Why and What statements',
                 'skippable' => true,
                 'allowed_paths' => ['identity'],
                 'required_on_publish_paths' => [],
@@ -73,9 +66,17 @@ class BrandGuidelinesBuilderSteps
             [
                 'key' => self::STEP_EXPRESSION,
                 'title' => 'Brand Expression',
-                'description' => 'Voice, tone, traits',
+                'description' => 'Brand Look and Brand Voice',
                 'skippable' => true,
                 'allowed_paths' => ['personality'],
+                'required_on_publish_paths' => [],
+            ],
+            [
+                'key' => self::STEP_POSITIONING,
+                'title' => 'Positioning',
+                'description' => 'Industry, audience, beliefs, values, tagline',
+                'skippable' => true,
+                'allowed_paths' => ['identity'],
                 'required_on_publish_paths' => [],
             ],
             [

@@ -113,6 +113,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // Company management (no tenant middleware - can access when no tenant selected)
     // These routes should be accessible even if user is disabled for current tenant
     Route::get('/companies', [\App\Http\Controllers\CompanyController::class, 'index'])->name('companies.index');
+    Route::post('/companies/reset-session', [\App\Http\Controllers\CompanyController::class, 'resetSession'])->name('companies.reset-session');
     Route::post('/companies/{tenant}/switch', [\App\Http\Controllers\CompanyController::class, 'switch'])->name('companies.switch');
     
     // Error pages
@@ -555,6 +556,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Phase L.6.1: Asset approval actions (publish/unpublish)
             Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
             Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');
+            Route::post('/assets/{asset}/finalize-from-builder', [\App\Http\Controllers\AssetController::class, 'finalizeFromBuilder'])->name('assets.finalize-from-builder');
             // Phase J.3.1: File replacement for rejected contributor assets
             Route::patch('/assets/{asset}/filename', [\App\Http\Controllers\AssetController::class, 'updateFilename'])->name('assets.filename.update');
             Route::post('/assets/{asset}/replace-file', [\App\Http\Controllers\AssetController::class, 'initiateReplaceFile'])->name('assets.replace-file');
@@ -643,6 +645,14 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/start', [\App\Http\Controllers\BrandDNABuilderController::class, 'start'])->name('brands.brand-dna.builder.start');
             Route::post('/brands/{brand}/brand-dna/builder/patch', [\App\Http\Controllers\BrandDNABuilderController::class, 'patch'])->name('brands.brand-dna.builder.patch');
             Route::post('/brands/{brand}/brand-dna/builder/prefill-from-guidelines-pdf', [\App\Http\Controllers\BrandGuidelinesPdfPrefillController::class, 'store'])->name('brands.brand-dna.builder.prefill-from-guidelines-pdf');
+            Route::get('/brands/{brand}/brand-dna/builder/research-insights', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchInsights'])->name('brands.brand-dna.builder.research-insights');
+            Route::get('/brands/{brand}/brand-dna/builder/research-snapshots/{snapshot}', [\App\Http\Controllers\BrandDNABuilderController::class, 'showResearchSnapshot'])->name('brands.brand-dna.builder.research-snapshots.show');
+            Route::get('/brands/{brand}/brand-dna/builder/research-debug', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchDebug'])->name('brands.brand-dna.builder.research-debug');
+            Route::post('/brands/{brand}/brand-dna/builder/insights/dismiss', [\App\Http\Controllers\BrandDNABuilderController::class, 'dismissInsight'])->name('brands.brand-dna.builder.insights.dismiss');
+            Route::post('/brands/{brand}/brand-dna/builder/insights/accept', [\App\Http\Controllers\BrandDNABuilderController::class, 'acceptInsight'])->name('brands.brand-dna.builder.insights.accept');
+            Route::post('/brands/{brand}/brand-dna/builder/trigger-research', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerResearch'])->name('brands.brand-dna.builder.trigger-research');
+            Route::post('/brands/{brand}/brand-dna/builder/attach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'attachAsset'])->name('brands.brand-dna.builder.attach-asset');
+            Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
             Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');
             Route::post('/brands/{brand}/brand-dna/unpublish', [\App\Http\Controllers\BrandDNABuilderController::class, 'unpublish'])->name('brands.brand-dna.unpublish');
 

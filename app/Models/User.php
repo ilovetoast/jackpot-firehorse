@@ -292,10 +292,9 @@ class User extends Authenticatable
      */
     public function activeBrandMembership(Brand $brand): ?array
     {
-        $tenant = $brand->tenant;
-        
-        // Verify tenant membership first
-        if (!$this->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        // Use tenant_id (always present) — do NOT access $brand->tenant; lazy loading is disabled.
+        // See docs/EAGER_LOADING_RULES.md
+        if (! $this->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
             return null;
         }
         

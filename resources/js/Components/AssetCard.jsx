@@ -15,7 +15,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
-import { EyeSlashIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { DocumentTextIcon, EyeSlashIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
@@ -444,6 +444,12 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                         {asset.deleted_at && (
                             <span className="inline-flex items-center rounded-md bg-red-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="In trash">
                                 <TrashIcon className="h-3 w-3" aria-label="In trash" />
+                            </span>
+                        )}
+                        {/* Reference material badge - builder-staged (Brand Guidelines uploads) */}
+                        {!asset.deleted_at && asset.builder_staged && (
+                            <span className="inline-flex items-center rounded-md bg-slate-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Reference material">
+                                <DocumentTextIcon className="h-3 w-3" aria-label="Reference material" />
                             </span>
                         )}
                         {/* Subtle unpublished icon (hidden when in trash) */}

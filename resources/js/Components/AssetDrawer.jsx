@@ -62,6 +62,7 @@ import PDFViewer from './PDFViewer'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
+import { filterActiveCategories } from '../utils/categoryUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
@@ -71,7 +72,9 @@ import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 import { useSelectionOptional } from '../contexts/SelectionContext'
 
 export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null, primaryColor, selectionAssetType = 'asset' }) {
-    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
+    const pageProps = usePage().props
+    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
+    const categories = pageProps.categories ?? []
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
@@ -126,6 +129,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Phase J.3: Approval comments for rejection role display
     const [approvalComments, setApprovalComments] = useState([])
     const [commentsLoading, setCommentsLoading] = useState(false)
+    // Reference materials: Publish & categorize modal (builder-staged assets)
+    const [showFinalizeFromBuilderModal, setShowFinalizeFromBuilderModal] = useState(false)
+    const [finalizeCategoryId, setFinalizeCategoryId] = useState(null)
+    const [finalizeLoading, setFinalizeLoading] = useState(false)
 
     // Unified Operations: Unresolved incidents for asset (processing issues)
     const [assetIncidents, setAssetIncidents] = useState([])
@@ -1994,6 +2001,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     {/* Lifecycle badges - Unpublished, Archived, and Expired (hidden when deleted) */}
                     {!displayAsset.deleted_at && (
                     <div className="flex flex-wrap gap-2">
+                        {/* Reference material badge - builder-staged assets (Brand Guidelines uploads) */}
+                        {displayAsset.builder_staged && (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700 border border-slate-300">
+                                Reference material
+                            </span>
+                        )}
                         {/* Unpublished badge */}
                         {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
                         {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
@@ -2132,6 +2145,18 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     Review & Approve
                                 </button>
                             )}
+
+                            {/* Publish & categorize - for builder-staged reference materials (no category yet) */}
+                            {displayAsset.builder_staged && canPublish && !displayAsset.archived_at && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowFinalizeFromBuilderModal(true)}
+                                    className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                >
+                                    <CloudArrowUpIcon className="h-5 w-5 mr-2" />
+                                    Publish & categorize
+                                </button>
+                            )}
                             
                             {/* Publish button - show if unpublished and not archived */}
                             {/* Phase J.3.1: Contributors cannot publish assets when approval is enabled */}
@@ -2166,11 +2191,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 // 1. User has publish permission AND
                                 // 2. Asset is not published AND
                                 // 3. Asset is not archived AND
-                                // 4. Contributors are blocked when approval is enabled
-                                // 5. If asset is pending approval or rejected, only approvers can publish
+                                // 4. Asset is NOT builder-staged (those use Publish & categorize)
+                                // 5. Contributors are blocked when approval is enabled
+                                // 6. If asset is pending approval or rejected, only approvers can publish
                                 const canShowPublishButton = canPublish && 
                                                              displayAsset.is_published === false && 
                                                              !displayAsset.archived_at &&
+                                                             !displayAsset.builder_staged &&
                                                              !contributorBlocked &&
                                                              (!isPendingApproval || isApprover) &&
                                                              (!isRejected || isApprover);
@@ -3435,6 +3462,84 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     <>
                                         <ArrowPathIcon className="h-4 w-4 mr-2" />
                                         Retry
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Publish & categorize modal - for builder-staged reference materials */}
+            {showFinalizeFromBuilderModal && displayAsset?.id && (
+                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center mb-4">
+                            <CloudArrowUpIcon className="h-6 w-6 text-indigo-600 mr-3" />
+                            <h3 className="text-lg font-semibold text-gray-900">Publish & categorize</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-4">
+                            Choose a category for this reference material. It will be published and appear in the main asset grid.
+                        </p>
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                            <select
+                                value={finalizeCategoryId ?? ''}
+                                onChange={(e) => setFinalizeCategoryId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            >
+                                <option value="">Select a category...</option>
+                                {(filterActiveCategories(categories)).map((cat) => (
+                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => { setShowFinalizeFromBuilderModal(false); setFinalizeCategoryId(null) }}
+                                disabled={finalizeLoading}
+                                className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!finalizeCategoryId) return
+                                    setFinalizeLoading(true)
+                                    try {
+                                        const response = await window.axios.post(`/app/assets/${displayAsset.id}/finalize-from-builder`, { category_id: finalizeCategoryId })
+                                        if (response.data?.message) {
+                                            setToastMessage('Asset published and categorized')
+                                            setToastType('success')
+                                            setTimeout(() => setToastMessage(null), 5000)
+                                            setShowFinalizeFromBuilderModal(false)
+                                            setFinalizeCategoryId(null)
+                                            // Reload so asset leaves reference materials view and appears in main grid
+                                            router.reload({ only: ['assets', 'next_page_url', 'reference_materials_count'], preserveState: true, preserveScroll: true })
+                                            onClose?.()
+                                        }
+                                    } catch (err) {
+                                        setToastMessage(err.response?.data?.message || 'Failed to publish asset')
+                                        setToastType('error')
+                                        setTimeout(() => setToastMessage(null), 5000)
+                                    } finally {
+                                        setFinalizeLoading(false)
+                                    }
+                                }}
+                                disabled={finalizeLoading || !finalizeCategoryId}
+                                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                            >
+                                {finalizeLoading ? (
+                                    <>
+                                        <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                        Publishing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <CheckIcon className="h-4 w-4 mr-2" />
+                                        Publish & categorize
                                     </>
                                 )}
                             </button>

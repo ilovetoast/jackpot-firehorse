@@ -102,8 +102,8 @@ export default function AppNav({ brand, tenant }) {
     const hasBrandSettingsAccess = can('brand_settings.manage')
     const hasMultipleBrands = brands && brands.length > 1
     // Show Brands section if user has at least one brand AND (is owner/admin OR has multiple brands OR has brand settings access)
-    // Owners/admins should always see brand management regardless of other conditions
-    const hasAnyBrandAccess = hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)
+    // Also show when user has brand_settings.manage permission even if brands array is empty (e.g. stale/cache) — so Brand Settings stays reachable
+    const hasAnyBrandAccess = (hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)) || (activeBrand && hasBrandSettingsAccess)
 
     // Use default white background for nav (no brand color)
     const navColor = '#ffffff'
@@ -300,7 +300,22 @@ export default function AppNav({ brand, tenant }) {
                                     <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                                 </svg>
                                 <p className="text-sm text-amber-800">
-                                    <span className="font-medium">No brand access.</span> You're in the company but not assigned to any brands. Contact your company administrator to get access.
+                                    <span className="font-medium">No brand access.</span> You're in the company but not assigned to any brands. Contact your company administrator to get access.{' '}
+                                    <Link
+                                        href="/app/brands"
+                                        className="font-medium underline hover:text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 rounded"
+                                    >
+                                        View brands
+                                    </Link>
+                                    {' '}to switch, or{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => router.post(route('companies.reset-session'), {}, { preserveState: false })}
+                                        className="font-medium underline hover:text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 rounded"
+                                    >
+                                        re-select company
+                                    </button>
+                                    {' '}to refresh.
                                 </p>
                             </div>
                         </div>

@@ -276,31 +276,48 @@ class AssetController extends Controller
         // Security: only assets in categories the user can view (private/locked folder visibility)
         $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
 
+        $sourceParam = $request->get('source');
+        $isReferenceMaterialsView = $sourceParam === 'reference_materials';
+
         // Query assets for this brand and asset type
         // Phase B2: lifecycle=deleted shows trash (onlyTrashed); otherwise exclude deleted (default scope).
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
         $assetsQuery = Asset::query()
-            ->excludeBuilderStaged()
+            ->when($isReferenceMaterialsView, fn ($q) => $q->builderStagedOnly(), fn ($q) => $q->excludeBuilderStaged())
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::ASSET);
 
-        // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
-        if (empty($viewableCategoryIds)) {
+        // Reference materials: no category filter (builder-staged assets have no category)
+        // Main grid: restrict to viewable categories only
+        if ($isReferenceMaterialsView) {
+            // No category filter; show all builder-staged assets regardless of category
+        } elseif (empty($viewableCategoryIds)) {
             $assetsQuery->whereRaw('0 = 1');
         } else {
             $assetsQuery->whereNotNull('metadata')
                 ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
         }
 
-        // Filter by category if provided (check metadata for category_id)
+        // Filter by category if provided (check metadata for category_id) — skip for reference materials
         // Use same JSON extraction as count query to ensure count/grid parity (handles string vs int in metadata)
-        if ($categoryId) {
+        if (! $isReferenceMaterialsView && $categoryId) {
             $assetsQuery->whereRaw(
                 'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
                 [(int) $categoryId]
             );
+        }
+
+        // Reference materials count for sidebar (builder-staged, not in trash)
+        $referenceMaterialsCount = 0;
+        if (! $isTrashView) {
+            $referenceMaterialsCount = Asset::query()
+                ->builderStagedOnly()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::ASSET)
+                ->count();
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
@@ -685,6 +702,8 @@ class AssetController extends Controller
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     // Asset health badge (healthy|warning|critical) for support visibility
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
+                    // Brand Guidelines Builder: staged reference materials (unpublished, no category)
+                    'builder_staged' => (bool) ($asset->builder_staged ?? false),
                 ];
                 if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     Log::info('ASSET API RESPONSE URL', [
@@ -1229,6 +1248,8 @@ class AssetController extends Controller
             'lifecycle' => $lifecycleParam, // Phase B2: e.g. 'deleted' for trash view
             'can_view_trash' => $canViewTrash,
             'trash_count' => $trashCount,
+            'source' => $sourceParam, // e.g. 'reference_materials' for builder-staged assets
+            'reference_materials_count' => $referenceMaterialsCount,
         ]);
     }
 
@@ -1878,6 +1899,75 @@ class AssetController extends Controller
         } catch (\Exception $e) {
             Log::error('[AssetController::publish]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to publish asset'], 500);
+        }
+    }
+
+    /**
+     * Finalize a builder-staged asset: assign category, clear builder_staged, and publish.
+     *
+     * POST /assets/{asset}/finalize-from-builder
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function finalizeFromBuilder(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = auth()->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        if (! $asset->builder_staged) {
+            return response()->json(['message' => 'Asset is not a reference material'], 422);
+        }
+
+        $validated = $request->validate([
+            'category_id' => 'required|integer|exists:categories,id',
+        ]);
+
+        $categoryId = (int) $validated['category_id'];
+        $category = Category::where('id', $categoryId)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+
+        if (! $category) {
+            return response()->json(['message' => 'Category not found'], 404);
+        }
+
+        Gate::forUser($user)->authorize('publish', $asset);
+
+        try {
+            DB::transaction(function () use ($asset, $category, $user) {
+                $metadata = $asset->metadata ?? [];
+                $metadata['category_id'] = $category->id;
+                $asset->metadata = $metadata;
+                $asset->builder_staged = false;
+                $asset->save();
+
+                $this->publicationService->publish($asset, $user);
+            });
+
+            return response()->json([
+                'message' => 'Asset published and categorized successfully',
+                'asset_id' => $asset->id,
+                'category_id' => $category->id,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::finalizeFromBuilder]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to finalize asset'], 500);
         }
     }
 

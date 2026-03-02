@@ -123,6 +123,17 @@ class CompanyController extends Controller
     }
 
     /**
+     * Clear tenant/brand session and redirect to company picker.
+     * Use when stuck in "No brand access" so user can re-select company and get fresh data.
+     */
+    public function resetSession(Request $request)
+    {
+        session()->forget(['tenant_id', 'brand_id']);
+
+        return redirect()->route('companies.index');
+    }
+
+    /**
      * Show the company settings page.
      */
     public function settings()

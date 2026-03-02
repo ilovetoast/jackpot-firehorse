@@ -55,4 +55,40 @@ class BrandDnaPayloadNormalizerTest extends TestCase
         $this->assertSame(['Explorer', 'Sage'], $result['personality']['candidate_archetypes']);
         $this->assertSame([], $result['personality']['rejected_archetypes']);
     }
+
+    public function test_normalizer_syncs_personality_tone_keywords_to_scoring_rules_when_empty(): void
+    {
+        $normalizer = new BrandDnaPayloadNormalizer;
+
+        $payload = [
+            'personality' => [
+                'tone_keywords' => ['warm', 'friendly'],
+            ],
+            'scoring_rules' => [
+                'tone_keywords' => [],
+            ],
+        ];
+
+        $result = $normalizer->normalize($payload);
+
+        $this->assertSame(['warm', 'friendly'], $result['scoring_rules']['tone_keywords'], 'Legacy personality.tone_keywords should sync to canonical scoring_rules.tone_keywords');
+    }
+
+    public function test_normalizer_scoring_rules_tone_keywords_wins_when_both_present(): void
+    {
+        $normalizer = new BrandDnaPayloadNormalizer;
+
+        $payload = [
+            'personality' => [
+                'tone_keywords' => ['legacy'],
+            ],
+            'scoring_rules' => [
+                'tone_keywords' => ['canonical'],
+            ],
+        ];
+
+        $result = $normalizer->normalize($payload);
+
+        $this->assertSame(['canonical'], $result['scoring_rules']['tone_keywords'], 'scoring_rules.tone_keywords is canonical and wins when both present');
+    }
 }

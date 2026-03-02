@@ -38,7 +38,8 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const tintBg = `${primaryColor}08`
 
     const logoUrl = auth?.activeBrand?.id === brand.id ? auth?.activeBrand?.logo_thumbnail_url : null
-    const heroSubheading = identity.tagline || personality.archetype || brand.name
+    const archetypeDisplay = personality.archetype || personality.primary_archetype
+    const heroSubheading = identity.tagline || archetypeDisplay || brand.name
 
     const handleCopyHex = (hex, label) => {
         copyToClipboard(hex)
@@ -60,7 +61,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                             ← Back to Brand Settings
                         </Link>
                         <div className="max-w-lg text-center space-y-6">
-                            <h1 className="text-2xl font-bold text-gray-900">Create Brand Guidelines</h1>
+                            <h1 className="text-2xl font-bold text-gray-900">Brand Guidelines</h1>
                             <p className="text-gray-600">
                                 {hasActiveVersion ? 'Update your brand guidelines or run the builder again.' : 'Start the Brand Guidelines Builder to define your brand DNA.'}
                             </p>
@@ -255,9 +256,9 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         {/* 5. Personality Section */}
                         <section className="py-28">
                             <div className="mx-auto max-w-4xl px-6 lg:px-8 text-center">
-                                {personality.archetype && (
+                                {archetypeDisplay && (
                                     <h2 className="text-5xl md:text-6xl font-bold text-gray-900 tracking-tight">
-                                        {personality.archetype}
+                                        {archetypeDisplay}
                                     </h2>
                                 )}
                                 {personality.traits?.length > 0 && (
@@ -282,7 +283,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                         )}
                                     </div>
                                 )}
-                                {(!personality.archetype && !personality.tone && (!personality.traits || personality.traits.length === 0)) && (
+                                {(!archetypeDisplay && !personality.tone && (!personality.traits || personality.traits.length === 0)) && (
                                     <p className="text-gray-500 italic">No personality configured.</p>
                                 )}
                             </div>

@@ -27,6 +27,7 @@ import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
 import { motion } from 'framer-motion'
 import {
+    DocumentTextIcon,
     FolderIcon,
     TagIcon,
     LockClosedIcon,
@@ -35,7 +36,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -45,6 +46,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const availableValues = available_values || pageProps.available_values || {}
     const category_id = selected_category ? parseInt(selected_category) : null
     const asset_type = 'image' // Default for asset grid (most assets are images)
+    const isReferenceMaterialsView = source === 'reference_materials'
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
@@ -469,14 +471,26 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
         setSelectedCategoryId(categoryId)
 
-        router.get('/app/assets',
-            categorySlug ? { category: categorySlug } : {},
-            {
-                preserveState: true,
-                preserveScroll: true,
-                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug']
-            }
-        )
+        // Clear source when switching to category (leave reference materials view)
+        const params = categorySlug ? { category: categorySlug } : {}
+
+        router.get('/app/assets', params, {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'source', 'reference_materials_count']
+        })
+    }, [source])
+
+    // Navigate to Reference materials view (builder-staged assets)
+    const handleReferenceMaterialsClick = useCallback(() => {
+        categoryChangeFromClickRef.current = true
+        setIsUploadDialogOpen(false)
+        setSelectedCategoryId(null)
+        router.get('/app/assets', { source: 'reference_materials' }, {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'source', 'reference_materials_count']
+        })
     }, [])
 
     // Mobile category tabs (same pattern as Deliverables)
@@ -484,24 +498,28 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const mobileCategoryTabs = useMemo(() => {
         const tabs = []
         if (show_all_button) {
-            tabs.push({ key: 'all', label: 'All', count: total_asset_count > 0 ? total_asset_count : null, category: null, categoryId: null, isTrash: false })
+            tabs.push({ key: 'all', label: 'All', count: total_asset_count > 0 ? total_asset_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false })
         }
         visibleMobileCategories.forEach((cat) => {
-            tabs.push({ key: String(cat.id), label: cat.name, count: cat.asset_count > 0 ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false })
+            tabs.push({ key: String(cat.id), label: cat.name, count: cat.asset_count > 0 ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false, isReferenceMaterials: false })
         })
+        if (reference_materials_count > 0 || source === 'reference_materials') {
+            tabs.push({ key: 'reference_materials', label: 'Reference materials', count: reference_materials_count > 0 ? reference_materials_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
+        }
         if (can_view_trash && (trash_count > 0 || lifecycle === 'deleted')) {
-            tabs.push({ key: 'trash', label: 'Trash', count: trash_count > 0 ? trash_count : null, category: null, categoryId: null, isTrash: true })
+            tabs.push({ key: 'trash', label: 'Trash', count: trash_count > 0 ? trash_count : null, category: null, categoryId: null, isTrash: true, isReferenceMaterials: false })
         }
         return tabs
-    }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle])
+    }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle, reference_materials_count, source])
 
     const activeMobileCategoryTabIndex = useMemo(() => (
         mobileCategoryTabs.findIndex((tab) => {
             if (tab.isTrash) return lifecycle === 'deleted'
-            if (tab.categoryId == null && !tab.isTrash) return selectedCategoryId == null && lifecycle !== 'deleted'
+            if (tab.isReferenceMaterials) return source === 'reference_materials'
+            if (tab.categoryId == null && !tab.isTrash) return selectedCategoryId == null && lifecycle !== 'deleted' && source !== 'reference_materials'
             return String(tab.categoryId) === String(selectedCategoryId)
         })
-    ), [mobileCategoryTabs, selectedCategoryId, lifecycle])
+    ), [mobileCategoryTabs, selectedCategoryId, lifecycle, source])
 
     const safeActiveMobileCategoryTabIndex = activeMobileCategoryTabIndex >= 0 ? activeMobileCategoryTabIndex : (mobileCategoryTabs.length > 0 ? 0 : -1)
 
@@ -535,11 +553,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         if (tab.isTrash) {
             router.get('/app/assets', { lifecycle: 'deleted' })
             setMobileCategoriesOpen(false)
+        } else if (tab.isReferenceMaterials) {
+            handleReferenceMaterialsClick()
+            setMobileCategoriesOpen(false)
         } else {
             handleCategorySelect(tab.category)
             setMobileCategoriesOpen(false)
         }
-    }, [mobileCategoryTabs, handleCategorySelect])
+    }, [mobileCategoryTabs, handleCategorySelect, handleReferenceMaterialsClick])
 
     // Handle finalize complete - refresh asset grid after successful upload finalize
     const handleFinalizeComplete = useCallback(() => {
@@ -759,11 +780,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     onClick={() => handleCategorySelect(null)}
                                                     className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
-                                                        backgroundColor: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' ? activeBgColor : 'transparent',
-                                                        color: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' ? activeTextColor : unselectedTextColor,
+                                                        backgroundColor: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' && !isReferenceMaterialsView ? activeBgColor : 'transparent',
+                                                        color: (selectedCategoryId === null || selectedCategoryId === undefined) && lifecycle !== 'deleted' && !isReferenceMaterialsView ? activeTextColor : unselectedTextColor,
                                                     }}
                                                     onMouseEnter={(e) => {
-                                                        if ((selectedCategoryId !== null && selectedCategoryId !== undefined) || lifecycle === 'deleted') {
+                                                        if ((selectedCategoryId !== null && selectedCategoryId !== undefined) || lifecycle === 'deleted' || isReferenceMaterialsView) {
                                                             e.currentTarget.style.backgroundColor = hoverBgColor
                                                             e.currentTarget.style.color = activeTextColor
                                                         }
@@ -775,10 +796,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                         }
                                                     }}
                                                 >
-                                                    <TagIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedIconColor }} />
+                                                    <TagIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) && !isReferenceMaterialsView ? activeTextColor : unselectedIconColor }} />
                                                     <span className="flex-1">All</span>
                                                     {total_asset_count > 0 && (
-                                                        <span className="text-xs font-normal opacity-80" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) ? activeTextColor : unselectedCountColor }}>
+                                                        <span className="text-xs font-normal opacity-80" style={{ color: (selectedCategoryId === null || selectedCategoryId === undefined) && !isReferenceMaterialsView ? activeTextColor : unselectedCountColor }}>
                                                             {total_asset_count}
                                                         </span>
                                                     )}
@@ -862,6 +883,40 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     )
                                                 })
                                             }
+                                            {/* Reference materials: builder-staged assets (above Trash) */}
+                                            {(reference_materials_count > 0 || isReferenceMaterialsView) && (
+                                                <>
+                                                    <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
+                                                    <button
+                                                        onClick={handleReferenceMaterialsClick}
+                                                        className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
+                                                        style={{
+                                                            backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent',
+                                                            color: isReferenceMaterialsView ? activeTextColor : unselectedTextColor,
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            if (!isReferenceMaterialsView) {
+                                                                e.currentTarget.style.backgroundColor = hoverBgColor
+                                                                e.currentTarget.style.color = activeTextColor
+                                                            }
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            if (!isReferenceMaterialsView) {
+                                                                e.currentTarget.style.backgroundColor = 'transparent'
+                                                                e.currentTarget.style.color = unselectedTextColor
+                                                            }
+                                                        }}
+                                                    >
+                                                        <DocumentTextIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: isReferenceMaterialsView ? activeTextColor : unselectedIconColor }} />
+                                                        <span className="flex-1">Reference materials</span>
+                                                        {reference_materials_count > 0 && (
+                                                            <span className="text-xs font-normal opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : unselectedCountColor }}>
+                                                                {reference_materials_count}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                </>
+                                            )}
                                             {/* Phase B2: Trash at bottom - only when has items or already on trash view */}
                                             {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
                                                 <>
@@ -974,6 +1029,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 </button>
                                             )
                                         })}
+                                        {(reference_materials_count > 0 || isReferenceMaterialsView) && (
+                                            <>
+                                                <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
+                                                <button
+                                                    onClick={() => { handleReferenceMaterialsClick(); setMobileCategoriesOpen(false) }}
+                                                    className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
+                                                    style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
+                                                >
+                                                    <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
+                                                    <span className="flex-1">Reference materials</span>
+                                                    {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
+                                                </button>
+                                            </>
+                                        )}
                                         {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
                                             <>
                                                 <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />

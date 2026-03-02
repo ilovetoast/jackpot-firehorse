@@ -42,7 +42,7 @@ class EnsureUserWithinPlanLimit
                 // Allow access to company switching routes so user can switch to another tenant
                 // Block access to routes within this disabled tenant
                 $routeName = $request->route()?->getName();
-                $allowedRoutes = ['companies.index', 'companies.switch'];
+                $allowedRoutes = ['companies.index', 'companies.reset-session', 'companies.switch'];
                 
                 if ($routeName && in_array($routeName, $allowedRoutes)) {
                     // Allow company switching

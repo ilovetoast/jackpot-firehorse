@@ -240,7 +240,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     }
 
     // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
-    const singleBrandHref = rootLinkHref ?? '/app/dashboard'
+    // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
+    const singleBrandHref = rootLinkHref ?? ((brands?.length === 0) ? '/app/brands' : '/app/dashboard')
     return (
         <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
             {activeBrand.logo_path ? (

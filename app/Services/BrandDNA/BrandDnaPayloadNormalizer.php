@@ -6,6 +6,11 @@ namespace App\Services\BrandDNA;
  * Brand DNA Payload Normalizer — ensures defaults exist for model_payload keys.
  * Additive only: never removes or renames existing keys.
  * Used when loading/saving drafts for the Brand Guidelines Builder.
+ *
+ * Canonical field locations (use these for snapshot vs draft comparison):
+ * - tone_keywords: scoring_rules.tone_keywords (personality.tone_keywords is legacy, normalized here)
+ * - traits: personality.traits
+ * - allowed_color_palette: scoring_rules.allowed_color_palette
  */
 class BrandDnaPayloadNormalizer
 {
@@ -62,6 +67,7 @@ class BrandDnaPayloadNormalizer
                 'font_mood' => null,
                 'heading_style' => null,
                 'body_style' => null,
+                'external_font_links' => [],
             ],
             'scoring_rules' => [
                 'allowed_color_palette' => [],
@@ -105,6 +111,32 @@ class BrandDnaPayloadNormalizer
             $result[$section] = $existing;
         }
 
+        // Canonical: scoring_rules.tone_keywords. Normalize legacy personality.tone_keywords into it.
+        $result = $this->normalizeToneKeywords($result);
+
         return $result;
+    }
+
+    /**
+     * Ensure tone_keywords has a single canonical location: scoring_rules.tone_keywords.
+     * If personality.tone_keywords has values and scoring_rules is empty, copy. Otherwise scoring_rules wins.
+     */
+    protected function normalizeToneKeywords(array $payload): array
+    {
+        $scoringRules = $payload['scoring_rules'] ?? [];
+        $personality = $payload['personality'] ?? [];
+
+        $scoringTone = $scoringRules['tone_keywords'] ?? [];
+        $personalityTone = $personality['tone_keywords'] ?? [];
+
+        $scoringTone = is_array($scoringTone) ? $scoringTone : [];
+        $personalityTone = is_array($personalityTone) ? $personalityTone : [];
+
+        if (empty($scoringTone) && ! empty($personalityTone)) {
+            $scoringRules['tone_keywords'] = array_values(array_unique($personalityTone));
+            $payload['scoring_rules'] = array_merge($payload['scoring_rules'] ?? [], $scoringRules);
+        }
+
+        return $payload;
     }
 }

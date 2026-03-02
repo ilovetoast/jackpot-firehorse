@@ -3,13 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
-use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Models\BrandModelVersion;
-use App\Models\BrandVisualReference;
+use App\Models\BrandModelVersionAsset;
 use App\Models\Category;
 use App\Services\BrandDNA\BrandModelService;
+use App\Services\BrandDNA\BrandVisualReferenceSyncService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -130,19 +130,7 @@ class BrandDNAController extends Controller
             ] : null,
             'topExecutions' => $topExecutions,
             'bottomExecutions' => $bottomExecutions,
-            'visualReferences' => $brand->visualReferences()
-                ->with('asset:id,title,metadata')
-                ->get()
-                ->map(fn ($r) => [
-                    'id' => $r->id,
-                    'asset_id' => $r->asset_id,
-                    'type' => $r->type,
-                    'asset' => $r->asset ? [
-                        'id' => $r->asset->id,
-                        'title' => $r->asset->title,
-                        'thumbnail_url' => $r->asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null,
-                    ] : null,
-                ]),
+            'visualReferences' => $this->getVisualReferencesForBrand($brand, $activeVersion),
         ]);
     }
 
@@ -270,6 +258,11 @@ class BrandDNAController extends Controller
         }
         $this->authorize('update', $brand);
 
+        $brandModel = $brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = $brand->brandModel()->create(['is_enabled' => false]);
+        }
+
         $logoInput = $request->input('logo_asset_id');
         $photoInput = $request->input('photography_asset_ids', []);
         $lifestyleInput = $request->input('lifestyle_photography_ids', []);
@@ -322,59 +315,67 @@ class BrandDNAController extends Controller
             }
         }
 
-        BrandVisualReference::where('brand_id', $brand->id)->delete();
+        $version = $brandModel->activeVersion;
+        if (! $version) {
+            $version = $this->brandModelService->createInitialVersion($brand, [], 'manual');
+            $this->brandModelService->activateVersion($version);
+        }
 
+        BrandModelVersionAsset::where('brand_model_version_id', $version->id)
+            ->where('builder_context', 'visual_reference')
+            ->delete();
+
+        $toInsert = [];
         if ($logoAssetId) {
-            $ref = BrandVisualReference::create([
-                'brand_id' => $brand->id,
-                'asset_id' => $logoAssetId,
-                'embedding_vector' => null,
-                'type' => BrandVisualReference::TYPE_LOGO,
-            ]);
-            GenerateAssetEmbeddingJob::dispatch($logoAssetId, $ref->id);
+            $toInsert[] = ['asset_id' => $logoAssetId, 'reference_type' => \App\Models\BrandVisualReference::TYPE_LOGO];
         }
-
         foreach ($photoIds as $assetId) {
-            $ref = BrandVisualReference::create([
-                'brand_id' => $brand->id,
-                'asset_id' => $assetId,
-                'embedding_vector' => null,
-                'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
-            ]);
-            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+            $toInsert[] = ['asset_id' => $assetId, 'reference_type' => \App\Models\BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE];
         }
-
         foreach ($lifestyleIds as $assetId) {
-            $ref = BrandVisualReference::create([
-                'brand_id' => $brand->id,
-                'asset_id' => $assetId,
-                'embedding_vector' => null,
-                'type' => BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY,
-            ]);
-            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+            $toInsert[] = ['asset_id' => $assetId, 'reference_type' => \App\Models\BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY];
         }
-
         foreach ($productIds as $assetId) {
-            $ref = BrandVisualReference::create([
-                'brand_id' => $brand->id,
-                'asset_id' => $assetId,
-                'embedding_vector' => null,
-                'type' => BrandVisualReference::TYPE_PRODUCT_PHOTOGRAPHY,
-            ]);
-            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+            $toInsert[] = ['asset_id' => $assetId, 'reference_type' => \App\Models\BrandVisualReference::TYPE_PRODUCT_PHOTOGRAPHY];
+        }
+        foreach ($graphicsIds as $assetId) {
+            $toInsert[] = ['asset_id' => $assetId, 'reference_type' => \App\Models\BrandVisualReference::TYPE_GRAPHICS_LAYOUT];
         }
 
-        foreach ($graphicsIds as $assetId) {
-            $ref = BrandVisualReference::create([
-                'brand_id' => $brand->id,
-                'asset_id' => $assetId,
-                'embedding_vector' => null,
-                'type' => BrandVisualReference::TYPE_GRAPHICS_LAYOUT,
+        foreach ($toInsert as $row) {
+            BrandModelVersionAsset::create([
+                'brand_model_version_id' => $version->id,
+                'asset_id' => $row['asset_id'],
+                'builder_context' => 'visual_reference',
+                'reference_type' => $row['reference_type'],
             ]);
-            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
         }
+
+        app(BrandVisualReferenceSyncService::class)->syncFromVersion($version);
 
         return redirect()->route('brands.dna.index', ['brand' => $brand->id])
             ->with('success', 'Visual references saved.');
+    }
+
+    protected function getVisualReferencesForBrand(Brand $brand, ?BrandModelVersion $activeVersion): array
+    {
+        if (! $activeVersion) {
+            return [];
+        }
+        $pivots = BrandModelVersionAsset::where('brand_model_version_id', $activeVersion->id)
+            ->where('builder_context', 'visual_reference')
+            ->with('asset:id,title,metadata')
+            ->get();
+
+        return $pivots->map(fn ($p) => [
+            'id' => $p->id,
+            'asset_id' => $p->asset_id,
+            'type' => $p->reference_type ?? \App\Models\BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+            'asset' => $p->asset ? [
+                'id' => $p->asset->id,
+                'title' => $p->asset->title,
+                'thumbnail_url' => $p->asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null,
+            ] : null,
+        ])->values()->all();
     }
 }

@@ -60,6 +60,9 @@ class BrandModelService
 
             // Sync core brand colors into allowed_color_palette
             $this->syncCoreColorsIntoPalette($version, $brand);
+
+            // Sync visual references to brand_visual_references for embeddings
+            app(BrandVisualReferenceSyncService::class)->syncFromVersion($version);
         });
     }
 

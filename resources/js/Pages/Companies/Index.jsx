@@ -55,7 +55,7 @@ export default function CompaniesIndex({ companies }) {
                                             Billing
                                         </th>
                                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Status
+                                            Current
                                         </th>
                                         <th scope="col" className="relative px-6 py-3">
                                             <span className="sr-only">Actions</span>
@@ -91,12 +91,10 @@ export default function CompaniesIndex({ companies }) {
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {company.is_active ? (
                                                     <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
-                                                        Active
+                                                        Current
                                                     </span>
                                                 ) : (
-                                                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                                                        Inactive
-                                                    </span>
+                                                    <span className="text-sm text-gray-400">—</span>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

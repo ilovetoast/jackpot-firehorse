@@ -11,12 +11,14 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
+use App\Models\BrandResearchSnapshot;
 use App\Models\Category;
 use App\Models\PdfTextExtraction;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Jobs\RunBrandResearchJob;
 use App\Services\BrandDNA\BrandDnaDraftService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -698,5 +700,92 @@ class BrandGuidelinesBuilderTest extends TestCase
             ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_research_insights_snapshot_scoped_to_draft_version(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $draftB = $draftService->createNewDraftVersion($this->brand);
+
+        $snapshotA = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftA->id,
+            'source_url' => 'https://example-a.com',
+            'status' => 'completed',
+            'snapshot' => ['brand_bio' => 'Version A'],
+            'suggestions' => [],
+            'coherence' => ['overall' => ['score' => 70]],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $snapshotB = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftB->id,
+            'source_url' => 'https://example-b.com',
+            'status' => 'completed',
+            'snapshot' => ['brand_bio' => 'Version B'],
+            'suggestions' => [],
+            'coherence' => ['overall' => ['score' => 80]],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertNotNull($data['latestSnapshotLite']);
+        $this->assertSame($snapshotB->id, $data['latestSnapshotLite']['id'], 'Research insights must return snapshot for current draft (B), not draft A');
+    }
+
+    public function test_run_brand_research_job_links_insight_state_to_snapshot(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        RunBrandResearchJob::dispatchSync($this->brand->id, $draft->id, 'https://example.com');
+
+        $snapshot = BrandResearchSnapshot::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('status', 'completed')
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($snapshot, 'Job must create completed snapshot');
+
+        $insightState = $draft->insightState;
+        $this->assertNotNull($insightState, 'Insight state must exist');
+        $this->assertSame($snapshot->id, $insightState->source_snapshot_id, 'Insight state must link to snapshot');
+    }
+
+    public function test_run_brand_research_does_not_modify_draft_fields(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->patchFromStep($this->brand, 'purpose_promise', [
+            'identity' => [
+                'mission' => 'Original',
+            ],
+        ]);
+
+        $payloadBefore = $draft->model_payload ?? [];
+        $this->assertSame('Original', $payloadBefore['identity']['mission'] ?? null);
+
+        RunBrandResearchJob::dispatchSync($this->brand->id, $draft->id, 'https://example.com');
+
+        $draft->refresh();
+        $payloadAfter = $draft->model_payload ?? [];
+        $this->assertSame('Original', $payloadAfter['identity']['mission'] ?? null, 'Research job must not modify draft fields');
+
+        $snapshot = BrandResearchSnapshot::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('status', 'completed')
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($snapshot, 'Job must create completed snapshot');
+        $this->assertNotNull($snapshot->suggestions, 'Snapshot must have suggestions');
     }
 }

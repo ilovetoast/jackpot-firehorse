@@ -32,16 +32,16 @@ class BrandGuidelinesPublishValidator
             $missing[] = 'Background: Provide website URL, at least one social URL, or upload a communication example';
         }
 
-        // 2. identity.mission (WHY)
+        // 2. identity.mission (WHY) — Purpose step
         $mission = $payload['identity']['mission'] ?? null;
         if (empty(trim((string) $mission))) {
-            $missing[] = 'Positioning: Mission (WHY) is required';
+            $missing[] = 'Purpose: Mission (WHY) is required';
         }
 
-        // 3. identity.positioning (WHAT / Position)
+        // 3. identity.positioning (WHAT) — Purpose step
         $positioning = $payload['identity']['positioning'] ?? null;
         if (empty(trim((string) $positioning))) {
-            $missing[] = 'Positioning: Positioning statement (WHAT) is required';
+            $missing[] = 'Purpose: Positioning statement (WHAT) is required';
         }
 
         // 4. personality.primary_archetype OR candidate_archetypes length >= 1

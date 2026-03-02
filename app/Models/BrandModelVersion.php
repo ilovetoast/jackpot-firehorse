@@ -2,8 +2,12 @@
 
 namespace App\Models;
 
+use App\Models\Asset;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Brand DNA / Brand Guidelines — versioned JSON model.
@@ -44,5 +48,45 @@ class BrandModelVersion extends Model
     public function createdByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function versionAssets(): HasMany
+    {
+        return $this->hasMany(BrandModelVersionAsset::class);
+    }
+
+    /**
+     * Assets for a specific builder context (e.g. brand_material, visual_reference).
+     */
+    public function assetsForContext(string $context): BelongsToMany
+    {
+        return $this->belongsToMany(Asset::class, 'brand_model_version_assets', 'brand_model_version_id', 'asset_id')
+            ->withPivot('builder_context', 'reference_type')
+            ->wherePivot('builder_context', $context)
+            ->withTimestamps();
+    }
+
+    public function insightState(): HasOne
+    {
+        return $this->hasOne(BrandModelVersionInsightState::class);
+    }
+
+    public function getOrCreateInsightState(?int $sourceSnapshotId = null): BrandModelVersionInsightState
+    {
+        $state = BrandModelVersionInsightState::firstOrCreate(
+            ['brand_model_version_id' => $this->id],
+            [
+                'source_snapshot_id' => $sourceSnapshotId,
+                'dismissed' => [],
+                'accepted' => [],
+            ]
+        );
+
+        if ($sourceSnapshotId && ! $state->source_snapshot_id) {
+            $state->source_snapshot_id = $sourceSnapshotId;
+            $state->save();
+        }
+
+        return $state;
     }
 }

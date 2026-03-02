@@ -63,7 +63,43 @@ class BrandService
             $creator->setRoleForBrand($brand, 'admin');
         }
 
+        // Ensure tenant owners and admins always have access to new brands.
+        // This fixes cases where creator assignment fails or an admin creates on behalf of the company.
+        $this->ensureTenantLeadershipHasBrandAccess($tenant, $brand);
+
         return $brand;
+    }
+
+    /**
+     * Ensure tenant owners and admins have brand_user access to the brand.
+     * Fixes "No brand access" when a new brand is created and the creator
+     * assignment fails, or when an admin creates a brand for the company.
+     */
+    protected function ensureTenantLeadershipHasBrandAccess(Tenant $tenant, Brand $brand): void
+    {
+        $owner = $tenant->owner();
+        $admins = $tenant->users()
+            ->wherePivot('role', 'admin')
+            ->get();
+
+        $leadership = collect([$owner])
+            ->merge($admins)
+            ->filter()
+            ->unique('id');
+
+        foreach ($leadership as $user) {
+            if (! $user->activeBrandMembership($brand)) {
+                try {
+                    $user->setRoleForBrand($brand, 'admin');
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[BrandService] Failed to add tenant leadership to brand', [
+                        'user_id' => $user->id,
+                        'brand_id' => $brand->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
     }
 
     /**

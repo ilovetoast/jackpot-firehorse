@@ -59,9 +59,13 @@ function mergePayload(base, incoming) {
     if (!incoming || typeof incoming !== 'object') return result
     if (incoming.identity) result.identity = { ...result.identity, ...incoming.identity }
     if (incoming.personality) {
+        const p = incoming.personality
+        // Builder uses primary_archetype; Settings UI uses archetype. Map for display.
+        const archetype = p.archetype || p.primary_archetype || result.personality?.archetype || ''
         result.personality = {
             ...result.personality,
             ...incoming.personality,
+            archetype: archetype ?? result.personality?.archetype ?? '',
             traits: Array.isArray(incoming.personality.traits) ? incoming.personality.traits : result.personality.traits,
         }
     }
@@ -151,11 +155,19 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
         e.preventDefault()
         if (!weightsValid) return
         setSaving(true)
+        // Sync archetype ↔ primary_archetype so Builder and Settings stay aligned
+        const toSave = { ...payload }
+        if (toSave.personality) {
+            toSave.personality = {
+                ...toSave.personality,
+                primary_archetype: toSave.personality.archetype || toSave.personality.primary_archetype || null,
+            }
+        }
         const url = typeof route === 'function'
             ? route('brands.dna.store', { brand: brand.id })
             : `/app/brands/${brand.id}/dna`
         const data = {
-            model_payload: payload,
+            model_payload: toSave,
             version_id: isEditingDraft ? currentVersion?.id : null,
         }
         router.post(url, data, {

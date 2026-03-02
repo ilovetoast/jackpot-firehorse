@@ -134,13 +134,30 @@ export default function BrandsIndex({ brands, limits }) {
                                             {/* Action Buttons */}
                                             <div className="flex-shrink-0 ml-4 flex items-center gap-2">
                                                 {!brand.is_disabled && (
-                                                    <Link
-                                                        href={`/app/brands/${brand.id}/edit`}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                                    >
-                                                        Edit
-                                                    </Link>
+                                                    <>
+                                                        {auth.activeBrand?.id !== brand.id && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation()
+                                                                    router.post(`/app/brands/${brand.id}/switch`, {}, {
+                                                                        preserveScroll: true,
+                                                                        onSuccess: () => window.location.reload(),
+                                                                    })
+                                                                }}
+                                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                            >
+                                                                Switch
+                                                            </button>
+                                                        )}
+                                                        <Link
+                                                            href={`/app/brands/${brand.id}/edit`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                        >
+                                                            Edit
+                                                        </Link>
+                                                    </>
                                                 )}
                                                 {!brand.is_default && (
                                                     <button

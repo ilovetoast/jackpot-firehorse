@@ -765,6 +765,14 @@ class Asset extends Model
     }
 
     /**
+     * Scope: only builder-staged assets (Brand Guidelines reference materials).
+     */
+    public function scopeBuilderStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where('builder_staged', true);
+    }
+
+    /**
      * Scope: assets that support thumbnail-derived metadata (hasRasterThumbnail + thumbnail_status=completed + medium path).
      * Matches supportsThumbnailMetadata() for SQL-based integrity metrics.
      */
