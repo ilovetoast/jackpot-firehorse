@@ -7,11 +7,14 @@ use App\Jobs\RunBrandResearchJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
+use App\Models\BrandIngestionRecord;
 use App\Models\BrandModelVersionAsset;
 use App\Models\BrandResearchSnapshot;
 use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
 use App\Services\BrandDNA\BrandDnaDraftService;
+use App\Services\BrandDNA\CoherenceDeltaService;
+use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\BrandGuidelinesPublishValidator;
 use App\Services\BrandDNA\BrandModelService;
 use App\Support\AssetVariant;
@@ -32,7 +35,9 @@ class BrandDNABuilderController extends Controller
         private BrandModelService $brandModelService,
         private BrandGuidelinesPublishValidator $publishValidator,
         private BrandCoherenceScoringService $coherenceService,
-        private BrandAlignmentEngine $alignmentEngine
+        private BrandAlignmentEngine $alignmentEngine,
+        private SuggestionApplier $suggestionApplier,
+        private CoherenceDeltaService $coherenceDeltaService
     ) {}
 
     /**
@@ -358,6 +363,55 @@ class BrandDNABuilderController extends Controller
     }
 
     /**
+     * GET /brands/{brand}/brand-dna/ingestions
+     * List ingestion records for processing status and extraction summary.
+     */
+    public function listIngestions(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $records = BrandIngestionRecord::where('brand_id', $brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        $items = $records->map(function (BrandIngestionRecord $r) {
+            $ext = $r->extraction_json ?? [];
+            $explicit = $ext['explicit_signals'] ?? [];
+            $signalsCount = 0;
+            foreach ($ext['identity'] ?? [] as $v) {
+                if ($v !== null && $v !== '' && $v !== []) {
+                    $signalsCount++;
+                }
+            }
+            foreach ($ext['personality'] ?? [] as $k => $v) {
+                if (($k === 'primary_archetype' && $v) || ($k !== 'primary_archetype' && ! empty($v))) {
+                    $signalsCount++;
+                }
+            }
+            if (!empty($ext['visual']['primary_colors'] ?? [])) $signalsCount++;
+            if (!empty($ext['visual']['fonts'] ?? [])) $signalsCount++;
+
+            return [
+                'id' => $r->id,
+                'status' => $r->status,
+                'created_at' => $r->created_at?->toIso8601String(),
+                'explicit_signals' => $explicit,
+                'signals_count' => $signalsCount,
+                'confidence' => $ext['confidence'] ?? 0,
+            ];
+        })->values()->all();
+
+        return response()->json(['ingestions' => $items]);
+    }
+
+    /**
      * GET /brands/{brand}/brand-dna/builder/research-insights
      */
     public function researchInsights(Request $request, Brand $brand): JsonResponse
@@ -405,6 +459,94 @@ class BrandDNABuilderController extends Controller
     }
 
     /**
+     * GET /brands/{brand}/brand-dna/builder/research-snapshots
+     * List snapshots scoped to the current draft version.
+     */
+    public function listResearchSnapshots(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $snapshots = BrandResearchSnapshot::where('brand_id', $brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->orderByDesc('created_at')
+            ->get();
+
+        $items = $snapshots->map(function (BrandResearchSnapshot $s) {
+            $coherence = $s->coherence ?? [];
+            $overall = $coherence['overall'] ?? [];
+            $alignment = $s->alignment ?? [];
+            $findings = $alignment['findings'] ?? [];
+            $suggestions = $s->suggestions ?? [];
+
+            return [
+                'id' => $s->id,
+                'created_at' => $s->created_at?->toIso8601String(),
+                'source_url' => $s->source_url,
+                'status' => $s->status,
+                'coherence_overall' => $overall['score'] ?? null,
+                'alignment_findings_count' => count($findings),
+                'suggestions_count' => count($suggestions),
+            ];
+        })->values()->all();
+
+        return response()->json(['snapshots' => $items]);
+    }
+
+    /**
+     * GET /brands/{brand}/brand-dna/builder/research-snapshots/{snapshot}/compare/{otherSnapshot}
+     * Compare two snapshots. Both must belong to same brand and same brand_model_version_id.
+     */
+    public function compareResearchSnapshots(Request $request, Brand $brand, BrandResearchSnapshot $snapshot, BrandResearchSnapshot $otherSnapshot): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        if ($snapshot->brand_id !== $brand->id || $otherSnapshot->brand_id !== $brand->id) {
+            abort(404);
+        }
+        if ($snapshot->brand_model_version_id !== $otherSnapshot->brand_model_version_id) {
+            return response()->json(['error' => 'Snapshots must belong to the same draft version.'], 422);
+        }
+
+        $prevCoherence = $snapshot->coherence ?? [];
+        $currCoherence = $otherSnapshot->coherence ?? [];
+        $coherenceDelta = $this->coherenceDeltaService->calculate($prevCoherence, $currCoherence);
+
+        $prevFindings = $snapshot->alignment['findings'] ?? [];
+        $currFindings = $otherSnapshot->alignment['findings'] ?? [];
+        $prevFindingIds = array_map(fn ($f) => $f['id'] ?? json_encode($f), $prevFindings);
+        $currFindingIds = array_map(fn ($f) => $f['id'] ?? json_encode($f), $currFindings);
+        $alignmentResolved = array_values(array_filter($prevFindings, fn ($f) => ! in_array($f['id'] ?? json_encode($f), $currFindingIds)));
+        $alignmentNew = array_values(array_filter($currFindings, fn ($f) => ! in_array($f['id'] ?? json_encode($f), $prevFindingIds)));
+
+        $prevSuggestions = $snapshot->suggestions ?? [];
+        $currSuggestions = $otherSnapshot->suggestions ?? [];
+        $prevSuggestionKeys = array_column($prevSuggestions, 'key');
+        $currSuggestionKeys = array_column($currSuggestions, 'key');
+        $suggestionRemoved = array_values(array_filter($prevSuggestions, fn ($s) => ! in_array($s['key'] ?? '', $currSuggestionKeys)));
+        $suggestionAdded = array_values(array_filter($currSuggestions, fn ($s) => ! in_array($s['key'] ?? '', $prevSuggestionKeys)));
+
+        return response()->json([
+            'coherence_delta' => $coherenceDelta,
+            'alignment_diff' => [
+                'resolved' => $alignmentResolved,
+                'new' => $alignmentNew,
+            ],
+            'suggestion_diff' => [
+                'added' => $suggestionAdded,
+                'removed' => $suggestionRemoved,
+            ],
+        ]);
+    }
+
+    /**
      * GET /brands/{brand}/brand-dna/builder/research-snapshots/{snapshot}
      * Snapshot detail: raw snapshot, coherence, alignment, suggestions, insightState decisions.
      */
@@ -421,6 +563,11 @@ class BrandDNABuilderController extends Controller
 
         $draft = $snapshot->brandModelVersion;
         $insightState = $draft?->insightState ?? null;
+        $dismissed = $insightState?->dismissed ?? [];
+        $suggestions = array_values(array_filter(
+            $snapshot->suggestions ?? [],
+            fn ($s) => ! in_array($s['key'] ?? '', $dismissed)
+        ));
 
         return response()->json([
             'snapshot' => [
@@ -431,12 +578,127 @@ class BrandDNABuilderController extends Controller
                 'snapshot' => $snapshot->snapshot,
                 'coherence' => $snapshot->coherence,
                 'alignment' => $snapshot->alignment,
-                'suggestions' => $snapshot->suggestions,
+                'suggestions' => $suggestions,
             ],
             'insightState' => $insightState ? [
                 'dismissed' => $insightState->dismissed ?? [],
                 'accepted' => $insightState->accepted ?? [],
             ] : ['dismissed' => [], 'accepted' => []],
+        ]);
+    }
+
+    /**
+     * POST /brands/{brand}/brand-dna/builder/snapshots/{snapshot}/apply
+     * Apply a snapshot suggestion to the draft. Draft changes only when Apply is called.
+     */
+    public function applySuggestion(Request $request, Brand $brand, BrandResearchSnapshot $snapshot): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        if ($snapshot->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $validated = $request->validate(['key' => 'required|string|max:255']);
+        $key = $validated['key'];
+
+        $suggestions = $snapshot->suggestions ?? [];
+        $suggestion = collect($suggestions)->firstWhere('key', $key);
+        if (! $suggestion) {
+            return response()->json(['error' => 'Suggestion not found in snapshot.'], 404);
+        }
+
+        $draft = $snapshot->brandModelVersion;
+        if (! $draft) {
+            return response()->json(['error' => 'Draft not found for snapshot.'], 404);
+        }
+
+        $state = $draft->getOrCreateInsightState($snapshot->id);
+        $dismissed = $state->dismissed ?? [];
+        if (in_array($key, $dismissed)) {
+            return response()->json(['error' => 'Suggestion was dismissed and cannot be applied.'], 422);
+        }
+
+        $previousCoherence = $snapshot->coherence ?? [];
+
+        $draft = $this->suggestionApplier->apply($draft, $suggestion);
+
+        $accepted = $state->accepted ?? [];
+        if (! in_array($key, $accepted)) {
+            $accepted[] = $key;
+        }
+        $dismissed = array_values(array_filter($dismissed, fn ($k) => $k !== $key));
+        $state->update(['accepted' => $accepted, 'dismissed' => $dismissed]);
+
+        $brandMaterialCount = $draft->assetsForContext('brand_material')->count();
+        $currentCoherence = $this->coherenceService->score(
+            $draft->model_payload ?? [],
+            $suggestions,
+            $snapshot->snapshot ?? [],
+            $brand,
+            $brandMaterialCount
+        );
+        $coherenceDelta = $this->coherenceDeltaService->calculate($previousCoherence, $currentCoherence);
+
+        return response()->json([
+            'draft' => [
+                'id' => $draft->id,
+                'version_number' => $draft->version_number,
+                'status' => $draft->status,
+                'model_payload' => $draft->model_payload,
+            ],
+            'insightState' => [
+                'dismissed' => $state->dismissed ?? [],
+                'accepted' => $state->accepted ?? [],
+            ],
+            'coherence_delta' => $coherenceDelta,
+        ]);
+    }
+
+    /**
+     * POST /brands/{brand}/brand-dna/builder/snapshots/{snapshot}/dismiss
+     * Dismiss a snapshot suggestion. Does not modify the draft.
+     */
+    public function dismissSuggestion(Request $request, Brand $brand, BrandResearchSnapshot $snapshot): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        if ($snapshot->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $validated = $request->validate(['key' => 'required|string|max:255']);
+        $key = $validated['key'];
+
+        $suggestions = $snapshot->suggestions ?? [];
+        $suggestion = collect($suggestions)->firstWhere('key', $key);
+        if (! $suggestion) {
+            return response()->json(['error' => 'Suggestion not found in snapshot.'], 404);
+        }
+
+        $draft = $snapshot->brandModelVersion;
+        if (! $draft) {
+            return response()->json(['error' => 'Draft not found for snapshot.'], 404);
+        }
+
+        $state = $draft->getOrCreateInsightState($snapshot->id);
+        $dismissed = $state->dismissed ?? [];
+        if (! in_array($key, $dismissed)) {
+            $dismissed[] = $key;
+            $state->update(['dismissed' => $dismissed]);
+        }
+
+        return response()->json([
+            'insightState' => [
+                'dismissed' => $state->dismissed ?? [],
+                'accepted' => $state->accepted ?? [],
+            ],
         ]);
     }
 

@@ -438,9 +438,12 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
 
 // ——— BuilderUploadDropzone ———
 // Uses server-returned upload_key from initiate response; never reconstructs path.
+// Supports both click-to-upload and drag-and-drop.
 function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, label, count = 0, accept }) {
     const [uploadingCount, setUploadingCount] = useState(0)
+    const [pendingNames, setPendingNames] = useState([])
     const [error, setError] = useState(null)
+    const [isDragging, setIsDragging] = useState(false)
     const inputRef = useRef(null)
     const uploading = uploadingCount > 0
 
@@ -448,6 +451,7 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
         if (!file) return
         setError(null)
         setUploadingCount((c) => c + 1)
+        setPendingNames((prev) => [...prev, file.name])
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content
         try {
             const initRes = await fetch('/app/uploads/initiate', {
@@ -505,6 +509,11 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
             setError(e.message || 'Upload failed')
         } finally {
             setUploadingCount((c) => Math.max(0, c - 1))
+            setPendingNames((prev) => {
+                const idx = prev.indexOf(file.name)
+                if (idx === -1) return prev
+                return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
+            })
         }
     }, [brandId, builderContext, onUploadComplete])
 
@@ -516,16 +525,57 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
         fileList.forEach((f) => doUpload(f))
     }
 
+    const handleDragOver = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!uploading) setIsDragging(true)
+    }
+
+    const handleDragLeave = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDragging(false)
+    }
+
+    const handleDrop = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDragging(false)
+        if (uploading) return
+        const files = e.dataTransfer?.files
+        if (!files?.length) return
+        Array.from(files).forEach((f) => doUpload(f))
+    }
+
     return (
         <div>
-            <button
-                type="button"
-                onClick={() => inputRef.current?.click()}
-                disabled={uploading}
-                className="w-full py-8 px-6 rounded-2xl border-2 border-dashed border-white/30 bg-white/5 hover:bg-white/10 hover:border-white/40 transition-colors text-white/80 disabled:opacity-50 flex flex-col items-center gap-2"
+            <div
+                role="button"
+                tabIndex={0}
+                onClick={() => !uploading && inputRef.current?.click()}
+                onKeyDown={(e) => e.key === 'Enter' && !uploading && inputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`w-full py-8 px-6 rounded-2xl border-2 border-dashed transition-colors text-white/80 flex flex-col items-center gap-2 cursor-pointer select-none ${
+                    uploading
+                        ? 'border-white/20 bg-white/5 opacity-50 cursor-not-allowed'
+                        : isDragging
+                        ? 'border-white/60 bg-white/15'
+                        : 'border-white/30 bg-white/5 hover:bg-white/10 hover:border-white/40'
+                }`}
             >
                 {uploading ? (
-                    <span className="animate-pulse">Uploading…</span>
+                    <div className="flex flex-col items-center gap-1 text-white/90">
+                        <span className="animate-pulse">
+                            {uploadingCount} file{uploadingCount !== 1 ? 's' : ''} uploading…
+                        </span>
+                        {pendingNames.length > 0 && (
+                            <span className="text-sm text-white/70">
+                                {pendingNames.length <= 2 ? pendingNames.join(', ') : `${pendingNames[0]} + ${pendingNames.length - 1} more`}
+                            </span>
+                        )}
+                    </div>
                 ) : (
                     <>
                         <svg className="w-10 h-10 text-white/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -533,9 +583,10 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
                         </svg>
                         <span>{label}</span>
                         {count > 0 && <span className="text-sm text-white/60">{count} uploaded</span>}
+                        {isDragging && <span className="text-sm text-white/70">Drop files here</span>}
                     </>
                 )}
-            </button>
+            </div>
             <input ref={inputRef} type="file" className="hidden" onChange={handleChange} accept={accept ?? 'image/*,.pdf,.doc,.docx'} multiple />
             {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
         </div>

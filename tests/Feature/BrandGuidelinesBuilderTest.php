@@ -18,7 +18,9 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Jobs\RunBrandIngestionJob;
 use App\Jobs\RunBrandResearchJob;
+use App\Models\BrandIngestionRecord;
 use App\Services\BrandDNA\BrandDnaDraftService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -787,5 +789,335 @@ class BrandGuidelinesBuilderTest extends TestCase
 
         $this->assertNotNull($snapshot, 'Job must create completed snapshot');
         $this->assertNotNull($snapshot->suggestions, 'Snapshot must have suggestions');
+    }
+
+    public function test_apply_suggestion_updates_draft_and_insight_state(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draft->update([
+            'model_payload' => array_merge($draft->model_payload ?? [], [
+                'scoring_rules' => ['allowed_color_palette' => []],
+            ]),
+        ]);
+
+        $snapshot = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => 'https://example.com',
+            'status' => 'completed',
+            'snapshot' => ['primary_colors' => ['#FF0000', '#00FF00']],
+            'suggestions' => [
+                [
+                    'key' => 'SUG:standards.allowed_color_palette',
+                    'path' => 'scoring_rules.allowed_color_palette',
+                    'type' => 'merge',
+                    'value' => [['hex' => '#FF0000'], ['hex' => '#00FF00']],
+                    'reason' => 'Detected website colors.',
+                    'confidence' => 0.9,
+                ],
+            ],
+            'coherence' => ['overall' => ['score' => 70]],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/snapshots/{$snapshot->id}/apply", [
+                'key' => 'SUG:standards.allowed_color_palette',
+            ]);
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertArrayHasKey('draft', $data);
+        $this->assertArrayHasKey('insightState', $data);
+        $this->assertArrayHasKey('coherence_delta', $data);
+        $this->assertContains('SUG:standards.allowed_color_palette', $data['insightState']['accepted'] ?? []);
+        $this->assertArrayHasKey('overall_delta', $data['coherence_delta']);
+        $this->assertArrayHasKey('section_deltas', $data['coherence_delta']);
+        $this->assertArrayHasKey('resolved_risks', $data['coherence_delta']);
+        $this->assertArrayHasKey('new_risks', $data['coherence_delta']);
+
+        $draft->refresh();
+        $palette = ($draft->model_payload ?? [])['scoring_rules']['allowed_color_palette'] ?? [];
+        $this->assertNotEmpty($palette);
+        $hexes = array_map(fn ($c) => is_array($c) ? ($c['hex'] ?? null) : $c, $palette);
+        $this->assertContains('#FF0000', $hexes);
+        $this->assertContains('#00FF00', $hexes);
+    }
+
+    public function test_dismiss_suggestion_adds_to_insight_state(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $snapshot = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => 'https://example.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [
+                [
+                    'key' => 'SUG:standards.logo',
+                    'path' => 'visual.detected_logo',
+                    'type' => 'informational',
+                    'value' => 'https://example.com/logo.png',
+                    'reason' => 'Logo detected.',
+                    'confidence' => 0.6,
+                ],
+            ],
+            'coherence' => [],
+            'alignment' => [],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/snapshots/{$snapshot->id}/dismiss", [
+                'key' => 'SUG:standards.logo',
+            ]);
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertContains('SUG:standards.logo', $data['insightState']['dismissed'] ?? []);
+    }
+
+    public function test_show_research_snapshot_filters_dismissed_suggestions(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $state = $draft->getOrCreateInsightState();
+        $state->update(['dismissed' => ['SUG:standards.logo']]);
+
+        $snapshot = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => 'https://example.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [
+                [
+                    'key' => 'SUG:standards.logo',
+                    'path' => 'visual.detected_logo',
+                    'type' => 'informational',
+                    'value' => 'https://example.com/logo.png',
+                    'reason' => 'Logo detected.',
+                    'confidence' => 0.6,
+                ],
+                [
+                    'key' => 'SUG:standards.allowed_color_palette',
+                    'path' => 'scoring_rules.allowed_color_palette',
+                    'type' => 'update',
+                    'value' => ['#FF0000'],
+                    'reason' => 'Colors.',
+                    'confidence' => 0.9,
+                ],
+            ],
+            'coherence' => [],
+            'alignment' => [],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-snapshots/{$snapshot->id}");
+
+        $response->assertStatus(200);
+        $suggestions = $response->json('snapshot.suggestions') ?? [];
+        $keys = array_column($suggestions, 'key');
+        $this->assertNotContains('SUG:standards.logo', $keys);
+        $this->assertContains('SUG:standards.allowed_color_palette', $keys);
+    }
+
+    public function test_snapshot_listing_scoped_to_version(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftB = $draftService->createNewDraftVersion($this->brand);
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftA->id,
+            'source_url' => 'https://example-a.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [],
+            'coherence' => ['overall' => ['score' => 70]],
+            'alignment' => ['findings' => []],
+        ]);
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftB->id,
+            'source_url' => 'https://example-b.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [['key' => 'SUG:x', 'path' => 'x', 'type' => 'informational', 'value' => null]],
+            'coherence' => ['overall' => ['score' => 80]],
+            'alignment' => ['findings' => [['id' => 'F1']]],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-snapshots");
+
+        $response->assertStatus(200);
+        $snapshots = $response->json('snapshots') ?? [];
+        $this->assertCount(1, $snapshots, 'Listing must return only snapshots for current draft (B)');
+        $this->assertSame('https://example-b.com', $snapshots[0]['source_url']);
+        $this->assertSame(80, $snapshots[0]['coherence_overall']);
+        $this->assertSame(1, $snapshots[0]['suggestions_count']);
+        $this->assertSame(1, $snapshots[0]['alignment_findings_count']);
+    }
+
+    public function test_snapshot_compare_requires_same_version(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftB = $draftService->createNewDraftVersion($this->brand);
+
+        $snapshotA = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftA->id,
+            'source_url' => 'https://example-a.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [],
+            'coherence' => [],
+            'alignment' => [],
+        ]);
+
+        $snapshotB = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draftB->id,
+            'source_url' => 'https://example-b.com',
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [],
+            'coherence' => [],
+            'alignment' => [],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-snapshots/{$snapshotA->id}/compare/{$snapshotB->id}");
+
+        $response->assertStatus(422);
+        $this->assertSame('Snapshots must belong to the same draft version.', $response->json('error'));
+    }
+
+    public function test_apply_returns_coherence_delta(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draft->update([
+            'model_payload' => array_merge($draft->model_payload ?? [], [
+                'scoring_rules' => ['allowed_color_palette' => []],
+            ]),
+        ]);
+
+        $snapshot = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => 'https://example.com',
+            'status' => 'completed',
+            'snapshot' => ['primary_colors' => ['#FF0000']],
+            'suggestions' => [
+                [
+                    'key' => 'SUG:standards.allowed_color_palette',
+                    'path' => 'scoring_rules.allowed_color_palette',
+                    'type' => 'merge',
+                    'value' => [['hex' => '#FF0000']],
+                    'reason' => 'Detected colors.',
+                    'confidence' => 0.9,
+                ],
+            ],
+            'coherence' => [
+                'overall' => ['score' => 65],
+                'sections' => ['standards' => ['score' => 60]],
+                'risks' => [['id' => 'COH:COLOR_MISMATCH', 'label' => 'Color mismatch']],
+            ],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/snapshots/{$snapshot->id}/apply", [
+                'key' => 'SUG:standards.allowed_color_palette',
+            ]);
+
+        $response->assertStatus(200);
+        $delta = $response->json('coherence_delta');
+        $this->assertNotNull($delta);
+        $this->assertIsInt($delta['overall_delta']);
+        $this->assertIsArray($delta['section_deltas']);
+        $this->assertIsArray($delta['resolved_risks']);
+        $this->assertIsArray($delta['new_risks']);
+    }
+
+    public function test_ingestion_creates_snapshot(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        PdfTextExtraction::create([
+            'asset_id' => $asset->id,
+            'status' => PdfTextExtraction::STATUS_COMPLETE,
+            'extracted_text' => "Brand Archetype: Creator\nMission: We empower creators.\nPrimary Color: #003388",
+            'extraction_source' => 'pdftotext',
+        ]);
+
+        RunBrandIngestionJob::dispatchSync(
+            $this->brand->id,
+            $draft->id,
+            $asset->id,
+            null,
+            []
+        );
+
+        $record = BrandIngestionRecord::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($record);
+        $this->assertSame(BrandIngestionRecord::STATUS_COMPLETED, $record->status);
+
+        $snapshot = BrandResearchSnapshot::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('source_url', 'ingestion')
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame('completed', $snapshot->status);
+        $this->assertNotEmpty($snapshot->suggestions);
     }
 }

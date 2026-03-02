@@ -646,7 +646,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/patch', [\App\Http\Controllers\BrandDNABuilderController::class, 'patch'])->name('brands.brand-dna.builder.patch');
             Route::post('/brands/{brand}/brand-dna/builder/prefill-from-guidelines-pdf', [\App\Http\Controllers\BrandGuidelinesPdfPrefillController::class, 'store'])->name('brands.brand-dna.builder.prefill-from-guidelines-pdf');
             Route::get('/brands/{brand}/brand-dna/builder/research-insights', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchInsights'])->name('brands.brand-dna.builder.research-insights');
+            Route::get('/brands/{brand}/brand-dna/builder/research-snapshots', [\App\Http\Controllers\BrandDNABuilderController::class, 'listResearchSnapshots'])->name('brands.brand-dna.builder.research-snapshots.index');
+            Route::get('/brands/{brand}/brand-dna/builder/research-snapshots/{snapshot}/compare/{otherSnapshot}', [\App\Http\Controllers\BrandDNABuilderController::class, 'compareResearchSnapshots'])->name('brands.brand-dna.builder.research-snapshots.compare');
             Route::get('/brands/{brand}/brand-dna/builder/research-snapshots/{snapshot}', [\App\Http\Controllers\BrandDNABuilderController::class, 'showResearchSnapshot'])->name('brands.brand-dna.builder.research-snapshots.show');
+            Route::post('/brands/{brand}/brand-dna/builder/snapshots/{snapshot}/apply', [\App\Http\Controllers\BrandDNABuilderController::class, 'applySuggestion'])->name('brands.brand-dna.builder.snapshots.apply');
+            Route::post('/brands/{brand}/brand-dna/builder/snapshots/{snapshot}/dismiss', [\App\Http\Controllers\BrandDNABuilderController::class, 'dismissSuggestion'])->name('brands.brand-dna.builder.snapshots.dismiss');
             Route::get('/brands/{brand}/brand-dna/builder/research-debug', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchDebug'])->name('brands.brand-dna.builder.research-debug');
             Route::post('/brands/{brand}/brand-dna/builder/insights/dismiss', [\App\Http\Controllers\BrandDNABuilderController::class, 'dismissInsight'])->name('brands.brand-dna.builder.insights.dismiss');
             Route::post('/brands/{brand}/brand-dna/builder/insights/accept', [\App\Http\Controllers\BrandDNABuilderController::class, 'acceptInsight'])->name('brands.brand-dna.builder.insights.accept');
@@ -655,6 +659,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
             Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');
             Route::post('/brands/{brand}/brand-dna/unpublish', [\App\Http\Controllers\BrandDNABuilderController::class, 'unpublish'])->name('brands.brand-dna.unpublish');
+            Route::get('/brands/{brand}/brand-dna/ingestions', [\App\Http\Controllers\BrandDNABuilderController::class, 'listIngestions'])->name('brands.brand-dna.ingestions.index');
 
             // Brand Bootstrap (foundation only)
             Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');
