@@ -160,19 +160,22 @@ class BrandDnaDraftService
             }
         }
 
-        // brand_colors: update Brand model directly, do not store in model_payload
+        // brand_colors: update Brand model directly; set user_defined when user manually edits
         if (array_key_exists('brand_colors', $filteredPatch)) {
             $colors = $filteredPatch['brand_colors'];
             if (is_array($colors)) {
                 $updates = [];
-                if (array_key_exists('primary_color', $colors) && $colors['primary_color'] !== null) {
+                if (array_key_exists('primary_color', $colors)) {
                     $updates['primary_color'] = $colors['primary_color'];
+                    $updates['primary_color_user_defined'] = true;
                 }
-                if (array_key_exists('secondary_color', $colors) && $colors['secondary_color'] !== null) {
+                if (array_key_exists('secondary_color', $colors)) {
                     $updates['secondary_color'] = $colors['secondary_color'];
+                    $updates['secondary_color_user_defined'] = true;
                 }
-                if (array_key_exists('accent_color', $colors) && $colors['accent_color'] !== null) {
+                if (array_key_exists('accent_color', $colors)) {
                     $updates['accent_color'] = $colors['accent_color'];
+                    $updates['accent_color_user_defined'] = true;
                 }
                 if (! empty($updates)) {
                     $brand->update($updates);

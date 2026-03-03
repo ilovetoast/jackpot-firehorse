@@ -19,6 +19,7 @@ import { Link, router, usePage } from '@inertiajs/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 import FontListbox from '../../Components/BrandGuidelines/FontListbox'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
 import ResearchInsightsPanel from '../../Components/BrandGuidelines/ResearchInsightsPanel'
@@ -75,11 +76,12 @@ function ProgressRail({ steps, stepKeys, currentStep, accentColor }) {
 }
 
 // ——— ChipInput ———
-function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter', onKeyDown }) {
+function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter', onKeyDown, disabled }) {
     const [input, setInput] = useState('')
     const inputRef = useRef(null)
 
     const add = (v) => {
+        if (disabled) return
         const trimmed = (typeof v === 'string' ? v : input).trim()
         if (!trimmed) return
         const next = Array.isArray(value) ? [...value] : []
@@ -90,6 +92,7 @@ function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter',
     }
 
     const remove = (i) => {
+        if (disabled) return
         const next = [...(value || [])]
         next.splice(i, 1)
         onChange(next)
@@ -106,7 +109,7 @@ function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter',
     }
 
     return (
-        <div className="flex flex-wrap gap-2 p-3 rounded-xl border border-white/20 bg-white/5 min-h-[52px]">
+        <div className={`flex flex-wrap gap-2 p-3 rounded-xl border border-white/20 bg-white/5 min-h-[52px] ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
             {(value || []).map((item, i) => (
                 <span
                     key={i}
@@ -130,7 +133,8 @@ function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter',
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
-                className="flex-1 min-w-[120px] bg-transparent border-0 text-white placeholder-white/50 focus:ring-0 focus:outline-none text-sm"
+                disabled={disabled}
+                className="flex-1 min-w-[120px] bg-transparent border-0 text-white placeholder-white/50 focus:ring-0 focus:outline-none text-sm disabled:cursor-not-allowed"
             />
         </div>
     )
@@ -218,10 +222,260 @@ function FieldCard({ title, children, className = '' }) {
     )
 }
 
+// ——— ProcessingView ———
+// Full-page processing status. Only shown when step=processing (intentional checkpoint).
+function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename }) {
+    const hasIngestion = ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)
+    const effectiveCrawler = crawlerRunning || (polledResearch?.crawlerRunning ?? false)
+    const records = polledResearch?.ingestionRecords ?? ingestionRecords ?? []
+    const hasErrors = records.some((r) => r.status === 'failed' || r.error)
+
+    const pdf = polledResearch?.pdf ?? {}
+    const website = polledResearch?.website ?? {}
+    const social = polledResearch?.social ?? {}
+    const materials = polledResearch?.materials ?? {}
+
+    const pdfStatus = pdf.status || (pdfExtractionPolling ? 'processing' : 'pending')
+    const pdfPages = pdf.pages_total > 0 ? `${pdf.pages_processed ?? 0} / ${pdf.pages_total}` : null
+    const pdfSignals = pdf.signals_detected > 0 ? `Signals: ${pdf.signals_detected}` : null
+
+    const websiteStatus = website.status || (effectiveCrawler ? 'processing' : 'pending')
+    const materialsStatus = materials.status || (hasIngestion ? 'processing' : 'pending')
+    const materialsProgress = materials.assets_total > 0 ? `${materials.assets_processed ?? 0} / ${materials.assets_total}` : null
+
+    const incomingPdfProgress = pdf.pages_total > 0 ? Math.round(((pdf.pages_processed ?? 0) / pdf.pages_total) * 100) : 0
+    const incomingMaterialsProgress = materials.assets_total > 0 ? Math.round(((materials.assets_processed ?? 0) / materials.assets_total) * 100) : 0
+    const [stablePdfProgress, setStablePdfProgress] = useState(0)
+    const [stableMaterialsProgress, setStableMaterialsProgress] = useState(0)
+    useEffect(() => {
+        setStablePdfProgress((prev) => Math.max(prev, incomingPdfProgress))
+    }, [incomingPdfProgress])
+    useEffect(() => {
+        setStableMaterialsProgress((prev) => Math.max(prev, incomingMaterialsProgress))
+    }, [incomingMaterialsProgress])
+
+    const sourceItems = [
+        {
+            key: 'pdf',
+            label: guidelinesPdfFilename ? `Brand Guidelines PDF (${guidelinesPdfFilename})` : 'Brand Guidelines PDF',
+            status: pdfStatus === 'completed' ? 'complete' : pdfStatus === 'failed' ? 'failed' : pdfStatus === 'processing' ? 'processing' : 'pending',
+            detail: pdfPages ? `Extracting pages (${pdfPages})` : (pdfExtractionPolling ? 'Extracting text…' : pdfStatus === 'processing' ? 'Processing…' : 'Pending'),
+            signals: pdfSignals,
+            progress: pdf.pages_total > 0 ? stablePdfProgress : null,
+        },
+        {
+            key: 'website',
+            label: 'Website',
+            status: websiteStatus === 'completed' ? 'complete' : websiteStatus === 'processing' ? 'processing' : 'pending',
+            detail: websiteStatus === 'completed' ? 'Complete' : websiteStatus === 'processing' ? 'Analyzing…' : 'Pending',
+            signals: website.signals_detected > 0 ? `Signals: ${website.signals_detected}` : null,
+        },
+        {
+            key: 'materials',
+            label: 'Brand Materials',
+            status: materialsStatus === 'completed' ? 'complete' : materialsStatus === 'processing' ? 'processing' : 'pending',
+            detail: materialsProgress ? `Processing ${materialsProgress}` : (materialsStatus === 'completed' ? 'Complete' : materialsStatus === 'processing' ? 'Processing…' : 'Pending'),
+            progress: materials.assets_total > 0 ? stableMaterialsProgress : null,
+        },
+        {
+            key: 'social',
+            label: 'Social',
+            status: social.status === 'completed' ? 'complete' : social.status === 'processing' ? 'processing' : 'pending',
+            detail: social.status === 'completed' ? 'Complete' : social.status === 'processing' ? 'Processing…' : 'Pending',
+        },
+    ]
+
+    records.forEach((r, i) => {
+        if (r.status === 'failed' || r.error) {
+            sourceItems.push({
+                key: `record-${r.id || i}`,
+                label: 'Ingestion',
+                status: 'failed',
+                detail: r.error || 'Failed',
+            })
+        }
+    })
+
+    return (
+        <div className="rounded-2xl border border-white/20 bg-white/5 p-8 max-w-2xl mx-auto">
+            <h3 className="text-xl font-semibold text-white/90 mb-2">Processing your Brand Guidelines</h3>
+            <p className="text-white/60 text-sm mb-6">
+                We&apos;re extracting data from your uploads to fill and suggest content for the next steps.
+            </p>
+            <p className="text-white/50 text-xs mb-6">
+                You can leave and return — progress is saved. Processing usually takes 30–60 seconds.
+            </p>
+            <div className="space-y-5">
+                {sourceItems.map((item) => (
+                    <div key={item.key} className="flex items-center gap-4">
+                        <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
+                            item.status === 'complete' ? 'bg-emerald-500/20 text-emerald-400' :
+                            item.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                            'bg-amber-500/20 text-amber-400'
+                        }`}>
+                            {item.status === 'complete' ? (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                            ) : item.status === 'failed' ? (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                            ) : (
+                                <motion.div
+                                    className="w-4 h-4 rounded-full bg-amber-400"
+                                    animate={{ opacity: [0.5, 1, 0.5] }}
+                                    transition={{ duration: 1.2, repeat: Infinity }}
+                                />
+                            )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium ${item.status === 'complete' ? 'text-emerald-400' : item.status === 'failed' ? 'text-red-400' : 'text-amber-200'}`}>
+                                {item.label}
+                            </p>
+                            <p className="text-xs text-white/50 mt-0.5">
+                                {item.detail}
+                                {item.signals && ` • ${item.signals}`}
+                            </p>
+                            {item.progress != null && item.status === 'processing' && (
+                                <div className="mt-1.5 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                    <motion.div
+                                        className="h-full rounded-full bg-amber-400"
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${item.progress}%` }}
+                                        transition={{ duration: 0.4 }}
+                                    />
+                                </div>
+                            )}
+                            {item.status === 'processing' && item.progress == null && (
+                                <div className="mt-1.5 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                    <motion.div
+                                        className="h-full rounded-full bg-amber-400"
+                                        initial={{ width: '0%' }}
+                                        animate={{ width: ['0%', '80%', '100%', '60%'] }}
+                                        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <p className="mt-8 text-sm text-white/50">
+                You cannot proceed to the next step until processing is complete.
+            </p>
+        </div>
+    )
+}
+
+// ——— ProcessingStatusPanel ———
+// Compact panel for non-Background steps. On Background step when processing, ProcessingView is shown instead.
+function ProcessingStatusPanel({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename, currentStep }) {
+    const hasIngestion = ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)
+    const effectiveCrawler = crawlerRunning || (polledResearch?.crawlerRunning ?? false)
+    const records = polledResearch?.ingestionRecords ?? ingestionRecords ?? []
+    const hasErrors = records.some((r) => r.status === 'failed' || r.error)
+    const showCrawlerInPanel = effectiveCrawler && currentStep !== 'background'
+
+    if (!pdfExtractionPolling && !hasIngestion && !showCrawlerInPanel && !hasErrors && records.length === 0) return null
+
+    return (
+        <div className="mb-6 rounded-xl border border-white/20 bg-white/5 p-5">
+            <h4 className="text-sm font-medium text-white/80 mb-3">Processing</h4>
+            <div className="space-y-3">
+                {pdfExtractionPolling && (
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className="text-amber-200">
+                                {guidelinesPdfFilename ? `Extracting text from ${guidelinesPdfFilename}` : 'Extracting text from Brand Guidelines PDF'}
+                            </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <motion.div
+                                className="h-full rounded-full bg-amber-400"
+                                initial={{ width: '0%' }}
+                                animate={{ width: ['0%', '50%', '100%', '50%'] }}
+                                transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                            />
+                        </div>
+                    </div>
+                )}
+                {showCrawlerInPanel && (
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className="text-amber-200">Analyzing website & social links</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <motion.div
+                                className="h-full rounded-full bg-amber-400"
+                                initial={{ width: '0%' }}
+                                animate={{ width: ['0%', '70%', '100%', '70%'] }}
+                                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                            />
+                        </div>
+                    </div>
+                )}
+                {(ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)) && (
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className="text-amber-200">
+                                {guidelinesPdfFilename ? `Processing Brand Guidelines (${guidelinesPdfFilename})` : 'Processing PDF and materials'}
+                            </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <motion.div
+                                className="h-full rounded-full bg-amber-400"
+                                initial={{ width: '0%' }}
+                                animate={{ width: ['0%', '60%', '100%', '60%'] }}
+                                transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                            />
+                        </div>
+                    </div>
+                )}
+                {records.map((r, i) => (
+                    <div key={r.id || i} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className={r.status === 'completed' ? 'text-emerald-400' : r.status === 'failed' || r.error ? 'text-red-400' : 'text-amber-200'}>
+                                {r.status === 'processing' && 'Extracting…'}
+                                {r.status === 'completed' && 'Complete'}
+                                {(r.status === 'failed' || r.error) && (r.error || 'Failed')}
+                            </span>
+                            {r.status === 'completed' && (
+                                <span className="text-emerald-400/80 text-xs">✓</span>
+                            )}
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            {r.status === 'processing' ? (
+                                <motion.div
+                                    className="h-full rounded-full bg-amber-400"
+                                    initial={{ width: '10%' }}
+                                    animate={{ width: ['10%', '90%', '10%'] }}
+                                    transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                                />
+                            ) : r.status === 'completed' ? (
+                                <motion.div
+                                    className="h-full rounded-full bg-emerald-400"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: '100%' }}
+                                    transition={{ duration: 0.3 }}
+                                />
+                            ) : (r.status === 'failed' || r.error) ? (
+                                <div className="h-full w-full rounded-full bg-red-500/60" />
+                            ) : null}
+                        </div>
+                    </div>
+                ))}
+            </div>
+            {(pdfExtractionPolling || hasIngestion || showCrawlerInPanel) ? (
+                <p className="mt-3 text-xs text-white/50">Wait for processing to finish before continuing to the next step.</p>
+            ) : records.length > 0 && !hasErrors ? (
+                <p className="mt-3 text-xs text-emerald-400/80">Processing complete. You can continue to the next step.</p>
+            ) : null}
+        </div>
+    )
+}
+
 // ——— PdfGuidelinesUploadCard ———
-// Upload PDF → trigger extraction → poll → prefill draft. Additive by default (fill_empty).
-function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, setBrandColors, saving, setErrors }) {
-    const [pdfAssetId, setPdfAssetId] = useState(null)
+// Upload PDF → attach to draft → trigger extraction → poll → prefill draft. Additive by default (fill_empty).
+function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, setBrandColors, saving, setErrors, onTriggerIngestion, onExtractionPollingChange, initialPdfAssetId, initialPdfFilename }) {
+    const [pdfAssetId, setPdfAssetId] = useState(initialPdfAssetId ?? null)
+    const [pdfFilename, setPdfFilename] = useState(initialPdfFilename ?? null)
     const [extractionStatus, setExtractionStatus] = useState(null)
     const [extractionPolling, setExtractionPolling] = useState(false)
     const [prefillLoading, setPrefillLoading] = useState(false)
@@ -231,22 +485,51 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
     const pollRef = useRef(null)
     const pollStartRef = useRef(null)
 
+    useEffect(() => {
+        setPdfAssetId(initialPdfAssetId ?? null)
+        setPdfFilename(initialPdfFilename ?? null)
+    }, [initialPdfAssetId, initialPdfFilename])
+
+    // Fetch extraction status on mount when PDF exists (e.g. user returned to page after failed extraction)
+    useEffect(() => {
+        if (!initialPdfAssetId || extractionPolling) return
+        axios.get(route('assets.pdf-text-extraction.show', { asset: initialPdfAssetId }))
+            .then((res) => {
+                const ext = res.data?.extraction
+                if (!ext) return
+                if (ext.status === 'failed') {
+                    setExtractionStatus({
+                        status: 'failed',
+                        error: ext.failure_reason ? 'Extraction failed — no selectable text detected.' : ext.error_message,
+                        failure_reason: ext.failure_reason,
+                    })
+                } else if (ext.status === 'complete' && ext.extracted_text) {
+                    setExtractionStatus(ext)
+                } else if (ext.status === 'complete' && !ext.extracted_text) {
+                    setExtractionStatus({ status: 'empty' })
+                }
+            })
+            .catch(() => {})
+    }, [initialPdfAssetId, extractionPolling])
+
     const triggerExtraction = useCallback(async (assetId) => {
         try {
             const res = await axios.post(route('assets.pdf-text-extraction.store', { asset: assetId }))
             if (res.status === 202) {
                 setExtractionPolling(true)
                 pollStartRef.current = Date.now()
+                onExtractionPollingChange?.(true)
             }
         } catch (e) {
             setErrors([e.response?.data?.message || 'Failed to start extraction'])
         }
-    }, [setErrors])
+    }, [setErrors, onExtractionPollingChange])
 
     const pollExtraction = useCallback(async () => {
         if (!pdfAssetId || !extractionPolling) return
         if (Date.now() - (pollStartRef.current || 0) > 45000) {
             setExtractionPolling(false)
+            onExtractionPollingChange?.(false)
             setExtractionStatus({ status: 'timeout' })
             return
         }
@@ -259,18 +542,27 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
             }
             if (ext.status === 'complete') {
                 setExtractionPolling(false)
+                onExtractionPollingChange?.(false)
                 setExtractionStatus(ext)
+                if (ext.extracted_text && onTriggerIngestion) {
+                    onTriggerIngestion({ pdf_asset_id: pdfAssetId })
+                }
                 return
             }
             if (ext.status === 'failed') {
                 setExtractionPolling(false)
-                setExtractionStatus({ status: 'failed', error: ext.error_message })
+                onExtractionPollingChange?.(false)
+                setExtractionStatus({
+                    status: 'failed',
+                    error: ext.failure_reason ? 'Extraction failed — no selectable text detected.' : ext.error_message,
+                    failure_reason: ext.failure_reason,
+                })
                 return
             }
         } catch {
             // keep polling
         }
-    }, [pdfAssetId, extractionPolling])
+    }, [pdfAssetId, extractionPolling, onTriggerIngestion, onExtractionPollingChange])
 
     useEffect(() => {
         if (!extractionPolling) return
@@ -280,11 +572,41 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
         }
     }, [extractionPolling, pollExtraction])
 
-    const handlePdfUploadComplete = useCallback((assetId) => {
+    const handlePdfUploadComplete = useCallback(async (assetId, meta) => {
         setPdfAssetId(assetId)
+        setPdfFilename(meta?.filename ?? null)
         setExtractionStatus(null)
+        try {
+            await axios.post(route('brands.brand-dna.builder.attach-asset', { brand: brandId }), {
+                asset_id: assetId,
+                builder_context: 'guidelines_pdf',
+            })
+        } catch (e) {
+            setErrors([e.response?.data?.message || 'Failed to attach PDF'])
+            return
+        }
         triggerExtraction(assetId)
-    }, [triggerExtraction])
+    }, [brandId, triggerExtraction, setErrors])
+
+    const handleReplacePdf = useCallback(async () => {
+        if (!pdfAssetId) {
+            setPdfAssetId(null)
+            setPdfFilename(null)
+            setExtractionStatus(null)
+            return
+        }
+        try {
+            await axios.post(route('brands.brand-dna.builder.detach-asset', { brand: brandId }), {
+                asset_id: pdfAssetId,
+                builder_context: 'guidelines_pdf',
+            })
+        } catch {
+            // continue to clear UI
+        }
+        setPdfAssetId(null)
+        setPdfFilename(null)
+        setExtractionStatus(null)
+    }, [brandId, pdfAssetId])
 
     const handlePrefill = useCallback(async (mode) => {
         if (!pdfAssetId) return
@@ -343,11 +665,12 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
 
     const isReady = extractionStatus?.status === 'complete' && extractionStatus?.extracted_text
     const isEmpty = extractionStatus?.status === 'empty' || (extractionStatus?.status === 'complete' && !extractionStatus?.extracted_text)
+    const isFailed = extractionStatus?.status === 'failed'
     const isTimeout = extractionStatus?.status === 'timeout'
 
     return (
         <FieldCard title="Import Official Brand Guidelines (PDF)">
-            <p className="text-white/60 text-sm mb-4">We&apos;ll extract text and prefill your Brand DNA. Optional.</p>
+            <p className="text-white/60 text-sm mb-4">We&apos;ll extract text and apply it to your Brand DNA. Optional.</p>
             {!pdfAssetId ? (
                 <BuilderUploadDropzone
                     brandId={brandId}
@@ -358,11 +681,59 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                 />
             ) : (
                 <div className="space-y-4">
-                    {extractionPolling && (
-                        <p className="text-white/80 text-sm">Extracting text…</p>
-                    )}
+                    {/* Cinematic filename display — dropzone replaced by prominent file name */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                        className="rounded-xl border border-white/20 bg-white/5 px-5 py-4"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-white font-medium truncate" title={pdfFilename || 'PDF'}>
+                                    {pdfFilename || 'Guidelines PDF'}
+                                </p>
+                                <p className="text-white/50 text-xs mt-0.5">
+                                    {extractionPolling ? 'Extracting text…' : isReady ? 'Ready to apply' : isFailed ? 'Extraction failed' : isEmpty ? 'No extractable text' : isTimeout ? 'Still processing…' : 'Processing…'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleReplacePdf}
+                                className="text-white/50 hover:text-white/90 text-sm underline"
+                            >
+                                Replace
+                            </button>
+                        </div>
+                    </motion.div>
                     {isTimeout && (
                         <p className="text-amber-200/90 text-sm">Still working — continue and we&apos;ll notify when ready.</p>
+                    )}
+                    {isFailed && (
+                        <div className="space-y-2">
+                            <p className="text-red-400/90 text-sm">{extractionStatus?.error || 'Extraction failed — no selectable text detected.'}</p>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleReplacePdf}
+                                    className="text-sm text-white/70 hover:text-white underline"
+                                >
+                                    Upload a text-based PDF
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowManualPaste(true)}
+                                    className="text-sm text-white/70 hover:text-white underline"
+                                >
+                                    Paste text manually
+                                </button>
+                            </div>
+                        </div>
                     )}
                     {isEmpty && (
                         <div className="space-y-2">
@@ -370,7 +741,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                             <div className="flex gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setPdfAssetId(null)}
+                                    onClick={handleReplacePdf}
                                     className="text-sm text-white/70 hover:text-white underline"
                                 >
                                     Upload a text-based PDF
@@ -387,7 +758,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                     )}
                     {isReady && !prefilled && (
                         <div className="space-y-2">
-                            <p className="text-white/80 text-sm">Text extracted. Prefill only fills empty fields.</p>
+                            <p className="text-white/80 text-sm">Text extracted. Apply fills empty fields only.</p>
                             <div className="flex flex-wrap gap-2">
                                 <button
                                     type="button"
@@ -396,7 +767,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                                     className="px-4 py-2 rounded-xl text-sm font-medium text-white"
                                     style={{ backgroundColor: accentColor || '#6366f1' }}
                                 >
-                                    {prefillLoading ? 'Prefilling…' : 'Prefill from PDF'}
+                                    {prefillLoading ? 'Applying…' : 'Apply from PDF'}
                                 </button>
                                 <button
                                     type="button"
@@ -410,7 +781,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                         </div>
                     )}
                     {prefilled && (
-                        <p className="text-emerald-400 text-sm">Prefilled — review each step.</p>
+                        <p className="text-emerald-400 text-sm">Applied — review each step.</p>
                     )}
                 </div>
             )}
@@ -438,7 +809,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
 
 // ——— BuilderUploadDropzone ———
 // Uses server-returned upload_key from initiate response; never reconstructs path.
-// Supports both click-to-upload and drag-and-drop.
+// Supports both click-to-upload and drag-and-drop. Shows upload progress and errors.
 function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, label, count = 0, accept }) {
     const [uploadingCount, setUploadingCount] = useState(0)
     const [pendingNames, setPendingNames] = useState([])
@@ -503,8 +874,12 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
             }
             const finalData = await finalRes.json()
             const result = finalData.results?.[0]
+            if (result?.status === 'failed') {
+                const errMsg = typeof result.error === 'string' ? result.error : result.error?.message
+                throw new Error(errMsg || 'Upload failed')
+            }
             const assetId = result?.asset_id ?? result?.id
-            if (assetId) onUploadComplete?.(assetId)
+            if (assetId) onUploadComplete?.(assetId, { filename: file.name })
         } catch (e) {
             setError(e.message || 'Upload failed')
         } finally {
@@ -588,7 +963,14 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
                 )}
             </div>
             <input ref={inputRef} type="file" className="hidden" onChange={handleChange} accept={accept ?? 'image/*,.pdf,.doc,.docx'} multiple />
-            {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+            {error && (
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/20 border border-red-500/40 p-3">
+                    <p className="flex-1 text-sm text-red-200">{error}</p>
+                    <button type="button" onClick={() => setError(null)} className="text-red-300 hover:text-red-100 text-xs underline">
+                        Dismiss
+                    </button>
+                </div>
+            )}
         </div>
     )
 }
@@ -665,6 +1047,8 @@ export default function BrandGuidelinesBuilder({
     currentStep,
     anchor: initialAnchor = null,
     crawlerRunning = false,
+    ingestionProcessing = false,
+    ingestionRecords = [],
     latestSnapshot = null,
     latestSuggestions = {},
     latestSnapshotLite = null,
@@ -674,6 +1058,9 @@ export default function BrandGuidelinesBuilder({
     brandMaterialCount: initialBrandMaterialCount = 0,
     brandMaterials: initialBrandMaterials = [],
     visualReferences: initialVisualReferences = [],
+    guidelinesPdfAssetId = null,
+    guidelinesPdfFilename = null,
+    overallStatus: initialOverallStatus = 'pending',
 }) {
     const { auth } = usePage().props
     const [payload, setPayload] = useState(() => modelPayload || {})
@@ -692,6 +1079,7 @@ export default function BrandGuidelinesBuilder({
     const [visualReferences, setVisualReferences] = useState(initialVisualReferences ?? [])
     const [assetSelectorOpen, setAssetSelectorOpen] = useState(null)
     const [dismissedInlineSuggestions, setDismissedInlineSuggestions] = useState([])
+    const [showStartOverConfirm, setShowStartOverConfirm] = useState(false)
 
     useEffect(() => {
         setBrandMaterials(initialBrandMaterials ?? [])
@@ -722,9 +1110,10 @@ export default function BrandGuidelinesBuilder({
     const isReviewStep = viewingReview
     const isLastDataStep = currentStep === stepKeys[stepKeys.length - 1] && !viewingReview
 
-    const primaryColor = brand.primary_color || '#6366f1'
-    const secondaryColor = brand.secondary_color || '#8b5cf6'
-    const accentColor = brand.accent_color || '#06b6d4'
+    // UI-only fallback for preview; never write back or send in payload
+    const displayPrimary = brand.primary_color ?? '#6366f1'
+    const displaySecondary = brand.secondary_color ?? '#8b5cf6'
+    const displayAccent = brand.accent_color ?? '#06b6d4'
 
     const updatePayload = useCallback((path, key, value) => {
         setPayload((prev) => ({
@@ -789,10 +1178,18 @@ export default function BrandGuidelinesBuilder({
         if (isReviewStep) return
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
+        } else if (currentStep === 'background') {
+            const nextIdx = stepKeys.indexOf(currentStep) + 1
+            const defaultNext = stepKeys[nextIdx]
+            if (effectiveOverallStatus === 'completed') {
+                patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
+            } else {
+                patchAndNavigate(defaultNext)
+            }
         } else {
             patchAndNavigate(stepKeys[stepKeys.indexOf(currentStep) + 1])
         }
-    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP])
+    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, effectiveOverallStatus])
 
     const handleBack = useCallback(() => {
         if (viewingReview) {
@@ -836,16 +1233,37 @@ export default function BrandGuidelinesBuilder({
     }, [brand.id, draft.id, enableScoring])
 
     const [researchPolling, setResearchPolling] = useState(false)
+    const [ingestionPolling, setIngestionPolling] = useState(ingestionProcessing ?? false)
+    const [pdfExtractionPolling, setPdfExtractionPolling] = useState(false)
     const [polledResearch, setPolledResearch] = useState(null)
 
-    const handleWebsiteBlur = useCallback(async () => {
-        const url = (payload.sources?.website_url || '').trim()
-        if (!url || !url.startsWith('http')) return
+    const triggerIngestion = useCallback(async (opts = {}) => {
         try {
-            await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url })
+            await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
+                pdf_asset_id: opts.pdf_asset_id || null,
+                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
+                material_asset_ids: opts.material_asset_ids || undefined,
+            })
+            setIngestionPolling(true)
+        } catch (e) {
+            if (e.response?.status !== 422) {
+                setErrors((prev) => [...prev, e.response?.data?.error || 'Failed to start processing'])
+            }
+        }
+    }, [brand.id, payload.sources?.website_url])
+
+    const handleAnalyzeAll = useCallback(async () => {
+        const websiteUrl = (payload.sources?.website_url || '').trim()
+        const socialUrls = (payload.sources?.social_urls || []).filter((u) => typeof u === 'string' && u.trim().startsWith('http'))
+        const urls = [...(websiteUrl ? [websiteUrl] : []), ...socialUrls]
+        if (urls.length === 0) return
+        try {
+            for (const url of urls) {
+                await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url })
+            }
             setResearchPolling(true)
         } catch {}
-    }, [payload.sources?.website_url, brand.id])
+    }, [payload.sources?.website_url, payload.sources?.social_urls, brand.id])
 
     const [brandMaterialFeedback, setBrandMaterialFeedback] = useState(null)
     useEffect(() => {
@@ -854,7 +1272,7 @@ export default function BrandGuidelinesBuilder({
         return () => clearTimeout(t)
     }, [brandMaterialFeedback])
 
-    const handleBrandMaterialUploadComplete = useCallback(async (assetId) => {
+    const handleBrandMaterialUploadComplete = useCallback(async (assetId, meta) => {
         if (!assetId) return
         try {
             const res = await axios.post(route('brands.brand-dna.builder.attach-asset', { brand: brand.id }), {
@@ -863,10 +1281,14 @@ export default function BrandGuidelinesBuilder({
             })
             const count = res.data?.count ?? 0
             setBrandMaterialCount(count)
-            setBrandMaterials((prev) => [...prev, { id: assetId, title: 'Asset', original_filename: 'Uploaded', thumbnail_url: null, signed_url: null }])
-            setBrandMaterialFeedback(`Uploaded successfully. ${count} material${count !== 1 ? 's' : ''} added.`)
-        } catch {}
-    }, [brand.id])
+            setBrandMaterials((prev) => [...prev, { id: assetId, title: meta?.filename || 'Asset', original_filename: meta?.filename || 'Uploaded', thumbnail_url: null, signed_url: null }])
+            setBrandMaterialFeedback(`Uploaded successfully. ${count} material${count !== 1 ? 's' : ''} added. Processing…`)
+            setIngestionPolling(true)
+            await triggerIngestion({})
+        } catch (e) {
+            setBrandMaterialFeedback(e.response?.data?.message || 'Upload failed')
+        }
+    }, [brand.id, triggerIngestion])
 
     const handleAssetAttach = useCallback(async (asset, context) => {
         const assetId = asset?.id ?? asset
@@ -880,7 +1302,9 @@ export default function BrandGuidelinesBuilder({
                 const count = res.data?.count ?? 0
                 setBrandMaterialCount(count)
                 setBrandMaterials((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
-                setBrandMaterialFeedback(`Added successfully. ${count} material${count !== 1 ? 's' : ''} total.`)
+                setBrandMaterialFeedback(`Added successfully. ${count} material${count !== 1 ? 's' : ''} total. Processing…`)
+                setIngestionPolling(true)
+                await triggerIngestion({})
             } else if (context === 'visual_reference') {
                 setVisualReferences((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
                 setPayload((prev) => ({
@@ -891,8 +1315,12 @@ export default function BrandGuidelinesBuilder({
                     },
                 }))
             }
-        } catch {}
-    }, [brand.id])
+        } catch (e) {
+            if (context === 'brand_material') {
+                setBrandMaterialFeedback(e.response?.data?.message || 'Failed to add')
+            }
+        }
+    }, [brand.id, triggerIngestion])
 
     const handleDetachVisualRef = useCallback(async (assetId) => {
         try {
@@ -925,25 +1353,30 @@ export default function BrandGuidelinesBuilder({
     const [insightStateLocal, setInsightStateLocal] = useState(insightState)
     useEffect(() => { setInsightStateLocal(insightState) }, [insightState])
 
-    // Poll research status when user triggers Analyze & Prefill
+    // Poll research + ingestion status when processing, or when on processing step
     useEffect(() => {
-        if (!researchPolling || !brand?.id) return
+        const shouldPoll = (researchPolling || ingestionPolling || currentStep === 'processing') && brand?.id
+        if (!shouldPoll) return
         const poll = async () => {
             try {
                 const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brand.id }))
                 const data = res.data
                 setPolledResearch(data)
-                if (!data?.crawlerRunning && data?.latestSnapshotLite) {
+                if (researchPolling && !data?.crawlerRunning && data?.latestSnapshotLite) {
                     setResearchPolling(false)
+                }
+                if (ingestionPolling && !data?.ingestionProcessing) {
+                    setIngestionPolling(false)
                 }
             } catch {
                 setResearchPolling(false)
+                setIngestionPolling(false)
             }
         }
         poll()
-        const id = setInterval(poll, 3000)
+        const id = setInterval(poll, 2000)
         return () => clearInterval(id)
-    }, [researchPolling, brand?.id])
+    }, [researchPolling, ingestionPolling, currentStep, brand?.id])
 
     const handleDismissInsight = useCallback(async (key) => {
         try {
@@ -973,6 +1406,16 @@ export default function BrandGuidelinesBuilder({
     }, [])
 
     const effectiveCrawlerRunning = researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning)
+    const hasProcessing = pdfExtractionPolling || ingestionProcessing || ingestionPolling || effectiveCrawlerRunning
+    const effectiveOverallStatus = polledResearch?.overall_status ?? initialOverallStatus
+    const isProcessing = hasProcessing
+
+    // When on processing step and overall_status becomes completed, redirect to archetype
+    useEffect(() => {
+        if (currentStep === 'processing' && effectiveOverallStatus === 'completed') {
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'archetype' }))
+        }
+    }, [currentStep, effectiveOverallStatus, brand.id])
     const effectiveSnapshotLite = polledResearch?.latestSnapshotLite ?? latestSnapshotLite
     const effectiveCoherence = polledResearch?.latestCoherence ?? latestCoherence
     const effectiveAlignment = polledResearch?.latestAlignment ?? latestAlignment
@@ -992,7 +1435,7 @@ export default function BrandGuidelinesBuilder({
             <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: `linear-gradient(160deg, #0f0e14 0%, ${primaryColor}15 40%, #0f0e14 100%)`,
+                    background: `linear-gradient(160deg, #0f0e14 0%, ${displayPrimary}15 40%, #0f0e14 100%)`,
                 }}
             />
             <div
@@ -1007,14 +1450,36 @@ export default function BrandGuidelinesBuilder({
 
             <div className="relative z-10 flex-1 flex flex-col min-h-0">
                 <header className="flex-shrink-0 px-4 sm:px-8 pt-6 pb-4">
-                    <Link
-                        href={route('brands.guidelines.index', { brand: brand.id })}
-                        className="text-sm font-medium text-white/60 hover:text-white/90"
-                    >
-                        ← Back to Guidelines
-                    </Link>
+                    <div className="flex items-center justify-between gap-4">
+                        <Link
+                            href={route('brands.guidelines.index', { brand: brand.id })}
+                            className="text-sm font-medium text-white/60 hover:text-white/90"
+                        >
+                            ← Back to Guidelines
+                        </Link>
+                        <button
+                            type="button"
+                            onClick={() => setShowStartOverConfirm(true)}
+                            className="text-sm font-medium text-white/50 hover:text-white/80"
+                        >
+                            Start over
+                        </button>
+                        <ConfirmDialog
+                            open={showStartOverConfirm}
+                            onClose={() => setShowStartOverConfirm(false)}
+                            onConfirm={() => {
+                                setShowStartOverConfirm(false)
+                                router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
+                            }}
+                            title="Start over"
+                            message="Your current draft will be replaced with a fresh one. This cannot be undone."
+                            confirmText="Start over"
+                            cancelText="Cancel"
+                            variant="warning"
+                        />
+                    </div>
                     <div className="mt-4">
-                        <ProgressRail steps={steps} stepKeys={allStepKeys} currentStep={effectiveStep} accentColor={accentColor} />
+                        <ProgressRail steps={steps} stepKeys={allStepKeys} currentStep={effectiveStep} accentColor={displayAccent} />
                     </div>
                     <div className="mt-3 flex items-center justify-between">
                         <span className="text-sm text-white/50">
@@ -1105,7 +1570,7 @@ export default function BrandGuidelinesBuilder({
                                         onClick={handlePublish}
                                         disabled={saving}
                                         className="w-full sm:w-auto px-8 py-3 rounded-xl font-semibold text-white transition-colors disabled:opacity-50"
-                                        style={{ backgroundColor: primaryColor }}
+                                        style={{ backgroundColor: displayPrimary }}
                                     >
                                         {saving ? 'Publishing…' : 'Publish Brand Guidelines'}
                                     </button>
@@ -1119,18 +1584,69 @@ export default function BrandGuidelinesBuilder({
                                 exit={{ opacity: 0, y: -12 }}
                                 transition={{ duration: 0.3 }}
                             >
-                                <StepShell title={currentStepConfig?.title} description={currentStepConfig?.description}>
+                                <StepShell
+                                    title={currentStep === 'processing' ? 'Processing your Brand Guidelines' : currentStepConfig?.title}
+                                    description={currentStep === 'processing' ? 'Extracting data to fill and suggest the next steps.' : currentStepConfig?.description}
+                                >
+                                    {/* Processing status — show on non-Background, non-Processing steps */}
+                                    {hasProcessing && currentStep !== 'background' && currentStep !== 'processing' && (
+                                        <ProcessingStatusPanel
+                                            pdfExtractionPolling={pdfExtractionPolling}
+                                            ingestionProcessing={ingestionProcessing || ingestionPolling}
+                                            ingestionRecords={polledResearch?.ingestionRecords ?? ingestionRecords}
+                                            crawlerRunning={effectiveCrawlerRunning}
+                                            polledResearch={polledResearch}
+                                            guidelinesPdfFilename={guidelinesPdfFilename}
+                                            currentStep={currentStep}
+                                        />
+                                    )}
+                                    {/* Brand Guidelines PDF summary — show on non-Background steps when PDF was uploaded */}
+                                    {currentStep !== 'background' && guidelinesPdfAssetId && (
+                                        <div className="mb-6 rounded-xl border border-white/20 bg-white/5 px-4 py-3 flex items-center gap-3">
+                                            <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center">
+                                                <svg className="w-4 h-4 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                                </svg>
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-white/90 truncate" title={guidelinesPdfFilename || 'Brand Guidelines PDF'}>
+                                                    {guidelinesPdfFilename || 'Brand Guidelines PDF'}
+                                                </p>
+                                                <p className="text-xs text-white/50">Imported from Background step</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {currentStep === 'processing' && (
+                                        <ProcessingView
+                                            pdfExtractionPolling={pdfExtractionPolling}
+                                            ingestionProcessing={ingestionProcessing || ingestionPolling}
+                                            ingestionRecords={polledResearch?.ingestionRecords ?? ingestionRecords}
+                                            crawlerRunning={effectiveCrawlerRunning}
+                                            polledResearch={polledResearch}
+                                            guidelinesPdfFilename={guidelinesPdfFilename}
+                                        />
+                                    )}
                                     {currentStep === 'background' && (
                                         <div className="space-y-8">
+                                            {hasProcessing && (
+                                                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90">
+                                                    Brand Guidelines uploaded — processing will begin when you continue.
+                                                </div>
+                                            )}
+                                            <>
                                             {/* 1. Import Official Brand Guidelines (PDF) */}
                                             <PdfGuidelinesUploadCard
                                                 brandId={brand.id}
-                                                accentColor={accentColor}
+                                                accentColor={displayAccent}
                                                 payload={payload}
                                                 setPayload={setPayload}
                                                 setBrandColors={setBrandColors}
                                                 saving={saving}
                                                 setErrors={setErrors}
+                                                onTriggerIngestion={triggerIngestion}
+                                                onExtractionPollingChange={setPdfExtractionPolling}
+                                                initialPdfAssetId={guidelinesPdfAssetId}
+                                                initialPdfFilename={guidelinesPdfFilename}
                                             />
 
                                             {/* 2. Website & Social */}
@@ -1138,31 +1654,14 @@ export default function BrandGuidelinesBuilder({
                                                 <div className="space-y-4">
                                                     <div>
                                                         <label className="block text-sm font-medium text-white/80 mb-2">Website URL</label>
-                                                        <div>
-                                                            <div className="flex gap-2">
-                                                                <input
-                                                                    type="url"
-                                                                    value={sources.website_url || ''}
-                                                                    onChange={(e) => updatePayload('sources', 'website_url', e.target.value)}
-                                                                    onBlur={handleWebsiteBlur}
-                                                                    placeholder="https://yoursite.com"
-                                                                    className="flex-1 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:border-white/30"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={effectiveCrawlerRunning}
-                                                                    onClick={() => handleWebsiteBlur()}
-                                                                    className="px-4 py-3 rounded-xl border border-white/20 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:bg-white/10 enabled:text-white/90"
-                                                                >
-                                                                    {effectiveCrawlerRunning ? 'Analyzing…' : 'Analyze & Prefill'}
-                                                                </button>
-                                                            </div>
-                                                            {effectiveCrawlerRunning && (
-                                                                <p className="mt-2 text-sm text-indigo-300">
-                                                                    Analyzing website… Results will appear in Research Insights when you continue to the next step.
-                                                                </p>
-                                                            )}
-                                                        </div>
+                                                        <input
+                                                            type="url"
+                                                            value={sources.website_url || ''}
+                                                            onChange={(e) => updatePayload('sources', 'website_url', e.target.value)}
+                                                            placeholder="https://yoursite.com"
+                                                            disabled={effectiveCrawlerRunning}
+                                                            className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:border-white/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                                                        />
                                                     </div>
                                                     <div>
                                                         <label className="block text-sm font-medium text-white/80 mb-2">Social URLs</label>
@@ -1170,7 +1669,44 @@ export default function BrandGuidelinesBuilder({
                                                             value={sources.social_urls || []}
                                                             onChange={(v) => updatePayload('sources', 'social_urls', v)}
                                                             placeholder="Paste URL and press Enter"
+                                                            disabled={effectiveCrawlerRunning}
                                                         />
+                                                    </div>
+                                                    <div className="pt-2">
+                                                        <button
+                                                            type="button"
+                                                            disabled={effectiveCrawlerRunning || (!(sources.website_url || '').trim() && (sources.social_urls || []).length === 0)}
+                                                            onClick={handleAnalyzeAll}
+                                                            className="w-full sm:w-auto px-6 py-3 rounded-xl font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            style={{ backgroundColor: effectiveCrawlerRunning ? 'rgba(99, 102, 241, 0.5)' : (displayAccent || '#6366f1') }}
+                                                        >
+                                                            {effectiveCrawlerRunning ? 'Analyzing…' : 'Analyze'}
+                                                        </button>
+                                                        {effectiveCrawlerRunning && (
+                                                            <>
+                                                                <div className="mt-3 space-y-1.5">
+                                                                    <div className="flex items-center justify-between text-sm">
+                                                                        <span className="text-amber-200">Analyzing website & social links</span>
+                                                                    </div>
+                                                                    <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                                                        <motion.div
+                                                                            className="h-full rounded-full bg-amber-400"
+                                                                            initial={{ width: '0%' }}
+                                                                            animate={{ width: ['0%', '70%', '100%', '70%'] }}
+                                                                            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <p className="mt-2 text-sm text-indigo-300">
+                                                                    Crawling website and social links… Results will appear in Research Insights when you continue to the next step.
+                                                                </p>
+                                                                {(polledResearch?.runningSnapshotLite?.source_url || polledResearch?.latestSnapshotLite?.source_url) && (
+                                                                    <p className="mt-1 text-sm text-white/70">
+                                                                        {polledResearch?.runningSnapshotLite?.source_url || polledResearch?.latestSnapshotLite?.source_url}
+                                                                    </p>
+                                                                )}
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </FieldCard>
@@ -1229,6 +1765,7 @@ export default function BrandGuidelinesBuilder({
                                                     accept="image/*,.pdf"
                                                 />
                                             </FieldCard>
+                                            </>
                                         </div>
                                     )}
 
@@ -1837,15 +2374,20 @@ export default function BrandGuidelinesBuilder({
                                 </button>
                             )}
                             {!isReviewStep && (
-                                <button
-                                    type="button"
-                                    onClick={handleNext}
-                                    disabled={saving}
-                                    className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
-                                    style={{ backgroundColor: saving ? '#4b5563' : accentColor }}
-                                >
-                                    {saving ? 'Saving…' : isLastDataStep ? 'Review' : 'Next'}
-                                </button>
+                                <>
+                                    {(isProcessing || currentStep === 'processing') && (
+                                        <span className="text-sm text-amber-200/90">Wait for processing to finish</span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleNext}
+                                        disabled={saving || isProcessing || currentStep === 'processing'}
+                                        className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
+                                        style={{ backgroundColor: saving || isProcessing ? '#4b5563' : displayAccent }}
+                                    >
+                                        {saving ? 'Saving…' : (isProcessing || currentStep === 'processing') ? 'Processing…' : isLastDataStep ? 'Review' : 'Next'}
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>

@@ -11,6 +11,7 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
+use App\Models\BrandModelVersionAsset;
 use App\Models\BrandResearchSnapshot;
 use App\Models\Category;
 use App\Models\PdfTextExtraction;
@@ -18,9 +19,15 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Jobs\AnalyzeBrandPdfPageJob;
+use App\Jobs\ExtractPdfTextJob;
+use App\Jobs\MergeBrandPdfExtractionJob;
 use App\Jobs\RunBrandIngestionJob;
+use App\Jobs\RunBrandPdfVisionExtractionJob;
 use App\Jobs\RunBrandResearchJob;
 use App\Models\BrandIngestionRecord;
+use App\Models\BrandPdfPageExtraction;
+use App\Models\BrandPdfVisionExtraction;
 use App\Services\BrandDNA\BrandDnaDraftService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -146,6 +153,27 @@ class BrandGuidelinesBuilderTest extends TestCase
         $this->assertSame(['Explorer'], $payload['personality']['candidate_archetypes'] ?? null);
     }
 
+    public function test_user_defined_color_overrides_extraction(): void
+    {
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/patch", [
+                'step_key' => 'standards',
+                'payload' => [
+                    'brand_colors' => [
+                        'primary_color' => '#003388',
+                        'secondary_color' => null,
+                        'accent_color' => null,
+                    ],
+                ],
+            ])
+            ->assertStatus(200);
+
+        $this->brand->refresh();
+        $this->assertSame('#003388', $this->brand->primary_color);
+        $this->assertTrue($this->brand->primary_color_user_defined, 'User-defined primary_color must set primary_color_user_defined');
+    }
+
     public function test_patch_endpoint_rejects_unknown_step_key(): void
     {
         $response = $this->actingAs($this->user)
@@ -247,6 +275,11 @@ class BrandGuidelinesBuilderTest extends TestCase
                 'sources' => ['website_url' => 'https://example.com', 'social_urls' => []],
                 'identity' => ['mission' => 'Our mission', 'positioning' => 'Our positioning'],
                 'personality' => ['primary_archetype' => 'Creator', 'candidate_archetypes' => []],
+                'scoring_rules' => [
+                    'tone_keywords' => ['artistic', 'visionary', 'bold'],
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                ],
+                'typography' => ['primary_font' => 'Inter'],
             ],
             'status' => 'draft',
         ]);
@@ -1119,5 +1152,719 @@ class BrandGuidelinesBuilderTest extends TestCase
         $this->assertNotNull($snapshot);
         $this->assertSame('completed', $snapshot->status);
         $this->assertNotEmpty($snapshot->suggestions);
+    }
+
+    public function test_conflict_is_stored_on_snapshot(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $pdfAsset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        PdfTextExtraction::create([
+            'asset_id' => $pdfAsset->id,
+            'status' => PdfTextExtraction::STATUS_COMPLETE,
+            'extracted_text' => "Brand Archetype: Creator\nMission: We empower creators.\nPrimary Color: #003388",
+            'extraction_source' => 'pdftotext',
+        ]);
+
+        $materialAsset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Material PDF',
+            'original_filename' => 'material.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/material.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'brand_material',
+        ]);
+
+        PdfTextExtraction::create([
+            'asset_id' => $materialAsset->id,
+            'status' => PdfTextExtraction::STATUS_COMPLETE,
+            'extracted_text' => "Brand Archetype: Hero\nMission: We lead boldly.\nPrimary Color: #FF0000",
+            'extraction_source' => 'pdftotext',
+        ]);
+
+        RunBrandIngestionJob::dispatchSync(
+            $this->brand->id,
+            $draft->id,
+            $pdfAsset->id,
+            null,
+            [$materialAsset->id]
+        );
+
+        $snapshot = BrandResearchSnapshot::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('source_url', 'ingestion')
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame('completed', $snapshot->status);
+
+        $snapshotData = $snapshot->snapshot ?? [];
+        $conflicts = $snapshotData['conflicts'] ?? [];
+        $this->assertNotEmpty($conflicts, 'Snapshot must store conflicts when sources disagree');
+
+        $archetypeConflict = collect($conflicts)->firstWhere('field', 'personality.primary_archetype');
+        $this->assertNotNull($archetypeConflict);
+        $this->assertArrayHasKey('candidates', $archetypeConflict);
+        $this->assertArrayHasKey('recommended', $archetypeConflict);
+        $this->assertArrayHasKey('recommended_weight', $archetypeConflict);
+        $this->assertCount(2, $archetypeConflict['candidates']);
+    }
+
+    public function test_apply_rejected_when_overriding_user_data(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draft->update([
+            'model_payload' => array_merge($draft->model_payload ?? [], [
+                'personality' => ['primary_archetype' => 'Creator'],
+            ]),
+        ]);
+
+        $snapshot = BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => 'https://example.com',
+            'status' => 'completed',
+            'snapshot' => ['conflicts' => []],
+            'suggestions' => [
+                [
+                    'key' => 'SUG:personality.primary_archetype',
+                    'path' => 'personality.primary_archetype',
+                    'type' => 'update',
+                    'value' => 'Ruler',
+                    'reason' => 'PDF explicitly declares Ruler.',
+                    'confidence' => 0.9,
+                    'weight' => 0.7,
+                ],
+            ],
+            'coherence' => ['overall' => ['score' => 70]],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/snapshots/{$snapshot->id}/apply", [
+                'key' => 'SUG:personality.primary_archetype',
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['error' => 'Cannot override user-defined value.']);
+
+        $draft->refresh();
+        $this->assertSame('Creator', ($draft->model_payload ?? [])['personality']['primary_archetype'] ?? null);
+    }
+
+    public function test_cannot_access_archetype_step_while_processing(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        PdfTextExtraction::create([
+            'asset_id' => $asset->id,
+            'status' => PdfTextExtraction::STATUS_PROCESSING,
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->get("/app/brands/{$this->brand->id}/brand-guidelines/builder?step=archetype");
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('step=background', $response->headers->get('Location'));
+        $this->assertStringContainsString('processing=1', $response->headers->get('Location'));
+    }
+
+    public function test_cannot_proceed_without_snapshot(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draftService->getOrCreateDraftVersion($this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->get("/app/brands/{$this->brand->id}/brand-guidelines/builder?step=archetype");
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('step=background', $response->headers->get('Location'));
+    }
+
+    public function test_extraction_failure_sets_failed_status(): void
+    {
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $extraction = PdfTextExtraction::create([
+            'asset_id' => $asset->id,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        $extractionService = $this->mock(\App\Services\PdfTextExtractionService::class);
+        $extractionService->shouldReceive('isPdftotextAvailable')->andReturn(true);
+        $extractionService->shouldReceive('extractFromPath')
+            ->andReturn(['text' => '', 'source' => 'pdftotext', 'exit_code' => 0, 'stderr' => '']);
+
+        $tempPath = sys_get_temp_dir() . '/test-empty-' . uniqid() . '.pdf';
+        file_put_contents($tempPath, '%PDF-1.4 minimal');
+        $pdfPageRenderingService = $this->mock(\App\Services\PdfPageRenderingService::class);
+        $pdfPageRenderingService->shouldReceive('downloadSourcePdfToTemp')->andReturn($tempPath);
+
+        $job = new ExtractPdfTextJob($asset->id, $extraction->id, null);
+        $job->handle($pdfPageRenderingService, $extractionService);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+
+        $extraction->refresh();
+        $this->assertSame(PdfTextExtraction::STATUS_FAILED, $extraction->status);
+        $this->assertSame('No selectable text detected', $extraction->failure_reason);
+    }
+
+    public function test_ingestion_auto_triggers_after_extraction(): void
+    {
+        \Illuminate\Support\Facades\Bus::fake([RunBrandIngestionJob::class]);
+
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $extraction = PdfTextExtraction::create([
+            'asset_id' => $asset->id,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        $extractionService = $this->mock(\App\Services\PdfTextExtractionService::class);
+        $extractionService->shouldReceive('isPdftotextAvailable')->andReturn(true);
+        $extractionService->shouldReceive('extractFromPath')
+            ->andReturn(['text' => "Brand Archetype: Creator\nMission: Test.", 'source' => 'pdftotext', 'exit_code' => 0, 'stderr' => '']);
+
+        $tempPath = sys_get_temp_dir() . '/test-pdf-' . uniqid() . '.pdf';
+        file_put_contents($tempPath, '%PDF-1.4 minimal');
+        $pdfPageRenderingService = $this->mock(\App\Services\PdfPageRenderingService::class);
+        $pdfPageRenderingService->shouldReceive('downloadSourcePdfToTemp')->andReturn($tempPath);
+
+        $job = new ExtractPdfTextJob($asset->id, $extraction->id, null);
+        $job->handle($pdfPageRenderingService, $extractionService);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+
+        \Illuminate\Support\Facades\Bus::assertDispatched(RunBrandIngestionJob::class, function ($job) use ($draft, $asset) {
+            return $job->brandId === $this->brand->id
+                && $job->brandModelVersionId === $draft->id
+                && $job->pdfAssetId === $asset->id;
+        });
+    }
+
+    public function test_pdf_vision_fallback_triggers_when_text_empty(): void
+    {
+        \Illuminate\Support\Facades\Bus::fake([RunBrandPdfVisionExtractionJob::class]);
+
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $extraction = PdfTextExtraction::create([
+            'asset_id' => $asset->id,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        $extractionService = $this->mock(\App\Services\PdfTextExtractionService::class);
+        $extractionService->shouldReceive('isPdftotextAvailable')->andReturn(true);
+        $extractionService->shouldReceive('extractFromPath')
+            ->andReturn(['text' => '', 'source' => 'pdftotext', 'exit_code' => 0, 'stderr' => '']);
+
+        $tempPath = sys_get_temp_dir() . '/test-empty-' . uniqid() . '.pdf';
+        file_put_contents($tempPath, '%PDF-1.4 minimal');
+        $pdfPageRenderingService = $this->mock(\App\Services\PdfPageRenderingService::class);
+        $pdfPageRenderingService->shouldReceive('downloadSourcePdfToTemp')->andReturn($tempPath);
+
+        $job = new ExtractPdfTextJob($asset->id, $extraction->id, null);
+        $job->handle($pdfPageRenderingService, $extractionService);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+
+        $extraction->refresh();
+        $this->assertSame(PdfTextExtraction::STATUS_FAILED, $extraction->status);
+        $this->assertSame('No selectable text detected', $extraction->failure_reason);
+
+        \Illuminate\Support\Facades\Bus::assertDispatched(RunBrandPdfVisionExtractionJob::class, function ($job) use ($asset, $draft) {
+            return $job->assetId === $asset->id
+                && $job->brandId === $this->brand->id
+                && $job->brandModelVersionId === $draft->id;
+        });
+    }
+
+    public function test_parallel_page_processing_merges_results(): void
+    {
+        \Illuminate\Support\Facades\Bus::fake([RunBrandIngestionJob::class]);
+
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $batchId = 'vision_test_' . uniqid();
+        $visionBatch = BrandPdfVisionExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'pages_total' => 2,
+            'pages_processed' => 0,
+            'status' => BrandPdfVisionExtraction::STATUS_PROCESSING,
+        ]);
+
+        $tempDir = sys_get_temp_dir() . '/pdf-pages-' . uniqid();
+        mkdir($tempDir, 0755, true);
+        $page1Path = $tempDir . '/page-1.png';
+        $page2Path = $tempDir . '/page-2.png';
+        file_put_contents($page1Path, 'fake-png');
+        file_put_contents($page2Path, 'fake-png');
+
+        $page1 = BrandPdfPageExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'page_number' => 1,
+            'extraction_json' => [
+                '_temp_image_path' => $page1Path,
+                'identity' => ['mission' => 'Test mission', 'vision' => null, 'positioning' => null],
+                'personality' => ['primary_archetype' => 'Creator', 'tone_keywords' => ['bold', 'creative'], 'traits' => []],
+                'visual' => ['primary_colors' => ['#FF0000'], 'fonts' => ['Helvetica']],
+            ],
+            'status' => BrandPdfPageExtraction::STATUS_COMPLETED,
+        ]);
+
+        $page2 = BrandPdfPageExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'page_number' => 2,
+            'extraction_json' => [
+                '_temp_image_path' => $page2Path,
+                'identity' => ['mission' => null, 'vision' => 'Test vision', 'positioning' => null],
+                'personality' => ['primary_archetype' => null, 'tone_keywords' => ['innovative'], 'traits' => []],
+                'visual' => ['primary_colors' => ['#00FF00'], 'fonts' => []],
+            ],
+            'status' => BrandPdfPageExtraction::STATUS_COMPLETED,
+        ]);
+
+        $pageRenderer = $this->mock(\App\Services\BrandDNA\Extraction\PdfPageRenderer::class);
+        $pageRenderer->shouldReceive('cleanupPages')->once();
+
+        $job = new MergeBrandPdfExtractionJob($batchId);
+        $job->handle($pageRenderer);
+
+        $visionBatch->refresh();
+        $this->assertSame(BrandPdfVisionExtraction::STATUS_COMPLETED, $visionBatch->status);
+        $merged = $visionBatch->extraction_json ?? [];
+        $this->assertSame('Test mission', $merged['identity']['mission'] ?? null);
+        $this->assertSame('Test vision', $merged['identity']['vision'] ?? null);
+        $this->assertSame('Creator', $merged['personality']['primary_archetype'] ?? null);
+        $this->assertContains('#FF0000', $merged['visual']['primary_colors'] ?? []);
+        $this->assertContains('#00FF00', $merged['visual']['primary_colors'] ?? []);
+
+        \Illuminate\Support\Facades\Bus::assertDispatched(RunBrandIngestionJob::class, function ($job) {
+            return $job->brandId === $this->brand->id;
+        });
+
+        if (is_dir($tempDir)) {
+            @unlink($page1Path);
+            @unlink($page2Path);
+            @rmdir($tempDir);
+        }
+    }
+
+    public function test_early_exit_stops_remaining_jobs(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $batchId = 'vision_early_' . uniqid();
+        $visionBatch = BrandPdfVisionExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'pages_total' => 3,
+            'pages_processed' => 1,
+            'signals_detected' => 5,
+            'early_complete' => true,
+            'status' => BrandPdfVisionExtraction::STATUS_PROCESSING,
+        ]);
+
+        $tempPath = sys_get_temp_dir() . '/page-pending-' . uniqid() . '.png';
+        file_put_contents($tempPath, 'fake');
+
+        $pendingPage = BrandPdfPageExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'page_number' => 2,
+            'extraction_json' => ['_temp_image_path' => $tempPath],
+            'status' => BrandPdfPageExtraction::STATUS_PENDING,
+        ]);
+
+        $job = new AnalyzeBrandPdfPageJob($pendingPage->id);
+        $job->handle(app(\App\Services\BrandDNA\Extraction\VisionExtractionService::class));
+
+        $pendingPage->refresh();
+        $this->assertSame(BrandPdfPageExtraction::STATUS_CANCELLED, $pendingPage->status);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+    }
+
+    public function test_processing_dashboard_returns_page_progress(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandPdfVisionExtraction::create([
+            'batch_id' => 'batch_dash_' . uniqid(),
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'pages_total' => 12,
+            'pages_processed' => 6,
+            'signals_detected' => 4,
+            'early_complete' => false,
+            'status' => BrandPdfVisionExtraction::STATUS_PROCESSING,
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertArrayHasKey('pdf', $data);
+        $this->assertSame('processing', $data['pdf']['status']);
+        $this->assertSame(12, $data['pdf']['pages_total']);
+        $this->assertSame(6, $data['pdf']['pages_processed']);
+        $this->assertSame(4, $data['pdf']['signals_detected']);
+        $this->assertFalse($data['pdf']['early_complete']);
+        $this->assertSame('processing', $data['overall_status']);
+    }
+
+    public function test_cannot_proceed_while_any_source_processing(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandPdfVisionExtraction::create([
+            'batch_id' => 'batch_block_' . uniqid(),
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'pages_total' => 5,
+            'pages_processed' => 2,
+            'status' => BrandPdfVisionExtraction::STATUS_PROCESSING,
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->get("/app/brands/{$this->brand->id}/brand-guidelines/builder?step=archetype");
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('step=background', $response->headers->get('Location'));
+        $this->assertStringContainsString('processing=1', $response->headers->get('Location'));
     }
 }

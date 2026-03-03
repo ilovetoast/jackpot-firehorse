@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandIngestionRecord;
+use App\Models\BrandPdfVisionExtraction;
 use App\Models\BrandModelVersion;
 use App\Models\BrandResearchSnapshot;
 use App\Services\BrandDNA\BrandAlignmentEngine;
@@ -21,6 +22,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Unified Brand Ingestion Job.
@@ -34,7 +36,7 @@ class RunBrandIngestionJob implements ShouldQueue
     public function __construct(
         public int $brandId,
         public int $brandModelVersionId,
-        public ?int $pdfAssetId = null,
+        public mixed $pdfAssetId = null,
         public ?string $websiteUrl = null,
         public array $materialAssetIds = []
     ) {}
@@ -92,18 +94,23 @@ class RunBrandIngestionJob implements ShouldQueue
                 ? BrandExtractionSchema::empty()
                 : BrandExtractionSchema::merge(...$extractions);
 
+            $conflicts = $extraction['conflicts'] ?? [];
+
             $record->update(['extraction_json' => $extraction]);
 
-            $suggestions = $suggestionService->generateSuggestions($extraction);
+            $suggestions = $suggestionService->generateSuggestions($extraction, $conflicts);
 
             $snapshotPayload = $this->extractionToSnapshotPayload($extraction);
+            $snapshotPayload['conflicts'] = $conflicts;
+
             $brandMaterialCount = $draft->assetsForContext('brand_material')->count();
             $coherence = $coherenceService->score(
                 $draft->model_payload ?? [],
                 $suggestions,
                 $snapshotPayload,
                 $brand,
-                $brandMaterialCount
+                $brandMaterialCount,
+                $conflicts
             );
             $alignment = $alignmentEngine->analyze($draft->model_payload ?? []);
 
@@ -121,10 +128,26 @@ class RunBrandIngestionJob implements ShouldQueue
             $draft->getOrCreateInsightState($snapshot->id);
 
             $record->update(['status' => BrandIngestionRecord::STATUS_COMPLETED]);
+
+            $extractedSignalCount = $this->countExtractionSignals($extraction);
+            Log::info('Brand ingestion summary', [
+                'draft_id' => $draft->id,
+                'pdf_asset_id' => $this->pdfAssetId,
+                'extracted_signal_count' => $extractedSignalCount,
+                'suggestion_count' => count($suggestions),
+                'snapshot_created' => true,
+            ]);
         } catch (\Throwable $e) {
+            Log::error('[RunBrandIngestionJob] Ingestion failed', [
+                'draft_id' => $this->brandModelVersionId,
+                'pdf_asset_id' => $this->pdfAssetId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             $record->update([
                 'status' => BrandIngestionRecord::STATUS_FAILED,
                 'extraction_json' => array_merge($record->extraction_json ?? [], ['error' => $e->getMessage()]),
+                'failure_reason' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -135,6 +158,17 @@ class RunBrandIngestionJob implements ShouldQueue
         $asset = Asset::find($this->pdfAssetId);
         if (! $asset) {
             return null;
+        }
+
+        $visionExtraction = BrandPdfVisionExtraction::where('asset_id', $asset->id)
+            ->where('brand_id', $this->brandId)
+            ->where('brand_model_version_id', $this->brandModelVersionId)
+            ->where('status', BrandPdfVisionExtraction::STATUS_COMPLETED)
+            ->latest()
+            ->first();
+
+        if ($visionExtraction && ! empty($visionExtraction->extraction_json)) {
+            return $visionExtraction->extraction_json;
         }
 
         $extraction = $asset->getLatestPdfTextExtractionForVersion($asset->currentVersion?->id);
@@ -148,6 +182,23 @@ class RunBrandIngestionJob implements ShouldQueue
         }
 
         return $processor->process($text);
+    }
+
+    protected function countExtractionSignals(array $extraction): int
+    {
+        $count = 0;
+        foreach (['identity', 'personality', 'visual'] as $section) {
+            $data = $extraction[$section] ?? [];
+            if (! is_array($data)) {
+                continue;
+            }
+            foreach ($data as $v) {
+                if ($v !== null && $v !== '' && $v !== []) {
+                    $count++;
+                }
+            }
+        }
+        return $count;
     }
 
     protected function extractionToSnapshotPayload(array $extraction): array

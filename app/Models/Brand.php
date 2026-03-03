@@ -41,8 +41,11 @@ class Brand extends Model
         'is_default',
         'show_in_selector',
         'primary_color',
+        'primary_color_user_defined',
         'secondary_color',
+        'secondary_color_user_defined',
         'accent_color',
+        'accent_color_user_defined',
         'nav_color',
         'workspace_button_style',
         'logo_filter',
@@ -60,6 +63,9 @@ class Brand extends Model
         return [
         'is_default' => 'boolean',
         'show_in_selector' => 'boolean',
+        'primary_color_user_defined' => 'boolean',
+        'secondary_color_user_defined' => 'boolean',
+        'accent_color_user_defined' => 'boolean',
         'settings' => 'array',
         'download_landing_settings' => 'array', // R3.2
     ];

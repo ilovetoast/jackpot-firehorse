@@ -9,6 +9,7 @@ namespace App\BrandDNA\Builder;
 class BrandGuidelinesBuilderSteps
 {
     public const STEP_BACKGROUND = 'background';
+    public const STEP_PROCESSING = 'processing';
     public const STEP_POSITIONING = 'positioning';
     public const STEP_ARCHETYPE = 'archetype';
     public const STEP_PURPOSE_PROMISE = 'purpose_promise';
@@ -23,6 +24,7 @@ class BrandGuidelinesBuilderSteps
     {
         return [
             self::STEP_BACKGROUND,
+            self::STEP_PROCESSING,
             self::STEP_ARCHETYPE,
             self::STEP_PURPOSE_PROMISE,
             self::STEP_EXPRESSION,
@@ -45,6 +47,14 @@ class BrandGuidelinesBuilderSteps
                 'description' => 'Website, social links, and communication examples',
                 'skippable' => false,
                 'allowed_paths' => ['sources'],
+                'required_on_publish_paths' => [],
+            ],
+            [
+                'key' => self::STEP_PROCESSING,
+                'title' => 'Processing',
+                'description' => 'Extracting data from your uploads',
+                'skippable' => false,
+                'allowed_paths' => [],
                 'required_on_publish_paths' => [],
             ],
             [

@@ -296,7 +296,7 @@ class ApprovalNotificationService
         return [
             'asset_id' => $asset->id,
             'asset_name' => $assetName,
-            'asset_type' => $asset->asset_type->value ?? 'unknown',
+            'asset_type' => $asset->type?->value ?? 'unknown',
             'brand_id' => $brand?->id,
             'brand_name' => $brand?->name ?? 'Unknown Brand',
             'tenant_id' => $tenant?->id,

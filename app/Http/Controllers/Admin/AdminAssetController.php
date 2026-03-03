@@ -657,6 +657,7 @@ class AdminAssetController extends Controller
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
             'deleted' => $this->parseBoolParam($request, 'deleted'),
+            'builder_staged' => $this->parseBoolParam($request, 'builder_staged'),
             'date_from' => $request->filled('date_from') ? trim($request->date_from) : null,
             'date_to' => $request->filled('date_to') ? trim($request->date_to) : null,
         ];
@@ -703,6 +704,7 @@ class AdminAssetController extends Controller
             '/user:(\d+)/i' => 'created_by',
             '/dead:(true|1)/i' => 'storage_missing',
             '/deleted:(true|false|1|0)/i' => 'deleted',
+            '/builder:(true|false|1|0)/i' => 'builder_staged',
         ];
 
         foreach ($patterns as $regex => $key) {
@@ -724,6 +726,8 @@ class AdminAssetController extends Controller
                         default => $val,
                     };
                 } elseif ($key === 'visible_in_grid') {
+                    $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : $parsed[$key] ?? null);
+                } elseif ($key === 'builder_staged') {
                     $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : $parsed[$key] ?? null);
                 } else {
                     $parsed[$key] = is_numeric($val) ? (int) $val : $val;
@@ -837,6 +841,11 @@ class AdminAssetController extends Controller
             $query->whereNotNull('deleted_at');
         } elseif (($filters['deleted'] ?? null) === false || $filters['deleted'] === '0') {
             $query->whereNull('deleted_at');
+        }
+        if (($filters['builder_staged'] ?? null) === true) {
+            $query->builderStagedOnly();
+        } elseif (($filters['builder_staged'] ?? null) === false) {
+            $query->excludeBuilderStaged();
         }
 
         return $query;
@@ -980,6 +989,8 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'builder_staged' => (bool) ($asset->builder_staged ?? false),
+            'builder_context' => $asset->builder_context ?? null,
             'admin_thumbnail_url' => $this->adminThumbnailSignedUrl($asset),
         ];
     }
@@ -1019,6 +1030,8 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'builder_staged' => (bool) ($asset->builder_staged ?? false),
+            'builder_context' => $asset->builder_context ?? null,
             'admin_thumbnail_url' => null,
         ];
     }

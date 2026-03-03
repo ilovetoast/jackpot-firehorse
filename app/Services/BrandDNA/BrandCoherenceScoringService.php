@@ -15,7 +15,8 @@ class BrandCoherenceScoringService
         ?array $snapshotSuggestions = null,
         ?array $snapshotRaw = null,
         $brand = null,
-        int $brandMaterialCount = 0
+        int $brandMaterialCount = 0,
+        ?array $conflicts = null
     ): array {
         $payload = (new BrandDnaPayloadNormalizer)->normalize($draftPayload);
         $sources = $payload['sources'] ?? [];
@@ -24,11 +25,20 @@ class BrandCoherenceScoringService
         $visual = $payload['visual'] ?? [];
         $typography = $payload['typography'] ?? [];
         $scoringRules = $payload['scoring_rules'] ?? [];
-        $brandColors = $brand?->primary_color ? [
-            'primary' => $brand->primary_color,
-            'secondary' => $brand->secondary_color,
-            'accent' => $brand->accent_color,
-        ] : null;
+        $brandColors = null;
+        if ($brand) {
+            $parts = [];
+            if ($brand->primary_color_user_defined && $brand->primary_color) {
+                $parts['primary'] = $brand->primary_color;
+            }
+            if ($brand->secondary_color_user_defined && $brand->secondary_color) {
+                $parts['secondary'] = $brand->secondary_color;
+            }
+            if ($brand->accent_color_user_defined && $brand->accent_color) {
+                $parts['accent'] = $brand->accent_color;
+            }
+            $brandColors = ! empty($parts) ? $parts : null;
+        }
 
         $sections = [
             'background' => $this->scoreBackground($sources, $brandMaterialCount),
@@ -54,9 +64,26 @@ class BrandCoherenceScoringService
             $sections['standards']['snapshot_risks'] ?? []
         );
 
+        $conflictPenalty = 0;
+        if (! empty($conflicts)) {
+            foreach ($conflicts as $c) {
+                $field = $c['field'] ?? '';
+                if ($field === 'personality.primary_archetype') {
+                    $recommended = $c['recommended'] ?? null;
+                    $draftArchetype = $personality['primary_archetype'] ?? null;
+                    if ($draftArchetype !== $recommended) {
+                        $risks[] = ['id' => 'COH:CONFLICT_PRIMARY_ARCHETYPE', 'label' => 'Multiple sources disagree on archetype', 'detail' => 'Resolve conflict by applying recommended value.'];
+                        $conflictPenalty = -3;
+                    }
+                    break;
+                }
+            }
+        }
+        $finalScore = max(0, min(100, $overallScore + $conflictPenalty));
+
         return [
             'overall' => [
-                'score' => min(100, max(0, $overallScore)),
+                'score' => $finalScore,
                 'confidence' => (int) round($overallConfidence),
                 'coverage' => (int) round($overallCoverage),
             ],

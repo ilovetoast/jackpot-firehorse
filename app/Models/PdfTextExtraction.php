@@ -29,6 +29,7 @@ class PdfTextExtraction extends Model
         'status',
         'processed_at',
         'error_message',
+        'failure_reason',
     ];
 
     protected function casts(): array

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
+import ConfirmDialog from '../../../Components/ConfirmDialog'
 
 // Darken hex for gradient background
 function darkenHex(hex, amount = 0.3) {
@@ -22,6 +23,7 @@ function copyToClipboard(text) {
 export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, hasActiveVersion, hasDraft }) {
     const { auth } = usePage().props
     const [copiedHex, setCopiedHex] = useState(null)
+    const [showStartOverConfirm, setShowStartOverConfirm] = useState(false)
     const isEnabled = brandModel?.is_enabled ?? false
     const showCallout = !isEnabled || !hasActiveVersion
 
@@ -66,15 +68,47 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                 {hasActiveVersion ? 'Update your brand guidelines or run the builder again.' : 'Start the Brand Guidelines Builder to define your brand DNA.'}
                             </p>
                             <div className="flex flex-col items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))}
-                                    className="inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
-                                >
-                                    {hasDraft ? 'Continue Brand Guidelines' : 'Start Brand Guidelines'}
-                                </button>
+                                <div className="flex flex-wrap items-center justify-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (hasDraft) {
+                                                router.get(route('brands.brand-guidelines.builder', { brand: brand.id }))
+                                            } else {
+                                                router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
+                                            }
+                                        }}
+                                        className="inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+                                    >
+                                        {hasDraft ? 'Continue Brand Guidelines' : 'Start Brand Guidelines'}
+                                    </button>
+                                    {hasDraft && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowStartOverConfirm(true)}
+                                                className="inline-flex rounded-md border border-gray-300 px-6 py-3 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                                            >
+                                                Start over
+                                            </button>
+                                            <ConfirmDialog
+                                                open={showStartOverConfirm}
+                                                onClose={() => setShowStartOverConfirm(false)}
+                                                onConfirm={() => {
+                                                    setShowStartOverConfirm(false)
+                                                    router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
+                                                }}
+                                                title="Start over"
+                                                message="Your current draft will be replaced with a fresh one. This cannot be undone."
+                                                confirmText="Start over"
+                                                cancelText="Cancel"
+                                                variant="warning"
+                                            />
+                                        </>
+                                    )}
+                                </div>
                                 <p className="text-sm text-gray-500">
-                                    You can import a PDF or start from scratch on the first step.
+                                    {hasDraft ? 'Resume where you left off, or start fresh.' : 'You can import a PDF or start from scratch on the first step.'}
                                 </p>
                             </div>
                             <Link

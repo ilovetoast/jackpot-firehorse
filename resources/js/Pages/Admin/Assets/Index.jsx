@@ -63,6 +63,12 @@ function parseSmartFilter(search) {
         [/category:(\w+)/gi, 'category_slug', String],
         [/user:(\d+)/gi, 'created_by', (v) => parseInt(v, 10)],
         [/deleted:(true|false|1|0)/gi, 'deleted', (v) => ['true', '1'].includes(String(v).toLowerCase())],
+        [/builder:(true|false|1|0)/gi, 'builder_staged', (v) => {
+            const s = String(v).toLowerCase()
+            if (['true', '1'].includes(s)) return true
+            if (['false', '0'].includes(s)) return false
+            return undefined
+        }],
     ]
     for (const [regex, key, fn] of patterns) {
         const m = search.match(regex)
@@ -174,6 +180,7 @@ export default function AdminAssetsIndex({
         initialFilters?.analysis_status ||
         initialFilters?.thumbnail_status ||
         initialFilters?.visible_in_grid != null ||
+        initialFilters?.builder_staged != null ||
         initialFilters?.deleted != null ||
         initialFilters?.has_incident != null ||
         initialFilters?.storage_missing ||
@@ -427,7 +434,7 @@ export default function AdminAssetsIndex({
                                 type="text"
                                 value={searchInput}
                                 onChange={(e) => setSearchInput(e.target.value)}
-                                placeholder="Search assets... tenant:3 brand:augusta type:execution status:failed tag:whiskey"
+                                placeholder="Search assets... tenant:3 brand:augusta type:execution builder:true tag:whiskey"
                                 className="relative z-10 block w-full rounded-lg border-slate-300 pl-10 pr-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                             />
                         </div>
@@ -585,6 +592,21 @@ export default function AdminAssetsIndex({
                                 </select>
                             </div>
                             <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Builder staged</label>
+                                <select
+                                    value={initialFilters?.builder_staged === true ? '1' : initialFilters?.builder_staged === false ? '0' : ''}
+                                    onChange={(e) => {
+                                        const v = e.target.value
+                                        applyFilters({ builder_staged: v === '' ? null : v === '1', page: 1 })
+                                    }}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="1">Builder staged only (detached)</option>
+                                    <option value="0">Not builder staged</option>
+                                </select>
+                            </div>
+                            <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1">Deleted</label>
                                 <select
                                     value={initialFilters?.deleted === true ? '1' : initialFilters?.deleted === false ? '0' : ''}
@@ -652,6 +674,7 @@ export default function AdminAssetsIndex({
                                     />
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tenant</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Brand</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase" title="Builder-staged (detached) assets">Builder</th>
                                     <SortableTh
                                         label="Analysis"
                                         sortKey="analysis_status"
@@ -679,7 +702,7 @@ export default function AdminAssetsIndex({
                             <tbody className="divide-y divide-slate-200 bg-white">
                                 {!assets?.length ? (
                                     <tr>
-                                        <td colSpan={10} className="px-4 py-12 text-center text-slate-500">
+                                        <td colSpan={11} className="px-4 py-12 text-center text-slate-500">
                                             No assets found
                                         </td>
                                     </tr>
@@ -713,6 +736,15 @@ export default function AdminAssetsIndex({
                                             </td>
                                             <td className="px-4 py-2 text-sm text-slate-600">{a.tenant?.name ?? '—'}</td>
                                             <td className="px-4 py-2 text-sm text-slate-600">{a.brand?.name ?? '—'}</td>
+                                            <td className="px-4 py-2">
+                                                {a.builder_staged ? (
+                                                    <span className="inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800" title={a.builder_context || 'Builder staged'}>
+                                                        {a.builder_context || 'Staged'}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400">—</span>
+                                                )}
+                                            </td>
                                             <td className="px-4 py-2">
                                                 <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.analysis_status] || STATUS_COLORS.unknown}`}>
                                                     {a.analysis_status}

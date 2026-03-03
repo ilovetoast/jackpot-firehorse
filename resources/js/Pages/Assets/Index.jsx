@@ -503,9 +503,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         visibleMobileCategories.forEach((cat) => {
             tabs.push({ key: String(cat.id), label: cat.name, count: cat.asset_count > 0 ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false, isReferenceMaterials: false })
         })
-        if (reference_materials_count > 0 || source === 'reference_materials') {
-            tabs.push({ key: 'reference_materials', label: 'Reference materials', count: reference_materials_count > 0 ? reference_materials_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
-        }
+        // Always show Reference materials tab so users can access detached builder-staged assets
+        tabs.push({ key: 'reference_materials', label: 'Reference materials', count: reference_materials_count > 0 ? reference_materials_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
         if (can_view_trash && (trash_count > 0 || lifecycle === 'deleted')) {
             tabs.push({ key: 'trash', label: 'Trash', count: trash_count > 0 ? trash_count : null, category: null, categoryId: null, isTrash: true, isReferenceMaterials: false })
         }
@@ -883,9 +882,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     )
                                                 })
                                             }
-                                            {/* Reference materials: builder-staged assets (above Trash) */}
-                                            {(reference_materials_count > 0 || isReferenceMaterialsView) && (
-                                                <>
+                                            {/* Reference materials: builder-staged assets (above Trash) - always visible so users can access detached uploads */}
+                                            <>
                                                     <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
                                                     <button
                                                         onClick={handleReferenceMaterialsClick}
@@ -916,7 +914,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                         )}
                                                     </button>
                                                 </>
-                                            )}
                                             {/* Phase B2: Trash at bottom - only when has items or already on trash view */}
                                             {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
                                                 <>
@@ -1029,20 +1026,19 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 </button>
                                             )
                                         })}
-                                        {(reference_materials_count > 0 || isReferenceMaterialsView) && (
-                                            <>
-                                                <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
-                                                <button
-                                                    onClick={() => { handleReferenceMaterialsClick(); setMobileCategoriesOpen(false) }}
-                                                    className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
-                                                    style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
-                                                >
-                                                    <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
-                                                    <span className="flex-1">Reference materials</span>
-                                                    {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
-                                                </button>
-                                            </>
-                                        )}
+                                        {/* Reference materials - always visible so users can access detached builder-staged assets */}
+                                        <>
+                                            <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
+                                            <button
+                                                onClick={() => { handleReferenceMaterialsClick(); setMobileCategoriesOpen(false) }}
+                                                className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
+                                                style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
+                                            >
+                                                <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
+                                                <span className="flex-1">Reference materials</span>
+                                                {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
+                                            </button>
+                                        </>
                                         {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (
                                             <>
                                                 <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />

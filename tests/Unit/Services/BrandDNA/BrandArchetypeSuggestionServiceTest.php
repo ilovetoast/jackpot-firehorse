@@ -83,4 +83,30 @@ class BrandArchetypeSuggestionServiceTest extends TestCase
         $this->assertSame('scoring_rules.tone_keywords', $suggestion['path']);
         $this->assertContains('inspiring', $suggestion['value']);
     }
+
+    public function test_archetype_reinforcement_generated_when_tone_low(): void
+    {
+        $service = new BrandArchetypeSuggestionService;
+        $draftPayload = [
+            'personality' => [
+                'primary_archetype' => 'Creator',
+                'traits' => ['imaginative', 'innovative', 'expressive'],
+            ],
+            'scoring_rules' => [
+                'tone_keywords' => ['bold'],
+            ],
+        ];
+
+        $result = $service->generate($draftPayload);
+
+        $reinforceSuggestions = array_filter(
+            $result['suggestions'] ?? [],
+            fn ($s) => ($s['key'] ?? '') === 'SUG:expression.tone_keywords.reinforce'
+        );
+        $this->assertNotEmpty($reinforceSuggestions, 'Archetype with < 3 tone keywords must generate reinforcement suggestion');
+        $suggestion = reset($reinforceSuggestions);
+        $this->assertSame('merge', $suggestion['type']);
+        $this->assertSame(0.75, $suggestion['confidence']);
+        $this->assertStringContainsString('Strengthen tone alignment', $suggestion['reason']);
+    }
 }

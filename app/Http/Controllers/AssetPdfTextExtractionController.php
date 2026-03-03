@@ -76,6 +76,7 @@ class AssetPdfTextExtractionController extends Controller
             'processed_at' => $extraction->processed_at?->toIso8601String(),
             'error_message' => $extraction->error_message,
             'character_count' => $extraction->character_count,
+            'failure_reason' => $extraction->failure_reason,
         ];
 
         if ($extraction->isComplete()) {

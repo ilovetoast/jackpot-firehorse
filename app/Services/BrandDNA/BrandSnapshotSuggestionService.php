@@ -124,6 +124,7 @@ class BrandSnapshotSuggestionService
             $confidence = (float) ($s['confidence'] ?? 0);
             $confidence = max(0.0, min(1.0, $confidence));
 
+            $weight = (float) ($s['weight'] ?? $confidence);
             $out[] = [
                 'key' => $key,
                 'path' => $s['path'] ?? '',
@@ -131,6 +132,8 @@ class BrandSnapshotSuggestionService
                 'value' => $s['value'] ?? null,
                 'reason' => $s['reason'] ?? '',
                 'confidence' => $confidence,
+                'weight' => $weight,
+                'confidence_tier' => SuggestionConfidenceTier::fromWeight($weight),
             ];
         }
 

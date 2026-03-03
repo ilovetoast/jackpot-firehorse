@@ -47,9 +47,9 @@ class BrandGuidelinesController extends Controller
             'brand' => [
                 'id' => $brand->id,
                 'name' => $brand->name,
-                'primary_color' => $brand->primary_color ?? '#6366f1',
-                'secondary_color' => $brand->secondary_color ?? '#8b5cf6',
-                'accent_color' => $brand->accent_color ?? '#06b6d4',
+                'primary_color' => $brand->primary_color,
+                'secondary_color' => $brand->secondary_color,
+                'accent_color' => $brand->accent_color,
             ],
             'brandModel' => [
                 'is_enabled' => $isEnabled,

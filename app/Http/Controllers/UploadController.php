@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AssetType;
 use App\Http\Responses\UploadErrorResponse;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -2007,8 +2008,12 @@ class UploadController extends Controller
                     );
                 } else {
                     // Create mode: Normal asset creation flow
-                    // Determine asset type from category
-                    $assetType = $category->asset_type->value;
+                    // Builder-staged uploads: never use category (no category_id, no metadata schema)
+                    if ($isBuilderStaged) {
+                        $categoryId = null;
+                    }
+                    // Determine asset type from category (builder-staged: $category is null → use ASSET)
+                    $assetType = ($category !== null) ? $category->asset_type->value : AssetType::ASSET->value;
 
                     // Phase 2 – Step 4: Extract and validate metadata fields BEFORE asset creation
                     // Frontend sends: { fieldKey: value } (only valid fields, no empty values)
@@ -2034,7 +2039,8 @@ class UploadController extends Controller
                     }
 
                     // Phase 2 – Step 4: Validate metadata against schema BEFORE asset creation
-                    if (!empty($metadataFields)) {
+                    // Skip when no category (builder-staged uploads have no category)
+                    if (!empty($metadataFields) && $category) {
                         try {
                             // Determine asset type for schema resolution (file type, not category asset_type)
                             // Default to 'image' - can be enhanced to detect from file MIME type
@@ -2118,7 +2124,8 @@ class UploadController extends Controller
                     // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
                     // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
                     // This ensures approval logic runs only after asset exists, not during upload
-                    if (!empty($metadataFields)) {
+                    // Skip when no category (builder-staged uploads have no category)
+                    if (!empty($metadataFields) && $category) {
                         try {
                             // UX-2: Assertion - Asset must exist before metadata persistence
                             // This guard ensures approval logic runs only after asset creation

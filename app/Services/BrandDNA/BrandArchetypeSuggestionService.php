@@ -103,6 +103,18 @@ class BrandArchetypeSuggestionService
             ];
         }
 
+        if (count($toneKeywords) < 3) {
+            $suggestions[] = [
+                'key' => 'SUG:expression.tone_keywords.reinforce',
+                'path' => 'scoring_rules.tone_keywords',
+                'type' => 'merge',
+                'value' => $canonical['tone_keywords'],
+                'reason' => 'Strengthen tone alignment with selected archetype.',
+                'confidence' => 0.75,
+                'weight' => 0.75,
+            ];
+        }
+
         return [
             'suggestions' => $this->normalizeSuggestions($suggestions),
         ];
@@ -114,6 +126,7 @@ class BrandArchetypeSuggestionService
         foreach ($suggestions as $s) {
             $confidence = (float) ($s['confidence'] ?? 0);
             $confidence = max(0.0, min(1.0, $confidence));
+            $weight = (float) ($s['weight'] ?? $confidence);
             $out[] = [
                 'key' => $s['key'] ?? '',
                 'path' => $s['path'] ?? '',
@@ -121,6 +134,8 @@ class BrandArchetypeSuggestionService
                 'value' => $s['value'] ?? [],
                 'reason' => $s['reason'] ?? '',
                 'confidence' => $confidence,
+                'weight' => $weight,
+                'confidence_tier' => SuggestionConfidenceTier::fromWeight($weight),
             ];
         }
 

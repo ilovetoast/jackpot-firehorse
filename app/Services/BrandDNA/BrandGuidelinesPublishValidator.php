@@ -2,7 +2,6 @@
 
 namespace App\Services\BrandDNA;
 
-use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
 
@@ -12,10 +11,9 @@ use App\Models\BrandModelVersion;
  */
 class BrandGuidelinesPublishValidator
 {
-    public const CONTEXT_GUIDELINE_SOURCE = 'guideline_source';
-
     /**
      * Validate draft and brand. Returns empty array if valid; otherwise list of missing field descriptions.
+     * Minimum brand completeness per stabilization spec.
      *
      * @return array<string>
      */
@@ -27,78 +25,58 @@ class BrandGuidelinesPublishValidator
             $payload = [];
         }
 
-        // 1. Background: website_url OR >= 1 social url OR >= 1 guideline_source asset
-        if (! $this->hasBackgroundSource($payload, $brand)) {
-            $missing[] = 'Background: Provide website URL, at least one social URL, or upload a communication example';
+        // 1. personality.primary_archetype
+        $primary = $payload['personality']['primary_archetype'] ?? null;
+        if (empty(trim((string) $primary))) {
+            $missing[] = 'Archetype: Primary archetype is required';
         }
 
-        // 2. identity.mission (WHY) — Purpose step
+        // 2. identity.mission
         $mission = $payload['identity']['mission'] ?? null;
         if (empty(trim((string) $mission))) {
             $missing[] = 'Purpose: Mission (WHY) is required';
         }
 
-        // 3. identity.positioning (WHAT) — Purpose step
+        // 3. identity.positioning
         $positioning = $payload['identity']['positioning'] ?? null;
         if (empty(trim((string) $positioning))) {
             $missing[] = 'Purpose: Positioning statement (WHAT) is required';
         }
 
-        // 4. personality.primary_archetype OR candidate_archetypes length >= 1
-        $primary = $payload['personality']['primary_archetype'] ?? null;
-        $candidates = $payload['personality']['candidate_archetypes'] ?? [];
-        if (empty(trim((string) $primary)) && (! is_array($candidates) || count($candidates) < 1)) {
-            $missing[] = 'Archetype: Select a primary archetype or at least one candidate';
+        // 4. ≥ 3 tone keywords
+        $toneKeywords = $payload['scoring_rules']['tone_keywords'] ?? $payload['personality']['tone_keywords'] ?? [];
+        $toneKeywords = is_array($toneKeywords) ? $toneKeywords : [];
+        if (count($toneKeywords) < 3) {
+            $missing[] = 'Expression: At least 3 tone keywords are required';
         }
 
-        // 5. At least ONE of: brand.primary_color, typography.primary_font, visual.approved_references >= 1
-        if (! $this->hasVisualStandard($payload, $brand)) {
-            $missing[] = 'Standards: Add at least one of: brand primary color, typography primary font, or a photography reference';
+        // 5. ≥ 1 allowed_color_palette color
+        $palette = $payload['scoring_rules']['allowed_color_palette'] ?? [];
+        $paletteCount = $this->countPaletteColors($palette);
+        if ($paletteCount < 1) {
+            $missing[] = 'Standards: At least 1 color in allowed palette is required';
+        }
+
+        // 6. typography.primary_font
+        $primaryFont = $payload['typography']['primary_font'] ?? null;
+        if (empty(trim((string) $primaryFont))) {
+            $missing[] = 'Standards: Primary font is required';
         }
 
         return $missing;
     }
 
-    protected function hasBackgroundSource(array $payload, Brand $brand): bool
+    protected function countPaletteColors(array $palette): int
     {
-        $sources = $payload['sources'] ?? [];
-        $websiteUrl = trim((string) ($sources['website_url'] ?? ''));
-        if ($websiteUrl !== '') {
-            return true;
-        }
-
-        $socialUrls = $sources['social_urls'] ?? [];
-        if (is_array($socialUrls) && count($socialUrls) >= 1) {
-            $nonEmpty = array_filter($socialUrls, fn ($u) => trim((string) $u) !== '');
-            if (count($nonEmpty) >= 1) {
-                return true;
+        $count = 0;
+        foreach ($palette as $item) {
+            if (is_array($item) && ! empty(trim((string) ($item['hex'] ?? '')))) {
+                $count++;
+            } elseif (is_string($item) && trim($item) !== '') {
+                $count++;
             }
         }
 
-        $count = Asset::where('brand_id', $brand->id)
-            ->where('builder_staged', true)
-            ->where('builder_context', self::CONTEXT_GUIDELINE_SOURCE)
-            ->count();
-
-        return $count >= 1;
-    }
-
-    protected function hasVisualStandard(array $payload, Brand $brand): bool
-    {
-        if (! empty(trim((string) ($brand->primary_color ?? '')))) {
-            return true;
-        }
-
-        $primaryFont = $payload['typography']['primary_font'] ?? null;
-        if (! empty(trim((string) $primaryFont))) {
-            return true;
-        }
-
-        $refs = $payload['visual']['approved_references'] ?? [];
-        if (is_array($refs) && count($refs) >= 1) {
-            return true;
-        }
-
-        return false;
+        return $count;
     }
 }

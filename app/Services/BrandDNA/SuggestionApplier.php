@@ -4,10 +4,12 @@ namespace App\Services\BrandDNA;
 
 use App\Models\BrandModelVersion;
 use LogicException;
+use RuntimeException;
 
 /**
  * Deterministic Apply engine for Brand DNA snapshot suggestions.
  * Draft changes only when apply() is called.
+ * User draft always wins: cannot override user-defined value when suggestion weight < 1.0.
  */
 class SuggestionApplier
 {
@@ -17,12 +19,20 @@ class SuggestionApplier
         $path = $suggestion['path'] ?? '';
         $type = $suggestion['type'] ?? 'informational';
         $value = $suggestion['value'] ?? null;
+        $weight = $suggestion['weight'] ?? 1.0;
 
         if ($type === 'informational') {
             return $draft;
         }
 
         $payload = $draft->model_payload ?? [];
+
+        if ($weight < 1.0) {
+            $existing = $this->getAtPathSafe($payload, $path);
+            if ($this->hasUserDefinedValue($existing)) {
+                throw new RuntimeException('Cannot override user-defined value.');
+            }
+        }
 
         if ($type === 'update') {
             $payload = $this->setAtPath($payload, $path, $value);
@@ -42,6 +52,36 @@ class SuggestionApplier
         $draft->save();
 
         return $draft;
+    }
+
+    protected function getAtPathSafe(array $payload, string $path)
+    {
+        $segments = $this->parsePath($path);
+        if ($segments === []) {
+            return null;
+        }
+        $current = $payload;
+        foreach ($segments as $segment) {
+            if (! is_array($current) || ! array_key_exists($segment, $current)) {
+                return null;
+            }
+            $current = $current[$segment];
+        }
+        return $current;
+    }
+
+    protected function hasUserDefinedValue(mixed $val): bool
+    {
+        if ($val === null) {
+            return false;
+        }
+        if (is_string($val)) {
+            return $val !== '';
+        }
+        if (is_array($val)) {
+            return ! empty($val);
+        }
+        return true;
     }
 
     /**
