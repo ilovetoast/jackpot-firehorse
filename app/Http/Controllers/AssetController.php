@@ -51,6 +51,18 @@ class AssetController extends Controller
     }
 
     /**
+     * GET /app/assets/staged
+     * Staged asset intake: assets without category, shown until classified.
+     * Reuses the asset grid with source=staged; no lifecycle filters.
+     */
+    public function staged(Request $request): Response|JsonResponse
+    {
+        $request->merge(['source' => 'staged']);
+
+        return $this->index($request);
+    }
+
+    /**
      * Display a listing of assets.
      * Returns JsonResponse for load_more (page 2+) so the client can append without Inertia; otherwise Inertia Response.
      */
@@ -194,8 +206,11 @@ class AssetController extends Controller
             abort(403, 'You do not have permission to view trash.');
         }
         $isTrashView = $normalizedLifecycle === 'deleted';
-        if (!empty($viewableCategoryIds)) {
+        $sourceParam = $request->get('source');
+        $isStagedView = $sourceParam === 'staged';
+        if (!empty($viewableCategoryIds) && ! $isStagedView) {
             $countQuery = Asset::query()
+                ->normalIntakeOnly()
                 ->excludeBuilderStaged()
                 ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
                 ->where('tenant_id', $tenant->id)
@@ -276,23 +291,25 @@ class AssetController extends Controller
         // Security: only assets in categories the user can view (private/locked folder visibility)
         $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
 
-        $sourceParam = $request->get('source');
         $isReferenceMaterialsView = $sourceParam === 'reference_materials';
 
         // Query assets for this brand and asset type
         // Phase B2: lifecycle=deleted shows trash (onlyTrashed); otherwise exclude deleted (default scope).
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
+        // Intake: main grid excludes staged (intake_state=normal); staged view shows intake_state=staged only.
         $assetsQuery = Asset::query()
-            ->when($isReferenceMaterialsView, fn ($q) => $q->builderStagedOnly(), fn ($q) => $q->excludeBuilderStaged())
+            ->when($isStagedView, fn ($q) => $q->stagedOnly(), fn ($q) => $q->normalIntakeOnly())
+            ->when($isReferenceMaterialsView, fn ($q) => $q->referenceMaterialsOnly(), fn ($q) => $q->when(! $isStagedView, fn ($q2) => $q2->excludeBuilderStaged()))
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET);
+            ->when($isReferenceMaterialsView, fn ($q) => $q, fn ($q) => $q->where('type', AssetType::ASSET));
 
+        // Staged view: no category filter (staged assets have no category)
         // Reference materials: no category filter (builder-staged assets have no category)
         // Main grid: restrict to viewable categories only
-        if ($isReferenceMaterialsView) {
-            // No category filter; show all builder-staged assets regardless of category
+        if ($isStagedView || $isReferenceMaterialsView) {
+            // No category filter; show all staged/reference assets
         } elseif (empty($viewableCategoryIds)) {
             $assetsQuery->whereRaw('0 = 1');
         } else {
@@ -300,35 +317,47 @@ class AssetController extends Controller
                 ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
         }
 
-        // Filter by category if provided (check metadata for category_id) — skip for reference materials
-        // Use same JSON extraction as count query to ensure count/grid parity (handles string vs int in metadata)
-        if (! $isReferenceMaterialsView && $categoryId) {
+        // Filter by category if provided — skip for staged and reference materials
+        if (! $isStagedView && ! $isReferenceMaterialsView && $categoryId) {
             $assetsQuery->whereRaw(
                 'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
                 [(int) $categoryId]
             );
         }
 
-        // Reference materials count for sidebar (builder-staged, not in trash)
+        // Reference materials count for sidebar — must match grid (apply same lifecycle as assets query)
         $referenceMaterialsCount = 0;
         if (! $isTrashView) {
-            $referenceMaterialsCount = Asset::query()
-                ->builderStagedOnly()
+            $refCountQuery = Asset::query()
+                ->referenceMaterialsOnly()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id);
+            $this->lifecycleResolver->apply($refCountQuery, $normalizedLifecycle, $user, $tenant, $brand);
+            $referenceMaterialsCount = $refCountQuery->count();
+        }
+
+        // Staged count for sidebar (intake_state=staged, not in trash)
+        $stagedCount = 0;
+        if (! $isTrashView) {
+            $stagedCount = Asset::query()
+                ->stagedOnly()
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::ASSET)
                 ->count();
         }
 
-        // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
+        // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver (skip for staged view per spec)
         // Phase B2: Resolver validates viewTrash for lifecycle=deleted and applies exclusions
-        $this->lifecycleResolver->apply(
-            $assetsQuery,
-            $normalizedLifecycle,
-            $user,
-            $tenant,
-            $brand
-        );
+        if (! $isStagedView) {
+            $this->lifecycleResolver->apply(
+                $assetsQuery,
+                $normalizedLifecycle,
+                $user,
+                $tenant,
+                $brand
+            );
+        }
 
         // Phase M: Base query for "has values" check (tenant, brand, category, lifecycle only; search applied below)
         // Must NOT include request metadata filters so empty filters are hidden by value presence, not by current selection
@@ -1236,7 +1265,7 @@ class AssetController extends Controller
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
-            'total_asset_count' => $totalAssetCount, // Total count for "All" button
+            'total_asset_count' => $isStagedView ? $stagedCount : $totalAssetCount, // Staged view: staged count; main grid: category total
             'assets' => $mappedAssets,
             'next_page_url' => $nextPageUrl,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
@@ -1248,8 +1277,9 @@ class AssetController extends Controller
             'lifecycle' => $lifecycleParam, // Phase B2: e.g. 'deleted' for trash view
             'can_view_trash' => $canViewTrash,
             'trash_count' => $trashCount,
-            'source' => $sourceParam, // e.g. 'reference_materials' for builder-staged assets
+            'source' => $sourceParam, // e.g. 'reference_materials', 'staged'
             'reference_materials_count' => $referenceMaterialsCount,
+            'staged_count' => $stagedCount,
         ]);
     }
 

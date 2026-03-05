@@ -102,6 +102,13 @@ class Asset extends Model
                         'category_id' => $oldCategoryId,
                     ]);
                 }
+
+                // Intake: when category_id is newly assigned to a staged asset, transition to normal
+                $hadCategory = $oldCategoryId !== null && $oldCategoryId !== '' && (is_string($oldCategoryId) ? strtolower(trim($oldCategoryId)) !== 'null' : true);
+                $hasCategory = $newCategoryId !== null && $newCategoryId !== '' && (is_string($newCategoryId) ? strtolower(trim($newCategoryId)) !== 'null' : true);
+                if (! $hadCategory && $hasCategory && ($asset->intake_state ?? 'normal') === 'staged') {
+                    $asset->intake_state = 'normal';
+                }
             }
         });
 
@@ -272,6 +279,7 @@ class Asset extends Model
         'builder_staged', // Brand Guidelines Builder: hidden from grid until finalized
         'builder_context', // e.g. logo_primary, photo_reference, texture_reference
         'source', // e.g. builder, crawler, upload
+        'intake_state', // normal | staged: staged = no category yet, shown on /assets/staged
     ];
 
     /**
@@ -765,11 +773,42 @@ class Asset extends Model
     }
 
     /**
+     * Scope: only staged assets (no category yet, shown on /assets/staged).
+     */
+    public function scopeStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where('intake_state', 'staged');
+    }
+
+    /**
+     * Scope: only normal intake assets (have category, shown in main grid).
+     */
+    public function scopeNormalIntakeOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(function ($q) {
+            $q->where('intake_state', 'normal')->orWhereNull('intake_state');
+        });
+    }
+
+    /**
      * Scope: only builder-staged assets (Brand Guidelines reference materials).
+     * @deprecated Prefer scopeReferenceMaterialsOnly for new code.
      */
     public function scopeBuilderStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void
     {
         $query->where('builder_staged', true);
+    }
+
+    /**
+     * Scope: reference materials (type=REFERENCE or legacy builder_staged).
+     * Used for Brand Builder PDFs, screenshots, ads, packaging.
+     */
+    public function scopeReferenceMaterialsOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(function ($q) {
+            $q->where('type', AssetType::REFERENCE)
+                ->orWhere('builder_staged', true);
+        });
     }
 
     /**

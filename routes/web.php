@@ -425,6 +425,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
+            Route::get('/assets/staged', [\App\Http\Controllers\AssetController::class, 'staged'])->name('assets.staged');
             Route::get('/assets/processing', [\App\Http\Controllers\AssetController::class, 'activeProcessingJobs'])->name('assets.processing');
             
             // Metadata Analytics (Phase 7) — redirect /analytics to the actual page

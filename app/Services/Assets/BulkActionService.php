@@ -43,6 +43,9 @@ class BulkActionService
             }
         }
 
+        if ($actionEnum === AssetBulkAction::ASSIGN_CATEGORY) {
+            return $this->executeAssignCategory($assetIds, $payload, $user, $tenantId, $brandId);
+        }
         if ($actionEnum->isMetadataAction()) {
             $opType = $actionEnum->metadataOperationType();
             $metadata = $payload['metadata'] ?? [];
@@ -247,6 +250,59 @@ class BulkActionService
             default:
                 return false;
         }
+    }
+
+    protected function executeAssignCategory(array $assetIds, array $payload, User $user, int $tenantId, ?int $brandId): BulkActionResult
+    {
+        $categoryId = (int) ($payload['category_id'] ?? 0);
+        if ($categoryId <= 0) {
+            throw new \InvalidArgumentException('category_id is required and must be a valid category ID.');
+        }
+
+        $category = \App\Models\Category::where('id', $categoryId)
+            ->where('tenant_id', $tenantId)
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->first();
+
+        if (!$category) {
+            throw new \InvalidArgumentException('Category not found or not accessible.');
+        }
+
+        $assets = Asset::whereIn('id', $assetIds)
+            ->where('tenant_id', $tenantId)
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->get();
+
+        $processed = 0;
+        $skipped = 0;
+        $errors = [];
+
+        foreach ($assets as $asset) {
+            if (!Gate::forUser($user)->allows('view', $asset)) {
+                $skipped++;
+                continue;
+            }
+            try {
+                $metadata = $asset->metadata ?? [];
+                $metadata['category_id'] = $category->id;
+                $asset->metadata = $metadata;
+                $asset->intake_state = 'normal';
+                $asset->builder_staged = false; // Clear builder_staged when classifying
+                $asset->save();
+                $processed++;
+            } catch (\Throwable $e) {
+                Log::warning('[BulkActionService] Assign category failed', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+                $errors[] = ['asset_id' => $asset->id, 'reason' => $e->getMessage()];
+            }
+        }
+
+        return new BulkActionResult(
+            totalSelected: count($assetIds),
+            processed: $processed,
+            skipped: $skipped,
+            errors: $errors,
+            perActionSummary: []
+        );
     }
 
     protected function executeMetadataBulk(array $assetIds, AssetBulkAction $action, array $metadata, User $user, int $tenantId, ?int $brandId): BulkActionResult

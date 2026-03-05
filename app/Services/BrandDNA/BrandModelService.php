@@ -38,8 +38,13 @@ class BrandModelService
     }
 
     /**
-     * Activate a version. Sets previous active → archived, updates brand_models.active_version_id.
-     * Syncs core brand colors (primary, secondary, accent) into allowed_color_palette if not already present.
+     * Activate a version (publish flow).
+     *
+     * When the user finishes the wizard:
+     * - Sets brand_models.active_version_id = version.id
+     * - Marks the draft version as active (status=active)
+     * - Archives the previous active version (status=archived)
+     * - Syncs core brand colors into allowed_color_palette if not already present
      */
     public function activateVersion(BrandModelVersion $version): void
     {

@@ -51,6 +51,15 @@ class AssetBulkActionController extends Controller
                 ], 422);
             }
         }
+        if (AssetBulkAction::ASSIGN_CATEGORY->value === $action) {
+            $categoryId = $payload['category_id'] ?? null;
+            if ($categoryId === null || (is_string($categoryId) && trim($categoryId) === '')) {
+                return response()->json([
+                    'message' => 'Category is required for ASSIGN_CATEGORY action.',
+                    'errors' => ['payload.category_id' => ['The category_id field is required.']],
+                ], 422);
+            }
+        }
 
         $actionEnum = AssetBulkAction::from($action);
         if ($actionEnum->isMetadataAction()) {

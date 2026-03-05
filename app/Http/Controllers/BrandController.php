@@ -443,6 +443,10 @@ class BrandController extends Controller
         $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
         $canEditSystemCategories = $this->planService->hasFeature($tenant, 'edit_system_categories');
 
+        $brandModel = $brand->brandModel;
+        $activeVersion = $brandModel?->activeVersion;
+        $modelPayload = $activeVersion?->model_payload ?? [];
+
         return Inertia::render('Brands/Edit', [
             'brand' => [
                 'id' => $brand->id,
@@ -523,6 +527,8 @@ class BrandController extends Controller
             // Phase M-2: Pass tenant settings to check if company metadata approval is enabled
             'tenant_settings' => $tenant->settings ?? [],
             'current_plan' => $currentPlan,
+            // Brand DNA: active version model_payload for Strategy, Positioning, Expression, Standards tabs
+            'model_payload' => $modelPayload,
         ]);
     }
 

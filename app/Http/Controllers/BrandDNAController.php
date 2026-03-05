@@ -179,6 +179,12 @@ class BrandDNAController extends Controller
             }
         }
 
+        $returnTo = $request->input('return_to');
+        if ($returnTo === 'edit') {
+            return redirect()->route('brands.edit', ['brand' => $brand->id])
+                ->with('success', 'Brand DNA saved.');
+        }
+
         return redirect()->route('brands.dna.index', ['brand' => $brand->id])
             ->with('success', 'Brand DNA saved.');
     }

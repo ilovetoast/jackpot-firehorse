@@ -24,7 +24,8 @@ export default function BuilderAssetSelectorModal({
     const fetchAssets = useCallback(async () => {
         setLoading(true)
         try {
-            const res = await fetch('/app/assets?format=json', {
+            // Fetch reference materials (Brand Builder uploads) for selection
+            const res = await fetch('/app/assets?format=json&source=reference_materials', {
                 credentials: 'same-origin',
                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             })

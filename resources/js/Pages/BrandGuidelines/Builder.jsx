@@ -1080,6 +1080,10 @@ export default function BrandGuidelinesBuilder({
     const [assetSelectorOpen, setAssetSelectorOpen] = useState(null)
     const [dismissedInlineSuggestions, setDismissedInlineSuggestions] = useState([])
     const [showStartOverConfirm, setShowStartOverConfirm] = useState(false)
+    const [researchPolling, setResearchPolling] = useState(false)
+    const [ingestionPolling, setIngestionPolling] = useState(ingestionProcessing ?? false)
+    const [pdfExtractionPolling, setPdfExtractionPolling] = useState(false)
+    const [polledResearch, setPolledResearch] = useState(null)
 
     useEffect(() => {
         setBrandMaterials(initialBrandMaterials ?? [])
@@ -1179,9 +1183,10 @@ export default function BrandGuidelinesBuilder({
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
         } else if (currentStep === 'background') {
+            const overallStatus = polledResearch?.overall_status ?? initialOverallStatus
             const nextIdx = stepKeys.indexOf(currentStep) + 1
             const defaultNext = stepKeys[nextIdx]
-            if (effectiveOverallStatus === 'completed') {
+            if (overallStatus === 'completed') {
                 patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
             } else {
                 patchAndNavigate(defaultNext)
@@ -1189,7 +1194,7 @@ export default function BrandGuidelinesBuilder({
         } else {
             patchAndNavigate(stepKeys[stepKeys.indexOf(currentStep) + 1])
         }
-    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, effectiveOverallStatus])
+    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, polledResearch, initialOverallStatus])
 
     const handleBack = useCallback(() => {
         if (viewingReview) {
@@ -1232,10 +1237,7 @@ export default function BrandGuidelinesBuilder({
         }
     }, [brand.id, draft.id, enableScoring])
 
-    const [researchPolling, setResearchPolling] = useState(false)
-    const [ingestionPolling, setIngestionPolling] = useState(ingestionProcessing ?? false)
-    const [pdfExtractionPolling, setPdfExtractionPolling] = useState(false)
-    const [polledResearch, setPolledResearch] = useState(null)
+    const effectiveOverallStatus = polledResearch?.overall_status ?? initialOverallStatus
 
     const triggerIngestion = useCallback(async (opts = {}) => {
         try {
@@ -1407,7 +1409,6 @@ export default function BrandGuidelinesBuilder({
 
     const effectiveCrawlerRunning = researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning)
     const hasProcessing = pdfExtractionPolling || ingestionProcessing || ingestionPolling || effectiveCrawlerRunning
-    const effectiveOverallStatus = polledResearch?.overall_status ?? initialOverallStatus
     const isProcessing = hasProcessing
 
     // When on processing step and overall_status becomes completed, redirect to archetype

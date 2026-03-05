@@ -55,6 +55,13 @@ const BULK_ACTION_GROUPS = [
         ],
     },
     {
+        label: 'Classification',
+        sectionDescription: 'Assign category to staged assets (moves to main grid).',
+        actions: [
+            { id: 'ASSIGN_CATEGORY', label: 'Assign Category', helper: 'Set category and move to main grid', icon: DocumentCheckIcon },
+        ],
+    },
+    {
         label: 'Metadata',
         sectionDescription: 'Add, replace, or clear metadata fields.',
         actions: [
@@ -78,6 +85,7 @@ const LIFECYCLE_ACTIONS = new Set([
     'PUBLISH', 'UNPUBLISH', 'ARCHIVE', 'RESTORE_ARCHIVE', 'APPROVE', 'MARK_PENDING', 'SOFT_DELETE', 'RESTORE_TRASH', 'FORCE_DELETE',
 ])
 const METADATA_ACTIONS = new Set(['METADATA_ADD', 'METADATA_REPLACE', 'METADATA_CLEAR'])
+const ASSIGN_CATEGORY_ACTION = 'ASSIGN_CATEGORY'
 
 /**
  * Build selection summary from current-page assets and selected IDs.
@@ -144,6 +152,7 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
     if (pending > 0 || rejected > 0) valid.add('APPROVE')
     if (approved > 0 || rejected > 0) valid.add('MARK_PENDING')
     if (pending > 0) valid.add('REJECT')
+    valid.add('ASSIGN_CATEGORY')
     valid.add('METADATA_ADD')
     valid.add('METADATA_REPLACE')
     valid.add('METADATA_CLEAR')
@@ -156,10 +165,15 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
 /**
  * For each group, return only actions that are valid. Filter out groups with zero valid actions.
  * When validIds is null, all actions in all groups are shown.
+ * Classification (ASSIGN_CATEGORY) is hidden when categories is empty.
  */
-function computedValidActions(groups, validIds) {
-    if (!validIds) return groups.map((g) => ({ ...g, validActions: g.actions }))
-    return groups
+function computedValidActions(groups, validIds, categories = []) {
+    let filteredGroups = groups
+    if (Array.isArray(categories) && categories.length === 0) {
+        filteredGroups = groups.filter((g) => g.label !== 'Classification')
+    }
+    if (!validIds) return filteredGroups.map((g) => ({ ...g, validActions: g.actions }))
+    return filteredGroups
         .map((group) => ({
             ...group,
             validActions: group.actions.filter((a) => validIds.has(a.id)),
@@ -194,10 +208,13 @@ export default function BulkActionsModal({
     isTrashMode = false,
     /** Phase B2: Tenant admin only — show Permanently Delete bulk action */
     canForceDelete = false,
+    /** Staged intake: categories for Assign Category bulk action */
+    categories = [],
 }) {
     const [step, setStep] = useState('select')
     const [selectedAction, setSelectedAction] = useState(null)
     const [rejectionReason, setRejectionReason] = useState('')
+    const [assignCategoryId, setAssignCategoryId] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
     const [modalEntered, setModalEntered] = useState(false)
@@ -212,8 +229,8 @@ export default function BulkActionsModal({
         [selectionSummary, isTrashMode, canForceDelete]
     )
     const groupsWithValidActions = useMemo(
-        () => computedValidActions(BULK_ACTION_GROUPS, validIds),
-        [validIds]
+        () => computedValidActions(BULK_ACTION_GROUPS, validIds, categories),
+        [validIds, categories]
     )
 
     useEffect(() => {
@@ -245,6 +262,7 @@ export default function BulkActionsModal({
         setSelectedAction(actionId)
         setStep('configure')
         setError(null)
+        if (actionId === ASSIGN_CATEGORY_ACTION) setAssignCategoryId('')
     }, [assetIds, onOpenMetadataEdit, onClose])
 
     const handleBack = useCallback(() => {
@@ -258,6 +276,7 @@ export default function BulkActionsModal({
         setStep('select')
         setSelectedAction(null)
         setRejectionReason('')
+        setAssignCategoryId('')
         setError(null)
         onClose()
     }, [onClose])
@@ -267,10 +286,16 @@ export default function BulkActionsModal({
             setError('Rejection reason is required.')
             return
         }
+        if (selectedAction === ASSIGN_CATEGORY_ACTION && !assignCategoryId) {
+            setError('Please select a category.')
+            return
+        }
         setSubmitting(true)
         setError(null)
         try {
-            const payload = selectedAction === 'REJECT' ? { rejection_reason: rejectionReason.trim() } : {}
+            let payload = {}
+            if (selectedAction === 'REJECT') payload = { rejection_reason: rejectionReason.trim() }
+            else if (selectedAction === ASSIGN_CATEGORY_ACTION) payload = { category_id: parseInt(assignCategoryId, 10) }
             const { data } = await axios.post(bulkActionUrl, {
                 asset_ids: assetIds,
                 action: selectedAction,
@@ -288,7 +313,7 @@ export default function BulkActionsModal({
                 if (window.toast) window.toast(errMsg, 'error')
                 else if (window.flash) window.flash('error', errMsg)
             }
-            onComplete?.(processed > 0 ? { actionId: selectedAction } : undefined)
+            onComplete?.(processed > 0 ? { actionId: selectedAction, assignCategory: selectedAction === ASSIGN_CATEGORY_ACTION } : undefined)
             handleClose()
         } catch (e) {
             const msg = e.response?.data?.message || e.message || 'Request failed.'
@@ -299,6 +324,7 @@ export default function BulkActionsModal({
     }
 
     const isReject = selectedAction === 'REJECT'
+    const isAssignCategory = selectedAction === ASSIGN_CATEGORY_ACTION
     const isLifecycle = selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)
 
     const summaryEligible = selectedAssetSummary
@@ -445,6 +471,27 @@ export default function BulkActionsModal({
                                 <span className="text-sm text-gray-500">{getActionLabel(selectedAction)}</span>
                             </div>
 
+                            {selectedAction === ASSIGN_CATEGORY_ACTION && (
+                                <>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Category
+                                    </label>
+                                    <select
+                                        value={assignCategoryId}
+                                        onChange={(e) => setAssignCategoryId(e.target.value)}
+                                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                    >
+                                        <option value="">Select a category...</option>
+                                        {Array.isArray(categories) && categories.map((cat) => (
+                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                        ))}
+                                    </select>
+                                    {categories.length === 0 && (
+                                        <p className="mt-2 text-xs text-amber-600">No categories available. Create a category first.</p>
+                                    )}
+                                </>
+                            )}
+
                             {isReject && (
                                 <>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -499,7 +546,7 @@ export default function BulkActionsModal({
                                 <button
                                     type="button"
                                     onClick={handleSubmit}
-                                    disabled={submitting || (isReject && !rejectionReason.trim())}
+                                    disabled={submitting || (isReject && !rejectionReason.trim()) || (isAssignCategory && !assignCategoryId)}
                                     className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors"
                                 >
                                     {submitting
@@ -508,6 +555,8 @@ export default function BulkActionsModal({
                                         ? 'Confirm Action'
                                         : isReject
                                         ? 'Reject'
+                                        : isAssignCategory
+                                        ? 'Assign Category'
                                         : 'Apply'}
                                 </button>
                             </div>

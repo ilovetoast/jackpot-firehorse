@@ -57,6 +57,7 @@ class BrandDNABuilderController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
+        // Use existing draft or create one from active version's model_payload
         $draft = $this->draftService->getOrCreateDraftVersion($brand);
         $stepKeys = BrandGuidelinesBuilderSteps::stepKeys();
         $steps = BrandGuidelinesBuilderSteps::steps();
@@ -66,6 +67,10 @@ class BrandDNABuilderController extends Controller
         }
         if (! BrandGuidelinesBuilderSteps::isValidStepKey($currentStep)) {
             $currentStep = BrandGuidelinesBuilderSteps::STEP_BACKGROUND;
+        }
+        // Legacy: redirect step=processing to archetype (processing step removed)
+        if ($currentStep === 'processing') {
+            return redirect()->to(route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => BrandGuidelinesBuilderSteps::STEP_ARCHETYPE]));
         }
         $anchor = $request->query('anchor');
 
@@ -145,61 +150,8 @@ class BrandDNABuilderController extends Controller
             $guidelinesPdfAssetId = $guidelinesPdfAsset?->id;
             $guidelinesPdfFilename = $guidelinesPdfAsset?->original_filename;
 
-            // Compute per-source completion (AND logic: all enabled sources must be complete)
-            $sources = $draft->model_payload['sources'] ?? [];
-            $hasWebsiteUrl = ! empty(trim((string) ($sources['website_url'] ?? '')));
-            $hasSocialUrls = ! empty($sources['social_urls'] ?? []);
-            $hasPdf = $guidelinesPdfAsset !== null;
-            $hasMaterials = $brandMaterialCount > 0;
-
-            $pdfComplete = ! $hasPdf;
-            if ($hasPdf) {
-                $visionBatch = BrandPdfVisionExtraction::where('asset_id', $guidelinesPdfAsset->id)
-                    ->where('brand_id', $brand->id)
-                    ->where('brand_model_version_id', $draft->id)
-                    ->latest()
-                    ->first();
-                $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
-                if ($visionBatch) {
-                    $pdfComplete = in_array($visionBatch->status, [BrandPdfVisionExtraction::STATUS_COMPLETED, BrandPdfVisionExtraction::STATUS_FAILED]);
-                } elseif ($extraction) {
-                    $pdfComplete = ! in_array($extraction->status, ['pending', 'processing']);
-                } else {
-                    $pdfComplete = false;
-                }
-            }
-
-            $websiteComplete = ! $hasWebsiteUrl && ! $hasSocialUrls;
-            if ($hasWebsiteUrl || $hasSocialUrls) {
-                $websiteComplete = $latestResearch !== null && $crawlerRunning === false;
-            }
-
-            $materialsComplete = ! $hasMaterials;
-            if ($hasMaterials) {
-                $latestIngestion = $ingestionRecords->first();
-                $materialsComplete = $latestIngestion && $latestIngestion->status !== BrandIngestionRecord::STATUS_PROCESSING;
-            }
-
-            $socialComplete = true; // Social is part of website crawl; treat as not_required when no social URLs, else covered by websiteComplete
-
-            $allSourcesComplete = $pdfComplete && $websiteComplete && $materialsComplete && $socialComplete;
-            $overallStatus = $allSourcesComplete ? 'completed' : 'processing';
-            if ($ingestionRecords->first()?->status === BrandIngestionRecord::STATUS_FAILED) {
-                $overallStatus = 'failed';
-            }
-
-            // Processing step: if complete, redirect to archetype
-            if ($currentStep === BrandGuidelinesBuilderSteps::STEP_PROCESSING && $overallStatus === 'completed') {
-                return redirect()->to(route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => BrandGuidelinesBuilderSteps::STEP_ARCHETYPE]));
-            }
-
-            // Post-background steps (archetype, etc.): if not complete, redirect to processing (intentional checkpoint)
-            $postBackgroundSteps = [BrandGuidelinesBuilderSteps::STEP_ARCHETYPE, BrandGuidelinesBuilderSteps::STEP_PURPOSE_PROMISE, BrandGuidelinesBuilderSteps::STEP_EXPRESSION, BrandGuidelinesBuilderSteps::STEP_POSITIONING, BrandGuidelinesBuilderSteps::STEP_STANDARDS];
-            if (in_array($currentStep, $postBackgroundSteps, true) && $overallStatus !== 'completed') {
-                return redirect()->to(route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => BrandGuidelinesBuilderSteps::STEP_PROCESSING]));
-            }
-
-            // Background step: never redirect — user can edit, upload, and click Next when ready
+            // AI processing disabled — wizard never blocks. User can always proceed.
+            $overallStatus = 'completed';
         } catch (\Throwable $e) {
             // Tables may not exist yet
             $ingestionProcessing = false;
@@ -315,7 +267,9 @@ class BrandDNABuilderController extends Controller
     /**
      * POST /brands/{brand}/brand-dna/versions/{version}/publish
      * Body: { enable_scoring: boolean|null }
-     * Validates required fields, then activates version.
+     *
+     * When the user finishes the wizard: sets brand_models.active_version_id = draft_id,
+     * marks the draft version as active, archives the previous active version.
      */
     public function publish(Request $request, Brand $brand, BrandModelVersion $version): JsonResponse
     {
@@ -329,6 +283,12 @@ class BrandDNABuilderController extends Controller
         $brandModel = $brand->brandModel;
         if (! $brandModel || $version->brand_model_id !== $brandModel->id) {
             abort(404, 'Version not found for this brand.');
+        }
+
+        if ($version->status !== 'draft') {
+            return response()->json([
+                'error' => 'Version must be a draft to publish.',
+            ], 422);
         }
 
         $missing = $this->publishValidator->validate($version, $brand);

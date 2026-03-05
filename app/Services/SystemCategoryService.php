@@ -352,6 +352,39 @@ class SystemCategoryService
     }
 
     /**
+     * Get or create the reference_material category for a brand.
+     * Used by Brand Builder for reference materials (PDFs, screenshots, ads, packaging).
+     */
+    public function getOrCreateReferenceMaterialCategory(Brand $brand): Category
+    {
+        $template = SystemCategory::where('slug', 'reference_material')
+            ->where('asset_type', AssetType::REFERENCE)
+            ->orderByDesc('version')
+            ->first();
+
+        if (! $template) {
+            throw new \RuntimeException('reference_material system category template not found. Run SystemCategoryTemplateSeeder.');
+        }
+
+        $existing = Category::where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::REFERENCE)
+            ->where('slug', 'reference_material')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $this->addTemplateToBrand($brand, $template);
+        return Category::where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::REFERENCE)
+            ->where('slug', 'reference_material')
+            ->firstOrFail();
+    }
+
+    /**
      * Sync system category templates to a brand.
      * Creates brand-specific categories from the templates (latest versions only).
      *

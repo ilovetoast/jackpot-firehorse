@@ -506,7 +506,113 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan }) {
+// Map backend model_payload (identity, personality, typography, scoring_rules, visual) to Brand Settings form structure
+function modelPayloadToForm(payload) {
+    if (!payload || typeof payload !== 'object') payload = {}
+    const identity = payload.identity || {}
+    const personality = payload.personality || {}
+    const typography = payload.typography || {}
+    const scoringRules = payload.scoring_rules || {}
+    const visual = payload.visual || {}
+    const palette = scoringRules.allowed_color_palette || []
+    const allowedColors = Array.isArray(palette)
+        ? palette.map((c) => (typeof c === 'string' ? c : c?.hex ?? ''))
+        : []
+    return {
+        strategy: {
+            archetype: personality.archetype || personality.primary_archetype || null,
+            tone: personality.tone || null,
+            traits: Array.isArray(personality.traits) ? personality.traits : [],
+            voice_description: personality.voice_description || null,
+        },
+        purpose: {
+            why: identity.mission || null,
+            what: identity.positioning || null,
+        },
+        positioning: {
+            industry: identity.industry || null,
+            target_audience: identity.target_audience || null,
+            market_category: identity.market_category || null,
+            competitive_position: identity.competitive_position || null,
+            tagline: identity.tagline || null,
+        },
+        expression: {
+            brand_look: visual.brand_look || visual.photography_style || null,
+            brand_voice: personality.brand_voice || visual.brand_voice || null,
+            tone_keywords: Array.isArray(scoringRules.tone_keywords) ? scoringRules.tone_keywords : (Array.isArray(personality.tone_keywords) ? personality.tone_keywords : []),
+            photography_attributes: Array.isArray(scoringRules.photography_attributes) ? scoringRules.photography_attributes : [],
+        },
+        standards: {
+            primary_font: typography.primary_font || null,
+            secondary_font: typography.secondary_font || null,
+            heading_style: typography.heading_style || null,
+            body_style: typography.body_style || null,
+            allowed_colors: allowedColors,
+            banned_colors: Array.isArray(scoringRules.banned_colors) ? scoringRules.banned_colors : [],
+            allowed_fonts: Array.isArray(scoringRules.allowed_fonts) ? scoringRules.allowed_fonts : [],
+            visual_references: Array.isArray(payload.visual_references) ? payload.visual_references : [],
+        },
+        beliefs: Array.isArray(identity.beliefs) ? identity.beliefs : [],
+        values: Array.isArray(identity.values) ? identity.values : [],
+    }
+}
+
+// Map form structure back to backend model_payload (merge with existing)
+function formToModelPayload(form, existingPayload) {
+    const existing = existingPayload && typeof existingPayload === 'object' ? { ...existingPayload } : {}
+    const identity = { ...(existing.identity || {}) }
+    const personality = { ...(existing.personality || {}) }
+    const typography = { ...(existing.typography || {}) }
+    const scoringRules = { ...(existing.scoring_rules || {}) }
+    const visual = { ...(existing.visual || {}) }
+
+    identity.mission = form.purpose?.why ?? identity.mission
+    identity.positioning = form.purpose?.what ?? identity.positioning
+    identity.industry = form.positioning?.industry ?? identity.industry
+    identity.target_audience = form.positioning?.target_audience ?? identity.target_audience
+    identity.market_category = form.positioning?.market_category ?? identity.market_category
+    identity.competitive_position = form.positioning?.competitive_position ?? identity.competitive_position
+    identity.tagline = form.positioning?.tagline ?? identity.tagline
+    identity.beliefs = form.beliefs ?? identity.beliefs
+    identity.values = form.values ?? identity.values
+
+    personality.archetype = form.strategy?.archetype ?? personality.archetype
+    personality.primary_archetype = form.strategy?.archetype ?? personality.primary_archetype
+    personality.tone = form.strategy?.tone ?? personality.tone
+    personality.traits = form.strategy?.traits ?? personality.traits
+    personality.voice_description = form.strategy?.voice_description ?? personality.voice_description
+    personality.brand_voice = form.expression?.brand_voice ?? personality.brand_voice
+
+    typography.primary_font = form.standards?.primary_font ?? typography.primary_font
+    typography.secondary_font = form.standards?.secondary_font ?? typography.secondary_font
+    typography.heading_style = form.standards?.heading_style ?? typography.heading_style
+    typography.body_style = form.standards?.body_style ?? typography.body_style
+
+    const palette = (form.standards?.allowed_colors || []).map((hex) =>
+        typeof hex === 'string' && hex ? { hex, role: null } : null
+    ).filter(Boolean)
+    scoringRules.allowed_color_palette = palette.length ? palette : (scoringRules.allowed_color_palette || [])
+    scoringRules.banned_colors = form.standards?.banned_colors ?? scoringRules.banned_colors
+    scoringRules.allowed_fonts = form.standards?.allowed_fonts ?? scoringRules.allowed_fonts
+    scoringRules.tone_keywords = form.expression?.tone_keywords ?? scoringRules.tone_keywords
+    scoringRules.photography_attributes = form.expression?.photography_attributes ?? scoringRules.photography_attributes
+
+    visual.brand_look = form.expression?.brand_look ?? visual.brand_look
+    visual.brand_voice = form.expression?.brand_voice ?? visual.brand_voice
+    visual.photography_style = form.expression?.brand_look ?? visual.photography_style
+
+    return {
+        ...existing,
+        identity,
+        personality,
+        typography,
+        scoring_rules: scoringRules,
+        visual,
+        visual_references: form.standards?.visual_references ?? existing.visual_references,
+    }
+}
+
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload }) {
     const { auth } = usePage().props
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
@@ -596,6 +702,39 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             background_asset_ids: Array.isArray(brand.download_landing_settings?.background_asset_ids) ? brand.download_landing_settings.background_asset_ids : [],
         },
     })
+
+    // Brand DNA: model_payload from active version (Strategy, Positioning, Expression, Standards tabs)
+    const [modelPayload, setModelPayload] = useState(() => modelPayloadToForm(model_payload))
+    const [dnaSaving, setDnaSaving] = useState(false)
+    useEffect(() => {
+        setModelPayload(modelPayloadToForm(model_payload))
+    }, [model_payload])
+
+    const setModelPayloadField = (path, value) => {
+        setModelPayload((prev) => {
+            const next = JSON.parse(JSON.stringify(prev))
+            const parts = path.split('.')
+            let cur = next
+            for (let i = 0; i < parts.length - 1; i++) {
+                const p = parts[i]
+                if (!cur[p]) cur[p] = {}
+                cur = cur[p]
+            }
+            cur[parts[parts.length - 1]] = value
+            return next
+        })
+    }
+
+    const handleSaveDna = (e) => {
+        e.preventDefault()
+        setDnaSaving(true)
+        const payload = formToModelPayload(modelPayload, model_payload)
+        const url = typeof route === 'function' ? route('brands.dna.store', { brand: brand.id }) : `/app/brands/${brand.id}/dna`
+        router.post(url, { model_payload: payload, return_to: 'edit' }, {
+            preserveScroll: true,
+            onFinish: () => setDnaSaving(false),
+        })
+    }
 
     const submit = (e) => {
         e.preventDefault()
@@ -722,7 +861,11 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     <nav className="mt-6 p-1 rounded-xl bg-gray-100 inline-flex flex-wrap gap-0.5 shadow-sm" aria-label="Brand settings tabs">
                         {[
                             { id: 'identity', label: 'Identity' },
-                            { id: 'workspace', label: 'Workspace Appearance' },
+                            { id: 'strategy', label: 'Strategy' },
+                            { id: 'positioning', label: 'Positioning' },
+                            { id: 'expression', label: 'Expression' },
+                            { id: 'standards', label: 'Standards' },
+                            { id: 'workspace', label: 'Workspace' },
                             { id: 'public-pages', label: 'Public Pages' },
                             { id: 'members', label: 'Members' },
                         ].map((tab) => (
@@ -739,12 +882,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 {tab.label}
                             </button>
                         ))}
-                        <Link
-                            href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna`}
-                            className="px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
-                        >
-                            Brand DNA
-                        </Link>
                         <Link
                             href={typeof route === 'function' ? route('brands.guidelines.index', { brand: brand.id }) : `/app/brands/${brand.id}/guidelines`}
                             className="px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
@@ -777,6 +914,191 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
+                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards') ? (
+                /* DNA tabs: separate form, saves to model_payload */
+                <form onSubmit={handleSaveDna} className="space-y-8">
+                    {activeTab === 'strategy' && (
+                    <div id="strategy" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Strategy</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Define your brand archetype, tone, traits, and voice. These inform creative alignment and scoring.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <div>
+                                        <label htmlFor="archetype" className="block text-sm font-medium text-gray-900">Archetype</label>
+                                        <input type="text" id="archetype" value={modelPayload.strategy?.archetype ?? ''} onChange={(e) => setModelPayloadField('strategy.archetype', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Creator, Sage, Explorer" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="tone" className="block text-sm font-medium text-gray-900">Tone</label>
+                                        <input type="text" id="tone" value={modelPayload.strategy?.tone ?? ''} onChange={(e) => setModelPayloadField('strategy.tone', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Professional, Playful" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="voice_description" className="block text-sm font-medium text-gray-900">Voice description</label>
+                                        <textarea id="voice_description" rows={3} value={modelPayload.strategy?.voice_description ?? ''} onChange={(e) => setModelPayloadField('strategy.voice_description', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="How your brand sounds in communication" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Traits</label>
+                                        <p className="text-xs text-gray-500 mb-2">Comma-separated or add one per line</p>
+                                        <textarea rows={2} value={(modelPayload.strategy?.traits || []).join(', ')} onChange={(e) => setModelPayloadField('strategy.traits', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Bold, Innovative, Trustworthy" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="purpose_why" className="block text-sm font-medium text-gray-900">Purpose — Why</label>
+                                        <textarea id="purpose_why" rows={2} value={modelPayload.purpose?.why ?? ''} onChange={(e) => setModelPayloadField('purpose.why', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Why does your brand exist?" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="purpose_what" className="block text-sm font-medium text-gray-900">Purpose — What</label>
+                                        <textarea id="purpose_what" rows={2} value={modelPayload.purpose?.what ?? ''} onChange={(e) => setModelPayloadField('purpose.what', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="What does your brand do?" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Beliefs</label>
+                                        <textarea rows={2} value={(modelPayload.beliefs || []).join('\n')} onChange={(e) => setModelPayloadField('beliefs', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="One belief per line" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Values</label>
+                                        <textarea rows={2} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="One value per line" />
+                                    </div>
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+                    {activeTab === 'positioning' && (
+                    <div id="positioning" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Positioning</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Industry, target audience, market category, and competitive position.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <div>
+                                        <label htmlFor="industry" className="block text-sm font-medium text-gray-900">Industry</label>
+                                        <input type="text" id="industry" value={modelPayload.positioning?.industry ?? ''} onChange={(e) => setModelPayloadField('positioning.industry', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="target_audience" className="block text-sm font-medium text-gray-900">Target audience</label>
+                                        <textarea id="target_audience" rows={2} value={modelPayload.positioning?.target_audience ?? ''} onChange={(e) => setModelPayloadField('positioning.target_audience', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="market_category" className="block text-sm font-medium text-gray-900">Market category</label>
+                                        <input type="text" id="market_category" value={modelPayload.positioning?.market_category ?? ''} onChange={(e) => setModelPayloadField('positioning.market_category', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="competitive_position" className="block text-sm font-medium text-gray-900">Competitive position</label>
+                                        <input type="text" id="competitive_position" value={modelPayload.positioning?.competitive_position ?? ''} onChange={(e) => setModelPayloadField('positioning.competitive_position', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="tagline" className="block text-sm font-medium text-gray-900">Tagline</label>
+                                        <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+                    {activeTab === 'expression' && (
+                    <div id="expression" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Expression</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Brand look, voice, tone keywords, and photography attributes for creative alignment.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <div>
+                                        <label htmlFor="brand_look" className="block text-sm font-medium text-gray-900">Brand look</label>
+                                        <textarea id="brand_look" rows={2} value={modelPayload.expression?.brand_look ?? ''} onChange={(e) => setModelPayloadField('expression.brand_look', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Visual style, photography style" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="brand_voice" className="block text-sm font-medium text-gray-900">Brand voice</label>
+                                        <textarea id="brand_voice" rows={2} value={modelPayload.expression?.brand_voice ?? ''} onChange={(e) => setModelPayloadField('expression.brand_voice', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Tone keywords</label>
+                                        <textarea rows={2} value={(modelPayload.expression?.tone_keywords || []).join(', ')} onChange={(e) => setModelPayloadField('expression.tone_keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Photography attributes</label>
+                                        <textarea rows={2} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                    </div>
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+                    {activeTab === 'standards' && (
+                    <div id="standards" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Standards</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Typography, colors, fonts, and visual references for compliance scoring.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label htmlFor="primary_font" className="block text-sm font-medium text-gray-900">Primary font</label>
+                                            <input type="text" id="primary_font" value={modelPayload.standards?.primary_font ?? ''} onChange={(e) => setModelPayloadField('standards.primary_font', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="secondary_font" className="block text-sm font-medium text-gray-900">Secondary font</label>
+                                            <input type="text" id="secondary_font" value={modelPayload.standards?.secondary_font ?? ''} onChange={(e) => setModelPayloadField('standards.secondary_font', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label htmlFor="heading_style" className="block text-sm font-medium text-gray-900">Heading style</label>
+                                            <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
+                                            <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Allowed colors</label>
+                                        <textarea rows={2} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Banned colors</label>
+                                        <textarea rows={2} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Hex codes, comma-separated" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Allowed fonts</label>
+                                        <textarea rows={2} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">Visual references (asset IDs)</label>
+                                        <textarea rows={2} value={(modelPayload.standards?.visual_references || []).join(', ')} onChange={(e) => setModelPayloadField('standards.visual_references', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated asset IDs" />
+                                    </div>
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+                </form>
                 ) : (
                 <form onSubmit={submit} className="space-y-8">
                     {/* Tab: Identity */}

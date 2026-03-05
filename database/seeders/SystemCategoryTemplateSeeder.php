@@ -154,6 +154,16 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'sort_order' => 9,
                 'version' => 1,
             ],
+            // REFERENCE asset type: Brand Builder reference materials (hidden from normal libraries)
+            [
+                'name' => 'Reference Material',
+                'slug' => 'reference_material',
+                'asset_type' => AssetType::REFERENCE,
+                'is_private' => false,
+                'is_hidden' => true,
+                'sort_order' => 0,
+                'version' => 1,
+            ],
         ];
 
         foreach ($templates as $template) {

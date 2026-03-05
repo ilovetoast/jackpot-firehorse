@@ -14,6 +14,7 @@ use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\Category;
 use App\Services\AssetPathGenerator;
+use App\Services\SystemCategoryService;
 use App\Models\UploadSession;
 use App\Services\AssetVersionService;
 use App\Services\MetadataPersistenceService;
@@ -344,9 +345,20 @@ class UploadCompletionService
             ]);
         }
         
-        // Brand Guidelines Builder: staged uploads get builder_staged, builder_context, source
+        // Brand Guidelines Builder: reference materials (PDFs, screenshots, ads, packaging)
+        // Stored as type=REFERENCE, category=reference_material. Not shown in normal asset libraries.
         $uploadOptions = $uploadSession->upload_options ?? [];
         $isBuilderStaged = ! empty($uploadOptions['builder_staged']) && ! empty($uploadOptions['builder_context']);
+
+        if ($isBuilderStaged) {
+            $brand = \App\Models\Brand::find($targetBrandId);
+            if ($brand) {
+                $refCategory = app(SystemCategoryService::class)->getOrCreateReferenceMaterialCategory($brand);
+                $categoryId = $refCategory->id;
+                $metadataArray['category_id'] = $categoryId;
+                $assetTypeEnum = AssetType::REFERENCE;
+            }
+        }
 
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
@@ -419,7 +431,11 @@ class UploadCompletionService
                     'approval_status' => $initialApprovalStatus,
                 ];
 
-                // Brand Guidelines Builder: staged assets are hidden from main grid until finalized
+                // Intake state: assets without category are staged until classified
+                $assetData['intake_state'] = ($categoryId === null || $categoryId === '') ? 'staged' : 'normal';
+
+                // Brand Guidelines Builder: reference materials (type=REFERENCE, category=reference_material)
+                // Kept builder_staged for backward compat; reference materials view also checks type=REFERENCE
                 if ($isBuilderStaged) {
                     $assetData['builder_staged'] = true;
                     $assetData['builder_context'] = (string) ($uploadOptions['builder_context'] ?? '');

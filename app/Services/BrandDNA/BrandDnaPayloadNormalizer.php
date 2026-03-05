@@ -38,6 +38,8 @@ class BrandDnaPayloadNormalizer
                 'tone' => null,
                 'voice' => null,
                 'voice_description' => null,
+                'brand_voice' => null,
+                'brand_look' => null,
             ],
             'identity' => [
                 'beliefs' => [],
@@ -47,6 +49,8 @@ class BrandDnaPayloadNormalizer
                 'positioning' => null,
                 'industry' => null,
                 'target_audience' => null,
+                'market_category' => null,
+                'competitive_position' => null,
             ],
             'visual' => [
                 'visual_density' => null,
@@ -58,6 +62,7 @@ class BrandDnaPayloadNormalizer
                 'photography_style' => null,
                 'composition_style' => null,
                 'color_system' => [],
+                'brand_look' => null,
             ],
             'typography' => [
                 'primary_font' => null,

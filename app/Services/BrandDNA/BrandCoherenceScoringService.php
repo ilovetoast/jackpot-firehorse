@@ -28,13 +28,13 @@ class BrandCoherenceScoringService
         $brandColors = null;
         if ($brand) {
             $parts = [];
-            if ($brand->primary_color_user_defined && $brand->primary_color) {
+            if ($this->isColorUserDefined($brand, 'primary') && $brand->primary_color) {
                 $parts['primary'] = $brand->primary_color;
             }
-            if ($brand->secondary_color_user_defined && $brand->secondary_color) {
+            if ($this->isColorUserDefined($brand, 'secondary') && $brand->secondary_color) {
                 $parts['secondary'] = $brand->secondary_color;
             }
-            if ($brand->accent_color_user_defined && $brand->accent_color) {
+            if ($this->isColorUserDefined($brand, 'accent') && $brand->accent_color) {
                 $parts['accent'] = $brand->accent_color;
             }
             $brandColors = ! empty($parts) ? $parts : null;
@@ -91,6 +91,12 @@ class BrandCoherenceScoringService
             'strengths' => array_slice($strengths, 0, 5),
             'risks' => array_slice($risks, 0, 5),
         ];
+    }
+
+    protected function isColorUserDefined($brand, string $which): bool
+    {
+        $attr = $which . '_color_user_defined';
+        return isset($brand->{$attr}) && $brand->{$attr} === true;
     }
 
     protected function scoreBackground(array $sources, int $brandMaterialCount): array

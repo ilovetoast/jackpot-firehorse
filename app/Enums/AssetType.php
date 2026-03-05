@@ -30,4 +30,12 @@ enum AssetType: string
      * Used to track and manage AI-generated materials separately.
      */
     case AI_GENERATED = 'ai_generated';
+
+    /**
+     * Reference materials for Brand Builder.
+     * PDFs, screenshots, ads, packaging examples used for brand research,
+     * future AI analysis, and visual reference selection.
+     * Not shown in normal asset libraries.
+     */
+    case REFERENCE = 'reference';
 }

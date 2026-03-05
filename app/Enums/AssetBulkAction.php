@@ -22,6 +22,7 @@ enum AssetBulkAction: string
     case METADATA_ADD = 'METADATA_ADD';
     case METADATA_REPLACE = 'METADATA_REPLACE';
     case METADATA_CLEAR = 'METADATA_CLEAR';
+    case ASSIGN_CATEGORY = 'ASSIGN_CATEGORY'; // Staged intake: set category_id + intake_state=normal
 
     public function isApprovalAction(): bool
     {

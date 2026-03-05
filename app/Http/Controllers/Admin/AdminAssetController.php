@@ -658,6 +658,7 @@ class AdminAssetController extends Controller
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
             'deleted' => $this->parseBoolParam($request, 'deleted'),
             'builder_staged' => $this->parseBoolParam($request, 'builder_staged'),
+            'intake_state' => $request->filled('intake_state') ? trim($request->intake_state) : null,
             'date_from' => $request->filled('date_from') ? trim($request->date_from) : null,
             'date_to' => $request->filled('date_to') ? trim($request->date_to) : null,
         ];
@@ -705,6 +706,8 @@ class AdminAssetController extends Controller
             '/dead:(true|1)/i' => 'storage_missing',
             '/deleted:(true|false|1|0)/i' => 'deleted',
             '/builder:(true|false|1|0)/i' => 'builder_staged',
+            '/staged:(true|1)/i' => 'intake_state',
+            '/intake:(staged|normal)/i' => 'intake_state',
         ];
 
         foreach ($patterns as $regex => $key) {
@@ -729,6 +732,8 @@ class AdminAssetController extends Controller
                     $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : $parsed[$key] ?? null);
                 } elseif ($key === 'builder_staged') {
                     $parsed[$key] = in_array(strtolower($val), ['true', '1']) ? true : (in_array(strtolower($val), ['false', '0']) ? false : $parsed[$key] ?? null);
+                } elseif ($key === 'intake_state') {
+                    $parsed[$key] = in_array(strtolower($val), ['staged', 'true', '1']) ? 'staged' : (strtolower($val) === 'normal' ? 'normal' : $parsed[$key] ?? null);
                 } else {
                     $parsed[$key] = is_numeric($val) ? (int) $val : $val;
                 }
@@ -846,6 +851,11 @@ class AdminAssetController extends Controller
             $query->builderStagedOnly();
         } elseif (($filters['builder_staged'] ?? null) === false) {
             $query->excludeBuilderStaged();
+        }
+        if (($filters['intake_state'] ?? null) === 'staged') {
+            $query->stagedOnly();
+        } elseif (($filters['intake_state'] ?? null) === 'normal') {
+            $query->normalIntakeOnly();
         }
 
         return $query;

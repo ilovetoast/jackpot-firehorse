@@ -10,7 +10,15 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Brand DNA Draft Service — wizard write path for Brand Guidelines Builder.
- * Manages draft BrandModelVersion and safe patch/merge of partial payloads.
+ *
+ * Logic:
+ * - If a draft BrandModelVersion exists: use it.
+ * - If not: create one by copying the active version's model_payload.
+ * - Wizard edits update the draft version only (model_payload).
+ *
+ * Brand table during wizard: only brand_colors, logo references, icon references may be updated.
+ * All other wizard data is stored in the draft's model_payload.
+ *
  * Uses BrandGuidelinesBuilderSteps as single source of truth for allowed paths.
  */
 class BrandDnaDraftService
@@ -30,6 +38,7 @@ class BrandDnaDraftService
     /**
      * Get or create the draft BrandModelVersion for the brand.
      * Returns the latest draft (status=draft); creates one if none exists.
+     * New drafts are seeded from the active version's model_payload (or empty if none).
      */
     public function getOrCreateDraftVersion(Brand $brand): BrandModelVersion
     {
@@ -137,9 +146,10 @@ class BrandDnaDraftService
     }
 
     /**
-     * Patch from builder step. Determines allowed paths from step config.
-     * Filters payload to only allowed paths (rejects arbitrary keys).
-     * Handles brand_colors specially: updates Brand model, not model_payload.
+     * Patch from builder step. Updates the draft version only.
+     * - Filters payload to allowed paths from step config.
+     * - brand_colors: updates brands table (primary_color, secondary_color, accent_color).
+     * - All other paths: updates brand_model_versions.model_payload on the draft.
      */
     public function patchFromStep(Brand $brand, string $stepKey, array $payload): BrandModelVersion
     {
@@ -160,7 +170,8 @@ class BrandDnaDraftService
             }
         }
 
-        // brand_colors: update Brand model directly; set user_defined when user manually edits
+        // brand_colors: update Brand model directly (allowed during wizard).
+        // Logo/icon references would also be allowed; currently only colors are updated here.
         if (array_key_exists('brand_colors', $filteredPatch)) {
             $colors = $filteredPatch['brand_colors'];
             if (is_array($colors)) {

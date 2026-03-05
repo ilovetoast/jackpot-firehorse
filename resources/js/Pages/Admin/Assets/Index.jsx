@@ -181,6 +181,7 @@ export default function AdminAssetsIndex({
         initialFilters?.thumbnail_status ||
         initialFilters?.visible_in_grid != null ||
         initialFilters?.builder_staged != null ||
+        initialFilters?.intake_state ||
         initialFilters?.deleted != null ||
         initialFilters?.has_incident != null ||
         initialFilters?.storage_missing ||
@@ -589,6 +590,21 @@ export default function AdminAssetsIndex({
                                     <option value="">All</option>
                                     <option value="1">Visible in grid</option>
                                     <option value="0">Not visible</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Staged</label>
+                                <select
+                                    value={initialFilters?.intake_state ?? ''}
+                                    onChange={(e) => {
+                                        const v = e.target.value
+                                        applyFilters({ intake_state: v === '' ? null : v, page: 1 })
+                                    }}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="staged">Staged only (uncategorized)</option>
+                                    <option value="normal">Normal only (categorized)</option>
                                 </select>
                             </div>
                             <div>

@@ -12,9 +12,12 @@ export default defineConfig({
     ],
     server: {
         host: '0.0.0.0',
-        port: 5173,
+        port: 5174,
+        strictPort: false,
         hmr: {
-            host: 'localhost'
+            host: 'jackpot.local',
+            protocol: 'ws',
+            clientPort: 5174,
         },
         cors: true,
         headers: {
