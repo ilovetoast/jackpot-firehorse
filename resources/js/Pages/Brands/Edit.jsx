@@ -1,6 +1,7 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
 import AppNav from '../../Components/AppNav'
+import { ARCHETYPES } from '../../constants/brandOptions'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
@@ -612,12 +613,13 @@ function formToModelPayload(form, existingPayload) {
     }
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [] }) {
     const { auth } = usePage().props
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const [activeSection, setActiveSection] = useState('basic-information')
-    const [activeTab, setActiveTab] = useState('identity') // identity | workspace | public-pages | members
+    const [topLevelNav, setTopLevelNav] = useState('brand_model') // brand_model | brand_settings
+    const [activeTab, setActiveTab] = useState('strategy') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|public-pages|members
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
@@ -857,37 +859,137 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         Manage identity, workspace appearance, and team access.
                     </p>
 
-                    {/* Tab navigation — pill-style segmented control */}
-                    <nav className="mt-6 p-1 rounded-xl bg-gray-100 inline-flex flex-wrap gap-0.5 shadow-sm" aria-label="Brand settings tabs">
-                        {[
-                            { id: 'identity', label: 'Identity' },
-                            { id: 'strategy', label: 'Strategy' },
-                            { id: 'positioning', label: 'Positioning' },
-                            { id: 'expression', label: 'Expression' },
-                            { id: 'standards', label: 'Standards' },
-                            { id: 'workspace', label: 'Workspace' },
-                            { id: 'public-pages', label: 'Public Pages' },
-                            { id: 'members', label: 'Members' },
-                        ].map((tab) => (
+                    {/* Top-level navigation: Brand Model vs Brand Settings */}
+                    <div className="mt-6 flex flex-wrap items-center gap-4">
+                        <div className="inline-flex p-1 rounded-xl bg-gray-100 shadow-sm" role="tablist" aria-label="Configuration type">
                             <button
-                                key={tab.id}
                                 type="button"
-                                onClick={() => setActiveTab(tab.id)}
+                                role="tab"
+                                aria-selected={topLevelNav === 'brand_model'}
+                                onClick={() => { setTopLevelNav('brand_model'); setActiveTab('strategy') }}
                                 className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
-                                    activeTab === tab.id
-                                        ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60'
-                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                    topLevelNav === 'brand_model' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
                                 }`}
                             >
-                                {tab.label}
+                                Brand Model
                             </button>
-                        ))}
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={topLevelNav === 'brand_settings'}
+                                onClick={() => { setTopLevelNav('brand_settings'); setActiveTab('identity') }}
+                                className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
+                                    topLevelNav === 'brand_settings' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                }`}
+                            >
+                                Brand Settings
+                            </button>
+                        </div>
                         <Link
                             href={typeof route === 'function' ? route('brands.guidelines.index', { brand: brand.id }) : `/app/brands/${brand.id}/guidelines`}
-                            className="px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
+                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
                         >
-                            Brand Guidelines
+                            Brand Guidelines →
                         </Link>
+                    </div>
+
+                    {/* Brand Builder entry panel — encourages guided builder over manual editing */}
+                    {topLevelNav === 'brand_model' && (() => {
+                        const draftVersion = (all_versions || []).find((v) => v.status === 'draft')
+                        const formatDate = (iso) => {
+                            if (!iso) return '—'
+                            try {
+                                const d = new Date(iso)
+                                return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                            } catch { return '—' }
+                        }
+                        return (
+                            <div className="mt-4 rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200/20">
+                                {draftVersion ? (
+                                    <>
+                                        <h3 className="text-sm font-semibold text-amber-800">Draft Version Available</h3>
+                                        <p className="mt-1 text-sm text-gray-600">You have unpublished changes.</p>
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.brand-guidelines.builder', { brand: brand.id }) : `/app/brands/${brand.id}/brand-guidelines/builder`}
+                                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                                            >
+                                                Resume Draft Builder
+                                            </Link>
+                                            <button
+                                                type="button"
+                                                onClick={() => router.post(typeof route === 'function' ? route('brands.dna.versions.activate', { brand: brand.id, version: draftVersion.id }) : `/app/brands/${brand.id}/dna/versions/${draftVersion.id}/activate`, {}, { preserveScroll: true })}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Publish Draft
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                                            <span><strong className="text-gray-700">Active Version</strong> {active_version ? `v${active_version.version_number}` : '—'}</span>
+                                            <span><strong className="text-gray-700">Last Updated</strong> {formatDate(active_version?.updated_at)}</span>
+                                        </div>
+                                        <p className="mt-3 text-sm text-gray-600">
+                                            Define your brand DNA using the guided Brand Builder or edit fields manually below.
+                                        </p>
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.brand-guidelines.builder', { brand: brand.id }) : `/app/brands/${brand.id}/brand-guidelines/builder`}
+                                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                                            >
+                                                Run Brand Builder
+                                            </Link>
+                                            <button
+                                                type="button"
+                                                onClick={() => router.post(typeof route === 'function' ? route('brands.dna.versions.store', { brand: brand.id }) : `/app/brands/${brand.id}/dna/versions`, {}, { preserveScroll: true })}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Create Draft Version
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )
+                    })()}
+
+                    {/* Tab navigation — Brand Model or Brand Settings tabs */}
+                    <nav className="mt-4 p-1 rounded-xl bg-gray-100 inline-flex flex-wrap gap-0.5 shadow-sm" aria-label={topLevelNav === 'brand_model' ? 'Brand Model tabs' : 'Brand Settings tabs'}>
+                        {topLevelNav === 'brand_model' ? (
+                            ['strategy', 'positioning', 'expression', 'standards'].map((tabId) => {
+                                const labels = { strategy: 'Strategy', positioning: 'Positioning', expression: 'Expression', standards: 'Standards' }
+                                return (
+                                    <button
+                                        key={tabId}
+                                        type="button"
+                                        onClick={() => setActiveTab(tabId)}
+                                        className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
+                                            activeTab === tabId ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                        }`}
+                                    >
+                                        {labels[tabId]}
+                                    </button>
+                                )
+                            })
+                        ) : (
+                            ['identity', 'workspace', 'public-pages', 'members'].map((tabId) => {
+                                const labels = { identity: 'Identity', workspace: 'Workspace', 'public-pages': 'Public Pages', members: 'Members' }
+                                return (
+                                    <button
+                                        key={tabId}
+                                        type="button"
+                                        onClick={() => setActiveTab(tabId)}
+                                        className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
+                                            activeTab === tabId ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                        }`}
+                                    >
+                                        {labels[tabId]}
+                                    </button>
+                                )
+                            })
+                        )}
                     </nav>
                 </div>
 
@@ -930,7 +1032,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mt-6 space-y-6">
                                     <div>
                                         <label htmlFor="archetype" className="block text-sm font-medium text-gray-900">Archetype</label>
-                                        <input type="text" id="archetype" value={modelPayload.strategy?.archetype ?? ''} onChange={(e) => setModelPayloadField('strategy.archetype', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Creator, Sage, Explorer" />
+                                        <select
+                                            id="archetype"
+                                            value={modelPayload.strategy?.archetype ?? ''}
+                                            onChange={(e) => setModelPayloadField('strategy.archetype', e.target.value || null)}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 focus:border-indigo-500 sm:text-sm"
+                                        >
+                                            <option value="">Select archetype</option>
+                                            {ARCHETYPES.map((a) => (
+                                                <option key={a.id} value={a.id}>{a.id} — {a.desc}</option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div>
                                         <label htmlFor="tone" className="block text-sm font-medium text-gray-900">Tone</label>

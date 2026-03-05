@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
+import { ARCHETYPES } from '../../../constants/brandOptions'
 import AppHead from '../../../Components/AppHead'
 import AssetImagePickerField from '../../../Components/media/AssetImagePickerField'
 import AssetImagePickerFieldMulti from '../../../Components/media/AssetImagePickerFieldMulti'
@@ -48,11 +49,6 @@ const DEFAULT_PAYLOAD = {
         photography_attributes: [],
     },
 }
-
-const ARCHETYPES = [
-    'Creator', 'Caregiver', 'Ruler', 'Jester', 'Everyman', 'Lover',
-    'Hero', 'Outlaw', 'Magician', 'Innocent', 'Sage', 'Explorer',
-]
 
 function mergePayload(base, incoming) {
     const result = JSON.parse(JSON.stringify(base))
@@ -704,7 +700,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                 >
                                                     <option value="">Select archetype</option>
                                                     {ARCHETYPES.map((a) => (
-                                                        <option key={a} value={a}>{a}</option>
+                                                        <option key={a.id} value={a.id}>{a.id} — {a.desc}</option>
                                                     ))}
                                                 </select>
                                             </div>

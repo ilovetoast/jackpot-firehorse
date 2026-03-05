@@ -447,6 +447,20 @@ class BrandController extends Controller
         $activeVersion = $brandModel?->activeVersion;
         $modelPayload = $activeVersion?->model_payload ?? [];
 
+        $allVersions = $brandModel
+            ? $brandModel->versions()
+                ->orderByDesc('version_number')
+                ->get(['id', 'version_number', 'status', 'source_type', 'created_at', 'updated_at'])
+                ->map(fn ($v) => [
+                    'id' => $v->id,
+                    'version_number' => $v->version_number,
+                    'status' => $v->status,
+                    'source_type' => $v->source_type,
+                    'created_at' => $v->created_at->toISOString(),
+                    'updated_at' => $v->updated_at->toISOString(),
+                ])
+            : [];
+
         return Inertia::render('Brands/Edit', [
             'brand' => [
                 'id' => $brand->id,
@@ -529,6 +543,15 @@ class BrandController extends Controller
             'current_plan' => $currentPlan,
             // Brand DNA: active version model_payload for Strategy, Positioning, Expression, Standards tabs
             'model_payload' => $modelPayload,
+            // Brand Model header: active version, create draft, run builder
+            'brand_model' => $brandModel ? ['id' => $brandModel->id, 'is_enabled' => $brandModel->is_enabled ?? false] : null,
+            'active_version' => $activeVersion ? [
+                'id' => $activeVersion->id,
+                'version_number' => $activeVersion->version_number,
+                'status' => $activeVersion->status,
+                'updated_at' => $activeVersion->updated_at->toISOString(),
+            ] : null,
+            'all_versions' => $allVersions,
         ]);
     }
 
