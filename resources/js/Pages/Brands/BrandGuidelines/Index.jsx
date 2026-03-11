@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
@@ -20,10 +20,29 @@ function copyToClipboard(text) {
     })
 }
 
-export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, hasActiveVersion, hasDraft }) {
+export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null }) {
     const { auth } = usePage().props
+
+    // Sync active brand to match the brand being viewed — avoids confusion when nav shows a different brand
+    useEffect(() => {
+        if (brand?.id && auth?.activeBrand?.id && brand.id !== auth.activeBrand.id) {
+            router.post(`/app/brands/${brand.id}/switch`, {}, {
+                preserveScroll: true,
+                preserveState: true,
+            })
+        }
+    }, [brand?.id, auth?.activeBrand?.id])
+
     const [copiedHex, setCopiedHex] = useState(null)
     const [showStartOverConfirm, setShowStartOverConfirm] = useState(false)
+    const [dismissedProcessingBanner, setDismissedProcessingBanner] = useState(() => {
+        try {
+            const key = `brand-guidelines-banner-dismissed-${brand?.id}`
+            return sessionStorage?.getItem(key) === '1'
+        } catch {
+            return false
+        }
+    })
     const isEnabled = brandModel?.is_enabled ?? false
     const showCallout = !isEnabled || !hasActiveVersion
 
@@ -49,10 +68,50 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
         setTimeout(() => setCopiedHex(null), 1200)
     }
 
+    const showProcessingBanner = hasDraft && (builderProcessing || researchFinalized) && !dismissedProcessingBanner
+    const dismissBanner = () => {
+        setDismissedProcessingBanner(true)
+        try {
+            sessionStorage?.setItem(`brand-guidelines-banner-dismissed-${brand?.id}`, '1')
+        } catch {}
+    }
+
     return (
         <div className="min-h-full">
-            <AppHead title="Brand Guidelines" />
+            <AppHead title={`Brand Guidelines — ${brand.name}`} />
             <AppNav brand={auth?.activeBrand} tenant={null} />
+            {showProcessingBanner && (
+                <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">
+                    <p className="text-sm text-indigo-800">
+                        {builderProcessing ? (
+                            <>Brand research for <strong>{brand.name}</strong> is still processing in the background. We&apos;ll notify you when it&apos;s ready.</>
+                        ) : (
+                            <>Brand research for <strong>{brand.name}</strong> is ready.</>
+                        )}
+                    </p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        {researchFinalized && (
+                            <button
+                                type="button"
+                                onClick={() => router.get(resumeUrl || route('brands.brand-guidelines.builder', { brand: brand.id, step: 'research-summary' }))}
+                                className="inline-flex rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                            >
+                                Review Research
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={dismissBanner}
+                            className="p-1.5 rounded text-indigo-600 hover:bg-indigo-100"
+                            aria-label="Dismiss"
+                        >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            )}
             <main className="bg-white">
                 {showCallout ? (
                     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
@@ -63,7 +122,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                             ← Back to Brand Settings
                         </Link>
                         <div className="max-w-lg text-center space-y-6">
-                            <h1 className="text-2xl font-bold text-gray-900">Brand Guidelines</h1>
+                            <h1 className="text-2xl font-bold text-gray-900">Brand Guidelines — {brand.name}</h1>
                             <p className="text-gray-600">
                                 {hasActiveVersion ? 'Update your brand guidelines or run the builder again.' : 'Start the Brand Guidelines Builder to define your brand DNA.'}
                             </p>
@@ -73,14 +132,14 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                         type="button"
                                         onClick={() => {
                                             if (hasDraft) {
-                                                router.get(route('brands.brand-guidelines.builder', { brand: brand.id }))
+                                                router.get(resumeUrl || route('brands.brand-guidelines.builder', { brand: brand.id, step: resumeStep }))
                                             } else {
                                                 router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
                                             }
                                         }}
                                         className="inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
                                     >
-                                        {hasDraft ? 'Continue Brand Guidelines' : 'Start Brand Guidelines'}
+                                        {hasDraft ? resumeLabel : 'Start Brand Guidelines'}
                                     </button>
                                     {hasDraft && (
                                         <>

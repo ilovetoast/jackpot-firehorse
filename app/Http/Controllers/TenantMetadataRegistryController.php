@@ -108,15 +108,13 @@ class TenantMetadataRegistryController extends Controller
         // Get all active categories for suppression UI
         // Include both system and non-system categories (use active() scope)
         // ordered() sorts by sort_order ASC; include is_hidden, sort_order, is_system for Metadata page
-        $categories = $tenant->brands()
-            ->with(['categories' => function ($query) {
-                $query->active()
-                    ->ordered()
-                    ->orderBy('name');
-            }])
+        // Eager load brand to avoid LazyLoadingViolationException
+        $categories = Category::whereHas('brand', fn ($q) => $q->where('tenant_id', $tenant->id))
+            ->with('brand')
+            ->active()
+            ->ordered()
+            ->orderBy('name')
             ->get()
-            ->pluck('categories')
-            ->flatten()
             ->filter(fn ($category) => $category->isActive())
             ->map(function ($category) {
                 $accessRules = [];
@@ -136,7 +134,7 @@ class TenantMetadataRegistryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug ?? \Illuminate\Support\Str::slug($category->name),
                     'brand_id' => $category->brand_id,
-                    'brand_name' => $category->brand->name ?? null,
+                    'brand_name' => $category->brand?->name ?? null,
                     'asset_type' => $category->asset_type?->value ?? 'asset',
                     'is_system' => $category->is_system,
                     'is_hidden' => $category->is_hidden,

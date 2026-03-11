@@ -653,12 +653,12 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                                 
                                                 {/* Content */}
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="flex-1">
-                                                            <p className="text-sm font-medium text-gray-900 leading-5">
+                                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                                            <span className="text-sm font-medium text-gray-900">
                                                                 {formatActivityDescription(activity)}
-                                                            </p>
-                                                            <div className="mt-2 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                                                            </span>
+                                                            <span className="flex items-center gap-1.5 text-xs text-gray-500 flex-shrink-0">
                                                                 <span className="flex items-center gap-1">
                                                                     {activity.actor?.type === 'user' ? (
                                                                         <UserIcon className="h-3 w-3 flex-shrink-0" />
@@ -673,7 +673,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                                                         <span>{activity.brand.name}</span>
                                                                     </>
                                                                 )}
-                                                            </div>
+                                                            </span>
                                                         </div>
                                                         <time className="flex-shrink-0 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                                                             {activity.created_at_human}

@@ -46,6 +46,7 @@ export default function CompanyPermissions({
             title: 'Company Management',
             type: 'company',
             permissions: [
+                'company.view',
                 'company_settings.view',
                 'company_settings.edit',
                 'company_settings.manage_download_policy',

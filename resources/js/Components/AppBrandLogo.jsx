@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { Link, router } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import { getContrastTextColor } from '../utils/colorUtils'
 import JackpotLogo from './JackpotLogo'
 
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
+    const { auth } = usePage().props
+    const tenant = auth?.activeCompany
+    const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
     // Filter out disabled brands and ensure we have a valid array
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
@@ -24,8 +27,16 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 preserveState: true,
                 preserveScroll: true,
                 onSuccess: () => {
-                    // Reload only the shared auth props (auth.brands, auth.activeBrand) without full page reload
-                    router.reload({ only: ['auth'] })
+                    // If on a brand-specific URL (e.g. guidelines, edit, dna), navigate to the same page for the new brand
+                    const path = typeof window !== 'undefined' ? window.location.pathname : ''
+                    const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
+                    if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
+                        const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
+                        const search = typeof window !== 'undefined' ? window.location.search : ''
+                        router.visit(newPath + search)
+                    } else {
+                        router.reload({ only: ['auth'] })
+                    }
                 },
             })
         }
@@ -41,7 +52,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
             const fallbackBrandName = firstBrand.name || 'Brand'
             const firstLetter = fallbackBrandName.charAt(0).toUpperCase()
             return (
-                <Link href="/app/dashboard" className="flex items-center min-w-0">
+                <Link href="/app" className="flex items-center min-w-0">
                     {firstBrand.logo_path ? (
                         <img
                             src={firstBrand.logo_path}
@@ -76,6 +87,10 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Ensure we have a brand name to display
     const brandName = activeBrand.name || 'Brand'
     const firstLetter = brandName.charAt(0).toUpperCase()
+    const isOnCompanyOverview = route().current('app')
+    const displayLabel = (isOnCompanyOverview && canViewCompanyOverview && tenant)
+        ? tenant.name
+        : brandName
     // Get brand primary color, fallback to indigo-600 if not set
     const brandColor = activeBrand.primary_color || '#4f46e5' // indigo-600 default
     // Get appropriate text color based on background color
@@ -93,33 +108,33 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     aria-haspopup="true"
                     style={{ color: textColor }}
                 >
-                    {activeBrand.logo_path ? (
-                        <img
-                            src={activeBrand.logo_path}
-                            alt={brandName}
-                            className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
-                            style={logoFilterStyle}
-                        />
-                    ) : (
-                        <>
+                    {!(isOnCompanyOverview && canViewCompanyOverview && tenant) && (
+                        activeBrand.logo_path ? (
+                            <img
+                                src={activeBrand.logo_path}
+                                alt={brandName}
+                                className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
+                                style={logoFilterStyle}
+                            />
+                        ) : (
                             <div 
                                 className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0"
                                 style={{ backgroundColor: brandColor }}
                             >
                                 <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
                             </div>
-                            <span 
-                                className="truncate min-w-0"
-                                style={{ 
-                                    fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                                    maxWidth: '200px'
-                                }}
-                                title={brandName}
-                            >
-                                {brandName}
-                            </span>
-                        </>
+                        )
                     )}
+                    <span 
+                        className="truncate min-w-0"
+                        style={{ 
+                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
+                            maxWidth: '200px'
+                        }}
+                        title={displayLabel}
+                    >
+                        {displayLabel}
+                    </span>
                     <svg
                         className="h-5 w-5 flex-shrink-0"
                         style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
@@ -145,10 +160,26 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             className="absolute left-0 z-20 mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            <div className="px-4 py-3 border-b border-gray-200">
-                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Switch Brand
-                                </p>
+                            {canViewCompanyOverview && tenant && (
+                                <>
+                                    <div className="px-3 pt-2 pb-1 text-xs text-gray-400 uppercase">
+                                        Company
+                                    </div>
+                                    <Link
+                                        href="/app"
+                                        className={`flex items-center px-3 py-2 rounded-md hover:bg-gray-100 ${
+                                            route().current('app') ? 'bg-gray-100 font-medium' : ''
+                                        }`}
+                                        onClick={() => setBrandMenuOpen(false)}
+                                    >
+                                        <span className="text-sm">
+                                            {tenant.name}
+                                        </span>
+                                    </Link>
+                                </>
+                            )}
+                            <div className="px-3 pt-3 pb-1 text-xs text-gray-400 uppercase">
+                                Switch Brand
                             </div>
                             <div className="max-h-64 overflow-y-auto">
                                 {brands && brands.length > 0 ? (
@@ -241,7 +272,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
 
     // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
-    const singleBrandHref = rootLinkHref ?? ((brands?.length === 0) ? '/app/brands' : '/app/dashboard')
+    const singleBrandHref = rootLinkHref ?? '/app'
     return (
         <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
             {activeBrand.logo_path ? (

@@ -4,7 +4,11 @@ namespace App\Jobs;
 
 use App\Models\BrandPdfPageExtraction;
 use App\Models\BrandPdfVisionExtraction;
+use App\Services\BrandDNA\BrandExtractionFusionService;
 use App\Services\BrandDNA\Extraction\VisionExtractionService;
+use App\Services\BrandDNA\FieldCandidateValidationService;
+use App\Services\BrandDNA\PdfPageClassificationService;
+use App\Services\BrandDNA\PdfPageVisualExtractionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -26,8 +30,12 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
         $this->onQueue(config('queue.pdf_processing_queue', 'pdf-processing'));
     }
 
-    public function handle(VisionExtractionService $visionService): void
-    {
+    public function handle(
+        VisionExtractionService $visionService,
+        PdfPageClassificationService $classificationService,
+        PdfPageVisualExtractionService $visualExtractionService,
+        FieldCandidateValidationService $validationService
+    ): void {
         $pageExt = BrandPdfPageExtraction::find($this->pageExtractionId);
         if (! $pageExt) {
             return;
@@ -54,15 +62,37 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
             return;
         }
 
+        $useVisualPipeline = config('brand_dna.visual_page_extraction_enabled', false);
+
+        Log::info('[AnalyzeBrandPdfPageJob] Pipeline config', [
+            'page_extraction_id' => $pageExt->id,
+            'visual_page_extraction_enabled' => $useVisualPipeline,
+            'env' => config('app.env'),
+            'path' => $useVisualPipeline ? 'visual' : 'legacy',
+        ]);
+
         try {
-            $extraction = $visionService->extractFromImage($imagePath);
-            $pageExt->update([
-                'extraction_json' => array_merge($extraction, [
+            if ($useVisualPipeline) {
+                $extraction = $this->runVisualPipeline($imagePath, $pageExt, $classificationService, $visualExtractionService, $validationService);
+            } else {
+                $extraction = $visionService->extractFromImage($imagePath);
+                $extraction = array_merge($extraction, [
                     'page_number' => $pageExt->page_number,
                     'confidence' => $extraction['confidence'] ?? 0.5,
-                ]),
+                ]);
+            }
+
+            $pageExt->update([
+                'extraction_json' => $extraction,
                 'status' => BrandPdfPageExtraction::STATUS_COMPLETED,
                 'error_message' => null,
+            ]);
+
+            Log::info('[AnalyzeBrandPdfPageJob] Page output shape', [
+                'page_extraction_id' => $pageExt->id,
+                'has_page_classification' => ! empty($extraction['_page_classification']),
+                'has_page_extractions' => isset($extraction['_page_extractions']) && is_array($extraction['_page_extractions']),
+                'page_extractions_count' => isset($extraction['_page_extractions']) ? count($extraction['_page_extractions']) : 0,
             ]);
 
             $visionBatch->increment('pages_processed');
@@ -92,6 +122,46 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
             ]);
             throw $e;
         }
+    }
+
+    protected function runVisualPipeline(
+        string $imagePath,
+        BrandPdfPageExtraction $pageExt,
+        PdfPageClassificationService $classificationService,
+        PdfPageVisualExtractionService $visualExtractionService,
+        FieldCandidateValidationService $validationService
+    ): array {
+        $pageNum = $pageExt->page_number;
+        $ocrText = $pageExt->extraction_json['_ocr_text'] ?? null;
+
+        $classification = $classificationService->classifyPage($imagePath, $pageNum);
+        $pageResult = $visualExtractionService->extractFromPage($imagePath, $classification, $ocrText);
+
+        $rawExtractions = $pageResult['extractions'] ?? [];
+        [$acceptedExtractions, $rejectedCandidates] = $validationService->validateMany($rawExtractions);
+
+        $pageResultValidated = array_merge($pageResult, ['extractions' => $acceptedExtractions]);
+
+        $fusionService = app(BrandExtractionFusionService::class);
+        $schema = $fusionService->pageExtractionsToSchema([$pageResultValidated]);
+
+        $rejectedForDebug = array_map(fn ($r) => [
+            'path' => $r['path'] ?? null,
+            'value' => $r['value'] ?? null,
+            'reason' => $r['reason'] ?? 'rejected',
+            'page' => $pageNum,
+            'page_type' => $pageResult['page_type'] ?? null,
+        ], $rejectedCandidates);
+
+        return array_merge($schema, [
+            'page_number' => $pageNum,
+            '_page_classification' => $classification,
+            '_page_extractions' => $acceptedExtractions,
+            '_raw_candidates' => $rawExtractions,
+            '_rejected_candidates' => $rejectedForDebug,
+            '_ocr_text' => $ocrText,
+            'confidence' => $classification['confidence'] ?? $schema['confidence'] ?? 0.5,
+        ]);
     }
 
     protected function countSignals(array $extraction): int

@@ -618,8 +618,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const [activeSection, setActiveSection] = useState('basic-information')
-    const [topLevelNav, setTopLevelNav] = useState('brand_model') // brand_model | brand_settings
-    const [activeTab, setActiveTab] = useState('strategy') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|public-pages|members
+    const [topLevelNav, setTopLevelNav] = useState('brand_settings') // brand_model | brand_settings
+    const [activeTab, setActiveTab] = useState('identity') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|public-pages|members
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
@@ -849,10 +849,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">
                     <Link
-                        href="/app/brands"
+                        href="/app"
                         className="text-sm font-medium text-gray-500 hover:text-gray-700"
                     >
-                        ← Back to Brands
+                        ← Back to Company
                     </Link>
                     <h1 className="mt-4 text-2xl font-bold tracking-tight text-gray-900">Brand Settings</h1>
                     <p className="mt-1 text-sm text-gray-600">
@@ -865,17 +865,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             <button
                                 type="button"
                                 role="tab"
-                                aria-selected={topLevelNav === 'brand_model'}
-                                onClick={() => { setTopLevelNav('brand_model'); setActiveTab('strategy') }}
-                                className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
-                                    topLevelNav === 'brand_model' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
-                                }`}
-                            >
-                                Brand Model
-                            </button>
-                            <button
-                                type="button"
-                                role="tab"
                                 aria-selected={topLevelNav === 'brand_settings'}
                                 onClick={() => { setTopLevelNav('brand_settings'); setActiveTab('identity') }}
                                 className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
@@ -883,6 +872,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 }`}
                             >
                                 Brand Settings
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={topLevelNav === 'brand_model'}
+                                onClick={() => { setTopLevelNav('brand_model'); setActiveTab('strategy') }}
+                                className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
+                                    topLevelNav === 'brand_model' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                }`}
+                            >
+                                Brand Model
                             </button>
                         </div>
                         <Link
@@ -2423,7 +2423,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     {/* Form Actions */}
                     <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
                         <Link
-                            href="/app/brands"
+                            href="/app"
                             className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
                         >
                             Cancel

@@ -105,9 +105,6 @@ Route::post('/app/admin/performance/client-metric', [\App\Http\Controllers\Admin
     ->name('admin.performance.client-metric');
 
 Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
-    // GET /app → redirect to dashboard (avoids 405 from OPTIONS catch-all matching path /app)
-    Route::get('', fn () => redirect()->route('dashboard'))->name('app');
-
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     
     // Company management (no tenant middleware - can access when no tenant selected)
@@ -129,6 +126,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     
     // Company settings (requires tenant to be selected). C12: RestrictCollectionOnlyUser gates collection-only users.
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+        // GET /app → company overview (all brands, aggregated metrics)
+        Route::get('', [\App\Http\Controllers\CompanyOverviewController::class, 'index'])->name('app');
         // Phase C12.0: Collection-only access landing (inside tenant so ResolveTenant can set collection_only)
         Route::get('/collection-access/{collection}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'landing'])->name('collection-invite.landing');
         Route::get('/collection-access/{collection}/view', [\App\Http\Controllers\CollectionAccessInviteController::class, 'viewCollection'])->name('collection-invite.view');
@@ -337,6 +336,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/support/tickets/suggestions/{suggestion}/accept', [\App\Http\Controllers\AdminTicketController::class, 'acceptSuggestion'])->name('admin.support.tickets.suggestions.accept');
     Route::post('/admin/support/tickets/suggestions/{suggestion}/reject', [\App\Http\Controllers\AdminTicketController::class, 'rejectSuggestion'])->name('admin.support.tickets.suggestions.reject');
     Route::post('/admin/support/tickets/suggestions/{suggestion}/create-ticket', [\App\Http\Controllers\AdminTicketController::class, 'createTicketFromSuggestion'])->name('admin.support.tickets.suggestions.create-ticket');
+    Route::post('/admin/support/round-robin', [\App\Http\Controllers\AdminTicketController::class, 'addRoundRobinUser'])->name('admin.support.round-robin.add');
+    Route::delete('/admin/support/round-robin/{user}', [\App\Http\Controllers\AdminTicketController::class, 'removeRoundRobinUser'])->name('admin.support.round-robin.remove');
     
     // Deletion Error Management routes (admin only)
     // Phase D-2: Admin Download Failures (read-only)
@@ -421,7 +422,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
-            Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'index'])->name('dashboard');
+            Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
+            Route::get('/dashboard', function () {
+                return redirect()->route('overview');
+            });
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
@@ -627,7 +631,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('uploads.finalize');
 
             // Brand routes (tenant-scoped)
-            Route::resource('brands', \App\Http\Controllers\BrandController::class);
+            Route::get('/brands', fn () => redirect()->route('app'))->name('brands.index');
+            Route::resource('brands', \App\Http\Controllers\BrandController::class)->except(['index']);
             Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
             Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
@@ -657,6 +662,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/insights/accept', [\App\Http\Controllers\BrandDNABuilderController::class, 'acceptInsight'])->name('brands.brand-dna.builder.insights.accept');
             Route::post('/brands/{brand}/brand-dna/builder/trigger-research', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerResearch'])->name('brands.brand-dna.builder.trigger-research');
             Route::post('/brands/{brand}/brand-dna/builder/trigger-ingestion', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerIngestion'])->name('brands.brand-dna.builder.trigger-ingestion');
+            Route::post('/brands/{brand}/brand-dna/builder/invalidate-and-rerun-research', [\App\Http\Controllers\BrandDNABuilderController::class, 'invalidateAndRerunResearch'])->name('brands.brand-dna.builder.invalidate-and-rerun-research');
             Route::post('/brands/{brand}/brand-dna/builder/attach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'attachAsset'])->name('brands.brand-dna.builder.attach-asset');
             Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
             Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');

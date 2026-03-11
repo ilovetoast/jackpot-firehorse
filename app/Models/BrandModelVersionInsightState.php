@@ -13,6 +13,7 @@ class BrandModelVersionInsightState extends Model
         'dismissed',
         'accepted',
         'viewed_at',
+        'research_ready_notified_at',
     ];
 
     protected function casts(): array
@@ -21,6 +22,7 @@ class BrandModelVersionInsightState extends Model
             'dismissed' => 'array',
             'accepted' => 'array',
             'viewed_at' => 'datetime',
+            'research_ready_notified_at' => 'datetime',
         ];
     }
 

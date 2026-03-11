@@ -53,6 +53,7 @@ class PermissionMap
         // - billing.view/manage: Plan & Billing
         // - brand_settings.manage: Brands Settings
         $companyPermissions = [
+            'company.view', // Company page (aggregated metrics across brands) — admin/owner only
             'billing.view',
             'billing.manage',
             'company_settings.view',

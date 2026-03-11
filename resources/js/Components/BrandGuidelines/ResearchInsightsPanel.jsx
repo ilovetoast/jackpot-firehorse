@@ -1,5 +1,5 @@
 /**
- * Research Insights Panel — right sidebar.
+ * Brand Intelligence Panel — right sidebar.
  * Status, Brand Coherence, Alignment Findings, Suggestions condensed.
  */
 import { useMemo, useState } from 'react'
@@ -66,7 +66,7 @@ export default function ResearchInsightsPanel({
     return (
         <div className="h-full flex flex-col overflow-hidden border-l border-white/10">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0">
-                <h3 className="text-lg font-semibold text-white">Research Insights</h3>
+                <h3 className="text-lg font-semibold text-white">Brand Intelligence</h3>
                 <button
                     type="button"
                     onClick={() => setCollapsed(!collapsed)}

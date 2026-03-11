@@ -13,9 +13,11 @@ import {
     XMarkIcon,
     PlusIcon,
     SparklesIcon,
+    UserMinusIcon,
+    UserPlusIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminTicketsIndex({ tickets, pagination, filterOptions, filters }) {
+export default function AdminTicketsIndex({ tickets, pagination, filterOptions, filters, roundRobinBucket = [] }) {
     const { auth } = usePage().props
     const [showCreateModal, setShowCreateModal] = useState(false)
     
@@ -23,6 +25,8 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
     // Handle both array and object formats (array_values ensures it's an array)
     const siteRoles = auth.user?.site_roles ? (Array.isArray(auth.user.site_roles) ? auth.user.site_roles : Object.values(auth.user.site_roles)) : []
     const canCreateEngineering = siteRoles.some(role => ['site_engineering', 'site_admin', 'site_owner'].includes(role))
+    const canManageRoundRobin = siteRoles.some(role => ['site_admin', 'site_owner'].includes(role))
+    const [roundRobinUserId, setRoundRobinUserId] = useState('')
     
     const { data, setData, post, processing, errors, reset } = useForm({
         subject: '',
@@ -183,6 +187,64 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                             </button>
                         )}
                     </div>
+
+                    {/* Round-Robin Bucket - Site Admin/Owner only */}
+                    {canManageRoundRobin && (
+                        <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-2">Round-Robin Assignment Bucket</h3>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Users in this bucket receive new support tickets in round-robin order. Add users with Site Support, Admin, or Owner role. When empty, uses config default (user 1).
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {roundRobinBucket.map((entry) => (
+                                    <span
+                                        key={entry.id}
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1.5 text-sm text-indigo-800"
+                                    >
+                                        {entry.user?.first_name} {entry.user?.last_name}
+                                        <button
+                                            type="button"
+                                            onClick={() => router.delete(`/app/admin/support/round-robin/${entry.user_id}`, { preserveScroll: true })}
+                                            className="rounded-full p-0.5 hover:bg-indigo-100 text-indigo-600"
+                                            title="Remove from bucket"
+                                        >
+                                            <UserMinusIcon className="h-4 w-4" />
+                                        </button>
+                                    </span>
+                                ))}
+                                <div className="inline-flex items-center gap-1">
+                                    <select
+                                        value={roundRobinUserId}
+                                        onChange={(e) => setRoundRobinUserId(e.target.value)}
+                                        className="rounded-md border-gray-300 text-sm py-1.5"
+                                    >
+                                        <option value="">Add user…</option>
+                                        {(filterOptions?.staff_users || [])
+                                            .filter((u) => !roundRobinBucket.some((e) => e.user_id === u.id))
+                                            .map((user) => (
+                                                <option key={user.id} value={user.id}>
+                                                    {user.first_name} {user.last_name}
+                                                </option>
+                                            ))}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        disabled={!roundRobinUserId}
+                                        onClick={() => {
+                                            if (roundRobinUserId) {
+                                                router.post('/app/admin/support/round-robin', { user_id: roundRobinUserId }, { preserveScroll: true })
+                                                setRoundRobinUserId('')
+                                            }
+                                        }}
+                                        className="inline-flex items-center rounded-md bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <UserPlusIcon className="h-4 w-4 mr-1" />
+                                        Add
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Compact Horizontal Filters */}
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">

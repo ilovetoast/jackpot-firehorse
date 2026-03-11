@@ -8,7 +8,14 @@ alwaysApply: true
 ## Critical
 
 **NEVER run `migrate:fresh` or `migrate:fresh --env=testing` directly.**  
-With Sail, `--env=testing` does NOT switch databases — the main DB (from .env) is used and will be destroyed.
+Without `.env.testing`, `--env=testing` does NOT switch databases — the main DB (from .env) is used and will be destroyed.
+
+## Test vs Dev Database (Isolation)
+
+- **Main/Dev DB:** `laravel` (from .env) — your real data
+- **Test DB:** `testing` — Sail creates this on MySQL init; tests and `--env=testing` use it
+
+`.env.testing` sets `DB_DATABASE=testing` so tests and any `--env=testing` command never touch `laravel`.
 
 ## Safe Test DB Refresh
 
@@ -19,6 +26,16 @@ To refresh only the testing database:
 # or
 composer test:db-fresh
 ```
+
+## Running Tests
+
+```bash
+./vendor/bin/sail test
+# or
+./vendor/bin/sail exec laravel.test php artisan test
+```
+
+Tests use `DB_DATABASE=testing` (phpunit.xml + .env.testing). Your `laravel` database is never modified.
 
 ## Main Database
 

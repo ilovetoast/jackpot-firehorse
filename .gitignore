@@ -26,5 +26,8 @@
 /storage/logs/stripe.log
 /vendor
 Homestead.json
+
+# Test PDFs (not tracked)
+/storage/app/test-pdfs/
 Homestead.yaml
 Thumbs.db

@@ -16,6 +16,10 @@ class BrandResearchSnapshot extends Model
         'suggestions',
         'coherence',
         'alignment',
+        'report',
+        'sections_json',
+        'page_classifications_json',
+        'page_extractions_json',
     ];
 
     protected function casts(): array
@@ -25,6 +29,10 @@ class BrandResearchSnapshot extends Model
             'suggestions' => 'array',
             'coherence' => 'array',
             'alignment' => 'array',
+            'report' => 'array',
+            'sections_json' => 'array',
+            'page_classifications_json' => 'array',
+            'page_extractions_json' => 'array',
         ];
     }
 

@@ -22,6 +22,7 @@ class BrandModelVersion extends Model
         'source_type',
         'model_payload',
         'metrics_payload',
+        'builder_progress',
         'status',
         'created_by',
     ];
@@ -31,6 +32,7 @@ class BrandModelVersion extends Model
         return [
             'model_payload' => 'array',
             'metrics_payload' => 'array',
+            'builder_progress' => 'array',
         ];
     }
 

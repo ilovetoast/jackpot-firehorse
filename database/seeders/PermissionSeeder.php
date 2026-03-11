@@ -20,6 +20,7 @@ class PermissionSeeder extends Seeder
         // manage_dashboard_widgets = Dashboard Widgets | manage_ai_settings = AI Settings
         // view_tag_quality = Tag Quality | ownership_transfer/delete_company = owner only
         $companyPermissions = [
+            'company.view',
             'billing.view',
             'billing.manage',
             'company_settings.view',

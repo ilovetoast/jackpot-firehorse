@@ -13,7 +13,7 @@ export default function CompaniesIndex({ companies }) {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                window.location.href = '/app/dashboard'
+                window.location.href = '/app'
             },
         })
     }

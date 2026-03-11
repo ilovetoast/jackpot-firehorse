@@ -83,6 +83,6 @@ class SignupController extends Controller
             'brand_id' => $defaultBrand->id,
         ]);
 
-        return $this->redirectToIntendedApp('/app/dashboard');
+        return $this->redirectToIntendedApp('/app/overview');
     }
 }

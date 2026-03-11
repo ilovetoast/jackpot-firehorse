@@ -29,19 +29,13 @@ class PlanService
         }
         
         // Get the most recent active subscription with name 'default'
-        // Don't rely on Cashier's subscribed() method as it may not work correctly
-        // with multiple subscriptions or when using Tenant instead of User
+        // Use relationship query (not lazy load) to avoid LazyLoadingViolationException
         $subscription = $tenant->subscriptions()
             ->where('name', 'default')
             ->where('stripe_status', 'active')
             ->orderBy('created_at', 'desc')
             ->first();
-        
-        // Fallback to Cashier's method if direct query doesn't work
-        if (! $subscription) {
-            $subscription = $tenant->subscription('default');
-        }
-        
+
         if (! $subscription) {
             return 'free';
         }

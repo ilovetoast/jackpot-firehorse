@@ -795,7 +795,7 @@ class DashboardController extends Controller
         $userRole = strtolower($userRole ?? 'viewer');
         $userWidgetVisibility = $roleWidgetVisibility[$userRole] ?? $roleWidgetVisibility['viewer'];
         
-        return Inertia::render('Dashboard', [
+        return Inertia::render('Overview/Index', [
             'tenant' => $tenant,
             'brand' => $brand,
             'plan' => [

@@ -46,7 +46,7 @@ class TenantPortalController extends Controller
                 'brand_id' => $tenant->defaultBrand?->id,
             ]);
             
-            return redirect(config('app.url') . '/app/dashboard')
+            return redirect(config('app.url') . '/app/overview')
                 ->with('success', "Welcome to {$tenant->name}!");
         }
         

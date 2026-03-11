@@ -10,6 +10,7 @@ namespace App\BrandDNA\Builder;
 class BrandGuidelinesBuilderSteps
 {
     public const STEP_BACKGROUND = 'background';
+    public const STEP_RESEARCH_SUMMARY = 'research-summary';
     public const STEP_ARCHETYPE = 'archetype';
     public const STEP_PURPOSE_PROMISE = 'purpose_promise';
     public const STEP_EXPRESSION = 'expression';
@@ -19,7 +20,7 @@ class BrandGuidelinesBuilderSteps
     /**
      * All step keys in order.
      * Order: Background → Archetype → Purpose → Expression → Positioning → Standards
-     * (Processing step removed — no AI extraction yet)
+     * (Processing and research-summary are interstitial steps inserted at runtime)
      */
     public static function stepKeys(): array
     {

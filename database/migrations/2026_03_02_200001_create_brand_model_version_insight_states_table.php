@@ -13,19 +13,22 @@ return new class extends Migration
         }
         Schema::create('brand_model_version_insight_states', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('brand_model_version_id')
-                ->constrained()
+            $table->foreignId('brand_model_version_id');
+            $table->foreign('brand_model_version_id', 'bmv_insight_states_version_fk')
+                ->references('id')
+                ->on('brand_model_versions')
                 ->cascadeOnDelete();
-            $table->foreignId('source_snapshot_id')
-                ->nullable()
-                ->constrained('brand_research_snapshots')
+            $table->foreignId('source_snapshot_id')->nullable();
+            $table->foreign('source_snapshot_id', 'bmv_insight_states_snapshot_fk')
+                ->references('id')
+                ->on('brand_research_snapshots')
                 ->nullOnDelete();
             $table->json('dismissed')->nullable();
             $table->json('accepted')->nullable();
             $table->timestamp('viewed_at')->nullable();
             $table->timestamps();
 
-            $table->unique('brand_model_version_id');
+            $table->unique('brand_model_version_id', 'bmv_insight_states_version_uniq');
         });
     }
 

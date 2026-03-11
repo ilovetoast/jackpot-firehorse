@@ -424,6 +424,8 @@ class HandleInertiaRequests extends Middleware
                 'permissions' => [
                     'can_edit_metadata' => in_array('metadata.edit_post_upload', $effectivePermissions, true)
                         || in_array('metadata.bulk_edit', $effectivePermissions, true),
+                    // Company overview: tenant-level permission (admin/owner via company.view)
+                    'can_view_company_overview' => $tenant && in_array('company.view', $effectivePermissions, true),
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

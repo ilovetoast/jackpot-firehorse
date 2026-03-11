@@ -18,10 +18,10 @@ export default function Contact({ plan }) {
                         <div className="flex items-center gap-4">
                             {auth?.user ? (
                                 <Link
-                                    href="/app/dashboard"
+                                    href="/app/overview"
                                     className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                 >
-                                    Dashboard
+                                    Overview
                                 </Link>
                             ) : (
                                 <>

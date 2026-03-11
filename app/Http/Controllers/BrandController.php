@@ -225,7 +225,7 @@ class BrandController extends Controller
         $canCreate = $this->brandService->canCreate($tenant);
 
         if (! $canCreate) {
-            return redirect()->route('brands.index')->withErrors([
+            return redirect()->route('app')->withErrors([
                 'plan_limit' => 'You have reached the maximum number of brands for your plan.',
             ]);
         }
@@ -271,7 +271,7 @@ class BrandController extends Controller
         try {
             $brand = $this->brandService->create($tenant, $validated, $user);
 
-            return redirect()->route('brands.index')->with('success', 'Brand created successfully.');
+            return redirect()->route('app')->with('success', 'Brand created successfully.');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
             return back()->withErrors([
                 'plan_limit' => $e->getMessage(),
@@ -681,7 +681,7 @@ class BrandController extends Controller
         try {
             $this->brandService->update($brand, $validated);
 
-            return redirect()->route('brands.index')->with('success', 'Brand updated successfully.');
+            return redirect()->route('app')->with('success', 'Brand updated successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),
@@ -710,7 +710,7 @@ class BrandController extends Controller
         try {
             $this->brandService->delete($brand);
 
-            return redirect()->route('brands.index')->with('success', 'Brand deleted successfully.');
+            return redirect()->route('app')->with('success', 'Brand deleted successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),

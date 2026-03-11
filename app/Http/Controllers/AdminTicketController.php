@@ -14,6 +14,7 @@ use App\Enums\TicketType;
 use App\Models\ActivityEvent;
 use App\Models\AITicketSuggestion;
 use App\Models\Brand;
+use App\Models\SupportRoundRobinUser;
 use App\Models\Ticket;
 use App\Models\TicketLink;
 use App\Models\TicketMessage;
@@ -207,10 +208,30 @@ class AdminTicketController extends Controller
             })->select('id', 'first_name', 'last_name', 'email')->orderBy('first_name')->get(),
         ];
 
+        // Round-robin bucket: users eligible for automatic support assignment
+        $roundRobinBucket = SupportRoundRobinUser::query()
+            ->with('user:id,first_name,last_name,email')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($r) => [
+                'id' => $r->id,
+                'user_id' => $r->user_id,
+                'user' => $r->user ? [
+                    'id' => $r->user->id,
+                    'first_name' => $r->user->first_name,
+                    'last_name' => $r->user->last_name,
+                    'email' => $r->user->email,
+                ] : null,
+            ])
+            ->values()
+            ->toArray();
+
         return Inertia::render('Admin/Support/Tickets/Index', [
             'tickets' => $formattedTickets,
             'pagination' => $tickets->toArray(),
             'filterOptions' => $filterOptions,
+            'roundRobinBucket' => $roundRobinBucket,
             'filters' => array_merge(
                 $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only']),
                 $request->get('type') === 'engineering' ? ['engineering_only' => '1'] : []
@@ -1065,6 +1086,52 @@ class AdminTicketController extends Controller
         } catch (\Exception $e) {
             return redirect()->back()->withErrors(['error' => 'Failed to create ticket: ' . $e->getMessage()]);
         }
+    }
+
+    /**
+     * Add user to support round-robin bucket.
+     * User must have site_support, site_admin, or site_owner role.
+     */
+    public function addRoundRobinUser(Request $request)
+    {
+        $user = Auth::user();
+        if (!$user->hasRole(['site_admin', 'site_owner'])) {
+            abort(403, 'Only Site Admin or Site Owner can manage the round-robin bucket.');
+        }
+
+        $request->validate(['user_id' => 'required|exists:users,id']);
+
+        $targetUser = User::findOrFail($request->user_id);
+        if (!$targetUser->hasRole(['site_support', 'site_admin', 'site_owner'])) {
+            return back()->withErrors(['user_id' => 'User must have Site Support, Site Admin, or Site Owner role.']);
+        }
+
+        if (SupportRoundRobinUser::where('user_id', $targetUser->id)->exists()) {
+            return back()->withErrors(['user_id' => 'User is already in the round-robin bucket.']);
+        }
+
+        $maxOrder = SupportRoundRobinUser::max('sort_order') ?? 0;
+        SupportRoundRobinUser::create([
+            'user_id' => $targetUser->id,
+            'sort_order' => $maxOrder + 1,
+        ]);
+
+        return back()->with('success', "{$targetUser->first_name} {$targetUser->last_name} added to round-robin bucket.");
+    }
+
+    /**
+     * Remove user from support round-robin bucket.
+     */
+    public function removeRoundRobinUser(Request $request, User $roundRobinUser)
+    {
+        $user = Auth::user();
+        if (!$user->hasRole(['site_admin', 'site_owner'])) {
+            abort(403, 'Only Site Admin or Site Owner can manage the round-robin bucket.');
+        }
+
+        SupportRoundRobinUser::where('user_id', $roundRobinUser->id)->delete();
+
+        return back()->with('success', "{$roundRobinUser->first_name} {$roundRobinUser->last_name} removed from round-robin bucket.");
     }
 
     /**

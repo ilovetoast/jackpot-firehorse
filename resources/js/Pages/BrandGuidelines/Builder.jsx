@@ -23,10 +23,39 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 import FontListbox from '../../Components/BrandGuidelines/FontListbox'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
 import ResearchInsightsPanel from '../../Components/BrandGuidelines/ResearchInsightsPanel'
+import ResearchSummary, { canProceedFromResearchSummary } from '../../Components/BrandGuidelines/ResearchSummary'
+import ProcessingProgressPanel from '../../Components/BrandGuidelines/ProcessingProgressPanel'
+import BrandResearchReadyToast from '../../Components/BrandGuidelines/BrandResearchReadyToast'
 import InlineSuggestionBlock from '../../Components/BrandGuidelines/InlineSuggestionBlock'
 import axios from 'axios'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
+
+// Unwrap AI-wrapped field: { value, source, confidence } -> value
+function unwrapValue(field) {
+    if (field && typeof field === 'object' && 'value' in field) return field.value
+    return field
+}
+
+function isAiPopulated(field) {
+    return field && typeof field === 'object' && field.source === 'ai'
+}
+
+function AiFieldBadge({ field, className = '' }) {
+    if (!isAiPopulated(field)) return null
+    const conf = field.confidence != null ? Math.round(field.confidence * 100) : null
+    const sources = field.sources || []
+    const tooltip = sources.length > 0 ? `Detected from:\n• ${sources.join('\n• ')}` : 'AI detected'
+    return (
+        <span
+            className={`inline-flex items-center gap-1.5 text-xs text-emerald-400/90 ${className}`}
+            title={tooltip}
+        >
+            <span>AI detected</span>
+            {conf != null && <span className="text-white/50">({conf}% confidence)</span>}
+        </span>
+    )
+}
 
 // ——— ProgressRail ———
 function ProgressRail({ steps, stepKeys, currentStep, accentColor }) {
@@ -195,7 +224,8 @@ function FieldCard({ title, children, className = '' }) {
 
 // ——— ProcessingView ———
 // Full-page processing status. Only shown when step=processing (intentional checkpoint).
-function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename }) {
+// Only shows items for sources that are actually applicable (hasPdf, hasWebsite, etc.).
+function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename, hasPdf = false, hasWebsite = false, hasSocial = false, hasMaterials = false }) {
     const hasIngestion = ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)
     const effectiveCrawler = crawlerRunning || (polledResearch?.crawlerRunning ?? false)
     const records = polledResearch?.ingestionRecords ?? ingestionRecords ?? []
@@ -209,6 +239,9 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
     const pdfStatus = pdf.status || (pdfExtractionPolling ? 'processing' : 'pending')
     const pdfPages = pdf.pages_total > 0 ? `${pdf.pages_processed ?? 0} / ${pdf.pages_total}` : null
     const pdfSignals = pdf.signals_detected > 0 ? `Signals: ${pdf.signals_detected}` : null
+    // PDF phase: text_extraction | vision_rendering (pages_total=0) | vision (page-by-page AI)
+    const pdfPhase = pdf.phase || (pdf.pages_total > 0 ? 'vision' : (pdfExtractionPolling ? 'text_extraction' : null))
+    const pdfPhaseRendering = pdf.phase === 'vision' && pdf.pages_total === 0 && pdfStatus === 'processing'
 
     const websiteStatus = website.status || (effectiveCrawler ? 'processing' : 'pending')
     const materialsStatus = materials.status || (hasIngestion ? 'processing' : 'pending')
@@ -225,42 +258,66 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
         setStableMaterialsProgress((prev) => Math.max(prev, incomingMaterialsProgress))
     }, [incomingMaterialsProgress])
 
-    const sourceItems = [
-        {
+    // Only show Upload when there are multiple PDF-related stages (2+); otherwise it's redundant
+    const pdfHasMultipleStages = hasPdf && (pdfStatus === 'processing' || hasIngestion)
+    const allCandidates = [
+        pdfHasMultipleStages && {
+            key: 'upload',
+            label: 'Upload',
+            status: 'complete',
+            detail: 'Complete',
+        },
+        hasPdf && {
             key: 'pdf',
             label: guidelinesPdfFilename ? `Brand Guidelines PDF (${guidelinesPdfFilename})` : 'Brand Guidelines PDF',
             status: pdfStatus === 'completed' ? 'complete' : pdfStatus === 'failed' ? 'failed' : pdfStatus === 'processing' ? 'processing' : 'pending',
-            detail: pdfPages ? `Extracting pages (${pdfPages})` : (pdfExtractionPolling ? 'Extracting text…' : pdfStatus === 'processing' ? 'Processing…' : 'Pending'),
+            detail: pdfStatus === 'completed' ? 'Complete' : pdfStatus === 'failed' ? 'Failed' : pdfPhaseRendering ? 'Rendering pages…' : pdfPhase === 'text_extraction' ? 'Extracting text…' : pdfPages ? `Analyzing page ${pdf.pages_processed ?? 0} of ${pdf.pages_total}` : (pdfStatus === 'processing' ? 'Processing…' : 'Pending'),
             signals: pdfSignals,
             progress: pdf.pages_total > 0 ? stablePdfProgress : null,
         },
-        {
+        hasWebsite && {
             key: 'website',
             label: 'Website',
             status: websiteStatus === 'completed' ? 'complete' : websiteStatus === 'processing' ? 'processing' : 'pending',
             detail: websiteStatus === 'completed' ? 'Complete' : websiteStatus === 'processing' ? 'Analyzing…' : 'Pending',
             signals: website.signals_detected > 0 ? `Signals: ${website.signals_detected}` : null,
         },
-        {
+        hasMaterials && {
             key: 'materials',
             label: 'Brand Materials',
             status: materialsStatus === 'completed' ? 'complete' : materialsStatus === 'processing' ? 'processing' : 'pending',
-            detail: materialsProgress ? `Processing ${materialsProgress}` : (materialsStatus === 'completed' ? 'Complete' : materialsStatus === 'processing' ? 'Processing…' : 'Pending'),
+            detail: materialsStatus === 'completed' ? 'Complete' : materialsProgress ? `Processing ${materialsProgress}` : (materialsStatus === 'processing' ? 'Processing…' : 'Pending'),
             progress: materials.assets_total > 0 ? stableMaterialsProgress : null,
         },
-        {
+        hasSocial && {
             key: 'social',
             label: 'Social',
             status: social.status === 'completed' ? 'complete' : social.status === 'processing' ? 'processing' : 'pending',
-            detail: social.status === 'completed' ? 'Complete' : social.status === 'processing' ? 'Processing…' : 'Pending',
+            detail: social.status === 'completed' ? 'Complete' : social.status === 'processing' ? 'Analyzing…' : 'Pending',
         },
     ]
+
+    // Ingestion / AI Summary — show when processing (generating insights) or failed
+    if (hasIngestion) {
+        const ingestionFailed = records.some((r) => r.status === 'failed' || r.error)
+        if (!ingestionFailed) {
+            allCandidates.push({
+                key: 'ingestion',
+                label: 'AI Summary',
+                status: 'processing',
+                detail: 'Generating insights and suggestions…',
+                progress: null,
+            })
+        }
+    }
+
+    const sourceItems = allCandidates.filter(Boolean)
 
     records.forEach((r, i) => {
         if (r.status === 'failed' || r.error) {
             sourceItems.push({
                 key: `record-${r.id || i}`,
-                label: 'Ingestion',
+                label: 'AI Summary',
                 status: 'failed',
                 detail: r.error || 'Failed',
             })
@@ -268,13 +325,12 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
     })
 
     return (
-        <div className="rounded-2xl border border-white/20 bg-white/5 p-8 max-w-2xl mx-auto">
-            <h3 className="text-xl font-semibold text-white/90 mb-2">Processing your Brand Guidelines</h3>
-            <p className="text-white/60 text-sm mb-6">
+        <div className="rounded-2xl border border-white/20 bg-white/5 p-8 w-full">
+            <p className="text-white/60 text-sm mb-2">
                 We&apos;re extracting data from your uploads to fill and suggest content for the next steps.
             </p>
-            <p className="text-white/50 text-xs mb-6">
-                You can leave and return — progress is saved. Processing usually takes 30–60 seconds.
+            <p className="text-white/50 text-sm mb-6">
+                This may take a few minutes — we&apos;re using AI to extract text and analyze images. You can leave and return; progress is saved.
             </p>
             <div className="space-y-5">
                 {sourceItems.map((item) => (
@@ -455,11 +511,16 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
     const [showManualPaste, setShowManualPaste] = useState(false)
     const pollRef = useRef(null)
     const pollStartRef = useRef(null)
+    const autoAppliedRef = useRef(false)
 
     useEffect(() => {
         setPdfAssetId(initialPdfAssetId ?? null)
         setPdfFilename(initialPdfFilename ?? null)
     }, [initialPdfAssetId, initialPdfFilename])
+
+    useEffect(() => {
+        autoAppliedRef.current = false
+    }, [pdfAssetId])
 
     // Fetch extraction status on mount when PDF exists (e.g. user returned to page after failed extraction)
     useEffect(() => {
@@ -480,7 +541,13 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                     setExtractionStatus({ status: 'empty' })
                 }
             })
-            .catch(() => {})
+            .catch((err) => {
+                // Asset was deleted (404) — clear stale state so user sees upload dropzone
+                if (err.response?.status === 404 || (err.response?.data?.message || '').includes('No query results')) {
+                    setPdfAssetId(null)
+                    setPdfFilename(null)
+                }
+            })
     }, [initialPdfAssetId, extractionPolling])
 
     const triggerExtraction = useCallback(async (assetId) => {
@@ -492,7 +559,12 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                 onExtractionPollingChange?.(true)
             }
         } catch (e) {
-            setErrors([e.response?.data?.message || 'Failed to start extraction'])
+            if (e.response?.status === 404 || (e.response?.data?.message || '').includes('No query results')) {
+                setPdfAssetId(null)
+                setPdfFilename(null)
+            } else {
+                setErrors([e.response?.data?.message || 'Failed to start extraction'])
+            }
         }
     }, [setErrors, onExtractionPollingChange])
 
@@ -530,8 +602,14 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                 })
                 return
             }
-        } catch {
-            // keep polling
+        } catch (err) {
+            if (err.response?.status === 404 || (err.response?.data?.message || '').includes('No query results')) {
+                setExtractionPolling(false)
+                onExtractionPollingChange?.(false)
+                setPdfAssetId(null)
+                setPdfFilename(null)
+            }
+            // else keep polling
         }
     }, [pdfAssetId, extractionPolling, onTriggerIngestion, onExtractionPollingChange])
 
@@ -547,13 +625,19 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
         setPdfAssetId(assetId)
         setPdfFilename(meta?.filename ?? null)
         setExtractionStatus(null)
+        setPrefilled(false)
         try {
             await axios.post(route('brands.brand-dna.builder.attach-asset', { brand: brandId }), {
                 asset_id: assetId,
                 builder_context: 'guidelines_pdf',
             })
         } catch (e) {
-            setErrors([e.response?.data?.message || 'Failed to attach PDF'])
+            if (e.response?.status === 404 || (e.response?.data?.message || '').includes('No query results')) {
+                setPdfAssetId(null)
+                setPdfFilename(null)
+            } else {
+                setErrors([e.response?.data?.message || 'Failed to attach PDF'])
+            }
             return
         }
         triggerExtraction(assetId)
@@ -620,6 +704,14 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
         }
     }, [pdfAssetId, brandId, setPayload, setBrandColors, setErrors])
 
+    const isReady = extractionStatus?.status === 'complete' && extractionStatus?.extracted_text
+    useEffect(() => {
+        if (isReady && !prefilled && !prefillLoading && !autoAppliedRef.current) {
+            autoAppliedRef.current = true
+            handlePrefill('fill_empty')
+        }
+    }, [isReady, prefilled, prefillLoading, handlePrefill])
+
     const handleManualPasteApply = useCallback(() => {
         const text = manualPaste.trim()
         if (!text) return
@@ -634,14 +726,13 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
         setManualPaste('')
     }, [manualPaste, setPayload])
 
-    const isReady = extractionStatus?.status === 'complete' && extractionStatus?.extracted_text
     const isEmpty = extractionStatus?.status === 'empty' || (extractionStatus?.status === 'complete' && !extractionStatus?.extracted_text)
     const isFailed = extractionStatus?.status === 'failed'
     const isTimeout = extractionStatus?.status === 'timeout'
 
     return (
         <FieldCard title="Import Official Brand Guidelines (PDF)">
-            <p className="text-white/60 text-sm mb-4">We&apos;ll extract text and apply it to your Brand DNA. Optional.</p>
+            <p className="text-white/60 text-sm mb-4">We&apos;ll extract text and apply it to your Brand DNA automatically. Optional.</p>
             {!pdfAssetId ? (
                 <BuilderUploadDropzone
                     brandId={brandId}
@@ -670,7 +761,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                                     {pdfFilename || 'Guidelines PDF'}
                                 </p>
                                 <p className="text-white/50 text-xs mt-0.5">
-                                    {extractionPolling ? 'Extracting text…' : isReady ? 'Ready to apply' : isFailed ? 'Extraction failed' : isEmpty ? 'No extractable text' : isTimeout ? 'Still processing…' : 'Processing…'}
+                                    {extractionPolling ? 'Extracting text…' : prefillLoading ? 'Applying…' : prefilled ? 'Applied' : isReady ? 'Applying…' : isFailed ? 'Extraction failed' : isEmpty ? 'No extractable text' : isTimeout ? 'Still processing…' : 'Processing…'}
                                 </p>
                             </div>
                             <button
@@ -723,30 +814,6 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                                     className="text-sm text-white/70 hover:text-white underline"
                                 >
                                     Paste text manually
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                    {isReady && !prefilled && (
-                        <div className="space-y-2">
-                            <p className="text-white/80 text-sm">Text extracted. Apply fills empty fields only.</p>
-                            <div className="flex flex-wrap gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => handlePrefill('fill_empty')}
-                                    disabled={prefillLoading || saving}
-                                    className="px-4 py-2 rounded-xl text-sm font-medium text-white"
-                                    style={{ backgroundColor: accentColor || '#6366f1' }}
-                                >
-                                    {prefillLoading ? 'Applying…' : 'Apply from PDF'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handlePrefill('replace')}
-                                    disabled={prefillLoading || saving}
-                                    className="px-4 py-2 rounded-xl border border-white/30 text-white/80 text-sm hover:bg-white/10"
-                                >
-                                    Replace step answers
                                 </button>
                             </div>
                         </div>
@@ -969,16 +1036,16 @@ function ReviewPanel({ payload, brand }) {
 
     const items = [
         { label: 'Website & Social', value: sources.website_url ? `Website: ${sources.website_url}` : `Social URLs: ${(sources.social_urls || []).length}` },
-        { label: 'Archetype', value: personality.primary_archetype || (personality.candidate_archetypes || []).join(', ') || '—' },
-        { label: 'Why', value: truncate(identity.mission) },
-        { label: 'What', value: truncate(identity.positioning) },
+        { label: 'Archetype', value: unwrapValue(personality.primary_archetype) || (personality.candidate_archetypes || []).join(', ') || '—' },
+        { label: 'Why', value: truncate(unwrapValue(identity.mission)) },
+        { label: 'What', value: truncate(unwrapValue(identity.positioning)) },
         { label: 'Brand Look', value: truncate(personality.brand_look) },
         { label: 'Brand Voice', value: truncate(personality.voice_description) },
         { label: 'Tone & Traits', value: ((scoringRules.tone_keywords || []).length + (personality.traits || []).length) > 0 ? `${(scoringRules.tone_keywords || []).length} tone keywords, ${(personality.traits || []).length} traits` : '—' },
         { label: 'Positioning', value: identity.industry || identity.target_audience ? `${identity.industry || '—'} / ${identity.target_audience || '—'}` : '—' },
         { label: 'Beliefs & Values', value: [...(identity.beliefs || []), ...(identity.values || [])].length ? `${(identity.beliefs || []).length} beliefs, ${(identity.values || []).length} values` : '—' },
-        { label: 'Typography', value: typography.primary_font ? `${typography.primary_font} / ${typography.secondary_font || '—'}` : '—' },
-        { label: 'Color Palette', value: (scoringRules.allowed_color_palette || []).length ? `${(scoringRules.allowed_color_palette || []).length} colors` : (brandColors?.primary ? 'Brand colors set' : '—') },
+        { label: 'Typography', value: unwrapValue(typography.primary_font) ? `${unwrapValue(typography.primary_font)} / ${typography.secondary_font || '—'}` : '—' },
+        { label: 'Color Palette', value: (unwrapValue(scoringRules.allowed_color_palette) || []).length ? `${(unwrapValue(scoringRules.allowed_color_palette) || []).length} colors` : (brandColors?.primary ? 'Brand colors set' : '—') },
         { label: 'Visual References', value: approvedRefsCount(visual.approved_references) ? `${approvedRefsCount(visual.approved_references)} references` : '—' },
     ]
 
@@ -1032,8 +1099,22 @@ export default function BrandGuidelinesBuilder({
     guidelinesPdfAssetId = null,
     guidelinesPdfFilename = null,
     overallStatus: initialOverallStatus = 'pending',
+    researchFinalized = false,
+    pipelineStatus = {},
+    isLocal = false,
 }) {
     const { auth } = usePage().props
+
+    // Sync active brand to match the brand being edited — avoids confusion when nav shows a different brand
+    useEffect(() => {
+        if (brand?.id && auth?.activeBrand?.id && brand.id !== auth.activeBrand.id) {
+            router.post(`/app/brands/${brand.id}/switch`, {}, {
+                preserveScroll: true,
+                preserveState: true,
+            })
+        }
+    }, [brand?.id, auth?.activeBrand?.id])
+
     const [payload, setPayload] = useState(() => modelPayload || {})
     const [brandColors, setBrandColors] = useState({
         primary_color: brand.primary_color || null,
@@ -1055,6 +1136,8 @@ export default function BrandGuidelinesBuilder({
     const [ingestionPolling, setIngestionPolling] = useState(ingestionProcessing ?? false)
     const [pdfExtractionPolling, setPdfExtractionPolling] = useState(false)
     const [polledResearch, setPolledResearch] = useState(null)
+    const [showResearchReadyToast, setShowResearchReadyToast] = useState(false)
+    const prevResearchFinalizedRef = useRef(null)
 
     useEffect(() => {
         setBrandMaterials(initialBrandMaterials ?? [])
@@ -1078,7 +1161,12 @@ export default function BrandGuidelinesBuilder({
 
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
-    const allStepKeys = [...stepKeys, REVIEW_STEP]
+    const hasProcessingEarly = pdfExtractionPolling || ingestionProcessing || ingestionPolling || (researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning))
+    // Include 'processing' and 'research-summary' between background and archetype when processing or on those steps
+    const includeProcessingStep = hasProcessingEarly || currentStep === 'processing' || currentStep === 'research-summary'
+    const allStepKeys = includeProcessingStep
+        ? [stepKeys[0], 'processing', 'research-summary', ...stepKeys.slice(1), REVIEW_STEP]
+        : [...stepKeys, REVIEW_STEP]
     const effectiveStep = viewingReview ? REVIEW_STEP : currentStep
     const stepIndex = allStepKeys.indexOf(effectiveStep)
     const currentStepConfig = steps.find((s) => s.key === currentStep)
@@ -1121,7 +1209,9 @@ export default function BrandGuidelinesBuilder({
         setErrors([])
         setSaving(true)
         try {
-            const stepToPatch = isReviewStep ? null : currentStep
+            // Interstitial steps (processing, research-summary) have no savable payload — do not patch
+            const interstitialSteps = ['processing', 'research-summary']
+            const stepToPatch = isReviewStep ? null : (interstitialSteps.includes(currentStep) ? null : currentStep)
             if (stepToPatch) {
                 const patchPayload = buildPayloadForStep(stepToPatch)
                 await axios.post(route('brands.brand-dna.builder.patch', { brand: brand.id }), {
@@ -1154,22 +1244,34 @@ export default function BrandGuidelinesBuilder({
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
         } else if (currentStep === 'background') {
-            const overallStatus = polledResearch?.overall_status ?? initialOverallStatus
-            const nextIdx = stepKeys.indexOf(currentStep) + 1
-            const defaultNext = stepKeys[nextIdx]
-            if (overallStatus === 'completed') {
-                patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
+            // If items are processing, go to processing step (page 2). Else skip to archetype.
+            if (hasProcessingEarly) {
+                patchAndNavigate('processing')
             } else {
-                patchAndNavigate(defaultNext)
+                patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
             }
+        } else if (currentStep === 'processing') {
+            // Processing step: Next goes to research-summary
+            patchAndNavigate('research-summary')
+        } else if (currentStep === 'research-summary') {
+            // Research summary: Next goes to archetype
+            patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
         } else {
             patchAndNavigate(stepKeys[stepKeys.indexOf(currentStep) + 1])
         }
-    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, polledResearch, initialOverallStatus])
+    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, hasProcessingEarly])
 
     const handleBack = useCallback(() => {
         if (viewingReview) {
             setViewingReview(false)
+            return
+        }
+        if (currentStep === 'processing') {
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'background' }))
+            return
+        }
+        if (currentStep === 'research-summary') {
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'processing' }))
             return
         }
         const idx = stepKeys.indexOf(currentStep)
@@ -1328,7 +1430,7 @@ export default function BrandGuidelinesBuilder({
 
     // Poll research + ingestion status when processing, or when on processing step
     useEffect(() => {
-        const shouldPoll = (researchPolling || ingestionPolling || currentStep === 'processing') && brand?.id
+        const shouldPoll = (researchPolling || ingestionPolling || pdfExtractionPolling || currentStep === 'processing') && brand?.id
         if (!shouldPoll) return
         const poll = async () => {
             try {
@@ -1341,6 +1443,9 @@ export default function BrandGuidelinesBuilder({
                 if (ingestionPolling && !data?.ingestionProcessing) {
                     setIngestionPolling(false)
                 }
+                if (pdfExtractionPolling && data?.pdf?.status === 'completed') {
+                    setPdfExtractionPolling(false)
+                }
             } catch {
                 setResearchPolling(false)
                 setIngestionPolling(false)
@@ -1349,7 +1454,7 @@ export default function BrandGuidelinesBuilder({
         poll()
         const id = setInterval(poll, 2000)
         return () => clearInterval(id)
-    }, [researchPolling, ingestionPolling, currentStep, brand?.id])
+    }, [researchPolling, ingestionPolling, pdfExtractionPolling, currentStep, brand?.id])
 
     const handleDismissInsight = useCallback(async (key) => {
         try {
@@ -1378,21 +1483,157 @@ export default function BrandGuidelinesBuilder({
         }
     }, [])
 
+    const CONFIDENCE_SAFE_APPLY = 0.75
+
+    const handleApplySafeSuggestions = useCallback(async ({ snapshot, suggestions }) => {
+        setSaving(true)
+        setErrors([])
+        try {
+            const sug = suggestions || {}
+            const identityUpdates = { ...(payload.identity || {}) }
+            let identityChanged = false
+            let archetypeApplied = false
+            const standardsPayload = {}
+            const patches = []
+
+            const items = sug.items || []
+            for (const item of items) {
+                const conf = item.confidence ?? 0
+                if (conf < CONFIDENCE_SAFE_APPLY) continue
+                const path = item.path
+                const value = item.value
+                if (!path || value === undefined) continue
+
+                const parts = path.split('.')
+                const section = parts[0]
+                const key = parts.slice(1).join('.') || parts[0]
+                if (!section || !key) continue
+
+                let current = payload[section]
+                if (section && key) current = current?.[key]
+                const isEmpty = current === undefined || current === null || current === '' || (Array.isArray(current) && current.length === 0)
+                if (!isEmpty) continue
+
+                if (section === 'personality' && key === 'primary_archetype') {
+                    const archVal = typeof value === 'string' ? value : (value?.label ?? value?.value ?? value)
+                    if (archVal) {
+                        patches.push({ step_key: 'archetype', payload: { personality: { ...(payload.personality || {}), primary_archetype: archVal } } })
+                        archetypeApplied = true
+                    }
+                } else if (section === 'identity') {
+                    if (key === 'mission' && !identityUpdates.mission) { identityUpdates.mission = value; identityChanged = true }
+                    else if (key === 'positioning' && !identityUpdates.positioning) { identityUpdates.positioning = value; identityChanged = true }
+                } else if (section === 'scoring_rules') {
+                    if (key === 'allowed_color_palette') {
+                        const palette = Array.isArray(value) ? value.map((c) => (typeof c === 'object' && c?.hex ? { hex: c.hex, role: null } : { hex: String(c), role: null })) : []
+                        if (palette.length > 0) {
+                            standardsPayload.scoring_rules = { ...(standardsPayload.scoring_rules || payload.scoring_rules || {}), allowed_color_palette: palette }
+                        }
+                    } else if (key === 'tone_keywords') {
+                        const keywords = Array.isArray(value) ? value : [value]
+                        if (keywords.length > 0) {
+                            standardsPayload.scoring_rules = { ...(standardsPayload.scoring_rules || payload.scoring_rules || {}), tone_keywords: keywords }
+                        }
+                    }
+                } else if (section === 'typography' && key === 'primary_font') {
+                    standardsPayload.typography = { ...(standardsPayload.typography || payload.typography || {}), primary_font: value }
+                }
+            }
+
+            if (!archetypeApplied) {
+                const arch = sug.recommended_archetypes?.[0]
+                const archVal = typeof arch === 'string' ? arch : (arch?.label ?? arch?.archetype ?? arch)
+                if (archVal && !unwrapValue(payload.personality?.primary_archetype)) {
+                    patches.push({ step_key: 'archetype', payload: { personality: { ...(payload.personality || {}), primary_archetype: archVal } } })
+                }
+            }
+            if (sug.mission_suggestion && !identityUpdates.mission) { identityUpdates.mission = sug.mission_suggestion; identityChanged = true }
+            if (sug.positioning_suggestion && !identityUpdates.positioning) { identityUpdates.positioning = sug.positioning_suggestion; identityChanged = true }
+            if (identityChanged) {
+                patches.push({ step_key: 'purpose_promise', payload: { identity: identityUpdates } })
+            }
+
+            const palette = unwrapValue(payload.scoring_rules?.allowed_color_palette) || []
+            const colors = snapshot?.primary_colors
+            if (Array.isArray(colors) && colors.length > 0 && !(Array.isArray(palette) && palette.length > 0) && !standardsPayload.scoring_rules?.allowed_color_palette) {
+                const hexColors = colors.map((c) => (typeof c === 'string' ? c : c?.hex ?? c)).filter(Boolean)
+                if (hexColors.length) {
+                    standardsPayload.scoring_rules = { ...(standardsPayload.scoring_rules || payload.scoring_rules || {}), allowed_color_palette: hexColors.map((hex) => ({ hex, role: null })) }
+                }
+            }
+            const fonts = snapshot?.detected_fonts
+            if (Array.isArray(fonts) && fonts.length > 0 && !unwrapValue(payload.typography?.primary_font) && !standardsPayload.typography?.primary_font) {
+                standardsPayload.typography = { ...(standardsPayload.typography || payload.typography || {}), primary_font: fonts[0] }
+            }
+            if (Object.keys(standardsPayload).length > 0) {
+                patches.push({ step_key: 'standards', payload: standardsPayload })
+            }
+
+            for (const { step_key, payload: p } of patches) {
+                await axios.post(route('brands.brand-dna.builder.patch', { brand: brand.id }), { step_key, payload: p })
+            }
+            if (patches.length > 0) {
+                setPayload((prev) => {
+                    let next = { ...prev }
+                    for (const { payload: p } of patches) {
+                        if (p.personality) next.personality = { ...(next.personality || {}), ...p.personality }
+                        if (p.identity) next.identity = { ...(next.identity || {}), ...p.identity }
+                        if (p.scoring_rules) next.scoring_rules = { ...(next.scoring_rules || {}), ...p.scoring_rules }
+                        if (p.typography) next.typography = { ...(next.typography || {}), ...p.typography }
+                    }
+                    return next
+                })
+                setSavedAt(Date.now())
+            }
+        } catch (e) {
+            setErrors([e.response?.data?.message || 'Failed to apply suggestions'])
+        } finally {
+            setSaving(false)
+        }
+    }, [brand.id, payload])
+
     const effectiveCrawlerRunning = researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning)
     const hasProcessing = pdfExtractionPolling || ingestionProcessing || ingestionPolling || effectiveCrawlerRunning
     const isProcessing = hasProcessing
 
-    // When on processing step and overall_status becomes completed, redirect to archetype
+    // When on processing step and overall_status becomes completed, redirect to research-summary
     useEffect(() => {
         if (currentStep === 'processing' && effectiveOverallStatus === 'completed') {
-            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'archetype' }))
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'research-summary' }))
         }
     }, [currentStep, effectiveOverallStatus, brand.id])
+
     const effectiveSnapshotLite = polledResearch?.latestSnapshotLite ?? latestSnapshotLite
     const effectiveCoherence = polledResearch?.latestCoherence ?? latestCoherence
     const effectiveAlignment = polledResearch?.latestAlignment ?? latestAlignment
     const effectiveSuggestions = polledResearch?.latestSuggestions ?? latestSuggestions
     const hasResearchData = researchPolling || effectiveCrawlerRunning || effectiveSnapshotLite || effectiveCoherence || effectiveAlignment || Object.keys(effectiveSuggestions || {}).length > 0
+
+    const effectiveResearchFinalized = polledResearch?.researchFinalized ?? researchFinalized ?? null
+
+    // Show toast when polling detects research_finalized transition to true — but NOT when user is on processing or research-summary (they get inline CTA instead)
+    useEffect(() => {
+        if (effectiveResearchFinalized !== true || prevResearchFinalizedRef.current === true) {
+            prevResearchFinalizedRef.current = effectiveResearchFinalized
+            return
+        }
+        const isOnProcessingPage = currentStep === 'processing'
+        const isOnResearchSummaryPage = currentStep === 'research-summary'
+        if (isOnProcessingPage || isOnResearchSummaryPage) {
+            prevResearchFinalizedRef.current = effectiveResearchFinalized
+            return
+        }
+        setShowResearchReadyToast(true)
+        prevResearchFinalizedRef.current = effectiveResearchFinalized
+    }, [effectiveResearchFinalized, currentStep])
+
+    const canProceedFromResearch = canProceedFromResearchSummary(
+        polledResearch,
+        effectiveSnapshotLite,
+        latestSnapshot ?? [],
+        ingestionProcessing || ingestionPolling,
+        effectiveResearchFinalized
+    )
 
     const sources = payload.sources || {}
     const identity = payload.identity || {}
@@ -1417,7 +1658,7 @@ export default function BrandGuidelinesBuilder({
                 }}
             />
 
-            <AppHead title="Brand Guidelines Builder" />
+            <AppHead title={`Brand Guidelines Builder — ${brand.name}`} />
             <AppNav brand={auth?.activeBrand} tenant={null} />
 
             <div className="relative z-10 flex-1 flex flex-col min-h-0">
@@ -1429,6 +1670,9 @@ export default function BrandGuidelinesBuilder({
                         >
                             ← Back to Guidelines
                         </Link>
+                        <span className="text-sm font-medium text-white/80 truncate max-w-[200px] sm:max-w-xs" title={brand.name}>
+                            {brand.name}
+                        </span>
                         <button
                             type="button"
                             onClick={() => setShowStartOverConfirm(true)}
@@ -1557,23 +1801,12 @@ export default function BrandGuidelinesBuilder({
                                 transition={{ duration: 0.3 }}
                             >
                                 <StepShell
-                                    title={currentStep === 'processing' ? 'Processing your Brand Guidelines' : currentStepConfig?.title}
-                                    description={currentStep === 'processing' ? 'Extracting data to fill and suggest the next steps.' : currentStepConfig?.description}
+                                    title={currentStep === 'processing' ? 'Processing your Brand Guidelines' : currentStep === 'research-summary' ? 'Research Summary' : currentStepConfig?.title}
+                                    description={currentStep === 'processing' ? 'Extracting data to fill and suggest the next steps.' : currentStep === 'research-summary' ? 'Review what the system discovered before editing brand fields.' : currentStepConfig?.description}
                                 >
                                     {/* Processing status — show on non-Background, non-Processing steps */}
-                                    {hasProcessing && currentStep !== 'background' && currentStep !== 'processing' && (
-                                        <ProcessingStatusPanel
-                                            pdfExtractionPolling={pdfExtractionPolling}
-                                            ingestionProcessing={ingestionProcessing || ingestionPolling}
-                                            ingestionRecords={polledResearch?.ingestionRecords ?? ingestionRecords}
-                                            crawlerRunning={effectiveCrawlerRunning}
-                                            polledResearch={polledResearch}
-                                            guidelinesPdfFilename={guidelinesPdfFilename}
-                                            currentStep={currentStep}
-                                        />
-                                    )}
-                                    {/* Brand Guidelines PDF summary — show on non-Background steps when PDF was uploaded */}
-                                    {currentStep !== 'background' && guidelinesPdfAssetId && (
+                                    {/* Brand Guidelines PDF summary — show on non-Background, non-Processing steps when PDF was uploaded */}
+                                    {currentStep !== 'background' && currentStep !== 'processing' && guidelinesPdfAssetId && (
                                         <div className="mb-6 rounded-xl border border-white/20 bg-white/5 px-4 py-3 flex items-center gap-3">
                                             <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center">
                                                 <svg className="w-4 h-4 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1588,21 +1821,54 @@ export default function BrandGuidelinesBuilder({
                                             </div>
                                         </div>
                                     )}
-                                    {currentStep === 'processing' && (
-                                        <ProcessingView
-                                            pdfExtractionPolling={pdfExtractionPolling}
-                                            ingestionProcessing={ingestionProcessing || ingestionPolling}
-                                            ingestionRecords={polledResearch?.ingestionRecords ?? ingestionRecords}
-                                            crawlerRunning={effectiveCrawlerRunning}
+                                    {currentStep === 'research-summary' && (
+                                        <ResearchSummary
+                                            brandId={brand.id}
                                             polledResearch={polledResearch}
-                                            guidelinesPdfFilename={guidelinesPdfFilename}
+                                            initialSnapshot={latestSnapshot ?? {}}
+                                            initialSuggestions={latestSuggestions ?? {}}
+                                            modelPayload={payload}
+                                            initialCoherence={latestCoherence}
+                                            initialAlignment={latestAlignment}
+                                            initialInsightState={insightState}
+                                            ingestionProcessing={ingestionProcessing || ingestionPolling}
+                                            researchFinalized={researchFinalized}
+                                            onApplySuggestion={handleApplySuggestion}
+                                            onDismissInsight={handleDismissInsight}
+                                            onApplySafeSuggestions={handleApplySafeSuggestions}
+                                            accentColor={displayAccent}
+                                            isLocal={isLocal}
                                         />
+                                    )}
+                                    {currentStep === 'processing' && (
+                                        polledResearch?.processing_progress ? (
+                                            <ProcessingProgressPanel
+                                                processingProgress={polledResearch.processing_progress}
+                                                accentColor={displayAccent || brand?.accent_color || '#06b6d4'}
+                                                brandId={brand?.id}
+                                                researchFinalized={effectiveResearchFinalized === true}
+                                                ingestionProcessing={polledResearch?.ingestionProcessing ?? ingestionProcessing ?? ingestionPolling}
+                                            />
+                                        ) : (
+                                            <ProcessingView
+                                                pdfExtractionPolling={pdfExtractionPolling}
+                                                ingestionProcessing={ingestionProcessing || ingestionPolling}
+                                                ingestionRecords={polledResearch?.ingestionRecords ?? ingestionRecords}
+                                                crawlerRunning={effectiveCrawlerRunning}
+                                                polledResearch={polledResearch}
+                                                guidelinesPdfFilename={guidelinesPdfFilename}
+                                                hasPdf={!!(guidelinesPdfAssetId || guidelinesPdfFilename)}
+                                                hasWebsite={!!(sources?.website_url?.trim?.())}
+                                                hasSocial={!!(sources?.social_urls?.length)}
+                                                hasMaterials={brandMaterialCount > 0}
+                                            />
+                                        )
                                     )}
                                     {currentStep === 'background' && (
                                         <div className="space-y-8">
-                                            {hasProcessing && (
+                                            {hasProcessingEarly && (
                                                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90">
-                                                    Brand Guidelines uploaded — processing will begin when you continue.
+                                                    Processing in progress. Click Next to see progress — you can continue once extraction is complete.
                                                 </div>
                                             )}
                                             <>
@@ -1854,11 +2120,18 @@ export default function BrandGuidelinesBuilder({
 
                                             {(personality.archetype_mode || 'dont_know') === 'know' ? (
                                                 /* Avenue 1: Direct selection — hero-style cards */
+                                                <div className="space-y-4">
+                                                    {isAiPopulated(personality.primary_archetype) && (
+                                                        <div className="flex items-center gap-2">
+                                                            <AiFieldBadge field={personality.primary_archetype} />
+                                                        </div>
+                                                    )}
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                                                     {ARCHETYPES.map((a) => {
-                                                        const selected = [personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean)
+                                                        const primary = unwrapValue(personality.primary_archetype)
+                                                        const selected = [primary, ...(personality.candidate_archetypes || [])].filter(Boolean)
                                                         const isSelected = selected.includes(a.id)
-                                                        const isSelectedFirst = personality.primary_archetype === a.id
+                                                        const isSelectedFirst = primary === a.id
                                                         const canSelect = selected.length < 2 && !isSelected
                                                         return (
                                                             <button
@@ -1902,6 +2175,7 @@ export default function BrandGuidelinesBuilder({
                                                         )
                                                     })}
                                                 </div>
+                                                </div>
                                             ) : (
                                                 /* Avenue 2: Apply / Doesn't apply — two groupings + hero cards */
                                                 <div className="space-y-6">
@@ -1910,7 +2184,7 @@ export default function BrandGuidelinesBuilder({
                                                         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
                                                             <h4 className="text-sm font-semibold text-emerald-300 mb-3">Applies to us</h4>
                                                             <div className="space-y-2 min-h-[100px]">
-                                                                {[personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean).map((id) => {
+                                                                {[unwrapValue(personality.primary_archetype), ...(personality.candidate_archetypes || [])].filter(Boolean).map((id) => {
                                                                     const a = ARCHETYPES.find((x) => x.id === id)
                                                                     if (!a) return null
                                                                     return (
@@ -1919,7 +2193,7 @@ export default function BrandGuidelinesBuilder({
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => {
-                                                                                    const selected = [personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean)
+                                                                                    const selected = [unwrapValue(personality.primary_archetype), ...(personality.candidate_archetypes || [])].filter(Boolean)
                                                                                     const next = selected.filter((x) => x !== a.id)
                                                                                     setPayload((prev) => ({
                                                                                         ...prev,
@@ -1959,11 +2233,11 @@ export default function BrandGuidelinesBuilder({
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div>
+                                                        <div>
                                                         <h4 className="text-sm font-semibold text-white/80 mb-3">Choose</h4>
                                                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                                                             {ARCHETYPES.filter((x) => {
-                                                                const selected = [personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean)
+                                                                const selected = [unwrapValue(personality.primary_archetype), ...(personality.candidate_archetypes || [])].filter(Boolean)
                                                                 const rejected = personality.rejected_archetypes || []
                                                                 return !selected.includes(x.id) && !rejected.includes(x.id)
                                                             }).map((a) => (
@@ -1977,7 +2251,7 @@ export default function BrandGuidelinesBuilder({
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => {
-                                                                                const selected = [personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean)
+                                                                                const selected = [unwrapValue(personality.primary_archetype), ...(personality.candidate_archetypes || [])].filter(Boolean)
                                                                                 if (selected.length >= 2) return
                                                                                 setPayload((prev) => ({
                                                                                     ...prev,
@@ -1988,7 +2262,7 @@ export default function BrandGuidelinesBuilder({
                                                                                     },
                                                                                 }))
                                                                             }}
-                                                                            disabled={[personality.primary_archetype, ...(personality.candidate_archetypes || [])].filter(Boolean).length >= 2}
+                                                                            disabled={[unwrapValue(personality.primary_archetype), ...(personality.candidate_archetypes || [])].filter(Boolean).length >= 2}
                                                                             className="px-3 py-1.5 rounded-lg bg-emerald-500/30 text-emerald-200 text-xs font-medium hover:bg-emerald-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                         >
                                                                             Applies
@@ -2016,8 +2290,9 @@ export default function BrandGuidelinesBuilder({
                                             <div className="rounded-2xl border border-white/20 bg-white/5 p-6">
                                                 <h3 className="text-lg font-semibold text-white mb-1">Why</h3>
                                                 <p className="text-sm text-white/60 mb-4">This brand exists to</p>
+                                                {isAiPopulated(identity.mission) && <AiFieldBadge field={identity.mission} className="mb-2" />}
                                                 <textarea
-                                                    value={identity.mission || ''}
+                                                    value={unwrapValue(identity.mission) || ''}
                                                     onChange={(e) => updatePayload('identity', 'mission', e.target.value)}
                                                     rows={4}
                                                     placeholder="e.g. challenge the status quo, empower creators, make technology accessible…"
@@ -2037,8 +2312,9 @@ export default function BrandGuidelinesBuilder({
                                             <div className="rounded-2xl border border-white/20 bg-white/5 p-6">
                                                 <h3 className="text-lg font-semibold text-white mb-1">What</h3>
                                                 <p className="text-sm text-white/60 mb-4">This brand delivers</p>
+                                                {isAiPopulated(identity.positioning) && <AiFieldBadge field={identity.positioning} className="mb-2" />}
                                                 <textarea
-                                                    value={identity.positioning || ''}
+                                                    value={unwrapValue(identity.positioning) || ''}
                                                     onChange={(e) => updatePayload('identity', 'positioning', e.target.value)}
                                                     rows={4}
                                                     placeholder="e.g. premium devices that just work, outdoor gear built to last…"
@@ -2059,10 +2335,10 @@ export default function BrandGuidelinesBuilder({
 
                                     {currentStep === 'expression' && (
                                         <div className="space-y-8">
-                                            {personality.primary_archetype && ARCHETYPE_RECOMMENDED_TRAITS[personality.primary_archetype] && !dismissedInlineSuggestions.includes('expression:traits') && (
+                                            {unwrapValue(personality.primary_archetype) && ARCHETYPE_RECOMMENDED_TRAITS[unwrapValue(personality.primary_archetype)] && !dismissedInlineSuggestions.includes('expression:traits') && (
                                                 <InlineSuggestionBlock
-                                                    title={`Recommended traits for ${personality.primary_archetype}`}
-                                                    items={ARCHETYPE_RECOMMENDED_TRAITS[personality.primary_archetype] || []}
+                                                    title={`Recommended traits for ${unwrapValue(personality.primary_archetype)}`}
+                                                    items={ARCHETYPE_RECOMMENDED_TRAITS[unwrapValue(personality.primary_archetype)] || []}
                                                     onApply={(trait) => {
                                                         const current = personality.traits || []
                                                         if (current.includes(trait)) return
@@ -2100,7 +2376,7 @@ export default function BrandGuidelinesBuilder({
                                             <div>
                                                 <label className="block text-sm font-medium text-white/80 mb-2">Tone keywords</label>
                                                 <ChipInput
-                                                    value={(scoringRules.tone_keywords || personality.tone_keywords || []).filter(Boolean)}
+                                                    value={(unwrapValue(scoringRules.tone_keywords) || personality.tone_keywords || []).filter(Boolean)}
                                                     onChange={(v) => updatePayload('scoring_rules', 'tone_keywords', v)}
                                                     placeholder="Add tone keyword"
                                                 />
@@ -2120,9 +2396,10 @@ export default function BrandGuidelinesBuilder({
                                         <div className="space-y-8">
                                             <FieldCard title="Typography">
                                                 <div className="grid sm:grid-cols-2 gap-4">
+                                                    {isAiPopulated(typography.primary_font) && <AiFieldBadge field={typography.primary_font} className="mb-2" />}
                                                     <FontListbox
                                                         label="Primary Font"
-                                                        value={typography.primary_font || ''}
+                                                        value={unwrapValue(typography.primary_font) || ''}
                                                         onChange={(v) => updatePayload('typography', 'primary_font', v)}
                                                     />
                                                     <FontListbox
@@ -2143,8 +2420,9 @@ export default function BrandGuidelinesBuilder({
                                             </FieldCard>
                                             <FieldCard title="Allowed Color Palette (hex)">
                                                 <p className="text-white/60 text-sm mb-3">Additional colors for scoring. Hex codes only.</p>
+                                                {isAiPopulated(scoringRules.allowed_color_palette) && <AiFieldBadge field={scoringRules.allowed_color_palette} className="mb-2" />}
                                                 <ColorPaletteChipInput
-                                                    value={(scoringRules.allowed_color_palette || []).map((c) => (typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')).filter(Boolean)}
+                                                    value={(unwrapValue(scoringRules.allowed_color_palette) || []).map((c) => (typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')).filter(Boolean)}
                                                     onChange={(v) => updatePayload('scoring_rules', 'allowed_color_palette', v.map((hex) => ({ hex, role: null })))}
                                                     placeholder="#hex and press Enter"
                                                 />
@@ -2299,7 +2577,7 @@ export default function BrandGuidelinesBuilder({
                         )}
                     </AnimatePresence>
                     </main>
-                    {hasResearchData && currentStep !== 'background' && (
+                    {hasResearchData && currentStep !== 'background' && currentStep !== 'processing' && (
                         <aside className="w-80 lg:w-96 flex-shrink-0 border-l border-white/10 bg-[#0f0e14]/80 hidden lg:block">
                             <ResearchInsightsPanel
                                 brandId={brand.id}
@@ -2347,17 +2625,20 @@ export default function BrandGuidelinesBuilder({
                             )}
                             {!isReviewStep && (
                                 <>
-                                    {(isProcessing || currentStep === 'processing') && (
+                                    {currentStep === 'processing' && effectiveOverallStatus !== 'completed' && (
                                         <span className="text-sm text-amber-200/90">Wait for processing to finish</span>
+                                    )}
+                                    {currentStep === 'research-summary' && !canProceedFromResearch && (
+                                        <span className="text-sm text-amber-200/90">Review results before continuing</span>
                                     )}
                                     <button
                                         type="button"
                                         onClick={handleNext}
-                                        disabled={saving || isProcessing || currentStep === 'processing'}
+                                        disabled={saving || (currentStep === 'processing' && effectiveOverallStatus !== 'completed') || (currentStep === 'research-summary' && !canProceedFromResearch)}
                                         className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
-                                        style={{ backgroundColor: saving || isProcessing ? '#4b5563' : displayAccent }}
+                                        style={{ backgroundColor: saving || (currentStep === 'processing' && effectiveOverallStatus !== 'completed') || (currentStep === 'research-summary' && !canProceedFromResearch) ? '#4b5563' : displayAccent }}
                                     >
-                                        {saving ? 'Saving…' : (isProcessing || currentStep === 'processing') ? 'Processing…' : isLastDataStep ? 'Review' : 'Next'}
+                                        {saving ? 'Saving…' : (currentStep === 'processing' && effectiveOverallStatus !== 'completed') ? 'Processing…' : (currentStep === 'research-summary' && !canProceedFromResearch) ? 'Waiting…' : isLastDataStep ? 'Review' : 'Next'}
                                     </button>
                                 </>
                             )}
@@ -2365,6 +2646,12 @@ export default function BrandGuidelinesBuilder({
                     </div>
                 </footer>
 
+                <BrandResearchReadyToast
+                    visible={showResearchReadyToast}
+                    onDismiss={() => setShowResearchReadyToast(false)}
+                    brandId={brand?.id}
+                    accentColor={displayAccent || brand?.accent_color || '#06b6d4'}
+                />
                 <BuilderAssetSelectorModal
                     open={assetSelectorOpen === 'visual_reference'}
                     onClose={() => setAssetSelectorOpen(null)}

@@ -91,6 +91,44 @@ class BrandGuidelinesBuilderTest extends TestCase
         ]);
     }
 
+    public function test_guidelines_index_resume_url_uses_resolved_step(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => null,
+            'status' => 'completed',
+            'snapshot' => [],
+            'suggestions' => [['key' => 'test', 'path' => 'test']],
+            'coherence' => ['overall' => []],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $draft->update([
+            'builder_progress' => [
+                'last_visited_step' => 'archetype',
+                'last_completed_step' => 'research-summary',
+            ],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->get(route('brands.guidelines.index', ['brand' => $this->brand->id]));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Brands/BrandGuidelines/Index')
+            ->has('resumeStep')
+            ->where('resumeStep', 'archetype')
+            ->has('resumeUrl')
+            ->where('resumeLabel', 'Continue Archetype')
+            ->where('resumeUrl', fn ($url) => str_contains($url, 'step=archetype'))
+        );
+    }
+
     public function test_patch_endpoint_creates_draft_if_none_exists(): void
     {
         $response = $this->actingAs($this->user)
@@ -184,6 +222,20 @@ class BrandGuidelinesBuilderTest extends TestCase
             ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_patch_endpoint_rejects_interstitial_step_keys(): void
+    {
+        foreach (['processing', 'research-summary'] as $stepKey) {
+            $response = $this->actingAs($this->user)
+                ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+                ->postJson("/app/brands/{$this->brand->id}/brand-dna/builder/patch", [
+                    'step_key' => $stepKey,
+                    'payload' => ['identity' => []],
+                ]);
+
+            $response->assertStatus(422);
+        }
     }
 
     public function test_patch_endpoint_rejects_payload_keys_not_in_allowed_paths(): void
@@ -1651,8 +1703,11 @@ class BrandGuidelinesBuilderTest extends TestCase
         $pageRenderer = $this->mock(\App\Services\BrandDNA\Extraction\PdfPageRenderer::class);
         $pageRenderer->shouldReceive('cleanupPages')->once();
 
+        $thumbnailGenerator = $this->mock(\App\Services\BrandDNA\PageThumbnailGenerator::class);
+        $thumbnailGenerator->shouldReceive('generate')->andReturn(null);
+
         $job = new MergeBrandPdfExtractionJob($batchId);
-        $job->handle($pageRenderer);
+        $job->handle($pageRenderer, $thumbnailGenerator);
 
         $visionBatch->refresh();
         $this->assertSame(BrandPdfVisionExtraction::STATUS_COMPLETED, $visionBatch->status);
@@ -1672,6 +1727,136 @@ class BrandGuidelinesBuilderTest extends TestCase
             @unlink($page2Path);
             @rmdir($tempDir);
         }
+    }
+
+    public function test_page_analysis_persistence_through_merge_and_ingestion(): void
+    {
+        config(['brand_dna.visual_page_extraction_enabled' => true]);
+
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $session = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $session->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Guidelines PDF',
+            'original_filename' => 'guidelines.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/guidelines.pdf',
+            'metadata' => ['category_id' => $this->category->id],
+            'builder_staged' => true,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        BrandModelVersionAsset::create([
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        $batchId = 'vision_page_analysis_' . uniqid();
+        $visionBatch = BrandPdfVisionExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'pages_total' => 1,
+            'pages_processed' => 0,
+            'status' => BrandPdfVisionExtraction::STATUS_PROCESSING,
+        ]);
+
+        $tempDir = sys_get_temp_dir() . '/pdf-pages-' . uniqid();
+        mkdir($tempDir, 0755, true);
+        $page1Path = $tempDir . '/page-1.png';
+        file_put_contents($page1Path, 'fake-png');
+
+        $pageClassification = [
+            'page_type' => 'mission',
+            'title' => 'Our Mission',
+            'confidence' => 0.9,
+        ];
+        $pageExtractions = [
+            ['path' => 'identity.mission', 'value' => 'Test mission', 'page' => 1, 'page_type' => 'mission'],
+        ];
+
+        BrandPdfPageExtraction::create([
+            'batch_id' => $batchId,
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'asset_id' => $asset->id,
+            'page_number' => 1,
+            'extraction_json' => [
+                '_temp_image_path' => $page1Path,
+                '_page_classification' => $pageClassification,
+                '_page_extractions' => $pageExtractions,
+                '_raw_candidates' => [],
+                '_rejected_candidates' => [],
+                '_ocr_text' => null,
+                'identity' => ['mission' => 'Test mission', 'vision' => null, 'positioning' => null],
+                'personality' => ['primary_archetype' => null, 'tone_keywords' => [], 'traits' => []],
+                'visual' => ['primary_colors' => [], 'fonts' => []],
+            ],
+            'status' => BrandPdfPageExtraction::STATUS_COMPLETED,
+        ]);
+
+        $pageRenderer = $this->mock(\App\Services\BrandDNA\Extraction\PdfPageRenderer::class);
+        $pageRenderer->shouldReceive('cleanupPages')->once();
+
+        $thumbnailGenerator = $this->mock(\App\Services\BrandDNA\PageThumbnailGenerator::class);
+        $thumbnailGenerator->shouldReceive('generate')->andReturn(null);
+
+        $job = new MergeBrandPdfExtractionJob($batchId);
+        $job->handle($pageRenderer, $thumbnailGenerator);
+
+        $visionBatch->refresh();
+        $merged = $visionBatch->extraction_json ?? [];
+        $this->assertNotEmpty($merged['page_classifications_json'] ?? [], 'Merge must produce page_classifications_json');
+        $this->assertNotEmpty($merged['page_extractions_json'] ?? [], 'Merge must produce page_extractions_json');
+        $this->assertNotEmpty($merged['page_analysis'] ?? [], 'Merge must produce page_analysis');
+
+        $snapshot = BrandResearchSnapshot::where('brand_id', $this->brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('status', 'completed')
+            ->latest()
+            ->first();
+
+        $this->assertNotNull($snapshot, 'Snapshot must be created by RunBrandIngestionJob');
+        $this->assertNotEmpty($snapshot->page_classifications_json ?? [], 'Snapshot must have page_classifications_json');
+        $this->assertNotEmpty($snapshot->page_extractions_json ?? [], 'Snapshot must have page_extractions_json');
+        $this->assertNotEmpty($snapshot->snapshot['page_analysis'] ?? [], 'Snapshot payload must have page_analysis');
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $dev = $response->json('developer_data');
+        $this->assertNotEmpty($dev['page_classifications'] ?? null, 'Developer payload must include page_classifications');
+        $this->assertNotEmpty($dev['page_extractions'] ?? null, 'Developer payload must include page_extractions');
+        $this->assertNotEmpty($dev['page_analysis'] ?? null, 'Developer payload must include page_analysis');
+
+        if (is_dir($tempDir)) {
+            @unlink($page1Path);
+            @rmdir($tempDir);
+        }
+
+        config(['brand_dna.visual_page_extraction_enabled' => false]);
     }
 
     public function test_early_exit_stops_remaining_jobs(): void
@@ -1866,5 +2051,135 @@ class BrandGuidelinesBuilderTest extends TestCase
         $response->assertRedirect();
         $this->assertStringContainsString('step=background', $response->headers->get('Location'));
         $this->assertStringContainsString('processing=1', $response->headers->get('Location'));
+    }
+
+    public function test_research_insights_finalized_returns_all_stages_complete(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => null,
+            'status' => 'completed',
+            'snapshot' => ['brand_bio' => 'Test'],
+            'suggestions' => [],
+            'coherence' => ['overall' => []],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertTrue($data['researchFinalized'] ?? false);
+
+        $stages = $data['processing_progress']['stages'] ?? [];
+        $this->assertNotEmpty($stages);
+        foreach ($stages as $stage) {
+            $this->assertSame('complete', $stage['status'], "Stage {$stage['key']} must be complete when research finalized");
+            $this->assertSame(100, $stage['percent']);
+        }
+    }
+
+    public function test_research_insights_returns_developer_data_when_snapshot_has_debug(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $evidenceMap = [
+            'identity.mission' => [
+                'final_value' => 'Our mission',
+                'winning_source' => 'pdf_visual',
+                'winning_page' => 3,
+                'winning_page_type' => 'mission',
+                'winning_reason' => 'best_confidence',
+            ],
+        ];
+        $narrativeFieldDebug = [
+            'identity.mission' => [
+                'candidate_pages' => [3, 4],
+                'accepted' => [['page' => 3, 'value' => 'Our mission']],
+                'rejected' => [['page' => 4, 'value' => 'Other', 'reason' => 'fragmentary_narrative']],
+            ],
+        ];
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => null,
+            'status' => 'completed',
+            'snapshot' => [
+                'brand_bio' => 'Test',
+                'evidence_map' => $evidenceMap,
+                'narrative_field_debug' => $narrativeFieldDebug,
+                'page_analysis' => [
+                    ['page' => 3, 'page_type' => 'mission', 'accepted_candidates' => [['path' => 'identity.mission']], 'used_in_final_merge' => ['identity.mission']],
+                ],
+            ],
+            'suggestions' => [],
+            'coherence' => ['overall' => []],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $this->assertArrayHasKey('pipelineStatus', $data);
+        $this->assertArrayHasKey('developer_data', $data);
+        $dev = $data['developer_data'];
+        $this->assertArrayHasKey('evidence_map', $dev);
+        $this->assertArrayHasKey('narrative_field_debug', $dev);
+        $this->assertArrayHasKey('page_analysis', $dev);
+        $this->assertSame('Our mission', $dev['evidence_map']['identity.mission']['final_value'] ?? null);
+        $this->assertSame('pdf_visual', $dev['evidence_map']['identity.mission']['winning_source'] ?? null);
+    }
+
+    public function test_research_insights_evidence_map_missing_provenance_when_pdf_visual_winner_has_null_page(): void
+    {
+        $draftService = app(BrandDnaDraftService::class);
+        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+
+        $evidenceMap = [
+            'identity.mission' => [
+                'final_value' => 'Our mission',
+                'winning_source' => 'pdf_visual',
+                'winning_page' => null,
+                'winning_page_type' => null,
+                'winning_reason' => 'best_confidence',
+            ],
+        ];
+
+        BrandResearchSnapshot::create([
+            'brand_id' => $this->brand->id,
+            'brand_model_version_id' => $draft->id,
+            'source_url' => null,
+            'status' => 'completed',
+            'snapshot' => [
+                'brand_bio' => 'Test',
+                'evidence_map' => $evidenceMap,
+            ],
+            'suggestions' => [],
+            'coherence' => ['overall' => []],
+            'alignment' => ['findings' => []],
+        ]);
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson("/app/brands/{$this->brand->id}/brand-dna/builder/research-insights");
+
+        $response->assertStatus(200);
+        $data = $response->json();
+        $entry = $data['developer_data']['evidence_map']['identity.mission'] ?? null;
+        $this->assertNotNull($entry);
+        $this->assertSame('pdf_visual', $entry['winning_source']);
+        $this->assertNull($entry['winning_page']);
+        $this->assertNull($entry['winning_page_type']);
     }
 }

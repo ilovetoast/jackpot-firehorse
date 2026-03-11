@@ -19,6 +19,8 @@ class BrandExtractionSchema
                 'positioning' => null,
                 'industry' => null,
                 'tagline' => null,
+                'beliefs' => [],
+                'values' => [],
             ],
             'personality' => [
                 'primary_archetype' => null,
@@ -141,6 +143,35 @@ class BrandExtractionSchema
 
         if (isset($ext['confidence']) && is_numeric($ext['confidence'])) {
             $base['confidence'] = max($base['confidence'], (float) $ext['confidence']);
+        }
+
+        if (! empty($ext['sections'])) {
+            $base['sections'] = $ext['sections'];
+        }
+        if (! empty($ext['section_sources'])) {
+            $base['section_sources'] = array_merge($base['section_sources'] ?? [], $ext['section_sources']);
+        }
+        if (! empty($ext['toc_map'])) {
+            $base['toc_map'] = array_merge($base['toc_map'] ?? [], $ext['toc_map']);
+        }
+        if (! empty($ext['_extraction_debug'])) {
+            $baseDebug = $base['_extraction_debug'] ?? [];
+            $extDebug = $ext['_extraction_debug'];
+            $base['_extraction_debug'] = [
+                'suppressed_lines' => array_values(array_unique(array_merge(
+                    $baseDebug['suppressed_lines'] ?? [],
+                    $extDebug['suppressed_lines'] ?? []
+                ))),
+                'suppressed_sections' => $extDebug['suppressed_sections'] ?? $baseDebug['suppressed_sections'] ?? [],
+                'collapsed_sections' => $extDebug['collapsed_sections'] ?? $baseDebug['collapsed_sections'] ?? [],
+                'section_count_raw' => $extDebug['section_count_raw'] ?? $baseDebug['section_count_raw'] ?? null,
+                'section_count_usable' => $extDebug['section_count_usable'] ?? $baseDebug['section_count_usable'] ?? null,
+                'section_count_suppressed' => $extDebug['section_count_suppressed'] ?? $baseDebug['section_count_suppressed'] ?? null,
+                'rejected_values' => array_merge($baseDebug['rejected_values'] ?? [], $extDebug['rejected_values'] ?? []),
+                'section_metadata' => $extDebug['section_metadata'] ?? $baseDebug['section_metadata'] ?? [],
+                'section_quality_by_path' => array_merge($baseDebug['section_quality_by_path'] ?? [], $extDebug['section_quality_by_path'] ?? []),
+                'auto_apply_blocked' => array_merge($baseDebug['auto_apply_blocked'] ?? [], $extDebug['auto_apply_blocked'] ?? []),
+            ];
         }
 
         return ['result' => $base, 'conflicts' => $conflicts, 'winners' => $winners];

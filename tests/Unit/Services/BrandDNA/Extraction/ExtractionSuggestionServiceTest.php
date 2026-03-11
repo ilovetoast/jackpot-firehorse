@@ -71,4 +71,28 @@ class ExtractionSuggestionServiceTest extends TestCase
         $this->assertSame(1.0, $conflictSuggestion['confidence']);
         $this->assertStringContainsString('disagree', $conflictSuggestion['reason']);
     }
+
+    public function test_low_section_quality_caps_auto_apply(): void
+    {
+        $service = new ExtractionSuggestionService;
+        $extraction = [
+            'personality' => [],
+            'explicit_signals' => ['positioning_declared' => true],
+            'identity' => ['positioning' => 'We are the leading brand in our category with authentic products.'],
+            'visual' => [],
+            'section_sources' => ['identity.positioning' => 'BRAND POSITIONING'],
+            '_extraction_debug' => [
+                'section_metadata' => [
+                    ['title' => 'BRAND POSITIONING', 'source' => 'heuristic', 'confidence' => 0.7, 'quality_score' => 0.5],
+                ],
+                'section_quality_by_path' => ['identity.positioning' => 0.5],
+            ],
+        ];
+
+        $suggestions = $service->generateSuggestions($extraction);
+
+        $posSuggestion = collect($suggestions)->firstWhere('key', 'SUG:identity.positioning');
+        $this->assertNotNull($posSuggestion);
+        $this->assertFalse($posSuggestion['auto_apply'], 'Low section quality must not auto-apply');
+    }
 }

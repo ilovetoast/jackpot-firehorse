@@ -63,7 +63,7 @@ class BrandCreationAndTeamTest extends TestCase
                 'slug' => 'new-brand',
             ]);
 
-        $response->assertRedirect(route('brands.index'));
+        $response->assertRedirect(route('app'));
 
         $newBrand = Brand::where('tenant_id', $this->tenant->id)->where('slug', 'new-brand')->first();
         $this->assertNotNull($newBrand);

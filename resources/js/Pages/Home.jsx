@@ -10,12 +10,12 @@ export default function Home() {
             // Check if user has a tenant, if so go to dashboard, otherwise companies page
             if (auth.companies && auth.companies.length > 0) {
                 return {
-                    text: 'Dashboard',
-                    href: '/app/dashboard',
+                    text: 'Overview',
+                    href: '/app/overview',
                 }
             } else {
                 return {
-                    text: 'Dashboard',
+                    text: 'Overview',
                     href: '/app/companies',
                 }
             }
@@ -720,7 +720,7 @@ export default function Home() {
                                 <p className="mt-6 text-sm text-gray-500">Traditional DAM: storage + checkboxes.</p>
                             </div>
                             <div className="rounded-2xl border-2 border-indigo-200/80 bg-white p-8 shadow-md ring-1 ring-indigo-100 lg:scale-[1.02]">
-                                <h3 className="text-sm font-semibold uppercase tracking-wider text-indigo-700">Jackpot</h3>
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-indigo-700 font-brand">Jackpot</h3>
                                 <ul className="mt-6 space-y-4">
                                     <li className="flex items-start gap-3">
                                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white" aria-hidden="true">✓</span>
@@ -839,7 +839,7 @@ export default function Home() {
                     <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
                         <div className="col-span-1 md:col-span-4">
                             <p className="text-center text-sm text-gray-500">
-                                Jackpot copyright - Velvetysoft
+                                <span className="font-brand">Jackpot</span> copyright - Velvetysoft
                             </p>
                         </div>
                     </div>

@@ -47,8 +47,16 @@ export default function AppNav({ brand, tenant }) {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                // Reload only the shared props (auth.brands, auth.activeBrand) without full page reload
-                router.reload({ only: ['auth'] })
+                // If on a brand-specific URL (e.g. guidelines, edit, dna), navigate to the same page for the new brand
+                const path = typeof window !== 'undefined' ? window.location.pathname : ''
+                const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
+                if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
+                    const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
+                    const search = typeof window !== 'undefined' ? window.location.search : ''
+                    router.visit(newPath + search)
+                } else {
+                    router.reload({ only: ['auth'] })
+                }
             },
         })
     }
@@ -220,7 +228,7 @@ export default function AppNav({ brand, tenant }) {
 
     // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
-        { href: '/app/dashboard', label: 'Dashboard', shortLabel: 'Home', icon: HomeIcon, isActive: (url) => url === '/app/dashboard' },
+        { href: '/app/overview', label: 'Overview', shortLabel: 'Overview', icon: HomeIcon, isActive: (url) => url === '/app/overview' || url.startsWith('/app/overview') },
         { href: '/app/assets', label: 'Assets', shortLabel: 'Assets', icon: PhotoIcon, isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions') },
         { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL, shortLabel: 'Exec', icon: Squares2X2Icon, isActive: (url) => url.startsWith('/app/executions') },
         { href: '/app/generative', label: 'Generate', shortLabel: 'Gen', icon: SparklesIcon, isActive: (url) => url.startsWith('/app/generative') },
@@ -302,7 +310,7 @@ export default function AppNav({ brand, tenant }) {
                                 <p className="text-sm text-amber-800">
                                     <span className="font-medium">No brand access.</span> You're in the company but not assigned to any brands. Contact your company administrator to get access.{' '}
                                     <Link
-                                        href="/app/brands"
+                                        href="/app"
                                         className="font-medium underline hover:text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 rounded"
                                     >
                                         View brands
@@ -384,10 +392,10 @@ export default function AppNav({ brand, tenant }) {
                             )}
                         </div>
 
-                        {/* Main menu: Dashboard, Assets, Executions, Collections, Generative, Downloads (C12: flag + .app-nav-main-links for CSS) */}
+                        {/* Main menu: Overview, Assets, Executions, Collections, Generative (C12: flag + .app-nav-main-links for CSS) */}
                         {isAppPage ? (isCollectionOnlyNav ? (
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center left-64 xl:left-[18rem]" data-collection-only="true">
-                                {['Dashboard', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
+                                {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
                                     <span
                                         key={label}
                                         className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
@@ -466,18 +474,18 @@ export default function AppNav({ brand, tenant }) {
                         ) : (
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute left-64 xl:left-[18rem]">
                                 <Link
-                                    href="/app/dashboard"
+                                    href="/app/overview"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl === '/app/dashboard'
+                                        color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl === '/app/dashboard'
+                                        borderBottomColor: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
                                 >
-                                    Dashboard
+                                    Overview
                                 </Link>
                                 <Link
                                     href="/app/assets"
@@ -539,18 +547,18 @@ export default function AppNav({ brand, tenant }) {
                         )) : (
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 sm:ml-6">
                                 <Link
-                                    href="/app/dashboard"
+                                    href="/app/overview"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl === '/app/dashboard'
+                                        color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl === '/app/dashboard'
+                                        borderBottomColor: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
                                 >
-                                    Dashboard
+                                    Overview
                                 </Link>
                                 <Link
                                     href="/app/assets"
@@ -841,7 +849,7 @@ export default function AppNav({ brand, tenant }) {
                                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Brands</p>
                                                 <PermissionGate permission="brand_settings.manage">
                                                     <Link
-                                                        href="/app/brands"
+                                                        href={activeBrand ? (typeof route === 'function' ? route('brands.edit', { brand: activeBrand.id }) : `/app/brands/${activeBrand.id}/edit`) : '/app'}
                                                         className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
                                                         onClick={() => setUserMenuOpen(false)}
                                                     >
@@ -1005,13 +1013,13 @@ export default function AppNav({ brand, tenant }) {
                         <nav className="flex-1 overflow-y-auto py-4 px-3" aria-label="Primary">
                             <div className="space-y-0.5">
                                 {[
-                                    { href: '/app/dashboard', label: 'Dashboard' },
+                                    { href: '/app/overview', label: 'Overview' },
                                     { href: '/app/assets', label: 'Assets' },
                                     { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL },
                                     { href: '/app/collections', label: 'Collections' },
                                     { href: '/app/generative', label: 'Generative' },
                                 ].map(({ href, label }) => {
-                                    const isActive = href === '/app/dashboard' ? currentUrl === href : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/executions'))
+                                    const isActive = (href === '/app/overview') ? (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')) : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/executions'))
                                     return (
                                         <Link
                                             key={href}

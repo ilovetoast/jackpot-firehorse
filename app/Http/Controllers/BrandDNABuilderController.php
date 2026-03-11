@@ -15,11 +15,15 @@ use App\Models\BrandPdfVisionExtraction;
 use App\Models\PdfTextExtraction;
 use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
+use App\Services\BrandDNA\BrandResearchNotificationService;
+use App\Services\BrandDNA\ResearchFinalizationService;
 use App\Services\BrandDNA\BrandDnaDraftService;
 use App\Services\BrandDNA\CoherenceDeltaService;
 use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\BrandGuidelinesPublishValidator;
 use App\Services\BrandDNA\BrandModelService;
+use App\Services\BrandDNA\BrandResearchReportBuilder;
+use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
@@ -41,7 +45,9 @@ class BrandDNABuilderController extends Controller
         private BrandAlignmentEngine $alignmentEngine,
         private SuggestionApplier $suggestionApplier,
         private CoherenceDeltaService $coherenceDeltaService,
-        private \App\Services\BrandDNA\PublishedVersionGuard $publishedGuard
+        private \App\Services\BrandDNA\PublishedVersionGuard $publishedGuard,
+        private ResearchFinalizationService $finalizationService,
+        private \App\Services\BrandDNA\ResearchProgressService $progressService
     ) {}
 
     /**
@@ -65,14 +71,13 @@ class BrandDNABuilderController extends Controller
         if ($currentStep === 'purpose') {
             $currentStep = BrandGuidelinesBuilderSteps::STEP_PURPOSE_PROMISE;
         }
-        if (! BrandGuidelinesBuilderSteps::isValidStepKey($currentStep)) {
+        if (! BrandGuidelinesBuilderSteps::isValidStepKey($currentStep) && ! in_array($currentStep, ['processing', 'research-summary'])) {
             $currentStep = BrandGuidelinesBuilderSteps::STEP_BACKGROUND;
         }
-        // Legacy: redirect step=processing to archetype (processing step removed)
-        if ($currentStep === 'processing') {
-            return redirect()->to(route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => BrandGuidelinesBuilderSteps::STEP_ARCHETYPE]));
-        }
+        // Allow step=processing and research-summary as valid — interstitial pages
         $anchor = $request->query('anchor');
+
+        $this->recordBuilderStepVisit($draft, $currentStep);
 
         $crawlerRunning = false;
         $ingestionProcessing = false;
@@ -117,7 +122,7 @@ class BrandDNABuilderController extends Controller
                 ->latest()
                 ->first();
             $latestSnapshot = $latestResearch?->snapshot ?? [];
-            $latestSuggestions = $latestResearch?->suggestions ?? [];
+            $latestSuggestions = SuggestionViewTransformer::forFrontend($latestResearch?->suggestions ?? []);
             $latestSnapshotLite = $latestResearch ? [
                 'id' => $latestResearch->id,
                 'status' => $latestResearch->status,
@@ -147,16 +152,93 @@ class BrandDNABuilderController extends Controller
             ])->values()->all();
 
             $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
+            // Clean orphaned pivot rows (asset soft-deleted; pivot remains, causes 404 when frontend fetches)
+            $pdfPivotAssetIds = BrandModelVersionAsset::where('brand_model_version_id', $draft->id)
+                ->where('builder_context', 'guidelines_pdf')
+                ->pluck('asset_id');
+            $existingIds = Asset::withoutTrashed()->whereIn('id', $pdfPivotAssetIds)->pluck('id');
+            $orphanedIds = $pdfPivotAssetIds->diff($existingIds);
+            if ($orphanedIds->isNotEmpty()) {
+                BrandModelVersionAsset::where('brand_model_version_id', $draft->id)
+                    ->where('builder_context', 'guidelines_pdf')
+                    ->whereIn('asset_id', $orphanedIds)
+                    ->delete();
+            }
             $guidelinesPdfAssetId = $guidelinesPdfAsset?->id;
             $guidelinesPdfFilename = $guidelinesPdfAsset?->original_filename;
 
-            // AI processing disabled — wizard never blocks. User can always proceed.
-            $overallStatus = 'completed';
+            // Compute real overallStatus for processing gate (Background allows Next; processing step blocks until complete)
+            $sources = $draft->model_payload['sources'] ?? [];
+            $hasWebsiteUrl = ! empty(trim((string) ($sources['website_url'] ?? '')));
+            $hasSocialUrls = ! empty($sources['social_urls'] ?? []);
+            $hasPdf = $guidelinesPdfAsset !== null;
+            $hasMaterials = $brandMaterialCount > 0;
+
+            $pdfComplete = ! $hasPdf;
+            if ($hasPdf && $guidelinesPdfAsset) {
+                $visionBatch = BrandPdfVisionExtraction::where('asset_id', $guidelinesPdfAsset->id)
+                    ->where('brand_id', $brand->id)
+                    ->where('brand_model_version_id', $draft->id)
+                    ->latest()
+                    ->first();
+                if ($visionBatch) {
+                    $pdfComplete = in_array($visionBatch->status, [BrandPdfVisionExtraction::STATUS_COMPLETED, BrandPdfVisionExtraction::STATUS_FAILED]);
+                } else {
+                    $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
+                    $pdfComplete = $extraction && ! in_array($extraction->status, ['pending', 'processing']);
+                }
+            }
+
+            $latestCompletedSnapshot = BrandResearchSnapshot::where('brand_id', $brand->id)
+                ->where('brand_model_version_id', $draft->id)
+                ->where('status', 'completed')
+                ->latest()
+                ->first();
+            $websiteComplete = ! $hasWebsiteUrl && ! $hasSocialUrls;
+            if ($hasWebsiteUrl || $hasSocialUrls) {
+                $websiteComplete = $latestCompletedSnapshot !== null && $runningSnapshot === null;
+            }
+
+            $latestIngestion = $ingestionRecords->first();
+            $materialsComplete = ! $hasMaterials;
+            if ($hasMaterials) {
+                $materialsComplete = $latestIngestion && $latestIngestion->status !== BrandIngestionRecord::STATUS_PROCESSING;
+            }
+
+            $allSourcesComplete = $pdfComplete && $websiteComplete && $materialsComplete;
+            $overallStatus = $allSourcesComplete ? 'completed' : 'processing';
+            if ($latestIngestion?->status === BrandIngestionRecord::STATUS_FAILED) {
+                $overallStatus = 'failed';
+            }
+
+            $finalization = $this->finalizationService->compute(
+                $brand->id,
+                $draft->id,
+                $guidelinesPdfAsset,
+                $hasWebsiteUrl,
+                $hasSocialUrls,
+                $brandMaterialCount
+            );
         } catch (\Throwable $e) {
             // Tables may not exist yet
             $ingestionProcessing = false;
             $ingestionRecords = collect();
             $overallStatus = $overallStatus ?? 'pending';
+            $finalization = [
+                'pipeline_status' => [
+                    'pdf_render_complete' => true,
+                    'page_classification_complete' => true,
+                    'page_extraction_complete' => true,
+                    'text_extraction_complete' => true,
+                    'fusion_complete' => true,
+                    'snapshot_persisted' => false,
+                    'suggestions_ready' => false,
+                    'coherence_ready' => false,
+                    'alignment_ready' => false,
+                    'research_finalized' => false,
+                ],
+                'research_finalized' => false,
+            ];
         }
 
         return Inertia::render('BrandGuidelines/Builder', [
@@ -197,6 +279,9 @@ class BrandDNABuilderController extends Controller
             'guidelinesPdfAssetId' => $guidelinesPdfAssetId ?? null,
             'guidelinesPdfFilename' => $guidelinesPdfFilename ?? null,
             'overallStatus' => $overallStatus ?? 'pending',
+            'researchFinalized' => $finalization['research_finalized'] ?? false,
+            'pipelineStatus' => $finalization['pipeline_status'] ?? [],
+            'isLocal' => app()->environment('local'),
         ]);
     }
 
@@ -253,6 +338,8 @@ class BrandDNABuilderController extends Controller
             $validated['step_key'],
             $validated['payload']
         );
+
+        $this->recordBuilderStepCompleted($draft, $validated['step_key']);
 
         return response()->json([
             'draft_version' => [
@@ -579,7 +666,7 @@ class BrandDNABuilderController extends Controller
 
         $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
         $visionBatch = null;
-        $pdfState = ['status' => 'pending', 'pages_total' => 0, 'pages_processed' => 0, 'signals_detected' => 0, 'early_complete' => false];
+        $pdfState = ['status' => 'pending', 'phase' => null, 'pages_total' => 0, 'pages_processed' => 0, 'signals_detected' => 0, 'early_complete' => false, 'batch_id' => null];
         if ($guidelinesPdfAsset) {
             $visionBatch = BrandPdfVisionExtraction::where('asset_id', $guidelinesPdfAsset->id)
                 ->where('brand_id', $brand->id)
@@ -595,11 +682,27 @@ class BrandDNABuilderController extends Controller
 
                 $pdfState = [
                     'status' => $visionBatch->status,
+                    'phase' => 'vision',
                     'pages_total' => $visionBatch->pages_total,
                     'pages_processed' => $monotonicProcessed,
                     'signals_detected' => $visionBatch->signals_detected,
                     'early_complete' => $visionBatch->early_complete,
+                    'batch_id' => $visionBatch->batch_id,
                 ];
+            } else {
+                $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
+                if ($extraction) {
+                    $extStatus = $extraction->status;
+                    $pdfState = [
+                        'status' => $extStatus === 'complete' ? 'completed' : ($extStatus === 'failed' ? 'failed' : $extStatus),
+                        'phase' => in_array($extStatus, ['complete', 'failed']) ? null : 'text_extraction',
+                        'pages_total' => 0,
+                        'pages_processed' => 0,
+                        'signals_detected' => 0,
+                        'early_complete' => false,
+                        'batch_id' => null,
+                    ];
+                }
             }
         }
 
@@ -636,6 +739,19 @@ class BrandDNABuilderController extends Controller
             $overallStatus = 'failed';
         }
 
+        $finalization = $this->finalizationService->compute(
+            $brand->id,
+            $draft->id,
+            $guidelinesPdfAsset,
+            $hasWebsiteUrl,
+            $hasSocialUrls,
+            $brandMaterialCount
+        );
+
+        if ($finalization['research_finalized'] ?? false) {
+            app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($brand, $draft);
+        }
+
         $websiteState = ['status' => 'pending', 'signals_detected' => 0];
         $socialState = ['status' => 'pending'];
         $materialsState = ['status' => 'pending', 'assets_total' => 0, 'assets_processed' => 0];
@@ -648,7 +764,45 @@ class BrandDNABuilderController extends Controller
             $websiteState['status'] = 'processing';
         }
 
+        $snapshotData = $latestCompletedSnapshot?->snapshot ?? [];
+
+        if (config('app.env') !== 'production' && $latestCompletedSnapshot) {
+            \Illuminate\Support\Facades\Log::info('[BrandDNABuilderController::researchInsights] Snapshot page data', [
+                'snapshot_id' => $latestCompletedSnapshot->id,
+                'has_page_classifications_json' => ! empty($latestCompletedSnapshot->page_classifications_json),
+                'has_page_extractions_json' => ! empty($latestCompletedSnapshot->page_extractions_json),
+                'has_page_analysis_in_snapshot' => ! empty($snapshotData['page_analysis'] ?? null),
+                'page_classifications_count' => isset($latestCompletedSnapshot->page_classifications_json) ? count($latestCompletedSnapshot->page_classifications_json) : 0,
+            ]);
+        }
+
+        $suggestionsData = $latestCompletedSnapshot?->suggestions ?? [];
+        $coherenceData = $latestCompletedSnapshot?->coherence ?? null;
+        $alignmentData = $latestCompletedSnapshot?->alignment ?? null;
+
+        $report = $latestCompletedSnapshot?->report;
+        if ($report === null && $latestCompletedSnapshot) {
+            $report = BrandResearchReportBuilder::build(
+                $snapshotData,
+                $suggestionsData,
+                $coherenceData ?? [],
+                $alignmentData ?? [],
+                $this->deriveReportSources($draft)
+            );
+        }
+        $report = $report ?? BrandResearchReportBuilder::build([], [], [], [], []);
+
+        $processingProgress = $this->progressService->compute(
+            [
+                'pipeline_status' => $finalization['pipeline_status'],
+                'pdf' => $pdfState,
+            ],
+            $visionBatch,
+            $guidelinesPdfAsset
+        );
+
         return response()->json([
+            'processing_progress' => $processingProgress,
             'crawlerRunning' => $runningSnapshot !== null,
             'runningSnapshotLite' => $runningSnapshot ? [
                 'id' => $runningSnapshot->id,
@@ -662,9 +816,39 @@ class BrandDNABuilderController extends Controller
                 'created_at' => $latestCompletedSnapshot->created_at?->toIso8601String(),
                 'source_url' => $latestCompletedSnapshot->source_url,
             ] : null,
-            'latestSuggestions' => $latestCompletedSnapshot?->suggestions ?? [],
-            'latestCoherence' => $latestCompletedSnapshot?->coherence ?? null,
-            'latestAlignment' => $latestCompletedSnapshot?->alignment ?? null,
+            'report' => $report,
+            'latestSuggestions' => SuggestionViewTransformer::forFrontend($suggestionsData, $snapshotData),
+            'researchFinalized' => $finalization['research_finalized'],
+            'pipelineStatus' => $finalization['pipeline_status'],
+            'developer_data' => array_filter(array_merge([
+                'snapshot' => $snapshotData,
+                'pipeline_status' => $finalization['pipeline_status'],
+                'coherence' => $coherenceData,
+                'alignment' => $alignmentData,
+                'sections' => $latestCompletedSnapshot?->sections_json ?? null,
+                'extraction_debug' => $snapshotData['extraction_debug'] ?? null,
+                'evidence_map' => $snapshotData['evidence_map'] ?? null,
+                'rejected_field_candidates' => $snapshotData['rejected_field_candidates'] ?? null,
+                'narrative_field_debug' => $snapshotData['narrative_field_debug'] ?? null,
+                'explicit_signals' => $snapshotData['explicit_signals'] ?? null,
+                'page_analysis' => $snapshotData['page_analysis'] ?? null,
+                'page_classifications' => $latestCompletedSnapshot?->page_classifications_json ?? null,
+                'page_extractions' => $latestCompletedSnapshot?->page_extractions_json ?? null,
+                'page_type_metrics' => $this->buildPageTypeMetrics($latestCompletedSnapshot?->page_classifications_json ?? []),
+                'pipeline_version' => $snapshotData['pipeline_version'] ?? null,
+                'visual_pipeline_enabled' => $snapshotData['visual_pipeline_enabled'] ?? null,
+                'snapshot_generated_at' => $snapshotData['snapshot_generated_at'] ?? null,
+                'stale_snapshot_warning' => $this->computeStaleSnapshotWarning($snapshotData),
+                '_debug' => [
+                    'config_visual_enabled' => config('brand_dna.visual_page_extraction_enabled', false),
+                    'snapshot_has_page_classifications' => ! empty($latestCompletedSnapshot?->page_classifications_json ?? null),
+                    'snapshot_has_page_extractions' => ! empty($latestCompletedSnapshot?->page_extractions_json ?? null),
+                    'snapshot_has_page_analysis_in_payload' => ! empty($snapshotData['page_analysis'] ?? null),
+                ],
+            ], []), fn ($v) => $v !== null),
+            'latestSnapshot' => $snapshotData,
+            'latestCoherence' => $coherenceData,
+            'latestAlignment' => $alignmentData,
             'insightState' => [
                 'dismissed' => $state->dismissed ?? [],
                 'accepted' => $state->accepted ?? [],
@@ -686,6 +870,106 @@ class BrandDNABuilderController extends Controller
             'materials' => $materialsState,
             'overall_status' => $overallStatus,
         ]);
+    }
+
+    protected function deriveReportSources(BrandModelVersion $draft): array
+    {
+        $sources = [];
+        if ($draft->assetsForContext('guidelines_pdf')->exists()) {
+            $sources[] = 'pdf';
+        }
+        $payload = $draft->model_payload ?? [];
+        if (! empty(trim((string) ($payload['sources']['website_url'] ?? '')))) {
+            $sources[] = 'website';
+        }
+        if ($draft->assetsForContext('brand_material')->exists()) {
+            $sources[] = 'materials';
+        }
+
+        return array_values(array_unique($sources));
+    }
+
+    /**
+     * Determine if snapshot is stale (pre-visual-pipeline) and return warning message.
+     */
+    protected function computeStaleSnapshotWarning(array $snapshotData): ?string
+    {
+        $hasVersion = ! empty($snapshotData['pipeline_version']);
+        $snapshotHadVisual = $snapshotData['visual_pipeline_enabled'] ?? false;
+        $currentVisual = config('brand_dna.visual_page_extraction_enabled', false);
+
+        if (! $hasVersion) {
+            return 'This research snapshot was generated with an older pipeline version. Re-run analysis to use the latest extraction logic.';
+        }
+        if ($currentVisual && ! $snapshotHadVisual) {
+            return 'This research snapshot was generated before visual page extraction was enabled. Re-run analysis to use the latest extraction logic.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Build page-type counts for QA metrics.
+     *
+     * @return array<string, int> Map of page_type => count
+     */
+    protected function buildPageTypeMetrics(array $pageClassifications): array
+    {
+        if (empty($pageClassifications)) {
+            return [];
+        }
+        $counts = [];
+        foreach ($pageClassifications as $c) {
+            $type = $c['page_type'] ?? 'unknown';
+            $counts[$type] = ($counts[$type] ?? 0) + 1;
+        }
+        ksort($counts);
+
+        return $counts;
+    }
+
+    /**
+     * Record builder step visit for resume flow. Updates last_visited_step.
+     * When transitioning from research-summary to a later step, sets research_reviewed_at.
+     */
+    protected function recordBuilderStepVisit(BrandModelVersion $draft, string $currentStep): void
+    {
+        try {
+            $progress = $draft->builder_progress ?? [];
+            $lastVisited = $progress['last_visited_step'] ?? null;
+
+            if ($currentStep === 'research-summary') {
+                $state = $draft->insightState;
+                if ($state && ! $state->viewed_at) {
+                    $state->update(['viewed_at' => now()]);
+                }
+            }
+
+            if ($lastVisited === 'research-summary' && in_array($currentStep, ['archetype', 'purpose_promise', 'expression', 'positioning', 'standards'], true)) {
+                $progress['research_reviewed_at'] = now()->toIso8601String();
+                $progress['last_completed_step'] = 'research-summary';
+            }
+
+            $progress['last_visited_step'] = $currentStep;
+            $draft->update(['builder_progress' => $progress]);
+        } catch (\Throwable $e) {
+            // Non-critical; do not block builder load
+        }
+    }
+
+    /**
+     * Record that user completed a builder step (saved via patch).
+     */
+    protected function recordBuilderStepCompleted(BrandModelVersion $draft, string $stepKey): void
+    {
+        try {
+            $progress = $draft->builder_progress ?? [];
+            $progress['last_completed_step'] = $stepKey;
+            $progress['last_visited_step'] = $stepKey;
+            $draft->update(['builder_progress' => $progress]);
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
     }
 
     /**
@@ -1040,6 +1324,70 @@ class BrandDNABuilderController extends Controller
         }
         RunBrandIngestionJob::dispatch($brand->id, $draft->id, $pdfAssetId, $websiteUrl, $materialIds);
         return response()->json(['triggered' => true]);
+    }
+
+    /**
+     * POST /brands/{brand}/brand-dna/builder/invalidate-and-rerun-research
+     * Dev only: delete completed snapshots and re-run the pipeline.
+     */
+    public function invalidateAndRerunResearch(Request $request, Brand $brand): JsonResponse
+    {
+        if (! in_array(config('app.env'), ['local', 'testing'], true) && ! config('app.debug')) {
+            abort(404);
+        }
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $deleted = BrandResearchSnapshot::where('brand_id', $brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('status', 'completed')
+            ->delete();
+
+        $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
+        $sources = $draft->model_payload['sources'] ?? [];
+        $websiteUrl = ! empty(trim((string) ($sources['website_url'] ?? ''))) ? trim($sources['website_url']) : null;
+        $materialIds = $draft->assetsForContext('brand_material')->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
+
+        if ($guidelinesPdfAsset) {
+            \App\Jobs\RunBrandPdfVisionExtractionJob::dispatch(
+                (string) $guidelinesPdfAsset->id,
+                $brand->id,
+                $draft->id
+            );
+
+            return response()->json([
+                'invalidated' => true,
+                'deleted_snapshots' => $deleted,
+                'rerun' => 'pdf_vision',
+            ]);
+        }
+
+        if ($websiteUrl || ! empty($materialIds)) {
+            RunBrandIngestionJob::dispatch(
+                $brand->id,
+                $draft->id,
+                null,
+                $websiteUrl,
+                $materialIds
+            );
+
+            return response()->json([
+                'invalidated' => true,
+                'deleted_snapshots' => $deleted,
+                'rerun' => 'ingestion',
+            ]);
+        }
+
+        return response()->json([
+            'invalidated' => true,
+            'deleted_snapshots' => $deleted,
+            'rerun' => null,
+            'message' => 'No PDF, website, or materials to process.',
+        ]);
     }
 
     /**

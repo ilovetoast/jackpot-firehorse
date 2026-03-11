@@ -60,4 +60,17 @@ return [
         'team_id' => env('LINEAR_TEAM_ID'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Support Round-Robin Default Bucket
+    |--------------------------------------------------------------------------
+    |
+    | Default user IDs for the support round-robin when the bucket is empty.
+    | Used by default in Cedar (and other environments) until the bucket
+    | is populated via the Support Tickets page.
+    |
+    */
+
+    'round_robin_default_user_ids' => [1],
+
 ];

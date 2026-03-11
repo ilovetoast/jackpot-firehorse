@@ -4,8 +4,10 @@ namespace App\Services;
 
 use App\Enums\TicketTeam;
 use App\Enums\TicketType;
+use App\Models\SupportRoundRobinUser;
 use App\Models\Ticket;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Spatie\Permission\Models\Role;
 
 /**
@@ -14,24 +16,17 @@ use Spatie\Permission\Models\Role;
  * Handles automatic ticket assignment logic.
  * Determines assigned team and user based on ticket type and available support staff.
  *
- * Assignment Rules:
- * 1. For tenant tickets:
- *    - Attempt assignment in this order:
- *      a) Users with global role: Site Support
- *      b) Users with global role: Site Admin
- *      c) Users with global role: Site Owner
- * 2. For internal tickets:
- *    - Assign to assigned_team = engineering
- *    - Attempt assignment to users with role: Site Engineering
- *    - Fallback to Site Admin if none exist
- * 3. For tenant_internal tickets:
- *    - Assign to assigned_team = support
- *    - Same assignment logic as tenant tickets
+ * Support Assignment (Round-Robin):
+ * - Uses support_round_robin_users bucket (users with support tag added via Support page)
+ * - When bucket is empty, falls back to config('tickets.round_robin_default_user_ids', [1])
+ * - Round-robin cycles through bucket; last assigned user tracked in cache
+ *
+ * Engineering Assignment:
+ * - Site Engineering → Site Admin (unchanged)
  *
  * Important:
  * - Support roles are global (not tenant-scoped)
  * - A user may hold both tenant and site roles
- * - Assignment logic is deterministic and testable
  * - If no eligible user exists, assigned_to_user_id is left null but assigned_team is still set
  */
 class TicketAssignmentService
@@ -96,28 +91,47 @@ class TicketAssignmentService
     }
 
     /**
-     * Find support user (Site Support → Site Admin → Site Owner).
+     * Find support user via round-robin from bucket.
+     * Bucket: support_round_robin_users table. When empty, uses config default [1].
      *
      * @return User|null
      */
     protected function findSupportUser(): ?User
     {
-        // Try Site Support first
-        $users = $this->getUsersWithRole('site_support');
-        if ($users->isNotEmpty()) {
-            return $users->first();
+        $userIds = SupportRoundRobinUser::getBucketUserIds();
+        if (empty($userIds)) {
+            $userIds = config('tickets.round_robin_default_user_ids', [1]);
+        }
+        if (empty($userIds)) {
+            return $this->findSupportUserByRole();
         }
 
-        // Try Site Admin
-        $users = $this->getUsersWithRole('site_admin');
-        if ($users->isNotEmpty()) {
-            return $users->first();
-        }
+        $lastUserId = Cache::get('support_round_robin_last_user_id');
+        $currentIndex = $lastUserId ? array_search((int) $lastUserId, array_map('intval', $userIds), true) : false;
+        $nextIndex = ($currentIndex !== false && $currentIndex < count($userIds) - 1)
+            ? $currentIndex + 1
+            : 0;
+        $nextUserId = $userIds[$nextIndex];
 
-        // Try Site Owner
-        $users = $this->getUsersWithRole('site_owner');
-        if ($users->isNotEmpty()) {
-            return $users->first();
+        Cache::put('support_round_robin_last_user_id', $nextUserId, now()->addYear());
+
+        $user = User::find($nextUserId);
+
+        return $user ?? $this->findSupportUserByRole();
+    }
+
+    /**
+     * Fallback: find support user by role when bucket/config yields no valid user.
+     *
+     * @return User|null
+     */
+    protected function findSupportUserByRole(): ?User
+    {
+        foreach (['site_support', 'site_admin', 'site_owner'] as $roleName) {
+            $users = $this->getUsersWithRole($roleName);
+            if ($users->isNotEmpty()) {
+                return $users->first();
+            }
         }
 
         return null;

@@ -119,7 +119,7 @@ class CompanyController extends Controller
             }
         }
 
-        return $this->redirectToIntendedApp('/app/dashboard');
+        return $this->redirectToIntendedApp('/app/overview');
     }
 
     /**

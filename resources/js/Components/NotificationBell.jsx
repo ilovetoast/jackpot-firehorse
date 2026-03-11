@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon, DocumentMagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 /**
@@ -111,6 +111,8 @@ export default function NotificationBell({ textColor = '#000000' }) {
                     return assetCount > 0 ? `${assetCount} asset${assetCount === 1 ? '' : 's'} ready to download` : 'Download ready'
                 }
                 return `"${downloadTitle}" is ready to download`
+            case 'brand_research.ready':
+                return data?.title || 'Brand research is ready'
             default:
                 return 'New notification'
         }
@@ -149,6 +151,11 @@ export default function NotificationBell({ textColor = '#000000' }) {
         const needsCompanySwitch = notifTenantId && (!activeTenantId || activeTenantId !== notifTenantId)
         const needsBrandSwitch = notifBrandId && activeBrandId && notifBrandId !== activeBrandId && activeTenantId === notifTenantId
 
+        if (notification.type === 'brand_research.ready' && data.action_url) {
+            setIsOpen(false)
+            router.visit(data.action_url)
+            return
+        }
         if (notification.type === 'download.ready' && data.download_id) {
             setIsOpen(false)
             if (needsCompanySwitch) {
@@ -257,7 +264,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                     {canViewSuggestions && pending_items.ai_suggestions > 0 && (
                                         <button
                                             onClick={() => {
-                                                router.visit('/app/dashboard')
+                                                router.visit('/app')
                                                 setIsOpen(false)
                                             }}
                                             className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 bg-blue-50"
@@ -281,7 +288,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                     {metadataApprovalsCount > 0 && (
                                         <button
                                             onClick={() => {
-                                                router.visit('/app/dashboard')
+                                                router.visit('/app')
                                                 setIsOpen(false)
                                             }}
                                             className={`w-full text-left px-4 py-3 text-sm ${
@@ -338,6 +345,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
                             ) : (
                                 notifications.map((notification) => {
                                     const isDownloadReady = notification.type === 'download.ready'
+                                    const isBrandResearchReady = notification.type === 'brand_research.ready'
                                     return (
                                         <button
                                             key={notification.id}
@@ -347,7 +355,32 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                             }`}
                                         >
                                             <div className="flex items-start justify-between">
-                                                {isDownloadReady ? (
+                                                {isBrandResearchReady ? (
+                                                    <>
+                                                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                            <DocumentMagnifyingGlassIcon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-sm font-medium text-gray-900">
+                                                                    {getNotificationMessage(notification)}
+                                                                </p>
+                                                                {getContextLabel(notification) && (
+                                                                    <p className="text-xs text-indigo-600 mt-0.5 font-medium">
+                                                                        {getContextLabel(notification)}
+                                                                    </p>
+                                                                )}
+                                                                <p className="text-xs text-gray-500 mt-0.5">
+                                                                    {notification.data?.body || 'Review extracted insights'}
+                                                                </p>
+                                                                <p className="text-xs text-gray-400 mt-0.5">
+                                                                    {new Date(notification.created_at).toLocaleString()}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        {notification.is_unread && (
+                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                                                        )}
+                                                    </>
+                                                ) : isDownloadReady ? (
                                                     <>
                                                         <div className="flex items-start gap-3 flex-1 min-w-0">
                                                             <ArrowDownTrayIcon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />

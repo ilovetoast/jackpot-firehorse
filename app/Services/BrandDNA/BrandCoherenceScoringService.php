@@ -42,7 +42,7 @@ class BrandCoherenceScoringService
 
         $sections = [
             'background' => $this->scoreBackground($sources, $brandMaterialCount),
-            'archetype' => $this->scoreArchetype($personality),
+            'archetype' => $this->scoreArchetype($personality, $snapshotRaw),
             'purpose' => $this->scorePurpose($identity),
             'expression' => $this->scoreExpression($identity, $personality, $scoringRules),
             'positioning' => $this->scorePositioning($identity),
@@ -70,7 +70,7 @@ class BrandCoherenceScoringService
                 $field = $c['field'] ?? '';
                 if ($field === 'personality.primary_archetype') {
                     $recommended = $c['recommended'] ?? null;
-                    $draftArchetype = $personality['primary_archetype'] ?? null;
+                    $draftArchetype = self::unwrapScalar($personality['primary_archetype'] ?? null);
                     if ($draftArchetype !== $recommended) {
                         $risks[] = ['id' => 'COH:CONFLICT_PRIMARY_ARCHETYPE', 'label' => 'Multiple sources disagree on archetype', 'detail' => 'Resolve conflict by applying recommended value.'];
                         $conflictPenalty = -3;
@@ -119,13 +119,19 @@ class BrandCoherenceScoringService
         ];
     }
 
-    protected function scoreArchetype(array $personality): array
+    protected function scoreArchetype(array $personality, ?array $snapshotRaw = null): array
     {
-        $primary = $personality['primary_archetype'] ?? null;
+        $primary = self::unwrapScalar($personality['primary_archetype'] ?? null);
+        if (($primary === null || $primary === '') && is_array($snapshotRaw)) {
+            $evidenceArchetype = $snapshotRaw['evidence_map']['personality.primary_archetype']['final_value'] ?? null;
+            if ($evidenceArchetype !== null && $evidenceArchetype !== '') {
+                $primary = is_string($evidenceArchetype) ? $evidenceArchetype : ($evidenceArchetype['value'] ?? (string) $evidenceArchetype);
+            }
+        }
         $candidates = $personality['candidate_archetypes'] ?? [];
         $selected = array_filter(array_merge(
-            $primary ? [$primary] : [],
-            is_array($candidates) ? $candidates : []
+            $primary !== null && $primary !== '' ? [$primary] : [],
+            is_array($candidates) ? array_map(fn ($c) => self::unwrapScalar($c), $candidates) : []
         ));
         $count = count(array_unique($selected));
         $valid = $count >= 1 && $count <= 2;
@@ -142,8 +148,8 @@ class BrandCoherenceScoringService
 
     protected function scorePurpose(array $identity): array
     {
-        $mission = trim((string) ($identity['mission'] ?? ''));
-        $positioning = trim((string) ($identity['positioning'] ?? ''));
+        $mission = trim((string) self::unwrapScalar($identity['mission'] ?? ''));
+        $positioning = trim((string) self::unwrapScalar($identity['positioning'] ?? ''));
         $hasMission = strlen($mission) >= 20 && ! $this->isPlaceholder($mission);
         $hasPositioning = strlen($positioning) >= 20 && ! $this->isPlaceholder($positioning);
         $coverage = ($hasMission ? 50 : 0) + ($hasPositioning ? 50 : 0);
@@ -164,8 +170,8 @@ class BrandCoherenceScoringService
 
     protected function scoreExpression(array $identity, array $personality, array $scoringRules): array
     {
-        $brandLook = trim((string) ($personality['brand_look'] ?? ''));
-        $voiceDescription = trim((string) ($personality['voice_description'] ?? ''));
+        $brandLook = trim((string) self::unwrapScalar($personality['brand_look'] ?? ''));
+        $voiceDescription = trim((string) self::unwrapScalar($personality['voice_description'] ?? ''));
         $toneKeywords = $scoringRules['tone_keywords'] ?? $personality['tone_keywords'] ?? [];
         $traits = $personality['traits'] ?? [];
         $hasBrandLook = strlen($brandLook) >= 15 && ! $this->isPlaceholder($brandLook);
@@ -186,11 +192,11 @@ class BrandCoherenceScoringService
 
     protected function scorePositioning(array $identity): array
     {
-        $industry = ! empty(trim((string) ($identity['industry'] ?? '')));
-        $audience = ! empty(trim((string) ($identity['target_audience'] ?? '')));
-        $marketCategory = ! empty(trim((string) ($identity['market_category'] ?? '')));
-        $competitivePosition = ! empty(trim((string) ($identity['competitive_position'] ?? '')));
-        $tagline = ! empty(trim((string) ($identity['tagline'] ?? '')));
+        $industry = ! empty(trim((string) self::unwrapScalar($identity['industry'] ?? '')));
+        $audience = ! empty(trim((string) self::unwrapScalar($identity['target_audience'] ?? '')));
+        $marketCategory = ! empty(trim((string) self::unwrapScalar($identity['market_category'] ?? '')));
+        $competitivePosition = ! empty(trim((string) self::unwrapScalar($identity['competitive_position'] ?? '')));
+        $tagline = ! empty(trim((string) self::unwrapScalar($identity['tagline'] ?? '')));
         $beliefs = $identity['beliefs'] ?? [];
         $values = $identity['values'] ?? [];
         $hasBeliefs = ! empty($beliefs);
@@ -216,7 +222,7 @@ class BrandCoherenceScoringService
             ! empty($brandColors['secondary'] ?? '') ||
             ! empty($brandColors['accent'] ?? '')
         );
-        $hasTypography = ! empty(trim((string) ($typography['primary_font'] ?? ''))) || ! empty(trim((string) ($typography['secondary_font'] ?? '')));
+        $hasTypography = ! empty(trim((string) self::unwrapScalar($typography['primary_font'] ?? ''))) || ! empty(trim((string) self::unwrapScalar($typography['secondary_font'] ?? '')));
         $hasRefs = ! empty($visual['approved_references'] ?? []);
         $count = ($hasPalette || $hasBrandColors ? 1 : 0) + ($hasTypography ? 1 : 0) + ($hasRefs ? 1 : 0);
         $coverage = min(100, $count * 40);
@@ -228,7 +234,7 @@ class BrandCoherenceScoringService
 
         if ($snapshotRaw && is_array($snapshotRaw)) {
             $draftColors = $this->normalizePaletteToHex($scoringRules['allowed_color_palette'] ?? []);
-            $snapshotColors = array_map(fn ($c) => strtolower(trim((string) $c)), $snapshotRaw['primary_colors'] ?? []);
+            $snapshotColors = $this->normalizeSnapshotColorsToHexStrings($snapshotRaw['primary_colors'] ?? []);
             $snapshotColors = array_filter($snapshotColors, fn ($c) => $c !== '');
 
             if (! empty($draftColors) && ! empty($snapshotColors)) {
@@ -241,8 +247,8 @@ class BrandCoherenceScoringService
                 }
             }
 
-            $primaryFont = trim((string) ($typography['primary_font'] ?? ''));
-            $detectedFonts = array_map(fn ($f) => strtolower(trim((string) $f)), $snapshotRaw['detected_fonts'] ?? []);
+            $primaryFont = trim((string) self::unwrapScalar($typography['primary_font'] ?? ''));
+            $detectedFonts = $this->normalizeSnapshotFontsToStrings($snapshotRaw['detected_fonts'] ?? []);
             $detectedFonts = array_filter($detectedFonts, fn ($f) => $f !== '');
 
             if ($primaryFont !== '' && ! empty($detectedFonts)) {
@@ -285,6 +291,51 @@ class BrandCoherenceScoringService
         }
 
         return array_values(array_unique($hex));
+    }
+
+    /**
+     * Normalize snapshot primary_colors to hex strings. Defensive against arrays/objects.
+     */
+    protected function normalizeSnapshotColorsToHexStrings(array $colors): array
+    {
+        $out = [];
+        foreach ($colors as $c) {
+            $hex = null;
+            if (is_string($c)) {
+                $hex = strtolower(trim($c));
+            } elseif (is_array($c) && isset($c['hex']) && is_string($c['hex'])) {
+                $hex = strtolower(trim($c['hex']));
+            } elseif (is_array($c) && isset($c['value']) && is_string($c['value'])) {
+                $hex = strtolower(trim($c['value']));
+            }
+            if ($hex !== null && $hex !== '') {
+                $out[] = $hex;
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Normalize snapshot detected_fonts to strings. Defensive against arrays/objects.
+     */
+    protected function normalizeSnapshotFontsToStrings(array $fonts): array
+    {
+        $out = [];
+        foreach ($fonts as $f) {
+            $name = null;
+            if (is_string($f)) {
+                $name = strtolower(trim($f));
+            } elseif (is_array($f)) {
+                $v = $f['value'] ?? $f['name'] ?? null;
+                $name = is_string($v) ? strtolower(trim($v)) : null;
+            }
+            if ($name !== null && $name !== '') {
+                $out[] = $name;
+            }
+        }
+
+        return array_values(array_unique($out));
     }
 
     protected function isPlaceholder(string $s): bool
@@ -335,5 +386,20 @@ class BrandCoherenceScoringService
         }
 
         return $out;
+    }
+
+    /**
+     * Unwrap scalar from wrapped value (e.g. {value: '...'} from AI apply or extraction merge).
+     */
+    protected static function unwrapScalar(mixed $val): mixed
+    {
+        if ($val === null || is_scalar($val)) {
+            return $val;
+        }
+        if (is_array($val) && isset($val['value'])) {
+            return $val['value'];
+        }
+
+        return null;
     }
 }
