@@ -500,7 +500,7 @@ function ProcessingStatusPanel({ pdfExtractionPolling, ingestionProcessing, inge
 
 // ——— PdfGuidelinesUploadCard ———
 // Upload PDF → attach to draft → trigger extraction → poll → prefill draft. Additive by default (fill_empty).
-function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, setBrandColors, saving, setErrors, onTriggerIngestion, onExtractionPollingChange, initialPdfAssetId, initialPdfFilename }) {
+function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, setBrandColors, saving, setErrors, onTriggerIngestion, onExtractionPollingChange, onPdfUploadingChange, onPdfAttached, initialPdfAssetId, initialPdfFilename }) {
     const [pdfAssetId, setPdfAssetId] = useState(initialPdfAssetId ?? null)
     const [pdfFilename, setPdfFilename] = useState(initialPdfFilename ?? null)
     const [extractionStatus, setExtractionStatus] = useState(null)
@@ -631,6 +631,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                 asset_id: assetId,
                 builder_context: 'guidelines_pdf',
             })
+            onPdfAttached?.()
         } catch (e) {
             if (e.response?.status === 404 || (e.response?.data?.message || '').includes('No query results')) {
                 setPdfAssetId(null)
@@ -641,7 +642,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
             return
         }
         triggerExtraction(assetId)
-    }, [brandId, triggerExtraction, setErrors])
+    }, [brandId, triggerExtraction, setErrors, onPdfAttached])
 
     const handleReplacePdf = useCallback(async () => {
         if (!pdfAssetId) {
@@ -738,6 +739,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                     brandId={brandId}
                     builderContext="guidelines_pdf"
                     onUploadComplete={handlePdfUploadComplete}
+                    onUploadingChange={onPdfUploadingChange}
                     label="Upload PDF guidelines"
                     accept=".pdf,application/pdf"
                 />
@@ -848,7 +850,7 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
 // ——— BuilderUploadDropzone ———
 // Uses server-returned upload_key from initiate response; never reconstructs path.
 // Supports both click-to-upload and drag-and-drop. Shows upload progress and errors.
-function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, label, count = 0, accept }) {
+function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, onUploadingChange, label, count = 0, accept }) {
     const [uploadingCount, setUploadingCount] = useState(0)
     const [pendingNames, setPendingNames] = useState([])
     const [error, setError] = useState(null)
@@ -859,7 +861,11 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
     const doUpload = useCallback(async (file) => {
         if (!file) return
         setError(null)
-        setUploadingCount((c) => c + 1)
+        setUploadingCount((c) => {
+            const next = c + 1
+            onUploadingChange?.(1)
+            return next
+        })
         setPendingNames((prev) => [...prev, file.name])
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content
         try {
@@ -921,14 +927,18 @@ function BuilderUploadDropzone({ brandId, builderContext, onUploadComplete, labe
         } catch (e) {
             setError(e.message || 'Upload failed')
         } finally {
-            setUploadingCount((c) => Math.max(0, c - 1))
+            setUploadingCount((c) => {
+                const next = Math.max(0, c - 1)
+                onUploadingChange?.(-1)
+                return next
+            })
             setPendingNames((prev) => {
                 const idx = prev.indexOf(file.name)
                 if (idx === -1) return prev
                 return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
             })
         }
-    }, [brandId, builderContext, onUploadComplete])
+    }, [brandId, builderContext, onUploadComplete, onUploadingChange])
 
     const handleChange = (e) => {
         const files = e.target.files
@@ -1135,6 +1145,8 @@ export default function BrandGuidelinesBuilder({
     const [researchPolling, setResearchPolling] = useState(false)
     const [ingestionPolling, setIngestionPolling] = useState(ingestionProcessing ?? false)
     const [pdfExtractionPolling, setPdfExtractionPolling] = useState(false)
+    const [backgroundUploadingCount, setBackgroundUploadingCount] = useState(0)
+    const [pdfAttachedThisSession, setPdfAttachedThisSession] = useState(!!guidelinesPdfAssetId)
     const [polledResearch, setPolledResearch] = useState(null)
     const [showResearchReadyToast, setShowResearchReadyToast] = useState(false)
     const prevResearchFinalizedRef = useRef(null)
@@ -1144,6 +1156,10 @@ export default function BrandGuidelinesBuilder({
         setBrandMaterialCount(initialBrandMaterialCount ?? 0)
         setVisualReferences(initialVisualReferences ?? [])
     }, [initialBrandMaterialCount, initialBrandMaterials, initialVisualReferences])
+
+    useEffect(() => {
+        if (guidelinesPdfAssetId) setPdfAttachedThisSession(true)
+    }, [guidelinesPdfAssetId])
 
     useEffect(() => {
         const links = (payload.typography?.external_font_links || []).filter((url) => typeof url === 'string' && url.startsWith('https://'))
@@ -1603,6 +1619,13 @@ export default function BrandGuidelinesBuilder({
         }
     }, [currentStep, effectiveOverallStatus, brand.id])
 
+    // When on research-summary but processing not complete (e.g. page data not ready), redirect back to processing
+    useEffect(() => {
+        if (currentStep === 'research-summary' && effectiveOverallStatus !== 'completed') {
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'processing' }))
+        }
+    }, [currentStep, effectiveOverallStatus, brand.id])
+
     const effectiveSnapshotLite = polledResearch?.latestSnapshotLite ?? latestSnapshotLite
     const effectiveCoherence = polledResearch?.latestCoherence ?? latestCoherence
     const effectiveAlignment = polledResearch?.latestAlignment ?? latestAlignment
@@ -1883,6 +1906,8 @@ export default function BrandGuidelinesBuilder({
                                                 setErrors={setErrors}
                                                 onTriggerIngestion={triggerIngestion}
                                                 onExtractionPollingChange={setPdfExtractionPolling}
+                                                onPdfUploadingChange={(delta) => setBackgroundUploadingCount((c) => Math.max(0, c + delta))}
+                                                onPdfAttached={() => setPdfAttachedThisSession(true)}
                                                 initialPdfAssetId={guidelinesPdfAssetId}
                                                 initialPdfFilename={guidelinesPdfFilename}
                                             />
@@ -1998,6 +2023,7 @@ export default function BrandGuidelinesBuilder({
                                                     brandId={brand.id}
                                                     builderContext="brand_material"
                                                     onUploadComplete={handleBrandMaterialUploadComplete}
+                                                    onUploadingChange={(delta) => setBackgroundUploadingCount((c) => Math.max(0, c + delta))}
                                                     label="Or upload brand materials (optional)"
                                                     count={brandMaterialCount}
                                                     accept="image/*,.pdf"
@@ -2625,21 +2651,32 @@ export default function BrandGuidelinesBuilder({
                             )}
                             {!isReviewStep && (
                                 <>
+                                    {currentStep === 'background' && backgroundUploadingCount > 0 && !(guidelinesPdfAssetId || pdfAttachedThisSession) && (
+                                        <span className="text-sm text-amber-200/90">Wait for upload to finish</span>
+                                    )}
                                     {currentStep === 'processing' && effectiveOverallStatus !== 'completed' && (
                                         <span className="text-sm text-amber-200/90">Wait for processing to finish</span>
                                     )}
                                     {currentStep === 'research-summary' && !canProceedFromResearch && (
                                         <span className="text-sm text-amber-200/90">Review results before continuing</span>
                                     )}
-                                    <button
-                                        type="button"
-                                        onClick={handleNext}
-                                        disabled={saving || (currentStep === 'processing' && effectiveOverallStatus !== 'completed') || (currentStep === 'research-summary' && !canProceedFromResearch)}
-                                        className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
-                                        style={{ backgroundColor: saving || (currentStep === 'processing' && effectiveOverallStatus !== 'completed') || (currentStep === 'research-summary' && !canProceedFromResearch) ? '#4b5563' : displayAccent }}
-                                    >
-                                        {saving ? 'Saving…' : (currentStep === 'processing' && effectiveOverallStatus !== 'completed') ? 'Processing…' : (currentStep === 'research-summary' && !canProceedFromResearch) ? 'Waiting…' : isLastDataStep ? 'Review' : 'Next'}
-                                    </button>
+                                    {(() => {
+                                        const backgroundBlocked = currentStep === 'background' && backgroundUploadingCount > 0 && !(guidelinesPdfAssetId || pdfAttachedThisSession)
+                                        const processingBlocked = currentStep === 'processing' && effectiveOverallStatus !== 'completed'
+                                        const researchBlocked = currentStep === 'research-summary' && !canProceedFromResearch
+                                        const isDisabled = saving || backgroundBlocked || processingBlocked || researchBlocked
+                                        return (
+                                            <button
+                                                type="button"
+                                                onClick={handleNext}
+                                                disabled={isDisabled}
+                                                className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
+                                                style={{ backgroundColor: isDisabled ? '#4b5563' : displayAccent }}
+                                            >
+                                                {saving ? 'Saving…' : backgroundBlocked ? 'Uploading…' : processingBlocked ? 'Processing…' : researchBlocked ? 'Waiting…' : isLastDataStep ? 'Review' : 'Next'}
+                                            </button>
+                                        )
+                                    })()}
                                 </>
                             )}
                         </div>

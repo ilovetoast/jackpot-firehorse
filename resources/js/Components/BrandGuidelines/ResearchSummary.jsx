@@ -64,6 +64,7 @@ export default function ResearchSummary({
     const [rawJsonOpen, setRawJsonOpen] = useState(false)
     const [applyingSafe, setApplyingSafe] = useState(false)
     const [rerunLoading, setRerunLoading] = useState(false)
+    const [rerunFeedback, setRerunFeedback] = useState(null)
 
     const snapshot = research?.latestSnapshot ?? initialSnapshot
     const suggestions = research?.latestSuggestions ?? initialSuggestions
@@ -644,26 +645,43 @@ export default function ResearchSummary({
                     <div className="px-6 pb-6 space-y-6">
                         {/* Stale Snapshot Warning */}
                         {staleSnapshotWarning && (
-                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-center justify-between gap-4">
-                                <p className="text-sm font-medium text-amber-200">{staleSnapshotWarning}</p>
+                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start justify-between gap-4">
+                                <p className="text-sm font-medium text-amber-200 flex-1">{staleSnapshotWarning}</p>
                                 {isLocal && (
-                                    <button
-                                        type="button"
-                                        onClick={async () => {
-                                            setRerunLoading(true)
-                                            try {
-                                                await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
-                                                const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brandId }))
-                                                setResearch(res.data)
-                                            } finally {
-                                                setRerunLoading(false)
-                                            }
-                                        }}
-                                        disabled={rerunLoading}
-                                        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/30 text-amber-200 hover:bg-amber-500/40 disabled:opacity-50"
-                                    >
-                                        {rerunLoading ? 'Re-running…' : 'Re-run analysis'}
-                                    </button>
+                                    <div className="shrink-0 flex flex-col items-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                setRerunLoading(true)
+                                                setRerunFeedback(null)
+                                                try {
+                                                    const { data } = await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
+                                                    const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brandId }))
+                                                    setResearch(res.data)
+                                                    const msg = data.rerun
+                                                        ? `Pipeline queued (${data.rerun}). Results will update automatically.`
+                                                        : data.message || 'Snapshots invalidated.'
+                                                    setRerunFeedback({ type: 'success', message: msg })
+                                                    setTimeout(() => setRerunFeedback(null), 6000)
+                                                } catch (err) {
+                                                    const msg = err?.response?.data?.message || err?.message || 'Re-run failed'
+                                                    setRerunFeedback({ type: 'error', message: msg })
+                                                    setTimeout(() => setRerunFeedback(null), 8000)
+                                                } finally {
+                                                    setRerunLoading(false)
+                                                }
+                                            }}
+                                            disabled={rerunLoading}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/30 text-amber-200 hover:bg-amber-500/40 disabled:opacity-50"
+                                        >
+                                            {rerunLoading ? 'Re-running…' : 'Re-run analysis'}
+                                        </button>
+                                        {rerunFeedback && (
+                                            <p className={`text-xs text-right ${rerunFeedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+                                                {rerunFeedback.message}
+                                            </p>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -676,10 +694,20 @@ export default function ResearchSummary({
                                     type="button"
                                     onClick={async () => {
                                         setRerunLoading(true)
+                                        setRerunFeedback(null)
                                         try {
-                                            await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
+                                            const { data } = await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
                                             const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brandId }))
                                             setResearch(res.data)
+                                            const msg = data.rerun
+                                                ? `Pipeline queued (${data.rerun}). Results will update automatically.`
+                                                : data.message || 'Snapshots invalidated.'
+                                            setRerunFeedback({ type: 'success', message: msg })
+                                            setTimeout(() => setRerunFeedback(null), 6000)
+                                        } catch (err) {
+                                            const msg = err?.response?.data?.message || err?.message || 'Re-run failed'
+                                            setRerunFeedback({ type: 'error', message: msg })
+                                            setTimeout(() => setRerunFeedback(null), 8000)
                                         } finally {
                                             setRerunLoading(false)
                                         }
@@ -689,6 +717,11 @@ export default function ResearchSummary({
                                 >
                                     {rerunLoading ? 'Re-running…' : 'Invalidate & re-run'}
                                 </button>
+                                {rerunFeedback && (
+                                    <p className={`mt-2 text-xs ${rerunFeedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+                                        {rerunFeedback.message}
+                                    </p>
+                                )}
                             </div>
                         )}
 

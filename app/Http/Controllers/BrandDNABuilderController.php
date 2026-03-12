@@ -183,6 +183,20 @@ class BrandDNABuilderController extends Controller
                     ->first();
                 if ($visionBatch) {
                     $pdfComplete = in_array($visionBatch->status, [BrandPdfVisionExtraction::STATUS_COMPLETED, BrandPdfVisionExtraction::STATUS_FAILED]);
+                    // Vision path: require all pages extracted and snapshot has page data
+                    if ($pdfComplete) {
+                        $pagesTotal = (int) $visionBatch->pages_total;
+                        $pagesProcessed = (int) $visionBatch->pages_processed;
+                        $allPagesComplete = $pagesTotal > 0 && $pagesProcessed >= $pagesTotal;
+                        $hasPageData = $latestResearch && (
+                            ! empty($latestResearch->page_classifications_json)
+                            || ! empty($latestResearch->page_extractions_json)
+                            || ! empty(($latestResearch->snapshot ?? [])['page_analysis'] ?? null)
+                        );
+                        if (! $allPagesComplete || ! $hasPageData) {
+                            $pdfComplete = false;
+                        }
+                    }
                 } else {
                     $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
                     $pdfComplete = $extraction && ! in_array($extraction->status, ['pending', 'processing']);
@@ -717,6 +731,20 @@ class BrandDNABuilderController extends Controller
         if ($hasPdf && $guidelinesPdfAsset) {
             if ($visionBatch) {
                 $pdfComplete = in_array($visionBatch->status, [BrandPdfVisionExtraction::STATUS_COMPLETED, BrandPdfVisionExtraction::STATUS_FAILED]);
+                // Vision path: require all pages extracted and snapshot has page data
+                if ($pdfComplete) {
+                    $pagesTotal = (int) $visionBatch->pages_total;
+                    $pagesProcessed = (int) $visionBatch->pages_processed;
+                    $allPagesComplete = $pagesTotal > 0 && $pagesProcessed >= $pagesTotal;
+                    $hasPageData = $latestCompletedSnapshot && (
+                        ! empty($latestCompletedSnapshot->page_classifications_json)
+                        || ! empty($latestCompletedSnapshot->page_extractions_json)
+                        || ! empty(($latestCompletedSnapshot->snapshot ?? [])['page_analysis'] ?? null)
+                    );
+                    if (! $allPagesComplete || ! $hasPageData) {
+                        $pdfComplete = false;
+                    }
+                }
             } else {
                 $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
                 $pdfComplete = $extraction && ! in_array($extraction->status, ['pending', 'processing']);
@@ -1316,7 +1344,7 @@ class BrandDNABuilderController extends Controller
         $websiteUrl = $validated['website_url'] ?? null;
         $materialIds = $validated['material_asset_ids'] ?? [];
         if (empty($materialIds)) {
-            $materialIds = $draft->assetsForContext('brand_material')->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
+            $materialIds = $draft->assetsForContext('brand_material')->get()->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
         }
         $hasWork = $pdfAssetId || $websiteUrl || ! empty($materialIds);
         if (! $hasWork) {
@@ -1350,7 +1378,7 @@ class BrandDNABuilderController extends Controller
         $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
         $sources = $draft->model_payload['sources'] ?? [];
         $websiteUrl = ! empty(trim((string) ($sources['website_url'] ?? ''))) ? trim($sources['website_url']) : null;
-        $materialIds = $draft->assetsForContext('brand_material')->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
+        $materialIds = $draft->assetsForContext('brand_material')->get()->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
 
         if ($guidelinesPdfAsset) {
             \App\Jobs\RunBrandPdfVisionExtractionJob::dispatch(
