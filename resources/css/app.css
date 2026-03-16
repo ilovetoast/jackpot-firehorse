@@ -28,11 +28,6 @@
 }
 
 @layer utilities {
-    /* Jackpot brand name: Kaushan Script (explicit so it overrides inherited font-sans) */
-    .font-brand {
-        font-family: 'Kaushan Script', cursive !important;
-    }
-
     /* Animated sheen for upload progress bar */
     @keyframes upload-sheen-animation {
         0% {

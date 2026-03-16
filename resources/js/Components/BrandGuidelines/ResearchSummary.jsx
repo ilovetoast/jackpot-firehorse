@@ -96,7 +96,9 @@ export default function ResearchSummary({
         (Array.isArray(pageClassifications) && pageClassifications.length > 0) ||
         (Array.isArray(pageExtractions) && pageExtractions.length > 0)
     )
-    const showDeveloperTools = hasDebugData || isLocal
+    // Show when: backend says local, OR Vite dev mode (npm run dev), OR debug data exists
+    const isViteDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true
+    const showDeveloperTools = hasDebugData || isLocal || isViteDev
     const insightState = research?.insightState ?? initialInsightState
     const processing = research?.ingestionProcessing ?? ingestionProcessing
     const finalized = research?.researchFinalized ?? researchFinalized ?? false

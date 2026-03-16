@@ -18,12 +18,15 @@ class MergeBrandPdfExtractionJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 5;
+
+    public array $backoff = [5, 10, 20];
 
     public int $timeout = 120;
 
     public function __construct(
-        public string $batchId
+        public string $batchId,
+        public int $attempt = 1
     ) {
         $this->onQueue(config('queue.pdf_processing_queue', 'pdf-processing'));
     }
@@ -36,14 +39,43 @@ class MergeBrandPdfExtractionJob implements ShouldQueue
             return;
         }
 
+        Log::info('[MergeBrandPdfExtractionJob] Started', [
+            'batch_id' => $this->batchId,
+            'attempt' => $this->attempt,
+        ]);
+
         if ($visionBatch->status === BrandPdfVisionExtraction::STATUS_COMPLETED) {
+            Log::info('[MergeBrandPdfExtractionJob] Batch already completed, skipping');
             return;
         }
 
-        $pages = BrandPdfPageExtraction::where('batch_id', $this->batchId)
-            ->where('status', BrandPdfPageExtraction::STATUS_COMPLETED)
-            ->orderBy('page_number')
-            ->get();
+        $pages = BrandPdfPageExtraction::where('batch_id', $this->batchId)->get();
+        $totalPages = $pages->count();
+
+        // Data presence guard: require actual extraction data, not just status flags
+        $readyPages = $pages->filter(function ($page) {
+            $ext = $page->extraction_json ?? [];
+            return ! empty($ext['_page_classification'])
+                || ! empty($ext['_page_extractions'])
+                || ! empty($ext['identity'])
+                || ! empty($ext['personality'])
+                || ! empty($ext['visual']);
+        });
+
+        if ($totalPages === 0 || $readyPages->count() !== $totalPages) {
+            Log::warning('[MergeBrandPdfExtractionJob] Skipped — page data incomplete', [
+                'batch_id' => $this->batchId,
+                'total_pages' => $totalPages,
+                'ready_pages' => $readyPages->count(),
+                'attempt' => $this->attempt,
+            ]);
+            if ($this->attempt < 5) {
+                self::dispatch($this->batchId, $this->attempt + 1)->delay(now()->addSeconds(5));
+            }
+            return;
+        }
+
+        $pages = $readyPages->sortBy('page_number')->values();
 
         $extractions = [];
         $pathsToClean = [];
@@ -223,9 +255,9 @@ class MergeBrandPdfExtractionJob implements ShouldQueue
             $visionBatch->asset_id,
             null,
             []
-        );
+        )->delay(now()->addSeconds(2));
 
-        Log::info('[MergeBrandPdfExtractionJob] Merged and dispatched ingestion', [
+        Log::info('[MergeBrandPdfExtractionJob] Succeeded', [
             'batch_id' => $this->batchId,
             'pages_merged' => count($extractions),
         ]);

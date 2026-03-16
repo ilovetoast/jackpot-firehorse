@@ -5,6 +5,7 @@ namespace App\Services\BrandDNA;
 use App\Models\BrandIngestionRecord;
 use App\Models\BrandPdfVisionExtraction;
 use App\Models\BrandResearchSnapshot;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Computes research_finalized and pipeline_status for Brand DNA builder.
@@ -54,6 +55,17 @@ class ResearchFinalizationService
                     BrandPdfVisionExtraction::STATUS_COMPLETED,
                     BrandPdfVisionExtraction::STATUS_FAILED,
                 ]);
+                // Require ALL pages processed — no partial completion (guards against legacy early-exit runs)
+                if ($visionComplete && $visionBatch->status === BrandPdfVisionExtraction::STATUS_COMPLETED) {
+                    $allPagesDone = $visionBatch->pages_total > 0
+                        && $visionBatch->pages_processed >= $visionBatch->pages_total;
+                    $hasPageData = ! empty($visionBatch->extraction_json['page_classifications_json'] ?? null)
+                        || ! empty($visionBatch->extraction_json['page_extractions_json'] ?? null)
+                        || ! empty($visionBatch->extraction_json['page_analysis'] ?? null);
+                    if (! $allPagesDone || ! $hasPageData) {
+                        $visionComplete = false;
+                    }
+                }
                 $status['page_classification_complete'] = $visionComplete;
                 $status['page_extraction_complete'] = $visionComplete;
                 $status['fusion_complete'] = $visionComplete;
@@ -99,6 +111,30 @@ class ResearchFinalizationService
 
         $snapshotExists = $latestSnapshot !== null;
         $status['snapshot_persisted'] = $snapshotExists;
+
+        // Verify snapshot has page data when vision path was used — prevents finalization with empty page analysis
+        if ($snapshotExists && $guidelinesPdfAsset) {
+            $visionBatch = BrandPdfVisionExtraction::where('asset_id', $guidelinesPdfAsset->id)
+                ->where('brand_id', $brandId)
+                ->where('brand_model_version_id', $draftId)
+                ->where('status', BrandPdfVisionExtraction::STATUS_COMPLETED)
+                ->latest()
+                ->first();
+            if ($visionBatch) {
+                $snapshot = $latestSnapshot->snapshot ?? [];
+                $hasPageAnalysis = ! empty($snapshot['page_analysis']);
+                $hasClassifications = ! empty($latestSnapshot->page_classifications_json);
+                $hasExtractions = ! empty($latestSnapshot->page_extractions_json);
+                if (! $hasPageAnalysis && ! $hasClassifications && ! $hasExtractions) {
+                    Log::warning('[ResearchFinalizationService] Detected incomplete vision data in snapshot', [
+                        'draft_id' => $draftId,
+                        'snapshot_id' => $latestSnapshot->id,
+                    ]);
+                    $snapshotExists = false;
+                    $status['snapshot_persisted'] = false;
+                }
+            }
+        }
 
         $suggestionsReady = $snapshotExists && is_array($latestSnapshot->suggestions);
         $status['suggestions_ready'] = $suggestionsReady;

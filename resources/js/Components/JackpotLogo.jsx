@@ -12,7 +12,7 @@ export default function JackpotLogo({ className = 'h-8 w-auto', textClassName = 
                 aria-hidden="true"
                 {...imgProps}
             />
-            <span className={`${textClassName} font-brand`}>Jackpot</span>
+            <span className={textClassName}>Jackpot</span>
         </span>
     )
 }

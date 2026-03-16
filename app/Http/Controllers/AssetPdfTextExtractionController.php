@@ -83,6 +83,10 @@ class AssetPdfTextExtractionController extends Controller
             $payload['extracted_text'] = $extraction->extracted_text;
         }
 
+        // When vision fallback is running, MergeBrandPdfExtractionJob will trigger ingestion.
+        // Frontend must NOT trigger ingestion to avoid RunBrandIngestionJob running before page data exists.
+        $payload['vision_fallback_triggered'] = (bool) $extraction->vision_fallback_triggered;
+
         return response()->json(['extraction' => $payload], 200);
     }
 }

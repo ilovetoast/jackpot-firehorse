@@ -23,6 +23,7 @@ use App\Services\BrandDNA\Extraction\ExtractionSuggestionService;
 use App\Services\BrandDNA\Extraction\ExtractionQualityValidator;
 use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\Extraction\WebsiteExtractionProcessor;
+use App\Jobs\MergeBrandPdfExtractionJob;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -74,7 +75,7 @@ class RunBrandIngestionJob implements ShouldQueue
             ]);
 
         $visualEnabled = config('brand_dna.visual_page_extraction_enabled', false);
-        Log::info('[RunBrandIngestionJob] Pipeline config', [
+        Log::info('[RunBrandIngestionJob] Started', [
             'draft_id' => $draft->id,
             'visual_page_extraction_enabled' => $visualEnabled,
             'env' => config('app.env'),
@@ -186,6 +187,20 @@ class RunBrandIngestionJob implements ShouldQueue
                 $activeSources
             );
 
+            $hasPageData = ! empty($extraction['page_classifications_json'])
+                || ! empty($extraction['page_extractions_json'])
+                || ! empty($extraction['page_analysis']);
+            if ($this->pdfAssetId && $visualEnabled && ! $hasPageData) {
+                Log::warning('[RunBrandIngestionJob] Aborted — vision path but snapshot would have no page data', [
+                    'draft_id' => $draft->id,
+                ]);
+                $record->update([
+                    'status' => BrandIngestionRecord::STATUS_FAILED,
+                    'failure_reason' => 'Incomplete page data, merge will re-run',
+                ]);
+                return;
+            }
+
             $snapshot = BrandResearchSnapshot::create([
                 'brand_id' => $brand->id,
                 'brand_model_version_id' => $draft->id,
@@ -208,7 +223,7 @@ class RunBrandIngestionJob implements ShouldQueue
             app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($brand, $draft);
 
             $extractedSignalCount = $this->countExtractionSignals($extraction);
-            Log::info('Brand ingestion summary', [
+            Log::info('[RunBrandIngestionJob] Snapshot persisted', [
                 'draft_id' => $draft->id,
                 'pdf_asset_id' => $this->pdfAssetId,
                 'extracted_signal_count' => $extractedSignalCount,
@@ -246,7 +261,19 @@ class RunBrandIngestionJob implements ShouldQueue
             ->first();
 
         if ($visionExtraction && ! empty($visionExtraction->extraction_json)) {
-            return $visionExtraction->extraction_json;
+            $ext = $visionExtraction->extraction_json;
+            $hasPageData = ! empty($ext['page_classifications_json'])
+                || ! empty($ext['page_extractions_json'])
+                || ! empty($ext['page_analysis']);
+            if (! $hasPageData) {
+                Log::warning('[RunBrandIngestionJob] Vision extraction lacks page data, triggering re-merge', [
+                    'asset_id' => $asset->id,
+                    'batch_id' => $visionExtraction->batch_id,
+                ]);
+                MergeBrandPdfExtractionJob::dispatch($visionExtraction->batch_id)->delay(now()->addSeconds(2));
+                return null;
+            }
+            return $ext;
         }
 
         $extraction = $asset->getLatestPdfTextExtractionForVersion($asset->currentVersion?->id);

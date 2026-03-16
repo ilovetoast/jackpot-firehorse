@@ -587,7 +587,8 @@ function PdfGuidelinesUploadCard({ brandId, accentColor, payload, setPayload, se
                 setExtractionPolling(false)
                 onExtractionPollingChange?.(false)
                 setExtractionStatus(ext)
-                if (ext.extracted_text && onTriggerIngestion) {
+                // Only trigger ingestion for text-based PDFs. When vision_fallback_triggered, MergeBrandPdfExtractionJob will trigger it.
+                if (ext.extracted_text && !ext.vision_fallback_triggered && onTriggerIngestion) {
                     onTriggerIngestion({ pdf_asset_id: pdfAssetId })
                 }
                 return
@@ -1178,11 +1179,14 @@ export default function BrandGuidelinesBuilder({
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
     const hasProcessingEarly = pdfExtractionPolling || ingestionProcessing || ingestionPolling || (researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning))
-    // Include 'processing' and 'research-summary' between background and archetype when processing or on those steps
-    const includeProcessingStep = hasProcessingEarly || currentStep === 'processing' || currentStep === 'research-summary'
-    const allStepKeys = includeProcessingStep
-        ? [stepKeys[0], 'processing', 'research-summary', ...stepKeys.slice(1), REVIEW_STEP]
-        : [...stepKeys, REVIEW_STEP]
+    // Always include research-summary as step 2 (after background). Include 'processing' only when actively processing.
+    const allStepKeys = [
+        stepKeys[0],
+        ...(hasProcessingEarly ? ['processing'] : []),
+        'research-summary',
+        ...stepKeys.slice(1),
+        REVIEW_STEP,
+    ]
     const effectiveStep = viewingReview ? REVIEW_STEP : currentStep
     const stepIndex = allStepKeys.indexOf(effectiveStep)
     const currentStepConfig = steps.find((s) => s.key === currentStep)
@@ -1260,11 +1264,11 @@ export default function BrandGuidelinesBuilder({
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
         } else if (currentStep === 'background') {
-            // If items are processing, go to processing step (page 2). Else skip to archetype.
+            // If items are processing, go to processing step. Else go to research-summary (always step 2).
             if (hasProcessingEarly) {
                 patchAndNavigate('processing')
             } else {
-                patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
+                patchAndNavigate('research-summary')
             }
         } else if (currentStep === 'processing') {
             // Processing step: Next goes to research-summary
@@ -1287,13 +1291,15 @@ export default function BrandGuidelinesBuilder({
             return
         }
         if (currentStep === 'research-summary') {
-            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'processing' }))
+            const prevIdx = allStepKeys.indexOf('research-summary') - 1
+            const prevStep = prevIdx >= 0 ? allStepKeys[prevIdx] : 'background'
+            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: prevStep }))
             return
         }
-        const idx = stepKeys.indexOf(currentStep)
+        const idx = allStepKeys.indexOf(currentStep)
         if (idx <= 0) return
-        router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: stepKeys[idx - 1] }))
-    }, [viewingReview, currentStep, stepKeys, brand.id])
+        router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: allStepKeys[idx - 1] }))
+    }, [viewingReview, currentStep, allStepKeys, brand.id])
 
     const handleSkip = useCallback(() => {
         if (!currentStepConfig?.skippable) return
@@ -1634,19 +1640,11 @@ export default function BrandGuidelinesBuilder({
 
     const effectiveResearchFinalized = polledResearch?.researchFinalized ?? researchFinalized ?? null
 
-    // Show toast when polling detects research_finalized transition to true — but NOT when user is on processing or research-summary (they get inline CTA instead)
+    // Show toast only when user has navigated away from the builder. Do NOT show when on any builder step (user is already in context).
+    // When on the builder, they see inline CTAs (ProcessingProgressPanel, research-summary) instead.
     useEffect(() => {
-        if (effectiveResearchFinalized !== true || prevResearchFinalizedRef.current === true) {
-            prevResearchFinalizedRef.current = effectiveResearchFinalized
-            return
-        }
-        const isOnProcessingPage = currentStep === 'processing'
-        const isOnResearchSummaryPage = currentStep === 'research-summary'
-        if (isOnProcessingPage || isOnResearchSummaryPage) {
-            prevResearchFinalizedRef.current = effectiveResearchFinalized
-            return
-        }
-        setShowResearchReadyToast(true)
+        // Never show toast when on the brand guidelines builder — only show when user is on a different page.
+        // Since this component only mounts when on the builder, we never show the toast here.
         prevResearchFinalizedRef.current = effectiveResearchFinalized
     }, [effectiveResearchFinalized, currentStep])
 
@@ -2619,6 +2617,7 @@ export default function BrandGuidelinesBuilder({
                                 onApplySuggestion={handleApplySuggestion}
                                 onJumpToStep={(step) => router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step }))}
                                 defaultExpanded={!!effectiveSnapshotLite}
+                                isLocal={isLocal}
                             />
                         </aside>
                     )}

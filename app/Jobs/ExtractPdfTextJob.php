@@ -127,34 +127,13 @@ class ExtractPdfTextJob implements ShouldQueue
 
             $builderContext = $asset->builder_context ?? '';
             if ($characterCount < 500 && $builderContext === 'guidelines_pdf') {
+                $extraction->update(['vision_fallback_triggered' => true]);
                 $this->dispatchVisionFallback($asset);
                 return;
             }
 
-            // Guarantee ingestion runs after extraction (no reliance on frontend)
-            if ($characterCount > 0 && $builderContext === 'guidelines_pdf') {
-                $pivot = BrandModelVersionAsset::where('asset_id', $asset->id)
-                    ->where('builder_context', 'guidelines_pdf')
-                    ->first();
-                if ($pivot) {
-                    $draft = $pivot->brandModelVersion;
-                    if ($draft) {
-                        $draft->loadMissing('brandModel');
-                    }
-                    if ($draft?->brandModel) {
-                        RunBrandIngestionJob::dispatch(
-                            $draft->brandModel->brand_id,
-                            $draft->id,
-                            $asset->id
-                        );
-                        Log::info('[ExtractPdfTextJob] Dispatched RunBrandIngestionJob after extraction', [
-                            'asset_id' => $asset->id,
-                            'draft_id' => $draft->id,
-                            'brand_id' => $draft->brandModel->brand_id,
-                        ]);
-                    }
-                }
-            }
+            // Extraction only prepares text. Ingestion is triggered by MergeBrandPdfExtractionJob
+            // (vision path) or by frontend trigger-ingestion (text path).
         } catch (\Throwable $e) {
             $extraction->update([
                 'status' => PdfTextExtraction::STATUS_FAILED,

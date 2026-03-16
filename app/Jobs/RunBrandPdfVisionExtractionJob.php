@@ -3,9 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\Asset;
-use App\Models\Brand;
-use App\Models\BrandModelVersion;
-use App\Models\BrandModelVersionAsset;
 use App\Models\BrandPdfPageExtraction;
 use App\Models\BrandPdfVisionExtraction;
 use App\Services\BrandDNA\Extraction\PdfPageRenderer;
@@ -13,13 +10,15 @@ use App\Services\PdfPageRenderingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Multimodal fallback for image-based PDFs.
- * Converts PDF to pages, dispatches per-page analysis, then merge triggers ingestion.
+ * Converts PDF to pages, dispatches per-page analysis via Bus::batch().
+ * Merge runs ONLY when ALL page jobs complete (no race condition, no early exit).
  */
 class RunBrandPdfVisionExtractionJob implements ShouldQueue
 {
@@ -41,6 +40,12 @@ class RunBrandPdfVisionExtractionJob implements ShouldQueue
         PdfPageRenderingService $pdfRenderingService,
         PdfPageRenderer $pageRenderer
     ): void {
+        Log::info('[RunBrandPdfVisionExtractionJob] Started', [
+            'asset_id' => $this->assetId,
+            'brand_id' => $this->brandId,
+            'brand_model_version_id' => $this->brandModelVersionId,
+        ]);
+
         $asset = Asset::with('currentVersion')->find($this->assetId);
         if (! $asset) {
             Log::warning('[RunBrandPdfVisionExtractionJob] Asset not found', ['asset_id' => $this->assetId]);
@@ -77,6 +82,11 @@ class RunBrandPdfVisionExtractionJob implements ShouldQueue
             $pagePaths = $pageRenderer->renderPages($tempPdfPath, PdfPageRenderer::MAX_PAGES);
             $visionBatch->update(['pages_total' => count($pagePaths)]);
 
+            Log::info('[RunBrandPdfVisionExtractionJob] Page render complete', [
+                'batch_id' => $batchId,
+                'pages_count' => count($pagePaths),
+            ]);
+
             if (empty($pagePaths)) {
                 $visionBatch->update([
                     'status' => BrandPdfVisionExtraction::STATUS_FAILED,
@@ -85,6 +95,7 @@ class RunBrandPdfVisionExtractionJob implements ShouldQueue
                 return;
             }
 
+            $pageJobs = [];
             foreach ($pagePaths as $pageNum => $path) {
                 $pageExt = BrandPdfPageExtraction::create([
                     'batch_id' => $batchId,
@@ -95,10 +106,29 @@ class RunBrandPdfVisionExtractionJob implements ShouldQueue
                     'extraction_json' => ['_temp_image_path' => $path],
                     'status' => BrandPdfPageExtraction::STATUS_PENDING,
                 ]);
-                AnalyzeBrandPdfPageJob::dispatch($pageExt->id);
+                $pageJobs[] = new AnalyzeBrandPdfPageJob($pageExt->id);
             }
 
-            Log::info('[RunBrandPdfVisionExtractionJob] Dispatched page jobs', [
+            Bus::batch($pageJobs)
+                ->then(function () use ($batchId) {
+                    // Delay prevents DB write timing issues where page jobs finish but transactions are still flushing
+                    MergeBrandPdfExtractionJob::dispatch($batchId)
+                        ->delay(now()->addSeconds(3));
+                })
+                ->catch(function (\Throwable $e) use ($visionBatch) {
+                    Log::error('[RunBrandPdfVisionExtractionJob] Page batch failed', [
+                        'batch_id' => $visionBatch->batch_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $visionBatch->update([
+                        'status' => BrandPdfVisionExtraction::STATUS_FAILED,
+                        'error_message' => 'Page extraction failed: ' . $e->getMessage(),
+                    ]);
+                })
+                ->onQueue(config('queue.pdf_processing_queue', 'pdf-processing'))
+                ->dispatch();
+
+            Log::info('[RunBrandPdfVisionExtractionJob] Dispatched page batch', [
                 'batch_id' => $batchId,
                 'pages' => count($pagePaths),
             ]);

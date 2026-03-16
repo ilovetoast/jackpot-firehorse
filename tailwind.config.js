@@ -7,9 +7,6 @@ export default {
   ],
   theme: {
     extend: {
-      fontFamily: {
-        brand: ['Kaushan Script', 'cursive'],
-      },
       colors: {
         primary: 'var(--primary)',
         secondary: 'var(--secondary)',

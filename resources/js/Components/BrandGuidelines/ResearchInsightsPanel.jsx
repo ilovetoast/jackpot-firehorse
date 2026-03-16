@@ -21,7 +21,10 @@ export default function ResearchInsightsPanel({
     onApplySuggestion,
     onJumpToStep,
     defaultExpanded,
+    isLocal = false,
 }) {
+    const isViteDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true
+    const showDevToolsLink = isLocal || isViteDev
     const hasHighSeverity = (latestAlignment?.findings || []).some((f) => f.severity === 'high')
     const coherenceLow = (latestCoherence?.overall?.score ?? 100) < 70
     const defaultOpen = defaultExpanded ?? (crawlerRunning || hasHighSeverity || coherenceLow)
@@ -91,7 +94,8 @@ export default function ResearchInsightsPanel({
                             <p>Enter a website URL in the Background step and click <strong className="text-white/80">Analyze & Prefill</strong> to run research.</p>
                             <p className="text-xs text-white/50">Results will appear here: coherence score, alignment findings, and suggestions.</p>
                         </div>
-                    ) : (
+                    ) : null}
+                    {hasData && (
                         <>
                     {/* Status */}
                     <div>
@@ -244,7 +248,21 @@ export default function ResearchInsightsPanel({
                             </div>
                         </div>
                     )}
+
                         </>
+                    )}
+                    {/* Developer Research Tools — visible in local/dev; links to research-summary step */}
+                    {showDevToolsLink && onJumpToStep && (
+                        <div className="mt-6 pt-4 border-t border-white/10">
+                            <h4 className="text-xs font-medium text-white/60 uppercase tracking-wider mb-2">Developer</h4>
+                            <button
+                                type="button"
+                                onClick={() => onJumpToStep('research-summary')}
+                                className="text-xs px-2 py-1 rounded-md bg-white/10 text-white/70 border border-white/20 hover:bg-white/15 hover:text-white/90"
+                            >
+                                Developer Research Tools
+                            </button>
+                        </div>
                     )}
                 </div>
             )}

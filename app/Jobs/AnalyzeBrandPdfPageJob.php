@@ -9,6 +9,7 @@ use App\Services\BrandDNA\Extraction\VisionExtractionService;
 use App\Services\BrandDNA\FieldCandidateValidationService;
 use App\Services\BrandDNA\PdfPageClassificationService;
 use App\Services\BrandDNA\PdfPageVisualExtractionService;
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 
 class AnalyzeBrandPdfPageJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Batchable, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 2;
 
@@ -36,6 +37,14 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
         PdfPageVisualExtractionService $visualExtractionService,
         FieldCandidateValidationService $validationService
     ): void {
+        if ($this->batch()?->cancelled()) {
+            return;
+        }
+
+        Log::info('[AnalyzeBrandPdfPageJob] Started', [
+            'page_extraction_id' => $this->pageExtractionId,
+        ]);
+
         $pageExt = BrandPdfPageExtraction::find($this->pageExtractionId);
         if (! $pageExt) {
             return;
@@ -46,7 +55,7 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
         }
 
         $visionBatch = BrandPdfVisionExtraction::where('batch_id', $pageExt->batch_id)->first();
-        if (! $visionBatch || $visionBatch->early_complete) {
+        if (! $visionBatch) {
             $pageExt->update(['status' => BrandPdfPageExtraction::STATUS_CANCELLED]);
             return;
         }
@@ -82,13 +91,14 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
                 ]);
             }
 
+            // Write extraction data FIRST, then status last — prevents Merge from reading completed before data is persisted
             $pageExt->update([
                 'extraction_json' => $extraction,
-                'status' => BrandPdfPageExtraction::STATUS_COMPLETED,
                 'error_message' => null,
             ]);
+            $pageExt->update(['status' => BrandPdfPageExtraction::STATUS_COMPLETED]);
 
-            Log::info('[AnalyzeBrandPdfPageJob] Page output shape', [
+            Log::info('[AnalyzeBrandPdfPageJob] Completed', [
                 'page_extraction_id' => $pageExt->id,
                 'has_page_classification' => ! empty($extraction['_page_classification']),
                 'has_page_extractions' => isset($extraction['_page_extractions']) && is_array($extraction['_page_extractions']),
@@ -100,17 +110,8 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
             $visionBatch->update(['signals_detected' => $visionBatch->signals_detected + $signals]);
 
             $visionBatch->refresh();
-            $shouldMerge = false;
-            if ($this->hasEarlyExitSignals($visionBatch)) {
-                $visionBatch->update(['early_complete' => true]);
-                Log::info('[AnalyzeBrandPdfPageJob] Early exit triggered', ['batch_id' => $visionBatch->batch_id]);
-                $shouldMerge = true;
-            } elseif ($visionBatch->pages_processed >= $visionBatch->pages_total) {
-                $shouldMerge = true;
-            }
-            if ($shouldMerge) {
-                MergeBrandPdfExtractionJob::dispatch($visionBatch->batch_id);
-            }
+            // Merge is now dispatched by Bus::batch()->then() in RunBrandPdfVisionExtractionJob
+            // when ALL page jobs complete. No early exit — every page must be processed.
         } catch (\Throwable $e) {
             $pageExt->update([
                 'status' => BrandPdfPageExtraction::STATUS_FAILED,
@@ -176,55 +177,5 @@ class AnalyzeBrandPdfPageJob implements ShouldQueue
             }
         }
         return $c;
-    }
-
-    protected function hasEarlyExitSignals(BrandPdfVisionExtraction $batch): bool
-    {
-        $pages = BrandPdfPageExtraction::where('batch_id', $batch->batch_id)
-            ->where('status', BrandPdfPageExtraction::STATUS_COMPLETED)
-            ->get();
-
-        $merged = $this->mergePageExtractions($pages);
-        $identity = $merged['identity'] ?? [];
-        $personality = $merged['personality'] ?? [];
-        $visual = $merged['visual'] ?? [];
-
-        $hasArchetype = ! empty($personality['primary_archetype']);
-        $hasMission = ! empty($identity['mission']);
-        $toneCount = count($personality['tone_keywords'] ?? []);
-        $colorCount = count($visual['primary_colors'] ?? []);
-        $fontCount = count($visual['fonts'] ?? []);
-
-        return $hasArchetype && $hasMission && $toneCount >= 3 && $colorCount >= 1 && $fontCount >= 1;
-    }
-
-    protected function mergePageExtractions($pages): array
-    {
-        $result = [
-            'identity' => ['mission' => null, 'vision' => null, 'positioning' => null],
-            'personality' => ['primary_archetype' => null, 'tone_keywords' => [], 'traits' => []],
-            'visual' => ['primary_colors' => [], 'fonts' => []],
-        ];
-        foreach ($pages as $p) {
-            $ext = $p->extraction_json ?? [];
-            foreach (['identity', 'personality', 'visual'] as $section) {
-                $data = $ext[$section] ?? [];
-                if (! is_array($data)) {
-                    continue;
-                }
-                foreach ($data as $k => $v) {
-                    if ($v === null || $v === '') {
-                        continue;
-                    }
-                    if (in_array($k, ['mission', 'vision', 'positioning', 'primary_archetype']) && $result[$section][$k] === null) {
-                        $result[$section][$k] = $v;
-                    }
-                    if (in_array($k, ['tone_keywords', 'traits', 'primary_colors', 'fonts']) && is_array($v)) {
-                        $result[$section][$k] = array_values(array_unique(array_merge($result[$section][$k] ?? [], $v)));
-                    }
-                }
-            }
-        }
-        return $result;
     }
 }

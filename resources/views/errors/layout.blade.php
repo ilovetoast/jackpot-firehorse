@@ -15,7 +15,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <meta property="og:image" content="{{ url('/og-image-1200x630.png') }}">
     <link rel="preconnect" href="https://fonts.bunny.net">
-    <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&family=Kaushan+Script&display=swap" rel="stylesheet" />
+    <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -37,7 +37,7 @@
             <div class="flex h-16 justify-between items-center">
                 <a href="{{ url('/') }}" class="flex items-center gap-2">
                     <img src="{{ asset('jp-logo.svg') }}" alt="" class="h-8 w-auto" aria-hidden="true" />
-                    <span class="text-xl font-bold text-gray-900" style="font-family: 'Kaushan Script', cursive;">Jackpot</span>
+                    <span class="text-xl font-bold text-gray-900">Jackpot</span>
                 </a>
                 <a href="{{ url('/') }}" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
                     Go home
