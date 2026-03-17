@@ -29,7 +29,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->unique(['brand_model_version_id', 'asset_id', 'builder_context']);
+            $table->unique(['brand_model_version_id', 'asset_id', 'builder_context'], 'bmv_assets_version_asset_context_unique');
             $table->index('brand_model_version_id');
         });
     }
