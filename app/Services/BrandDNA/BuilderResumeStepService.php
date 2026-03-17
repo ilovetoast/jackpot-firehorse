@@ -26,7 +26,7 @@ class BuilderResumeStepService
     protected const STEPS_AFTER_RESEARCH = ['archetype', 'purpose_promise', 'expression', 'positioning', 'standards'];
 
     public function __construct(
-        protected ResearchFinalizationService $finalizationService
+        protected \App\Services\BrandDNA\PipelineFinalizationService $finalizationService
     ) {}
 
     /**

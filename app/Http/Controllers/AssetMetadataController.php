@@ -1102,8 +1102,8 @@ class AssetMetadataController extends Controller
             'metadata_extracted' => $hasMetadataExtracted,
             'preview_generated' => $hasPreviewGenerated,
         ];
-        // Matches AssetCompletionService::meetsCompletionCriteria + BrandComplianceService::isImageAnalysisReady
-        $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding
+        // Matches BrandComplianceService::isImageAnalysisReady — dominant_hue_group is a filter facet, not a scoring gate
+        $metadataHealth['is_complete'] = $hasDominantColors && $hasEmbedding
             && $thumbnailComplete && $hasAiTaggingCompleted && $hasMetadataExtracted && $hasPreviewGenerated;
 
         // SVG detection: use current version's mime when available (asset.mime_type can be stale after replace)

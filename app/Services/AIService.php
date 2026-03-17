@@ -8,6 +8,7 @@ use App\Models\AIAgentRun;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\AI\Providers\AnthropicProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use Illuminate\Support\Facades\Log;
 
@@ -75,17 +76,18 @@ class AIService
     {
         $defaultProviderName = config('ai.default_provider', 'openai');
 
-        // Register OpenAI provider
-        $openAIProvider = new OpenAIProvider();
-        $this->providers['openai'] = $openAIProvider;
+        $this->providers['openai'] = new OpenAIProvider();
 
-        // Set default provider
-        if (isset($this->providers[$defaultProviderName])) {
-            $this->defaultProvider = $this->providers[$defaultProviderName];
-        } else {
-            // Fallback to first available provider
-            $this->defaultProvider = reset($this->providers);
+        if (config('ai.anthropic.api_key')) {
+            try {
+                $this->providers['anthropic'] = new AnthropicProvider();
+            } catch (\Throwable $e) {
+                Log::warning('[AIService] AnthropicProvider failed to initialize', ['error' => $e->getMessage()]);
+            }
         }
+
+        $this->defaultProvider = $this->providers[$defaultProviderName]
+            ?? reset($this->providers) ?: null;
     }
 
     /**

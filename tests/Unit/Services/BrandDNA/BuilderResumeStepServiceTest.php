@@ -8,7 +8,7 @@ use App\Models\BrandModelVersion;
 use App\Models\BrandModelVersionInsightState;
 use App\Models\Tenant;
 use App\Services\BrandDNA\BuilderResumeStepService;
-use App\Services\BrandDNA\ResearchFinalizationService;
+use App\Services\BrandDNA\PipelineFinalizationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -44,7 +44,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_processing_incomplete_resumes_to_processing(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => false]);
         });
 
@@ -57,7 +57,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_finalized_research_but_not_reviewed_resumes_to_research_summary(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => true]);
         });
 
@@ -70,7 +70,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_last_visited_archetype_resumes_to_archetype(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => true]);
         });
 
@@ -90,7 +90,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_last_visited_purpose_resumes_to_purpose(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => true]);
         });
 
@@ -110,7 +110,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_research_reviewed_via_insight_state_viewed_at(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => true]);
         });
 
@@ -133,7 +133,7 @@ class BuilderResumeStepServiceTest extends TestCase
 
     public function test_ambiguous_state_falls_back_to_background(): void
     {
-        $this->mock(ResearchFinalizationService::class, function ($mock) {
+        $this->mock(PipelineFinalizationService::class, function ($mock) {
             $mock->shouldReceive('compute')->andReturn(['research_finalized' => true]);
         });
 

@@ -47,12 +47,20 @@ export default function AppNav({ brand, tenant }) {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                // If on a brand-specific URL (e.g. guidelines, edit, dna), navigate to the same page for the new brand
                 const path = typeof window !== 'undefined' ? window.location.pathname : ''
                 const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
                 if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
                     const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
-                    const search = typeof window !== 'undefined' ? window.location.search : ''
+                    let search = typeof window !== 'undefined' ? window.location.search : ''
+                    // Strip transient builder steps that are brand-specific
+                    if (newPath.includes('/brand-guidelines/builder') && search) {
+                        const params = new URLSearchParams(search)
+                        const step = params.get('step')
+                        if (step === 'processing' || step === 'research-summary') {
+                            params.delete('step')
+                        }
+                        search = params.toString() ? `?${params}` : ''
+                    }
                     router.visit(newPath + search)
                 } else {
                     router.reload({ only: ['auth'] })

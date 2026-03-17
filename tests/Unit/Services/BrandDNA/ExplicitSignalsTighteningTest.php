@@ -2,7 +2,7 @@
 
 namespace Tests\Unit\Services\BrandDNA;
 
-use App\Jobs\RunBrandIngestionJob;
+use App\Services\BrandDNA\BrandSnapshotService;
 use ReflectionClass;
 use Tests\TestCase;
 
@@ -22,9 +22,10 @@ class ExplicitSignalsTighteningTest extends TestCase
             ],
         ];
 
-        $job = new RunBrandIngestionJob(1, 1);
-        $method = (new ReflectionClass($job))->getMethod('ensureExplicitSignalsFromExtraction');
-        $method->invokeArgs($job, [&$extraction]);
+        $service = app(BrandSnapshotService::class);
+        $method = (new ReflectionClass($service))->getMethod('ensureExplicitSignalsFromExtraction');
+        $method->setAccessible(true);
+        $method->invokeArgs($service, [&$extraction]);
 
         $this->assertFalse($extraction['explicit_signals']['positioning_declared']);
     }
@@ -39,9 +40,10 @@ class ExplicitSignalsTighteningTest extends TestCase
             ],
         ];
 
-        $job = new RunBrandIngestionJob(1, 1);
-        $method = (new ReflectionClass($job))->getMethod('ensureExplicitSignalsFromExtraction');
-        $method->invokeArgs($job, [&$extraction]);
+        $service = app(BrandSnapshotService::class);
+        $method = (new ReflectionClass($service))->getMethod('ensureExplicitSignalsFromExtraction');
+        $method->setAccessible(true);
+        $method->invokeArgs($service, [&$extraction]);
 
         $this->assertFalse($extraction['explicit_signals']['mission_declared']);
         $this->assertTrue($extraction['explicit_signals']['positioning_declared']);

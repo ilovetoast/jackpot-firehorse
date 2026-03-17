@@ -445,7 +445,7 @@ class BrandController extends Controller
 
         $brandModel = $brand->brandModel;
         $activeVersion = $brandModel?->activeVersion;
-        $modelPayload = $activeVersion?->model_payload ?? [];
+        $modelPayload = self::deepUnwrapPayload($activeVersion?->model_payload ?? []);
 
         $allVersions = $brandModel
             ? $brandModel->versions()
@@ -1275,5 +1275,22 @@ class BrandController extends Controller
             ->where('brand_id', $brand->id)
             ->first();
         return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+    }
+
+    protected static function deepUnwrapPayload(array $data): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value) && isset($value['value'], $value['source'])) {
+                $inner = $value['value'];
+                $result[$key] = is_array($inner) ? self::deepUnwrapPayload($inner) : $inner;
+            } elseif (is_array($value)) {
+                $result[$key] = self::deepUnwrapPayload($value);
+            } else {
+                $result[$key] = $value;
+            }
+        }
+
+        return $result;
     }
 }

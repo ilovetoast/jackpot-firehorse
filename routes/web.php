@@ -658,16 +658,19 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/snapshots/{snapshot}/apply', [\App\Http\Controllers\BrandDNABuilderController::class, 'applySuggestion'])->name('brands.brand-dna.builder.snapshots.apply');
             Route::post('/brands/{brand}/brand-dna/builder/snapshots/{snapshot}/dismiss', [\App\Http\Controllers\BrandDNABuilderController::class, 'dismissSuggestion'])->name('brands.brand-dna.builder.snapshots.dismiss');
             Route::get('/brands/{brand}/brand-dna/builder/research-debug', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchDebug'])->name('brands.brand-dna.builder.research-debug');
+            Route::get('/brands/{brand}/brand-dna/builder/pipeline-diagnostics', [\App\Http\Controllers\BrandDNABuilderController::class, 'pipelineDiagnostics'])->name('brands.brand-dna.builder.pipeline-diagnostics');
             Route::post('/brands/{brand}/brand-dna/builder/insights/dismiss', [\App\Http\Controllers\BrandDNABuilderController::class, 'dismissInsight'])->name('brands.brand-dna.builder.insights.dismiss');
             Route::post('/brands/{brand}/brand-dna/builder/insights/accept', [\App\Http\Controllers\BrandDNABuilderController::class, 'acceptInsight'])->name('brands.brand-dna.builder.insights.accept');
             Route::post('/brands/{brand}/brand-dna/builder/trigger-research', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerResearch'])->name('brands.brand-dna.builder.trigger-research');
             Route::post('/brands/{brand}/brand-dna/builder/trigger-ingestion', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerIngestion'])->name('brands.brand-dna.builder.trigger-ingestion');
-            Route::post('/brands/{brand}/brand-dna/builder/invalidate-and-rerun-research', [\App\Http\Controllers\BrandDNABuilderController::class, 'invalidateAndRerunResearch'])->name('brands.brand-dna.builder.invalidate-and-rerun-research');
+            Route::post('/brands/{brand}/brand-dna/builder/retry-pipeline', [\App\Http\Controllers\BrandDNABuilderController::class, 'retryPipeline'])->name('brands.brand-dna.builder.retry-pipeline');
             Route::post('/brands/{brand}/brand-dna/builder/attach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'attachAsset'])->name('brands.brand-dna.builder.attach-asset');
             Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
+            Route::post('/brands/{brand}/brand-dna/builder/generate-logo-guidelines', [\App\Http\Controllers\BrandDNABuilderController::class, 'generateLogoGuidelines'])->name('brands.brand-dna.builder.generate-logo-guidelines');
             Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');
             Route::post('/brands/{brand}/brand-dna/unpublish', [\App\Http\Controllers\BrandDNABuilderController::class, 'unpublish'])->name('brands.brand-dna.unpublish');
             Route::get('/brands/{brand}/brand-dna/ingestions', [\App\Http\Controllers\BrandDNABuilderController::class, 'listIngestions'])->name('brands.brand-dna.ingestions.index');
+            Route::get('/brands/{brand}/brand-dna/builder/brand-pipeline/{run}', [\App\Http\Controllers\BrandPipelineController::class, 'show'])->name('brands.brand-dna.builder.brand-pipeline.show');
 
             // Brand Bootstrap (foundation only)
             Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');

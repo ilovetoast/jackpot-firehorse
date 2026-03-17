@@ -720,7 +720,6 @@ class BrandComplianceService
      * Requirements when visualMetadataReady():
      * - thumbnail_status === ThumbnailStatus::COMPLETED
      * - dominant_colors present in metadata
-     * - dominant_hue_group present on assets table
      * - AssetEmbedding exists with non-empty embedding_vector
      *
      * @return bool False if any requirement missing; true if ready to score or bypass
@@ -739,10 +738,8 @@ class BrandComplianceService
             return false;
         }
 
-        $dominantHueGroup = $asset->dominant_hue_group ?? null;
-        if ($dominantHueGroup === null || $dominantHueGroup === '') {
-            return false;
-        }
+        // dominant_hue_group is derived from dominant_colors and used for filter facets,
+        // not for scoring. Don't block scoring readiness on it.
 
         $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
         if (! $assetEmbedding || empty($assetEmbedding->embedding_vector ?? [])) {

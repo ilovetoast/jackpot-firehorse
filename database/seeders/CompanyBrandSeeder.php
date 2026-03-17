@@ -173,15 +173,17 @@ class CompanyBrandSeeder extends Seeder
             $secondaryUser->removeRole('site_owner');
         }
 
-        // Define secondary companies and their brands
+        // Define secondary companies, their brands, and plan assignments
         $companiesData = [
-            'St. Croix' => ['St Croix', 'St Croix Fly', 'Seviin'],
-            'Augusta' => ['Augusta'],
-            'ACG' => ['Nebo', 'True', 'Thaw'],
-            'Victory' => ['Victory'],
+            'St. Croix' => ['brands' => ['St Croix', 'St Croix Fly', 'Seviin'], 'plan' => 'pro'],
+            'Augusta' => ['brands' => ['Augusta'], 'plan' => 'starter'],
+            'ACG' => ['brands' => ['Nebo', 'True', 'Thaw'], 'plan' => 'premium'],
+            'Victory' => ['brands' => ['Victory'], 'plan' => 'free'],
         ];
 
-        foreach ($companiesData as $companyName => $brandNames) {
+        foreach ($companiesData as $companyName => $companyConfig) {
+            $brandNames = $companyConfig['brands'];
+            $plan = $companyConfig['plan'];
             $companySlug = Str::slug($companyName);
             
             // Create or get tenant - the boot() method will auto-create a default brand
@@ -196,7 +198,10 @@ class CompanyBrandSeeder extends Seeder
             }
 
             // Client companies are logically owned by the agency (supports spin-off testing)
-            $tenant->update(['incubated_by_agency_id' => $initialCompany->id]);
+            $tenant->update([
+                'incubated_by_agency_id' => $initialCompany->id,
+                'manual_plan_override' => $plan,
+            ]);
 
             // msteele and brempe: members of all seeded tenants and brands
             $initialUser->setRoleForTenant($tenant, 'member');

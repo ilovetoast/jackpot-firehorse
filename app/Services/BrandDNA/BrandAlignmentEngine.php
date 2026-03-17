@@ -26,6 +26,7 @@ class BrandAlignmentEngine
     public function analyze(array $draftPayload): array
     {
         $payload = (new BrandDnaPayloadNormalizer)->normalize($draftPayload);
+        $payload = self::deepUnwrapAiValues($payload);
         $findings = [];
 
         $this->checkArchetypeTone($payload, $findings);
@@ -184,5 +185,20 @@ class BrandAlignmentEngine
                 'suggestion' => null,
             ];
         }
+    }
+
+    protected static function deepUnwrapAiValues(array $data): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value) && isset($value['value'], $value['source'])) {
+                $result[$key] = $value['value'];
+            } elseif (is_array($value)) {
+                $result[$key] = self::deepUnwrapAiValues($value);
+            } else {
+                $result[$key] = $value;
+            }
+        }
+        return $result;
     }
 }

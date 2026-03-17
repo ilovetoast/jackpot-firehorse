@@ -5,8 +5,8 @@ namespace App\Jobs;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\BrandModelVersionAsset;
+use App\Models\BrandPipelineRun;
 use App\Models\PdfTextExtraction;
-use App\Jobs\RunBrandPdfVisionExtractionJob;
 use App\Services\PdfPageRenderingService;
 use App\Services\PdfTextExtractionService;
 use Illuminate\Bus\Queueable;
@@ -46,7 +46,7 @@ class ExtractPdfTextJob implements ShouldQueue
         PdfTextExtractionService $extractionService
     ): void {
         $asset = Asset::with(['storageBucket', 'tenant', 'currentVersion'])->find($this->assetId);
-        if (!$asset) {
+        if (! $asset) {
             Log::warning('[ExtractPdfTextJob] Asset not found', ['asset_id' => $this->assetId]);
             return;
         }
@@ -57,18 +57,18 @@ class ExtractPdfTextJob implements ShouldQueue
         $activeVersion = $version ?: $asset->currentVersion;
 
         $mime = strtolower((string) ($asset->mime_type ?? ''));
-        if (!str_contains($mime, 'pdf')) {
+        if (! str_contains($mime, 'pdf')) {
             Log::warning('[ExtractPdfTextJob] Asset is not a PDF', ['asset_id' => $asset->id]);
             return;
         }
 
         $extraction = PdfTextExtraction::where('asset_id', $asset->id)->find($this->extractionId);
-        if (!$extraction) {
+        if (! $extraction) {
             Log::warning('[ExtractPdfTextJob] Extraction record not found', ['extraction_id' => $this->extractionId, 'asset_id' => $asset->id]);
             return;
         }
 
-        if (!$extractionService->isPdftotextAvailable()) {
+        if (! $extractionService->isPdftotextAvailable()) {
             $extraction->update([
                 'status' => PdfTextExtraction::STATUS_FAILED,
                 'processed_at' => now(),
@@ -99,14 +99,16 @@ class ExtractPdfTextJob implements ShouldQueue
                     'error_message' => 'No selectable text detected.',
                     'failure_reason' => 'No selectable text detected',
                 ]);
-                Log::warning('[ExtractPdfTextJob] PDF extraction produced no text, triggering vision fallback', [
+                Log::warning('[ExtractPdfTextJob] PDF extraction produced no text, starting vision pipeline', [
                     'asset_id' => $asset->id,
                     'extraction_id' => $extraction->id,
                 ]);
-                $this->dispatchVisionFallback($asset);
+                Log::channel('pipeline')->info('[ExtractPdfTextJob] No text — vision pipeline (will produce page analysis)', [
+                    'asset_id' => $asset->id,
+                ]);
+                $this->startBrandPipeline($asset, BrandPipelineRun::EXTRACTION_MODE_VISION);
                 return;
             }
-
 
             $extraction->update([
                 'extracted_text' => $result['text'],
@@ -125,15 +127,41 @@ class ExtractPdfTextJob implements ShouldQueue
                 'character_count' => $characterCount,
             ]);
 
-            $builderContext = $asset->builder_context ?? '';
-            if ($characterCount < 500 && $builderContext === 'guidelines_pdf') {
-                $extraction->update(['vision_fallback_triggered' => true]);
-                $this->dispatchVisionFallback($asset);
-                return;
-            }
+            $pivot = BrandModelVersionAsset::where('asset_id', $asset->id)
+                ->where('builder_context', 'guidelines_pdf')
+                ->first();
 
-            // Extraction only prepares text. Ingestion is triggered by MergeBrandPdfExtractionJob
-            // (vision path) or by frontend trigger-ingestion (text path).
+            if ($pivot) {
+                $draft = $pivot->brandModelVersion;
+                if ($draft?->brandModel) {
+                    $pageCount = 1;
+                    try {
+                        $pageCount = $pdfPageRenderingService->detectPageCount($tempPdfPath);
+                    } catch (\Throwable $e) {
+                        Log::warning('[ExtractPdfTextJob] Could not get page count, defaulting to vision', [
+                            'asset_id' => $asset->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $pageCount = 2;
+                    }
+                    $extractionMode = $characterCount < 500 || $pageCount > 1
+                        ? BrandPipelineRun::EXTRACTION_MODE_VISION
+                        : BrandPipelineRun::EXTRACTION_MODE_TEXT;
+                    Log::info('[ExtractPdfTextJob] Chose extraction mode', [
+                        'asset_id' => $asset->id,
+                        'character_count' => $characterCount,
+                        'page_count' => $pageCount,
+                        'extraction_mode' => $extractionMode,
+                    ]);
+                    Log::channel('pipeline')->info('[ExtractPdfTextJob] Pipeline start — extraction mode chosen', [
+                        'asset_id' => $asset->id,
+                        'character_count' => $characterCount,
+                        'page_count' => $pageCount,
+                        'extraction_mode' => $extractionMode,
+                    ]);
+                    $this->startBrandPipeline($asset, $extractionMode);
+                }
+            }
         } catch (\Throwable $e) {
             $extraction->update([
                 'status' => PdfTextExtraction::STATUS_FAILED,
@@ -156,7 +184,7 @@ class ExtractPdfTextJob implements ShouldQueue
         }
     }
 
-    protected function dispatchVisionFallback(Asset $asset): void
+    protected function startBrandPipeline(Asset $asset, string $extractionMode): void
     {
         $pivot = BrandModelVersionAsset::where('asset_id', $asset->id)
             ->where('builder_context', 'guidelines_pdf')
@@ -168,14 +196,27 @@ class ExtractPdfTextJob implements ShouldQueue
         if (! $draft?->brandModel) {
             return;
         }
-        RunBrandPdfVisionExtractionJob::dispatch(
-            $asset->id,
-            $draft->brandModel->brand_id,
-            $draft->id
-        );
-        Log::info('[ExtractPdfTextJob] Dispatched RunBrandPdfVisionExtractionJob (multimodal fallback)', [
+
+        $run = BrandPipelineRun::create([
+            'brand_id' => $draft->brandModel->brand_id,
+            'brand_model_version_id' => $draft->id,
             'asset_id' => $asset->id,
-            'draft_id' => $draft->id,
+            'stage' => BrandPipelineRun::STAGE_INIT,
+            'extraction_mode' => $extractionMode,
+            'status' => BrandPipelineRun::STATUS_PENDING,
+        ]);
+
+        BrandPipelineRunnerJob::dispatch($run->id);
+
+        Log::info('[ExtractPdfTextJob] Dispatched BrandPipelineRunnerJob', [
+            'asset_id' => $asset->id,
+            'run_id' => $run->id,
+            'extraction_mode' => $extractionMode,
+        ]);
+        Log::channel('pipeline')->info('[ExtractPdfTextJob] BrandPipelineRunnerJob dispatched', [
+            'run_id' => $run->id,
+            'asset_id' => $asset->id,
+            'extraction_mode' => $extractionMode,
         ]);
     }
 }

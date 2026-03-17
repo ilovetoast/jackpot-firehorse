@@ -11,7 +11,7 @@ class ConflictDetectionService
     protected const SINGLE_VALUE_FIELDS = [
         'identity.mission', 'identity.vision', 'identity.positioning', 'identity.industry', 'identity.tagline',
         'personality.primary_archetype',
-        'visual.logo_detected',
+        'visual.logo_description',
     ];
 
     public function detect(array $extractions): array

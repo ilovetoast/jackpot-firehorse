@@ -6,7 +6,7 @@ use App\Models\Brand;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
 use App\Models\BrandModelVersionInsightState;
-use App\Models\BrandResearchSnapshot;
+use App\Models\BrandPipelineSnapshot;
 use App\Models\Notification;
 use App\Models\Tenant;
 use App\Models\User;
@@ -55,7 +55,7 @@ class BrandResearchNotificationServiceTest extends TestCase
             'created_by' => $this->user->id,
         ]);
 
-        BrandResearchSnapshot::create([
+        BrandPipelineSnapshot::create([
             'brand_id' => $this->brand->id,
             'brand_model_version_id' => $draft->id,
             'source_url' => 'ingestion',
@@ -68,7 +68,7 @@ class BrandResearchNotificationServiceTest extends TestCase
 
         $state = BrandModelVersionInsightState::create([
             'brand_model_version_id' => $draft->id,
-            'source_snapshot_id' => null,
+            'source_pipeline_snapshot_id' => null,
         ]);
 
         $service = app(BrandResearchNotificationService::class);
@@ -101,7 +101,7 @@ class BrandResearchNotificationServiceTest extends TestCase
             'created_by' => $this->user->id,
         ]);
 
-        BrandResearchSnapshot::create([
+        BrandPipelineSnapshot::create([
             'brand_id' => $this->brand->id,
             'brand_model_version_id' => $draft->id,
             'source_url' => 'ingestion',
@@ -114,7 +114,7 @@ class BrandResearchNotificationServiceTest extends TestCase
 
         $state = BrandModelVersionInsightState::create([
             'brand_model_version_id' => $draft->id,
-            'source_snapshot_id' => null,
+            'source_pipeline_snapshot_id' => null,
             'research_ready_notified_at' => now(),
         ]);
 
@@ -142,7 +142,7 @@ class BrandResearchNotificationServiceTest extends TestCase
             'created_by' => null,
         ]);
 
-        BrandResearchSnapshot::create([
+        BrandPipelineSnapshot::create([
             'brand_id' => $this->brand->id,
             'brand_model_version_id' => $draft->id,
             'source_url' => 'ingestion',
@@ -155,7 +155,7 @@ class BrandResearchNotificationServiceTest extends TestCase
 
         BrandModelVersionInsightState::create([
             'brand_model_version_id' => $draft->id,
-            'source_snapshot_id' => null,
+            'source_pipeline_snapshot_id' => null,
         ]);
 
         $service = app(BrandResearchNotificationService::class);

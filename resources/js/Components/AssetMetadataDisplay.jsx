@@ -423,7 +423,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                 <p className="font-medium mb-1">Missing for scoring:</p>
                                 <ul className="list-disc list-inside space-y-0.5">
                                     {!metadataHealth.dominant_colors && <li>Dominant colors</li>}
-                                    {!metadataHealth.dominant_hue_group && <li>Dominant hue group</li>}
                                     {!metadataHealth.embedding && <li>Visual embedding</li>}
                                     {!metadataHealth.thumbnails && <li>Thumbnails</li>}
                                     {!metadataHealth.ai_tagging_completed && <li>AI tagging</li>}

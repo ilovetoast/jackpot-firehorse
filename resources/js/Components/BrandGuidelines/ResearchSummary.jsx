@@ -19,11 +19,27 @@ function FieldCard({ title, children, className = '' }) {
 
 const PATH_LABELS = {
     'personality.primary_archetype': 'Archetype',
+    'personality.traits': 'Personality traits',
+    'personality.voice_description': 'Brand voice',
+    'personality.brand_look': 'Brand look',
     'identity.mission': 'Mission',
     'identity.positioning': 'Positioning',
+    'identity.tagline': 'Tagline',
+    'identity.industry': 'Industry',
+    'identity.target_audience': 'Target audience',
+    'identity.vision': 'Vision',
+    'identity.beliefs': 'Beliefs',
+    'identity.values': 'Values',
     'scoring_rules.tone_keywords': 'Tone keywords',
     'scoring_rules.allowed_color_palette': 'Primary colors',
-    'typography.primary_font': 'Fonts',
+    'scoring_rules.secondary_color_palette': 'Secondary colors',
+    'typography.primary_font': 'Heading font',
+    'typography.secondary_font': 'Body font',
+    'typography.heading_style': 'Heading style',
+    'typography.body_style': 'Body style',
+    'visual.photography_style': 'Photography',
+    'visual.visual_style': 'Visual style',
+    'visual.design_cues': 'Design cues',
 }
 
 function unwrapValue(field) {
@@ -60,12 +76,8 @@ export default function ResearchSummary({
 }) {
     const [research, setResearch] = useState(polledResearch || null)
     const [devModeOpen, setDevModeOpen] = useState(false)
-    const [pageAnalysisOpen, setPageAnalysisOpen] = useState(false)
     const [rawJsonOpen, setRawJsonOpen] = useState(false)
     const [applyingSafe, setApplyingSafe] = useState(false)
-    const [rerunLoading, setRerunLoading] = useState(false)
-    const [rerunFeedback, setRerunFeedback] = useState(null)
-
     const snapshot = research?.latestSnapshot ?? initialSnapshot
     const suggestions = research?.latestSuggestions ?? initialSuggestions
     const report = research?.report ?? null
@@ -76,14 +88,10 @@ export default function ResearchSummary({
     const coherence = research?.latestCoherence ?? initialCoherence
     const alignment = research?.latestAlignment ?? initialAlignment
     const sections = research?.developer_data?.sections ?? null
-    const pageAnalysis = research?.developer_data?.page_analysis ?? []
     const pipelineStatus = research?.pipelineStatus ?? research?.developer_data?.pipeline_status ?? {}
     const evidenceMap = research?.developer_data?.evidence_map ?? {}
     const narrativeFieldDebug = research?.developer_data?.narrative_field_debug ?? {}
-    const pageClassifications = research?.developer_data?.page_classifications ?? null
-    const pageExtractions = research?.developer_data?.page_extractions ?? null
     const pipelineVersion = research?.developer_data?.pipeline_version ?? null
-    const visualPipelineEnabled = research?.developer_data?.visual_pipeline_enabled ?? null
     const snapshotGeneratedAt = research?.developer_data?.snapshot_generated_at ?? null
     const staleSnapshotWarning = research?.developer_data?.stale_snapshot_warning ?? null
     const debugInfo = research?.developer_data?._debug ?? null
@@ -91,10 +99,7 @@ export default function ResearchSummary({
     const hasDebugData = !!(
         (pipelineStatus && Object.keys(pipelineStatus).length > 0) ||
         (evidenceMap && Object.keys(evidenceMap).length > 0) ||
-        (narrativeFieldDebug && Object.keys(narrativeFieldDebug).length > 0) ||
-        (pageAnalysis?.length > 0) ||
-        (Array.isArray(pageClassifications) && pageClassifications.length > 0) ||
-        (Array.isArray(pageExtractions) && pageExtractions.length > 0)
+        (narrativeFieldDebug && Object.keys(narrativeFieldDebug).length > 0)
     )
     // Show when: backend says local, OR Vite dev mode (npm run dev), OR debug data exists
     const isViteDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true
@@ -246,24 +251,56 @@ export default function ResearchSummary({
                     {/* Brand Snapshot */}
                     <FieldCard title="Brand Snapshot">
                         <div className="space-y-4">
-                            {snapshot?.logo_url ? (
-                                <div className="flex items-start gap-4">
-                                    <img
-                                        src={snapshot.logo_url}
-                                        alt="Detected logo"
-                                        className="w-16 h-16 object-contain rounded-lg bg-white/10"
-                                    />
-                                    <div className="flex-1 min-w-0" />
+                            {snapshot?.mission ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Mission (WHY)</p>
+                                    <p className="text-sm text-white/80">{snapshot.mission}</p>
                                 </div>
                             ) : null}
                             <div>
-                                <p className="text-xs text-white/50 mb-1">Brand description</p>
+                                <p className="text-xs text-white/50 mb-1">Positioning (WHAT)</p>
                                 {snapshot?.brand_bio ? (
                                     <p className="text-sm text-white/80 line-clamp-4">{snapshot.brand_bio}</p>
                                 ) : (
                                     <p className="text-sm text-white/50 italic">Not confidently detected</p>
                                 )}
                             </div>
+                            {snapshot?.tagline ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Tagline</p>
+                                    <p className="text-sm text-white/80 italic">"{snapshot.tagline}"</p>
+                                </div>
+                            ) : null}
+                            {snapshot?.industry ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Industry</p>
+                                    <p className="text-sm text-white/80">{snapshot.industry}</p>
+                                </div>
+                            ) : null}
+                            {snapshot?.target_audience ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Target audience</p>
+                                    <p className="text-sm text-white/80 line-clamp-3">{snapshot.target_audience}</p>
+                                </div>
+                            ) : null}
+                            {snapshot?.voice_description ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Brand voice</p>
+                                    <p className="text-sm text-white/80 line-clamp-4">{snapshot.voice_description}</p>
+                                </div>
+                            ) : null}
+                            {snapshot?.brand_look ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Brand look</p>
+                                    <p className="text-sm text-white/80 line-clamp-4">{snapshot.brand_look}</p>
+                                </div>
+                            ) : null}
+                            {snapshot?.logo_description ? (
+                                <div>
+                                    <p className="text-xs text-white/50 mb-1">Logo guidelines</p>
+                                    <p className="text-sm text-white/80 line-clamp-4">{snapshot.logo_description}</p>
+                                </div>
+                            ) : null}
                             {(snapshot?.hero_headlines?.length ?? 0) > 0 && (
                                 <div>
                                     <p className="text-xs text-white/50 mb-1">Detected headlines</p>
@@ -274,7 +311,7 @@ export default function ResearchSummary({
                                     </ul>
                                 </div>
                             )}
-                            {(!snapshot?.logo_url && !snapshot?.brand_bio && (!snapshot?.hero_headlines?.length) && (!snapshot?.primary_colors?.length)) && (
+                            {(!snapshot?.mission && !snapshot?.brand_bio && !snapshot?.voice_description && !snapshot?.brand_look && !snapshot?.target_audience && !snapshot?.industry && !snapshot?.logo_description && (!snapshot?.hero_headlines?.length) && (!snapshot?.primary_colors?.length)) && (
                                 <p className="text-sm text-white/50">No brand snapshot data yet.</p>
                             )}
                         </div>
@@ -647,83 +684,8 @@ export default function ResearchSummary({
                     <div className="px-6 pb-6 space-y-6">
                         {/* Stale Snapshot Warning */}
                         {staleSnapshotWarning && (
-                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start justify-between gap-4">
-                                <p className="text-sm font-medium text-amber-200 flex-1">{staleSnapshotWarning}</p>
-                                {isLocal && (
-                                    <div className="shrink-0 flex flex-col items-end gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                setRerunLoading(true)
-                                                setRerunFeedback(null)
-                                                try {
-                                                    const { data } = await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
-                                                    const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brandId }))
-                                                    setResearch(res.data)
-                                                    const msg = data.rerun
-                                                        ? `Pipeline queued (${data.rerun}). Results will update automatically.`
-                                                        : data.message || 'Snapshots invalidated.'
-                                                    setRerunFeedback({ type: 'success', message: msg })
-                                                    setTimeout(() => setRerunFeedback(null), 6000)
-                                                } catch (err) {
-                                                    const msg = err?.response?.data?.message || err?.message || 'Re-run failed'
-                                                    setRerunFeedback({ type: 'error', message: msg })
-                                                    setTimeout(() => setRerunFeedback(null), 8000)
-                                                } finally {
-                                                    setRerunLoading(false)
-                                                }
-                                            }}
-                                            disabled={rerunLoading}
-                                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/30 text-amber-200 hover:bg-amber-500/40 disabled:opacity-50"
-                                        >
-                                            {rerunLoading ? 'Re-running…' : 'Re-run analysis'}
-                                        </button>
-                                        {rerunFeedback && (
-                                            <p className={`text-xs text-right ${rerunFeedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                                                {rerunFeedback.message}
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Re-run / Invalidate (dev only) */}
-                        {isLocal && !staleSnapshotWarning && hasSnapshot && (
-                            <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-                                <p className="text-xs text-white/60 mb-2">Delete current snapshot and re-run pipeline (dev only)</p>
-                                <button
-                                    type="button"
-                                    onClick={async () => {
-                                        setRerunLoading(true)
-                                        setRerunFeedback(null)
-                                        try {
-                                            const { data } = await axios.post(route('brands.brand-dna.builder.invalidate-and-rerun-research', { brand: brandId }))
-                                            const res = await axios.get(route('brands.brand-dna.builder.research-insights', { brand: brandId }))
-                                            setResearch(res.data)
-                                            const msg = data.rerun
-                                                ? `Pipeline queued (${data.rerun}). Results will update automatically.`
-                                                : data.message || 'Snapshots invalidated.'
-                                            setRerunFeedback({ type: 'success', message: msg })
-                                            setTimeout(() => setRerunFeedback(null), 6000)
-                                        } catch (err) {
-                                            const msg = err?.response?.data?.message || err?.message || 'Re-run failed'
-                                            setRerunFeedback({ type: 'error', message: msg })
-                                            setTimeout(() => setRerunFeedback(null), 8000)
-                                        } finally {
-                                            setRerunLoading(false)
-                                        }
-                                    }}
-                                    disabled={rerunLoading}
-                                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white/80 hover:bg-white/20 disabled:opacity-50"
-                                >
-                                    {rerunLoading ? 'Re-running…' : 'Invalidate & re-run'}
-                                </button>
-                                {rerunFeedback && (
-                                    <p className={`mt-2 text-xs ${rerunFeedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                                        {rerunFeedback.message}
-                                    </p>
-                                )}
+                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                                <p className="text-sm font-medium text-amber-200">{staleSnapshotWarning}</p>
                             </div>
                         )}
 
@@ -738,35 +700,12 @@ export default function ResearchSummary({
                                             {String(debugInfo.config_visual_enabled)}
                                         </p>
                                     </div>
-                                    <div className="rounded bg-white/5 px-2 py-1.5">
-                                        <p className="text-white/50">snapshot has classifications</p>
-                                        <p className={`font-medium ${debugInfo.snapshot_has_page_classifications ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                            {String(debugInfo.snapshot_has_page_classifications)}
-                                        </p>
-                                    </div>
-                                    <div className="rounded bg-white/5 px-2 py-1.5">
-                                        <p className="text-white/50">snapshot has extractions</p>
-                                        <p className={`font-medium ${debugInfo.snapshot_has_page_extractions ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                            {String(debugInfo.snapshot_has_page_extractions)}
-                                        </p>
-                                    </div>
-                                    <div className="rounded bg-white/5 px-2 py-1.5">
-                                        <p className="text-white/50">snapshot has page_analysis</p>
-                                        <p className={`font-medium ${debugInfo.snapshot_has_page_analysis_in_payload ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                            {String(debugInfo.snapshot_has_page_analysis_in_payload)}
-                                        </p>
-                                    </div>
                                 </div>
-                                {!debugInfo.snapshot_has_page_classifications && (
-                                    <p className="text-xs text-amber-400/90">
-                                        Queue worker may have visual pipeline disabled. Restart queue container: <code className="bg-black/30 px-1 rounded">sail restart queue</code>
-                                    </p>
-                                )}
                             </div>
                         )}
 
                         {/* Snapshot Metadata */}
-                        {(pipelineVersion != null || visualPipelineEnabled != null || snapshotGeneratedAt) && (
+                        {(pipelineVersion != null || snapshotGeneratedAt) && (
                             <div className="space-y-2">
                                 <h5 className="text-xs font-medium text-white/60 uppercase">Snapshot Metadata</h5>
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -774,12 +713,6 @@ export default function ResearchSummary({
                                         <div className="rounded bg-white/5 px-2 py-1.5">
                                             <p className="text-white/50">pipeline_version</p>
                                             <p className="text-white/90">{pipelineVersion}</p>
-                                        </div>
-                                    )}
-                                    {visualPipelineEnabled != null && (
-                                        <div className="rounded bg-white/5 px-2 py-1.5">
-                                            <p className="text-white/50">visual_pipeline_enabled</p>
-                                            <p className="text-white/90">{String(visualPipelineEnabled)}</p>
                                         </div>
                                     )}
                                     {snapshotGeneratedAt && (
@@ -887,144 +820,6 @@ export default function ResearchSummary({
                             )}
                         </div>
 
-                        {/* Page Analysis Inspector */}
-                        <div className="space-y-3">
-                            <button
-                                type="button"
-                                onClick={() => setPageAnalysisOpen(!pageAnalysisOpen)}
-                                className="w-full flex items-center justify-between text-left text-xs font-medium text-white/70 hover:text-white/90"
-                            >
-                                <span className="uppercase">Page Analysis</span>
-                                <span className="text-white/50">
-                                    {pageAnalysis.length > 0
-                                        ? `${pageAnalysis.length} pages · ${pageAnalysis.filter((p) => (p.used_in_final_merge?.length ?? 0) > 0).length} contributing`
-                                        : processing
-                                            ? 'Processing…'
-                                            : 'No page data'}
-                                </span>
-                                <svg
-                                    className={`w-4 h-4 transition-transform ${pageAnalysisOpen ? 'rotate-180' : ''}`}
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
-                            {pageAnalysisOpen && (
-                                <div className="space-y-4 rounded-lg border border-white/10 bg-black/20 p-4">
-                                    {pageAnalysis.length > 0 ? (
-                                        <>
-                                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                                                <div className="rounded bg-white/5 px-2 py-1.5">
-                                                    <p className="text-white/50">Total pages</p>
-                                                    <p className="font-medium text-white/90">{pageAnalysis.length}</p>
-                                                </div>
-                                                <div className="rounded bg-white/5 px-2 py-1.5">
-                                                    <p className="text-white/50">Classified</p>
-                                                    <p className="font-medium text-white/90">{pageAnalysis.filter((p) => p.page_type && p.page_type !== 'unknown').length}</p>
-                                                </div>
-                                                <div className="rounded bg-white/5 px-2 py-1.5">
-                                                    <p className="text-white/50">With accepted</p>
-                                                    <p className="font-medium text-emerald-400/90">{pageAnalysis.filter((p) => (p.accepted_candidates?.length ?? 0) > 0).length}</p>
-                                                </div>
-                                                <div className="rounded bg-white/5 px-2 py-1.5">
-                                                    <p className="text-white/50">With rejected</p>
-                                                    <p className="font-medium text-amber-400/90">{pageAnalysis.filter((p) => (p.rejected_candidates?.length ?? 0) > 0).length}</p>
-                                                </div>
-                                                <div className="rounded bg-white/5 px-2 py-1.5">
-                                                    <p className="text-white/50">Contributing</p>
-                                                    <p className="font-medium text-indigo-400/90">{pageAnalysis.filter((p) => (p.used_in_final_merge?.length ?? 0) > 0).length}</p>
-                                                </div>
-                                            </div>
-                                            <div className="space-y-3">
-                                                {pageAnalysis.map((p, idx) => (
-                                                    <div
-                                                        key={idx}
-                                                        className={`rounded-lg border p-3 space-y-2 ${
-                                                            (p.used_in_final_merge?.length ?? 0) > 0 ? 'border-indigo-500/30 bg-indigo-500/5' : 'border-white/10 bg-white/5'
-                                                        }`}
-                                                    >
-                                                        <div className="flex gap-3 items-start">
-                                                            {p.thumbnail_url && (
-                                                                <img src={p.thumbnail_url} alt={`Page ${p.page}`} className="w-20 h-24 object-contain rounded border border-white/10 shrink-0 bg-white/5" />
-                                                            )}
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                    <span className="font-medium text-white/90">Page {p.page}</span>
-                                                                    <span className="text-xs px-1.5 py-0.5 rounded bg-white/20 text-white/80">{p.page_type ?? 'unknown'}</span>
-                                                                    <span className="text-xs text-white/50">{(p.classification_confidence ?? 0) * 100}% confidence</span>
-                                                                    {(p.used_in_final_merge?.length ?? 0) > 0 && (
-                                                                        <span className="text-xs text-indigo-300">→ {p.used_in_final_merge.length} field(s) in merge</span>
-                                                                    )}
-                                                                </div>
-                                                                {p.page_title && <p className="text-xs text-white/60 mt-0.5">{p.page_title}</p>}
-                                                                {p.ocr_text_excerpt && <p className="text-xs text-white/50 mt-1 line-clamp-2 font-mono">{p.ocr_text_excerpt}</p>}
-                                                                {(p.eligible_fields?.length ?? 0) > 0 && (
-                                                                    <p className="text-xs text-white/50 mt-1">
-                                                                        Eligible: {(p.eligible_fields || []).join(', ')}
-                                                                    </p>
-                                                                )}
-                                                                {(p.attempted_fields?.length ?? 0) > 0 && (
-                                                                    <p className="text-xs text-white/50">
-                                                                        Attempted: {(p.attempted_fields || []).join(', ')}
-                                                                    </p>
-                                                                )}
-                                                                {(p.accepted_fields?.length ?? 0) > 0 && (
-                                                                    <p className="text-xs text-emerald-400/80">
-                                                                        Accepted: {(p.accepted_fields || []).join(', ')}
-                                                                    </p>
-                                                                )}
-                                                                {(p.rejected_fields?.length ?? 0) > 0 && (
-                                                                    <p className="text-xs text-amber-400/80">
-                                                                        Rejected: {(p.rejected_fields || []).map((r) => (typeof r === 'object' && r && 'path' in r) ? r.path : String(r)).filter(Boolean).join(', ')}
-                                                                    </p>
-                                                                )}
-                                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                                    {(p.accepted_candidates?.length ?? 0) > 0 && <span className="text-xs text-emerald-400/90">✓ {p.accepted_candidates.length} accepted</span>}
-                                                                    {(p.rejected_candidates?.length ?? 0) > 0 && <span className="text-xs text-amber-400/90">✗ {p.rejected_candidates.length} rejected</span>}
-                                                                    {(p.used_in_final_merge?.length ?? 0) > 0 && <span className="text-xs text-indigo-300">{p.used_in_final_merge.join(', ')}</span>}
-                                                                </div>
-                                                                {(p.rejected_candidates?.length ?? 0) > 0 && (
-                                                                    <div className="mt-2 space-y-1">
-                                                                        <p className="text-xs text-white/50">Rejections:</p>
-                                                                        {p.rejected_candidates.slice(0, 5).map((r, ri) => {
-                                                                            const valStr = typeof r.value === 'string' ? r.value : JSON.stringify(r.value ?? '')
-                                                                            return (
-                                                                                <div key={ri} className="text-xs text-amber-300/80">
-                                                                                    {r.path}: &quot;{valStr.slice(0, 40)}{valStr.length > 40 ? '…' : ''}&quot; — {r.reason}
-                                                                                </div>
-                                                                            )
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="space-y-2 text-xs text-white/50">
-                                            {processing ? (
-                                                <p className="text-amber-400/90">Processing… Page analysis will appear when PDF extraction completes. Polling every 2s.</p>
-                                            ) : (
-                                                <>
-                                                    {!pageClassifications && <p>Page classifications not available</p>}
-                                                    {!pageExtractions && <p>Page extractions not available</p>}
-                                                    {pageClassifications && pageExtractions && <p>No page analysis data was built from classifications/extractions.</p>}
-                                                    {hasSnapshot && !pageClassifications && !pageExtractions && (
-                                                        <p className="text-amber-400/90 mt-2">
-                                                            This snapshot may be from before the visual pipeline ran. Ensure BRAND_DNA_VISUAL_PAGE_EXTRACTION_ENABLED=true, restart the queue worker, then use &quot;Invalidate &amp; re-run&quot; below.
-                                                        </p>
-                                                    )}
-                                                </>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
 
                         {/* Raw JSON — collapsed by default */}
                         <div className="space-y-2">

@@ -60,6 +60,9 @@ class AITaskType
     // PDF text: structure extracted text (document_type, summary) for guidelines/specs
     public const PDF_DOCUMENT_STRUCTURE = 'pdf_document_structure';
 
+    // Brand PDF extraction: single-pass Claude analysis of brand guidelines PDF
+    public const BRAND_PDF_EXTRACTION = 'brand_pdf_extraction';
+
     /**
      * Get all task types as an array.
      *
@@ -87,6 +90,7 @@ class AITaskType
             self::BRAND_BOOTSTRAP_SIGNAL_EXTRACTION,
             self::SENTRY_ERROR_ANALYSIS,
             self::PDF_DOCUMENT_STRUCTURE,
+            self::BRAND_PDF_EXTRACTION,
         ];
     }
     

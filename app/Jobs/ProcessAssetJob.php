@@ -178,6 +178,13 @@ class ProcessAssetJob implements ShouldQueue
                 $versionUpdate['storage_class'] = $inspection['storage_class'];
             }
             $version->update($versionUpdate);
+
+            if (($inspection['width'] ?? null) && ($inspection['height'] ?? null)) {
+                $asset->update([
+                    'width' => $inspection['width'],
+                    'height' => $inspection['height'],
+                ]);
+            }
         }
 
         // ZIP/archive short-circuit: never run full pipeline — complete immediately to avoid indefinite processing

@@ -84,19 +84,22 @@ class AutoApplyHighConfidenceSuggestions
         }
 
         $sectionTitle = $s['section'] ?? null;
+
         if ($sectionTitle !== null && ! SectionAwareBrandGuidelinesProcessor::isTrustedSection($sectionTitle)) {
             return 'section_not_trusted';
         }
 
-        $sectionSource = $s['section_source'] ?? 'heuristic';
-        $sectionConfidence = (float) ($s['section_confidence'] ?? 0);
-        if ($sectionSource === 'heuristic' && $sectionConfidence < 0.8) {
-            return 'heuristic_section_weak';
-        }
+        if ($sectionTitle !== null) {
+            $sectionSource = $s['section_source'] ?? 'heuristic';
+            $sectionConfidence = (float) ($s['section_confidence'] ?? 0);
+            if ($sectionSource === 'heuristic' && $sectionConfidence < 0.8) {
+                return 'heuristic_section_weak';
+            }
 
-        $sectionQuality = (float) ($s['section_quality_score'] ?? 1.0);
-        if ($sectionTitle !== null && $sectionQuality < ExtractionSuggestionService::MIN_SECTION_QUALITY_AUTO_APPLY) {
-            return 'section_quality_too_low';
+            $sectionQuality = (float) ($s['section_quality_score'] ?? 1.0);
+            if ($sectionQuality < ExtractionSuggestionService::MIN_SECTION_QUALITY_AUTO_APPLY) {
+                return 'section_quality_too_low';
+            }
         }
 
         return null;

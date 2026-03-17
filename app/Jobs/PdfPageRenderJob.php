@@ -163,9 +163,6 @@ class PdfPageRenderJob implements ShouldQueue
 
             $this->updateExtractionCompletionFlag($asset, $versionNumber, $pageCount);
 
-            if ($page === 1 && !$asset->pdf_pages_rendered && $pageCount > 1) {
-                RenderRemainingPdfPagesJob::dispatch($asset->id, $activeVersion?->id);
-            }
         } catch (\Throwable $e) {
             Log::error('[PdfPageRenderJob] Failed to render PDF page', [
                 'asset_id' => $asset->id,

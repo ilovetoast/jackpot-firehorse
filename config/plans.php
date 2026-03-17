@@ -26,8 +26,9 @@ return [
             'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
             'max_tags_per_asset' => 1, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 5, // 5 AI tagging calls per month (very low allowance for free plan)
-            'max_ai_suggestions_per_month' => 10, // 10 AI suggestions per month (small allowance for free plan)
+            'max_ai_tagging_per_month' => 5,
+            'max_ai_suggestions_per_month' => 10,
+            'max_ai_brand_research_per_month' => 0, // Brand research requires a paid plan
         ],
         'features' => [
             'basic_asset_types',
@@ -63,6 +64,7 @@ return [
             'Download links limited to 50 per month',
             'Limited to 1 tag per asset for basic organization',
             '5 AI tagging operations and 10 AI suggestions per month',
+            'AI brand research not available (manual entry only)',
         ],
     ],
 
@@ -82,8 +84,9 @@ return [
             'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
             'max_tags_per_asset' => 5, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 50, // 50 AI tagging calls per month
-            'max_ai_suggestions_per_month' => 100, // 100 AI suggestions per month
+            'max_ai_tagging_per_month' => 50,
+            'max_ai_suggestions_per_month' => 100,
+            'max_ai_brand_research_per_month' => 3, // ~$0.16/call = ~$0.48/mo max
         ],
         'features' => [
             'all_asset_types',
@@ -121,6 +124,7 @@ return [
             'Download links limited to 200 per month',
             'Up to 5 tags per asset for better organization',
             '50 AI tagging operations and 100 AI suggestions per month',
+            '3 AI brand research analyses per month',
         ],
     ],
 
@@ -141,8 +145,9 @@ return [
             'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
             'max_tags_per_asset' => 10, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 500, // 500 AI tagging calls per month
-            'max_ai_suggestions_per_month' => 1000, // 1000 AI suggestions per month
+            'max_ai_tagging_per_month' => 500,
+            'max_ai_suggestions_per_month' => 1000,
+            'max_ai_brand_research_per_month' => 10, // ~$0.16/call = ~$1.60/mo max
         ],
         'features' => [
             'all_asset_types',
@@ -184,6 +189,7 @@ return [
             'Share downloads with custom permissions',
             'Up to 10 tags per asset for comprehensive categorization',
             '500 AI tagging operations and 1,000 AI suggestions per month',
+            '10 AI brand research analyses per month',
         ],
     ],
 
@@ -204,8 +210,9 @@ return [
             'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on premium plan
             'max_tags_per_asset' => 15, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 10000, // 10,000 AI tagging calls per month
-            'max_ai_suggestions_per_month' => 10000, // 10,000 AI suggestions per month
+            'max_ai_tagging_per_month' => 10000,
+            'max_ai_suggestions_per_month' => 10000,
+            'max_ai_brand_research_per_month' => 50, // ~$0.16/call = ~$8.00/mo max
         ],
         'features' => [
             'all_asset_types',
@@ -255,6 +262,7 @@ return [
             'Share downloads with custom permissions',
             'Up to 15 tags per asset for maximum flexibility',
             '10,000 AI tagging operations and 10,000 AI suggestions per month',
+            '50 AI brand research analyses per month',
         ],
     ],
 
@@ -277,6 +285,7 @@ return [
             'max_tags_per_asset' => 50,
             'max_ai_tagging_per_month' => 999999,
             'max_ai_suggestions_per_month' => 999999,
+            'max_ai_brand_research_per_month' => 999999,
         ],
         'features' => [
             'all_asset_types',

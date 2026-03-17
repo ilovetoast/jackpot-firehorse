@@ -12,7 +12,7 @@ class WebsiteExtractionProcessor
             'primary_colors' => array_map(fn ($c) => is_string($c) ? $c : ($c['hex'] ?? (string)$c), $primaryColors),
             'secondary_colors' => [],
             'fonts' => $crawlResult['detected_fonts'] ?? [],
-            'logo_detected' => $crawlResult['logo_url'] ?? null,
+            'logo_description' => null,
         ];
         $schema['identity']['positioning'] = $crawlResult['brand_bio'] ?? null;
         $schema['sources']['website'] = [
@@ -28,7 +28,7 @@ class WebsiteExtractionProcessor
         $signals = 0;
         if (!empty($schema['visual']['primary_colors'])) $signals++;
         if (!empty($schema['visual']['fonts'])) $signals++;
-        if ($schema['visual']['logo_detected']) $signals++;
+        if ($schema['visual']['logo_description']) $signals++;
         if ($schema['identity']['positioning']) $signals++;
         return min(1.0, $signals * 0.25);
     }

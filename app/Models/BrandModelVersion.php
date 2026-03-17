@@ -73,19 +73,19 @@ class BrandModelVersion extends Model
         return $this->hasOne(BrandModelVersionInsightState::class);
     }
 
-    public function getOrCreateInsightState(?int $sourceSnapshotId = null): BrandModelVersionInsightState
+    public function getOrCreateInsightState(?int $sourcePipelineSnapshotId = null): BrandModelVersionInsightState
     {
         $state = BrandModelVersionInsightState::firstOrCreate(
             ['brand_model_version_id' => $this->id],
             [
-                'source_snapshot_id' => $sourceSnapshotId,
+                'source_pipeline_snapshot_id' => $sourcePipelineSnapshotId,
                 'dismissed' => [],
                 'accepted' => [],
             ]
         );
 
-        if ($sourceSnapshotId && ! $state->source_snapshot_id) {
-            $state->source_snapshot_id = $sourceSnapshotId;
+        if ($sourcePipelineSnapshotId && ! $state->source_pipeline_snapshot_id) {
+            $state->source_pipeline_snapshot_id = $sourcePipelineSnapshotId;
             $state->save();
         }
 

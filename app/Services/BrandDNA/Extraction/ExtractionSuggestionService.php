@@ -63,8 +63,9 @@ class ExtractionSuggestionService
             ], $sectionSources, $extraction);
         }
 
-        if (($explicit['mission_declared'] ?? false) && ! empty($extraction['identity']['mission']) && ! in_array('identity.mission', $conflictFields)) {
+        if (! empty($extraction['identity']['mission']) && ! in_array('identity.mission', $conflictFields)) {
             $val = SignalWeights::unwrap($extraction['identity']['mission']);
+            $isExplicit = $explicit['mission_declared'] ?? false;
             if (is_string($val) && ExtractionQualityValidator::isLowQualityExtractedValue($val)) {
                 // Skip low-quality mission
             } else {
@@ -73,17 +74,18 @@ class ExtractionSuggestionService
                     'path' => 'identity.mission',
                     'type' => 'update',
                     'value' => $val,
-                'reason' => 'Extracted from Brand Guidelines.',
-                'confidence' => 0.9,
-                'weight' => SignalWeights::PDF_EXPLICIT,
-                'source' => array_merge($sources, ['pdf']),
-                'evidence' => $this->evidenceForMission($extraction),
-            ], $sectionSources, $extraction);
+                    'reason' => $isExplicit ? 'Purpose explicitly declared in Brand Guidelines.' : 'Purpose inferred from Brand Guidelines.',
+                    'confidence' => $isExplicit ? 0.9 : 0.85,
+                    'weight' => $isExplicit ? SignalWeights::PDF_EXPLICIT : SignalWeights::PDF_INFERRED,
+                    'source' => array_merge($sources, ['pdf']),
+                    'evidence' => $this->evidenceForMission($extraction),
+                ], $sectionSources, $extraction);
             }
         }
 
-        if (($explicit['positioning_declared'] ?? false) && ! empty($extraction['identity']['positioning']) && ! in_array('identity.positioning', $conflictFields)) {
+        if (! empty($extraction['identity']['positioning']) && ! in_array('identity.positioning', $conflictFields)) {
             $val = SignalWeights::unwrap($extraction['identity']['positioning']);
+            $isExplicit = $explicit['positioning_declared'] ?? false;
             if (is_string($val) && ExtractionQualityValidator::isLowQualityExtractedValue($val)) {
                 // Skip low-quality positioning
             } else {
@@ -92,12 +94,12 @@ class ExtractionSuggestionService
                     'path' => 'identity.positioning',
                     'type' => 'update',
                     'value' => $val,
-                'reason' => 'Extracted from Brand Guidelines.',
-                'confidence' => 0.9,
-                'weight' => SignalWeights::PDF_EXPLICIT,
-                'source' => array_merge($sources, ['pdf']),
-                'evidence' => $this->evidenceForPositioning($extraction),
-            ], $sectionSources, $extraction);
+                    'reason' => $isExplicit ? 'Brand promise explicitly stated in Brand Guidelines.' : 'Brand promise inferred from Brand Guidelines.',
+                    'confidence' => $isExplicit ? 0.9 : 0.85,
+                    'weight' => $isExplicit ? SignalWeights::PDF_EXPLICIT : SignalWeights::PDF_INFERRED,
+                    'source' => array_merge($sources, ['pdf']),
+                    'evidence' => $this->evidenceForPositioning($extraction),
+                ], $sectionSources, $extraction);
             }
         }
 
@@ -152,24 +154,321 @@ class ExtractionSuggestionService
             $tone = $extraction['personality']['tone_keywords'];
             $toneVal = is_array($tone) ? implode(', ', array_slice($tone, 0, 5)) : (string) $tone;
             if ($toneVal && ! in_array('scoring_rules.tone_keywords', $conflictFields)) {
-                $conf = 0.75;
-                if ($conf >= self::CONFIDENCE_MIN) {
+                $suggestions[] = $this->normalizeSuggestion([
+                    'key' => 'SUG:scoring_rules.tone_keywords',
+                    'path' => 'scoring_rules.tone_keywords',
+                    'type' => 'update',
+                    'value' => is_array($tone) ? $tone : array_filter(array_map('trim', explode(',', $toneVal))),
+                    'reason' => 'Tone keywords extracted from Brand Guidelines.',
+                    'confidence' => 0.85,
+                    'weight' => SignalWeights::PDF_EXPLICIT,
+                    'source' => array_merge($sources, ['pdf']),
+                    'evidence' => $this->evidenceForTone($extraction),
+                ], $sectionSources, $extraction);
+            }
+        }
+
+        $this->generateIdentityFieldSuggestions($extraction, $conflictFields, $sources, $sectionSources, $suggestions);
+        $this->generatePersonalityFieldSuggestions($extraction, $conflictFields, $sources, $sectionSources, $suggestions);
+        $this->generateVisualFieldSuggestions($extraction, $sources, $sectionSources, $suggestions);
+        $this->generateTypographyFieldSuggestions($extraction, $sources, $sectionSources, $suggestions);
+
+        return $suggestions;
+    }
+
+    protected function generateIdentityFieldSuggestions(array $extraction, array $conflictFields, array $sources, ?array $sectionSources, array &$suggestions): void
+    {
+        $identity = $extraction['identity'] ?? [];
+        $pdfSources = array_merge($sources, ['pdf']);
+
+        $fields = [
+            'tagline' => ['path' => 'identity.tagline', 'reason' => 'Tagline extracted from Brand Guidelines.', 'conf' => 0.9],
+            'industry' => ['path' => 'identity.industry', 'reason' => 'Industry identified from Brand Guidelines.', 'conf' => 0.85],
+            'target_audience' => ['path' => 'identity.target_audience', 'reason' => 'Target audience identified from Brand Guidelines.', 'conf' => 0.85],
+            'vision' => ['path' => 'identity.vision', 'reason' => 'Vision statement extracted from Brand Guidelines.', 'conf' => 0.85],
+        ];
+
+        foreach ($fields as $key => $meta) {
+            $val = SignalWeights::unwrap($identity[$key] ?? null);
+            if (empty($val) || ! is_string($val) || in_array($meta['path'], $conflictFields)) {
+                continue;
+            }
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:' . $meta['path'],
+                'path' => $meta['path'],
+                'type' => 'update',
+                'value' => $val,
+                'reason' => $meta['reason'],
+                'confidence' => $meta['conf'],
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Extracted from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        $arrayFields = [
+            'beliefs' => ['path' => 'identity.beliefs', 'reason' => 'Core beliefs extracted from Brand Guidelines.', 'conf' => 0.85],
+            'values' => ['path' => 'identity.values', 'reason' => 'Brand values extracted from Brand Guidelines.', 'conf' => 0.85],
+        ];
+
+        foreach ($arrayFields as $key => $meta) {
+            $val = $identity[$key] ?? [];
+            if (empty($val) || ! is_array($val) || in_array($meta['path'], $conflictFields)) {
+                continue;
+            }
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:' . $meta['path'],
+                'path' => $meta['path'],
+                'type' => 'update',
+                'value' => $val,
+                'reason' => $meta['reason'],
+                'confidence' => $meta['conf'],
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Extracted from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+    }
+
+    protected function generatePersonalityFieldSuggestions(array $extraction, array $conflictFields, array $sources, ?array $sectionSources, array &$suggestions): void
+    {
+        $personality = $extraction['personality'] ?? [];
+        $pdfSources = array_merge($sources, ['pdf']);
+
+        $traits = $personality['traits'] ?? [];
+        if (! empty($traits) && is_array($traits) && ! in_array('personality.traits', $conflictFields)) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:personality.traits',
+                'path' => 'personality.traits',
+                'type' => 'update',
+                'value' => $traits,
+                'reason' => 'Personality traits extracted from Brand Guidelines.',
+                'confidence' => 0.85,
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Extracted from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        $toneKw = $personality['tone_keywords'] ?? [];
+        if (! empty($toneKw) && is_array($toneKw) && ! in_array('personality.tone_keywords', $conflictFields)) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:personality.tone_keywords',
+                'path' => 'personality.tone_keywords',
+                'type' => 'update',
+                'value' => $toneKw,
+                'reason' => 'Tone keywords extracted from Brand Guidelines.',
+                'confidence' => 0.85,
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Extracted from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        $voiceDesc = $personality['voice_description'] ?? null;
+        if (! empty($voiceDesc) && is_string($voiceDesc)) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:personality.voice_description',
+                'path' => 'personality.voice_description',
+                'type' => 'update',
+                'value' => $voiceDesc,
+                'reason' => 'Brand voice synthesized from Brand Guidelines.',
+                'confidence' => 0.85,
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Synthesized from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        $brandLook = $personality['brand_look'] ?? null;
+        if (! empty($brandLook) && is_string($brandLook)) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:personality.brand_look',
+                'path' => 'personality.brand_look',
+                'type' => 'update',
+                'value' => $brandLook,
+                'reason' => 'Brand look synthesized from Brand Guidelines.',
+                'confidence' => 0.85,
+                'weight' => SignalWeights::PDF_EXPLICIT,
+                'source' => $pdfSources,
+                'evidence' => ['Synthesized from Brand Guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+    }
+
+    protected function generateVisualFieldSuggestions(array $extraction, array $sources, ?array $sectionSources, array &$suggestions): void
+    {
+        $visual = $extraction['visual'] ?? [];
+        $pdfSources = array_merge($sources, ['pdf']);
+
+        if (! empty($visual['secondary_colors']) && is_array($visual['secondary_colors'])) {
+            $palette = [];
+            foreach ($visual['secondary_colors'] as $c) {
+                if (is_string($c)) {
+                    $palette[] = ['hex' => $c];
+                } elseif (is_array($c) && isset($c['hex'])) {
+                    $palette[] = $c;
+                }
+            }
+            if (! empty($palette)) {
+                $suggestions[] = $this->normalizeSuggestion([
+                    'key' => 'SUG:standards.secondary_color_palette',
+                    'path' => 'scoring_rules.secondary_color_palette',
+                    'type' => 'update',
+                    'value' => $palette,
+                    'reason' => 'Secondary colors extracted from Brand Guidelines.',
+                    'confidence' => 0.8,
+                    'weight' => 0.7,
+                    'source' => $pdfSources,
+                    'evidence' => ['Brand guidelines PDF'],
+                ], $sectionSources, $extraction);
+            }
+        }
+
+        $stringVisualFields = [
+            'photography_style' => ['path' => 'visual.photography_style', 'reason' => 'Photography direction extracted from Brand Guidelines.'],
+            'visual_style' => ['path' => 'visual.visual_style', 'reason' => 'Visual design direction extracted from Brand Guidelines.'],
+        ];
+
+        foreach ($stringVisualFields as $key => $meta) {
+            $val = $visual[$key] ?? null;
+            if (empty($val) || ! is_string($val)) {
+                continue;
+            }
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:' . $meta['path'],
+                'path' => $meta['path'],
+                'type' => 'update',
+                'value' => $val,
+                'reason' => $meta['reason'],
+                'confidence' => 0.8,
+                'weight' => 0.7,
+                'source' => $pdfSources,
+                'evidence' => ['Brand guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        $allColors = array_merge(
+            is_array($visual['primary_colors'] ?? null) ? $visual['primary_colors'] : [],
+            is_array($visual['secondary_colors'] ?? null) ? $visual['secondary_colors'] : []
+        );
+        $hexColors = [];
+        foreach ($allColors as $c) {
+            $hex = is_string($c) ? $c : ($c['hex'] ?? ($c['value'] ?? null));
+            if (is_string($hex) && preg_match('/^#[0-9A-Fa-f]{6}$/', $hex)) {
+                $hexColors[] = strtoupper($hex);
+            }
+        }
+        $hexColors = array_values(array_unique($hexColors));
+
+        if (count($hexColors) >= 1) {
+            $roles = [
+                ['key' => 'primary_color', 'label' => 'Primary'],
+                ['key' => 'secondary_color', 'label' => 'Secondary'],
+                ['key' => 'accent_color', 'label' => 'Accent'],
+            ];
+            foreach ($roles as $i => $role) {
+                if (isset($hexColors[$i])) {
                     $suggestions[] = $this->normalizeSuggestion([
-                        'key' => 'SUG:scoring_rules.tone_keywords',
-                        'path' => 'scoring_rules.tone_keywords',
+                        'key' => "SUG:brand_colors.{$role['key']}",
+                        'path' => "brand_colors.{$role['key']}",
                         'type' => 'update',
-                        'value' => is_array($tone) ? $tone : array_filter(array_map('trim', explode(',', $toneVal))),
-                        'reason' => 'Tone keywords extracted from source materials.',
-                        'confidence' => $conf,
-                        'weight' => 0.75,
-                        'source' => $sources,
-                        'evidence' => $this->evidenceForTone($extraction),
+                        'value' => $hexColors[$i],
+                        'reason' => "{$role['label']} brand color from Brand Guidelines palette.",
+                        'confidence' => 0.82,
+                        'weight' => SignalWeights::PDF_EXPLICIT,
+                        'source' => $pdfSources,
+                        'evidence' => ['Brand color palette from guidelines PDF'],
                     ], $sectionSources, $extraction);
                 }
             }
         }
 
-        return $suggestions;
+        if (! empty($visual['design_cues']) && is_array($visual['design_cues'])) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:visual.design_cues',
+                'path' => 'visual.design_cues',
+                'type' => 'update',
+                'value' => $visual['design_cues'],
+                'reason' => 'Design cues extracted from Brand Guidelines.',
+                'confidence' => 0.75,
+                'weight' => 0.7,
+                'source' => $pdfSources,
+                'evidence' => ['Brand guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+    }
+
+    protected function generateTypographyFieldSuggestions(array $extraction, array $sources, ?array $sectionSources, array &$suggestions): void
+    {
+        $typo = $extraction['typography'] ?? [];
+        $pdfSources = array_merge($sources, ['pdf']);
+
+        $secondaryFont = $typo['secondary_font'] ?? null;
+        if (! empty($secondaryFont) && is_string($secondaryFont)) {
+            $suggestions[] = $this->normalizeSuggestion([
+                'key' => 'SUG:typography.secondary_font',
+                'path' => 'typography.secondary_font',
+                'type' => 'update',
+                'value' => $secondaryFont,
+                'reason' => 'Body font extracted from Brand Guidelines.',
+                'confidence' => 0.8,
+                'weight' => 0.7,
+                'source' => $pdfSources,
+                'evidence' => ['Brand guidelines PDF'],
+            ], $sectionSources, $extraction);
+        }
+
+        foreach (['heading_style', 'body_style'] as $key) {
+            $val = $typo[$key] ?? null;
+            if (! empty($val) && is_string($val)) {
+                $suggestions[] = $this->normalizeSuggestion([
+                    'key' => 'SUG:typography.' . $key,
+                    'path' => 'typography.' . $key,
+                    'type' => 'update',
+                    'value' => $val,
+                    'reason' => 'Typography style extracted from Brand Guidelines.',
+                    'confidence' => 0.75,
+                    'weight' => 0.7,
+                    'source' => $pdfSources,
+                    'evidence' => ['Brand guidelines PDF'],
+                ], $sectionSources, $extraction);
+            }
+        }
+
+        $fontDetails = $typo['font_details'] ?? [];
+        if (is_array($fontDetails) && count($fontDetails) > 0) {
+            $fonts = [];
+            foreach ($fontDetails as $fd) {
+                if (! is_array($fd) || empty($fd['name'])) {
+                    continue;
+                }
+                $fonts[] = [
+                    'name' => (string) $fd['name'],
+                    'role' => (string) ($fd['role'] ?? 'other'),
+                    'source' => 'unknown',
+                    'styles' => is_array($fd['styles'] ?? null) ? $fd['styles'] : [],
+                    'heading_use' => $fd['heading_use'] ?? null,
+                    'body_use' => $fd['body_use'] ?? null,
+                    'usage_notes' => $fd['usage_notes'] ?? null,
+                    'purchase_url' => null,
+                    'file_urls' => [],
+                ];
+            }
+            if (count($fonts) > 0) {
+                $suggestions[] = $this->normalizeSuggestion([
+                    'key' => 'SUG:typography.fonts',
+                    'path' => 'typography.fonts',
+                    'type' => 'update',
+                    'value' => $fonts,
+                    'reason' => 'Font details extracted from Brand Guidelines.',
+                    'confidence' => 0.85,
+                    'weight' => SignalWeights::PDF_EXPLICIT,
+                    'source' => $pdfSources,
+                    'evidence' => ['Brand guidelines typography section'],
+                ], $sectionSources, $extraction);
+            }
+        }
     }
 
     protected function deriveSources(array $extraction, array $activeSources): array

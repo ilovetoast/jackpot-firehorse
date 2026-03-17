@@ -61,7 +61,7 @@ class BrandDNAController extends Controller
                     'id' => $v->id,
                     'version_number' => $v->version_number,
                     'status' => $v->status,
-                    'model_payload' => $v->model_payload ?? [],
+                    'model_payload' => self::deepUnwrap($v->model_payload ?? []),
                 ];
             }
         }
@@ -117,7 +117,7 @@ class BrandDNAController extends Controller
                 'id' => $activeVersion->id,
                 'version_number' => $activeVersion->version_number,
                 'status' => $activeVersion->status,
-                'model_payload' => $activeVersion->model_payload ?? [],
+                'model_payload' => self::deepUnwrap($activeVersion->model_payload ?? []),
             ] : null,
             'editingVersion' => $editingVersion,
             'allVersions' => $allVersions,
@@ -209,7 +209,7 @@ class BrandDNAController extends Controller
                 'id' => $version->id,
                 'version_number' => $version->version_number,
                 'status' => $version->status,
-                'model_payload' => $version->model_payload ?? [],
+                'model_payload' => self::deepUnwrap($version->model_payload ?? []),
             ],
         ]);
     }
@@ -383,5 +383,22 @@ class BrandDNAController extends Controller
                 'thumbnail_url' => $p->asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null,
             ] : null,
         ])->values()->all();
+    }
+
+    protected static function deepUnwrap(array $data): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value) && isset($value['value'], $value['source'])) {
+                $inner = $value['value'];
+                $result[$key] = is_array($inner) ? self::deepUnwrap($inner) : $inner;
+            } elseif (is_array($value)) {
+                $result[$key] = self::deepUnwrap($value);
+            } else {
+                $result[$key] = $value;
+            }
+        }
+
+        return $result;
     }
 }

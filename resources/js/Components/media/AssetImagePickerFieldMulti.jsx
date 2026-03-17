@@ -19,6 +19,7 @@ export default function AssetImagePickerFieldMulti({
   label = '',
   disabled = false,
   className = '',
+  brandId = null,
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const items = Array.isArray(value) ? value : []
@@ -111,6 +112,7 @@ export default function AssetImagePickerFieldMulti({
         maxSelection={maxSelection}
         initialSelectedIds={items.map((i) => i.asset_id).filter(Boolean)}
         disabled={disabled}
+        brandId={brandId}
       />
     </div>
   )

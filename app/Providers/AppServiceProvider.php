@@ -13,6 +13,7 @@ use App\Listeners\ProcessAssetOnUpload;
 use App\Listeners\SendAssetPendingApprovalNotification;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\AI\Providers\AnthropicProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Database\Eloquent\Model;
@@ -31,20 +32,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Bind AI provider interface to default provider
-        // This allows dependency injection of AIProviderInterface
-        // The default provider is resolved from config('ai.default_provider')
         $this->app->singleton(AIProviderInterface::class, function ($app) {
             $defaultProviderName = config('ai.default_provider', 'openai');
-            
-            // Resolve provider based on config
-            // Currently only OpenAI is implemented
-            if ($defaultProviderName === 'openai') {
-                return new OpenAIProvider();
-            }
-            
-            // Fallback to OpenAI if provider not found
-            return new OpenAIProvider();
+
+            return match ($defaultProviderName) {
+                'anthropic' => new AnthropicProvider(),
+                default => new OpenAIProvider(),
+            };
+        });
+
+        $this->app->singleton(AnthropicProvider::class, function ($app) {
+            return new AnthropicProvider();
         });
 
         $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {

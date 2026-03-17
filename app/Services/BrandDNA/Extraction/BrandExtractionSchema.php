@@ -5,9 +5,11 @@ namespace App\Services\BrandDNA\Extraction;
 class BrandExtractionSchema
 {
     protected const SINGLE_VALUE_FIELDS = [
-        'identity.mission', 'identity.vision', 'identity.positioning', 'identity.industry', 'identity.tagline',
-        'personality.primary_archetype',
-        'visual.logo_detected',
+        'identity.mission', 'identity.vision', 'identity.positioning', 'identity.industry',
+        'identity.target_audience', 'identity.tagline',
+        'personality.primary_archetype', 'personality.voice_description', 'personality.brand_look',
+        'visual.logo_description', 'visual.photography_style', 'visual.visual_style',
+        'typography.primary_font', 'typography.secondary_font', 'typography.heading_style', 'typography.body_style',
     ];
 
     public static function empty(): array
@@ -18,6 +20,7 @@ class BrandExtractionSchema
                 'vision' => null,
                 'positioning' => null,
                 'industry' => null,
+                'target_audience' => null,
                 'tagline' => null,
                 'beliefs' => [],
                 'values' => [],
@@ -26,12 +29,24 @@ class BrandExtractionSchema
                 'primary_archetype' => null,
                 'traits' => [],
                 'tone_keywords' => [],
+                'voice_description' => null,
+                'brand_look' => null,
             ],
             'visual' => [
                 'primary_colors' => [],
                 'secondary_colors' => [],
                 'fonts' => [],
-                'logo_detected' => null,
+                'logo_description' => null,
+                'photography_style' => null,
+                'visual_style' => null,
+                'design_cues' => [],
+            ],
+            'typography' => [
+                'primary_font' => null,
+                'secondary_font' => null,
+                'heading_style' => null,
+                'body_style' => null,
+                'font_details' => [],
             ],
             'explicit_signals' => [
                 'archetype_declared' => false,
@@ -44,6 +59,13 @@ class BrandExtractionSchema
                 'materials' => [],
             ],
             'confidence' => 0.0,
+            'section_confidence' => [
+                'identity' => 0.0,
+                'personality' => 0.0,
+                'visual' => 0.0,
+                'typography' => 0.0,
+            ],
+            '_extraction_notes' => [],
             'conflicts' => [],
         ];
     }
@@ -71,7 +93,7 @@ class BrandExtractionSchema
 
     protected static function mergeOne(array $base, array $ext, array $conflicts, array $winners): array
     {
-        foreach (['identity', 'personality', 'visual'] as $section) {
+        foreach (['identity', 'personality', 'visual', 'typography'] as $section) {
             if (! isset($ext[$section]) || ! is_array($ext[$section])) {
                 continue;
             }
@@ -143,6 +165,19 @@ class BrandExtractionSchema
 
         if (isset($ext['confidence']) && is_numeric($ext['confidence'])) {
             $base['confidence'] = max($base['confidence'], (float) $ext['confidence']);
+        }
+
+        if (! empty($ext['section_confidence'])) {
+            foreach ($ext['section_confidence'] as $k => $v) {
+                $base['section_confidence'][$k] = max($base['section_confidence'][$k] ?? 0, (float) $v);
+            }
+        }
+
+        if (! empty($ext['_extraction_notes'])) {
+            $base['_extraction_notes'] = array_values(array_unique(array_merge(
+                $base['_extraction_notes'] ?? [],
+                $ext['_extraction_notes']
+            )));
         }
 
         if (! empty($ext['sections'])) {

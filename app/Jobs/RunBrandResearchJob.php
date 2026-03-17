@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
-use App\Models\BrandResearchSnapshot;
+use App\Models\BrandPipelineSnapshot;
 use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandArchetypeSuggestionService;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
@@ -47,7 +47,8 @@ class RunBrandResearchJob implements ShouldQueue
             return;
         }
 
-        $snapshot = BrandResearchSnapshot::create([
+        $snapshot = BrandPipelineSnapshot::create([
+            'brand_pipeline_run_id' => null,
             'brand_id' => $brand->id,
             'brand_model_version_id' => $draft->id,
             'source_url' => $this->sourceUrl,

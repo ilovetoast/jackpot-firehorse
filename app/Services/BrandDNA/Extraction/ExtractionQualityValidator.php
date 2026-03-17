@@ -64,7 +64,7 @@ class ExtractionQualityValidator
             return true;
         }
 
-        if (preg_match('/[^\p{L}\p{N}\s.,;:!?\'\"\-]/u', $trimmed)) {
+        if (preg_match('/[^\p{L}\p{N}\s.,;:!?\'\"\-&\/()]/u', $trimmed)) {
             return true;
         }
 

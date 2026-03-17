@@ -314,7 +314,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions'];
+        $features = ['tagging', 'suggestions', 'brand_research'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -382,7 +382,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions'];
+        $features = ['tagging', 'suggestions', 'brand_research'];
         $status = [];
 
         foreach ($features as $feature) {

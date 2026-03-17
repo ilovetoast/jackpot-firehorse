@@ -43,6 +43,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Anthropic Provider
+    |--------------------------------------------------------------------------
+    */
+    'anthropic' => [
+        'api_key' => env('ANTHROPIC_API_KEY'),
+    ],
+
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Models Registry
     |--------------------------------------------------------------------------
     |
@@ -120,6 +130,18 @@ return [
             ],
             'active' => true,
             'notes' => 'Cost-effective alternative for high-volume operations',
+        ],
+        'claude-sonnet-4-20250514' => [
+            'provider' => 'anthropic',
+            'model_name' => 'claude-sonnet-4-20250514',
+            'capabilities' => ['text', 'reasoning', 'image', 'multimodal', 'pdf'],
+            'recommended_use' => ['brand_pdf_extraction'],
+            'default_cost_per_token' => [
+                'input' => 0.000003,   // $3 per 1M tokens
+                'output' => 0.000015,  // $15 per 1M tokens
+            ],
+            'active' => true,
+            'notes' => 'Native PDF support for single-pass brand guidelines extraction',
         ],
     ],
 
@@ -370,6 +392,33 @@ PROMPT
                 // Tenant-scoped, runs from StructPdfTextWithAiJob after extraction completes
             ],
         ],
+        'brand_pdf_extractor' => [
+            'name' => 'Brand PDF Extractor',
+            'description' => 'Single-pass Claude extraction of brand DNA fields from guidelines PDFs',
+            'scope' => 'tenant',
+            'default_model' => 'claude-sonnet-4-20250514',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered during brand pipeline
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI Credit Weights
+    |--------------------------------------------------------------------------
+    |
+    | Cost-proportional weights for different AI features.
+    | Used for unified credit tracking and plan limit documentation.
+    | Weight 1 = baseline (cheapest operation, e.g. image tagging ~$0.005).
+    | Brand research weight reflects its ~30x higher API cost (~$0.16/call).
+    |
+    */
+    'credit_weights' => [
+        'tagging' => 1,
+        'suggestions' => 1,
+        'brand_research' => 30,
     ],
 
     /*

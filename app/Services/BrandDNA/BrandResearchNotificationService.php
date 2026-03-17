@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 class BrandResearchNotificationService
 {
     public function __construct(
-        protected ResearchFinalizationService $finalizationService,
+        protected \App\Services\BrandDNA\PipelineFinalizationService $finalizationService,
         protected FeatureGate $featureGate
     ) {}
 

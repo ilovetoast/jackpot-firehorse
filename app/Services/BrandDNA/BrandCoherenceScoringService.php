@@ -150,8 +150,8 @@ class BrandCoherenceScoringService
     {
         $mission = trim((string) self::unwrapScalar($identity['mission'] ?? ''));
         $positioning = trim((string) self::unwrapScalar($identity['positioning'] ?? ''));
-        $hasMission = strlen($mission) >= 20 && ! $this->isPlaceholder($mission);
-        $hasPositioning = strlen($positioning) >= 20 && ! $this->isPlaceholder($positioning);
+        $hasMission = strlen($mission) >= 10 && ! $this->isPlaceholder($mission);
+        $hasPositioning = strlen($positioning) >= 10 && ! $this->isPlaceholder($positioning);
         $coverage = ($hasMission ? 50 : 0) + ($hasPositioning ? 50 : 0);
         $confMission = $hasMission ? 85 : (strlen($mission) > 0 ? 40 : 0);
         $confPositioning = $hasPositioning ? 85 : (strlen($positioning) > 0 ? 40 : 0);
@@ -172,8 +172,8 @@ class BrandCoherenceScoringService
     {
         $brandLook = trim((string) self::unwrapScalar($personality['brand_look'] ?? ''));
         $voiceDescription = trim((string) self::unwrapScalar($personality['voice_description'] ?? ''));
-        $toneKeywords = $scoringRules['tone_keywords'] ?? $personality['tone_keywords'] ?? [];
-        $traits = $personality['traits'] ?? [];
+        $toneKeywords = self::unwrapArrayField($scoringRules['tone_keywords'] ?? $personality['tone_keywords'] ?? []);
+        $traits = self::unwrapArrayField($personality['traits'] ?? []);
         $hasBrandLook = strlen($brandLook) >= 15 && ! $this->isPlaceholder($brandLook);
         $hasVoice = strlen($voiceDescription) >= 15 && ! $this->isPlaceholder($voiceDescription);
         $hasTone = ! empty($toneKeywords);
@@ -197,8 +197,8 @@ class BrandCoherenceScoringService
         $marketCategory = ! empty(trim((string) self::unwrapScalar($identity['market_category'] ?? '')));
         $competitivePosition = ! empty(trim((string) self::unwrapScalar($identity['competitive_position'] ?? '')));
         $tagline = ! empty(trim((string) self::unwrapScalar($identity['tagline'] ?? '')));
-        $beliefs = $identity['beliefs'] ?? [];
-        $values = $identity['values'] ?? [];
+        $beliefs = self::unwrapArrayField($identity['beliefs'] ?? []);
+        $values = self::unwrapArrayField($identity['values'] ?? []);
         $hasBeliefs = ! empty($beliefs);
         $hasValues = ! empty($values);
         $count = ($industry ? 1 : 0) + ($audience ? 1 : 0) + ($marketCategory ? 1 : 0) + ($competitivePosition ? 1 : 0) + ($tagline ? 1 : 0) + ($hasBeliefs ? 1 : 0) + ($hasValues ? 1 : 0);
@@ -401,5 +401,17 @@ class BrandCoherenceScoringService
         }
 
         return null;
+    }
+
+    /**
+     * Unwrap an array field that may be AI-wrapped ({value: [...], source: 'ai'}).
+     */
+    protected static function unwrapArrayField(mixed $val): array
+    {
+        if (is_array($val) && isset($val['value']) && is_array($val['value'])) {
+            return $val['value'];
+        }
+
+        return is_array($val) ? $val : [];
     }
 }

@@ -126,7 +126,6 @@ services:
         environment:
             WWWUSER: '${WWWUSER}'
             LARAVEL_SAIL: 1
-            BRAND_DNA_VISUAL_PAGE_EXTRACTION_ENABLED: '${BRAND_DNA_VISUAL_PAGE_EXTRACTION_ENABLED:-true}'
         volumes:
             - '.:/var/www/html'
         networks:

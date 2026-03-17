@@ -96,19 +96,19 @@ class BrandSnapshotSuggestionService
 
     protected function suggestLogo(array $snapshotRaw): array
     {
-        $logoUrl = $snapshotRaw['logo_url'] ?? null;
-        if ($logoUrl === null || trim((string) $logoUrl) === '') {
+        $logoDesc = $snapshotRaw['logo_description'] ?? null;
+        if ($logoDesc === null || trim((string) $logoDesc) === '') {
             return [];
         }
 
         return [
             [
-                'key' => 'SUG:standards.logo',
-                'path' => 'visual.detected_logo',
+                'key' => 'SUG:standards.logo_description',
+                'path' => 'visual.logo_description',
                 'type' => 'informational',
-                'value' => $logoUrl,
-                'reason' => 'Logo detected on website.',
-                'confidence' => 0.6,
+                'value' => $logoDesc,
+                'reason' => 'Logo guidelines extracted from Brand Guidelines.',
+                'confidence' => 0.7,
             ],
         ];
     }

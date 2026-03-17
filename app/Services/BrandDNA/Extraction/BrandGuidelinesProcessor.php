@@ -46,7 +46,7 @@ class BrandGuidelinesProcessor
             'primary_colors' => $hexColors,
             'secondary_colors' => [],
             'fonts' => $fonts,
-            'logo_detected' => null,
+            'logo_description' => null,
         ];
 
         $schema['explicit_signals'] = [

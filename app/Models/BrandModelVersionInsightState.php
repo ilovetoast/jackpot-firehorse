@@ -9,7 +9,7 @@ class BrandModelVersionInsightState extends Model
 {
     protected $fillable = [
         'brand_model_version_id',
-        'source_snapshot_id',
+        'source_pipeline_snapshot_id',
         'dismissed',
         'accepted',
         'viewed_at',
@@ -33,6 +33,6 @@ class BrandModelVersionInsightState extends Model
 
     public function sourceSnapshot(): BelongsTo
     {
-        return $this->belongsTo(BrandResearchSnapshot::class, 'source_snapshot_id');
+        return $this->belongsTo(BrandPipelineSnapshot::class, 'source_pipeline_snapshot_id');
     }
 }

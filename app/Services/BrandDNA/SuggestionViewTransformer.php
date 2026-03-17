@@ -28,6 +28,17 @@ class SuggestionViewTransformer
             'mission_suggestion' => null,
             'positioning_suggestion' => null,
             'tone_suggestion' => null,
+            'tagline_suggestion' => null,
+            'industry_suggestion' => null,
+            'target_audience_suggestion' => null,
+            'beliefs_suggestion' => null,
+            'values_suggestion' => null,
+            'traits_suggestion' => null,
+            'tone_keywords_suggestion' => null,
+            'voice_description_suggestion' => null,
+            'brand_look_suggestion' => null,
+            'brand_color_suggestions' => [],
+            'fonts_suggestion' => [],
             'auto_applied' => [],
             'suggested' => [],
             'ignored' => [],
@@ -72,6 +83,15 @@ class SuggestionViewTransformer
             'identity.mission' => 'mission_suggestion',
             'identity.positioning' => 'positioning_suggestion',
             'scoring_rules.tone_keywords' => 'tone_suggestion',
+            'identity.tagline' => 'tagline_suggestion',
+            'identity.industry' => 'industry_suggestion',
+            'identity.target_audience' => 'target_audience_suggestion',
+            'identity.beliefs' => 'beliefs_suggestion',
+            'identity.values' => 'values_suggestion',
+            'personality.traits' => 'traits_suggestion',
+            'personality.tone_keywords' => 'tone_keywords_suggestion',
+            'personality.voice_description' => 'voice_description_suggestion',
+            'personality.brand_look' => 'brand_look_suggestion',
         ];
 
         $legacy = [
@@ -79,6 +99,17 @@ class SuggestionViewTransformer
             'mission_suggestion' => null,
             'positioning_suggestion' => null,
             'tone_suggestion' => null,
+            'tagline_suggestion' => null,
+            'industry_suggestion' => null,
+            'target_audience_suggestion' => null,
+            'beliefs_suggestion' => null,
+            'values_suggestion' => null,
+            'traits_suggestion' => null,
+            'tone_keywords_suggestion' => null,
+            'voice_description_suggestion' => null,
+            'brand_look_suggestion' => null,
+            'brand_color_suggestions' => [],
+            'fonts_suggestion' => [],
         ];
 
         foreach ($suggestions as $s) {
@@ -112,16 +143,32 @@ class SuggestionViewTransformer
                 $value = $s['value'] ?? null;
                 $key = $pathToLegacy[$path];
                 if ($key === 'recommended_archetypes') {
-                    $label = is_string($value) ? $value : ($value['label'] ?? $value['archetype'] ?? $value);
                     $legacy['recommended_archetypes'][] = array_merge(
                         is_array($value) ? $value : ['label' => $value],
                         ['confidence' => $confidence]
                     );
-                } elseif ($key === 'mission_suggestion' || $key === 'positioning_suggestion') {
-                    $legacy[$key] = is_string($value) ? $value : ($value['value'] ?? $value);
-                } elseif ($key === 'tone_suggestion') {
-                    $legacy['tone_suggestion'] = is_array($value) ? $value : (array) $value;
+                } elseif (in_array($key, ['mission_suggestion', 'positioning_suggestion', 'tagline_suggestion', 'industry_suggestion', 'target_audience_suggestion', 'voice_description_suggestion', 'brand_look_suggestion'], true)) {
+                    $unwrapped = is_array($value) && array_key_exists('value', $value) && isset($value['source']) ? $value['value'] : $value;
+                    $legacy[$key] = is_string($unwrapped) ? $unwrapped : (string) ($unwrapped ?? '');
+                } elseif (in_array($key, ['tone_suggestion', 'beliefs_suggestion', 'values_suggestion', 'traits_suggestion', 'tone_keywords_suggestion'], true)) {
+                    $unwrapped = is_array($value) && array_key_exists('value', $value) && isset($value['source']) ? $value['value'] : $value;
+                    $legacy[$key] = is_array($unwrapped) ? $unwrapped : (array) $unwrapped;
                 }
+            }
+
+            if ($path === 'typography.fonts') {
+                $value = $s['value'] ?? [];
+                $unwrapped = is_array($value) && array_key_exists('value', $value) && isset($value['source']) ? $value['value'] : $value;
+                $legacy['fonts_suggestion'] = is_array($unwrapped) ? $unwrapped : [];
+            }
+
+            if ($path && str_starts_with($path, 'brand_colors.')) {
+                $colorKey = str_replace('brand_colors.', '', $path);
+                $legacy['brand_color_suggestions'][] = [
+                    'key' => $colorKey,
+                    'value' => $s['value'] ?? null,
+                    'confidence' => $confidence,
+                ];
             }
         }
 

@@ -73,6 +73,7 @@ class BrandDnaPayloadNormalizer
                 'heading_style' => null,
                 'body_style' => null,
                 'external_font_links' => [],
+                'fonts' => [],
             ],
             'scoring_rules' => [
                 'allowed_color_palette' => [],

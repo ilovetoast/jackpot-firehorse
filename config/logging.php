@@ -141,6 +141,13 @@ return [
             'days' => 7,
         ],
 
+        'pipeline' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/pipeline.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => 14,
+        ],
+
     ],
 
 ];

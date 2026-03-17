@@ -231,7 +231,16 @@ class GenerateThumbnailsJob implements ShouldQueue
             $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
             $fileType = $fileTypeService->detectFileType($mime, $ext);
             $dimensionsFromRendering = in_array($fileType, ['pdf', 'video'], true);
-            if (!$dimensionsFromRendering && (!$asset->width || !$asset->height)) {
+
+            $assetWidth = $asset->width;
+            $assetHeight = $asset->height;
+            if ((!$assetWidth || !$assetHeight) && $version && ($version->width || $version->height)) {
+                $assetWidth = $assetWidth ?: $version->width;
+                $assetHeight = $assetHeight ?: $version->height;
+                $asset->update(['width' => $assetWidth, 'height' => $assetHeight]);
+            }
+
+            if (!$dimensionsFromRendering && (!$assetWidth || !$assetHeight)) {
                 Log::warning('[GenerateThumbnailsJob] Skipping thumbnail generation - dimensions unknown (soft fail)', [
                     'asset_id' => $asset->id,
                     'width' => $asset->width,
@@ -259,8 +268,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                 return;
             }
 
-            $width = $asset->width ? (int) $asset->width : 0;
-            $height = $asset->height ? (int) $asset->height : 0;
+            $width = $assetWidth ? (int) $assetWidth : 0;
+            $height = $assetHeight ? (int) $assetHeight : 0;
             $pixelCount = $width * $height;
             $maxPixels = (int) config('assets.thumbnail.max_pixels', 100_000_000);
             $largeThreshold = (int) config('assets.thumbnail.large_asset_threshold_pixels', 30_000_000);

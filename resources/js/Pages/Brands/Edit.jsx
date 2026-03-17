@@ -14,6 +14,7 @@ import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandAvatar from '../../Components/BrandAvatar'
 import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
 import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
+import AssetImagePickerFieldMulti from '../../Components/media/AssetImagePickerFieldMulti'
 import BrandMembersSection from '../../Components/brand/BrandMembersSection'
 import PublicPageTheme from '../../Components/branding/PublicPageTheme'
 
@@ -507,9 +508,28 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     )
 }
 
-// Map backend model_payload (identity, personality, typography, scoring_rules, visual) to Brand Settings form structure
+function unwrapAi(val) {
+    if (val && typeof val === 'object' && !Array.isArray(val) && 'value' in val && 'source' in val) return val.value
+    return val
+}
+
+function deepUnwrap(obj) {
+    if (!obj || typeof obj !== 'object') return obj
+    if (Array.isArray(obj)) return obj.map(deepUnwrap)
+    if ('value' in obj && 'source' in obj) {
+        const inner = obj.value
+        return Array.isArray(inner) ? inner.map(deepUnwrap) : inner
+    }
+    const result = {}
+    for (const [k, v] of Object.entries(obj)) {
+        result[k] = deepUnwrap(v)
+    }
+    return result
+}
+
 function modelPayloadToForm(payload) {
     if (!payload || typeof payload !== 'object') payload = {}
+    payload = deepUnwrap(payload)
     const identity = payload.identity || {}
     const personality = payload.personality || {}
     const typography = payload.typography || {}
@@ -538,7 +558,7 @@ function modelPayloadToForm(payload) {
             tagline: identity.tagline || null,
         },
         expression: {
-            brand_look: visual.brand_look || visual.photography_style || null,
+            brand_look: personality.brand_look || visual.brand_look || visual.photography_style || null,
             brand_voice: personality.brand_voice || visual.brand_voice || null,
             tone_keywords: Array.isArray(scoringRules.tone_keywords) ? scoringRules.tone_keywords : (Array.isArray(personality.tone_keywords) ? personality.tone_keywords : []),
             photography_attributes: Array.isArray(scoringRules.photography_attributes) ? scoringRules.photography_attributes : [],
@@ -552,6 +572,12 @@ function modelPayloadToForm(payload) {
             banned_colors: Array.isArray(scoringRules.banned_colors) ? scoringRules.banned_colors : [],
             allowed_fonts: Array.isArray(scoringRules.allowed_fonts) ? scoringRules.allowed_fonts : [],
             visual_references: Array.isArray(payload.visual_references) ? payload.visual_references : [],
+            reference_categories: (visual.reference_categories && typeof visual.reference_categories === 'object') ? visual.reference_categories : {
+                photography: { asset_ids: [], use_for_scoring: false },
+                graphics: { asset_ids: [], use_for_scoring: false },
+            },
+            show_logo_visual_treatment: visual.show_logo_visual_treatment !== false,
+            logo_usage_guidelines: (visual.logo_usage_guidelines && typeof visual.logo_usage_guidelines === 'object') ? visual.logo_usage_guidelines : {},
         },
         beliefs: Array.isArray(identity.beliefs) ? identity.beliefs : [],
         values: Array.isArray(identity.values) ? identity.values : [],
@@ -560,7 +586,7 @@ function modelPayloadToForm(payload) {
 
 // Map form structure back to backend model_payload (merge with existing)
 function formToModelPayload(form, existingPayload) {
-    const existing = existingPayload && typeof existingPayload === 'object' ? { ...existingPayload } : {}
+    const existing = existingPayload && typeof existingPayload === 'object' ? deepUnwrap({ ...existingPayload }) : {}
     const identity = { ...(existing.identity || {}) }
     const personality = { ...(existing.personality || {}) }
     const typography = { ...(existing.typography || {}) }
@@ -582,6 +608,7 @@ function formToModelPayload(form, existingPayload) {
     personality.tone = form.strategy?.tone ?? personality.tone
     personality.traits = form.strategy?.traits ?? personality.traits
     personality.voice_description = form.strategy?.voice_description ?? personality.voice_description
+    personality.brand_look = form.expression?.brand_look ?? personality.brand_look
     personality.brand_voice = form.expression?.brand_voice ?? personality.brand_voice
 
     typography.primary_font = form.standards?.primary_font ?? typography.primary_font
@@ -601,6 +628,22 @@ function formToModelPayload(form, existingPayload) {
     visual.brand_look = form.expression?.brand_look ?? visual.brand_look
     visual.brand_voice = form.expression?.brand_voice ?? visual.brand_voice
     visual.photography_style = form.expression?.brand_look ?? visual.photography_style
+    if (form.standards?.show_logo_visual_treatment !== undefined) {
+        visual.show_logo_visual_treatment = form.standards.show_logo_visual_treatment
+    }
+    if (form.standards?.logo_usage_guidelines !== undefined) {
+        visual.logo_usage_guidelines = form.standards.logo_usage_guidelines
+    }
+    if (form.standards?.reference_categories) {
+        visual.reference_categories = form.standards.reference_categories
+        const scoringIds = []
+        Object.values(form.standards.reference_categories).forEach((cat) => {
+            if (cat?.use_for_scoring && Array.isArray(cat.asset_ids)) {
+                scoringIds.push(...cat.asset_ids)
+            }
+        })
+        visual.approved_references = scoringIds
+    }
 
     return {
         ...existing,
@@ -611,6 +654,128 @@ function formToModelPayload(form, existingPayload) {
         visual,
         visual_references: form.standards?.visual_references ?? existing.visual_references,
     }
+}
+
+const REFERENCE_CATEGORIES = [
+    { key: 'photography', label: 'Photography', contextCategory: 'photography' },
+    { key: 'graphics', label: 'Graphics', contextCategory: 'graphics' },
+]
+
+function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange }) {
+    const [activeCategory, setActiveCategory] = useState('photography')
+    const [categoryAssets, setCategoryAssets] = useState({})
+
+    const cats = referenceCategories && typeof referenceCategories === 'object' ? referenceCategories : {}
+
+    const fetchAssetsForRefs = (opts) => {
+        const params = new URLSearchParams({ format: 'json' })
+        if (opts?.category) params.set('category', opts.category)
+        return fetch(`/app/assets?${params}`, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        }).then((r) => r.json())
+    }
+
+    useEffect(() => {
+        const allIds = []
+        REFERENCE_CATEGORIES.forEach((cat) => {
+            const catData = cats[cat.key]
+            if (catData?.asset_ids?.length) allIds.push(...catData.asset_ids)
+        })
+        if (allIds.length === 0) return
+
+        // Fetch all assets (no category filter) so we can match any asset regardless of category/state
+        fetchAssetsForRefs({}).then((data) => {
+            const allAssets = data?.assets ?? data?.data ?? (Array.isArray(data) ? data : [])
+            // Also try reference materials source
+            return fetch(`/app/assets?format=json&source=research`, {
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            }).then((r) => r.json()).then((refData) => {
+                const refAssets = refData?.assets ?? refData?.data ?? (Array.isArray(refData) ? refData : [])
+                return [...allAssets, ...refAssets]
+            }).catch(() => allAssets)
+        }).then((combined) => {
+            const updates = {}
+            REFERENCE_CATEGORIES.forEach((cat) => {
+                const catData = cats[cat.key]
+                if (catData?.asset_ids?.length && !categoryAssets[cat.key]?.length) {
+                    updates[cat.key] = catData.asset_ids.map((id) => {
+                        const found = combined.find((a) => String(a.id) === String(id))
+                        return found
+                            ? { asset_id: found.id, preview_url: found.thumbnail_url ?? found.final_thumbnail_url ?? null, title: found.title }
+                            : { asset_id: id, preview_url: null, title: null }
+                    })
+                }
+            })
+            if (Object.keys(updates).length > 0) {
+                setCategoryAssets((prev) => ({ ...prev, ...updates }))
+            }
+        })
+    }, [])
+
+    const handleCategoryAssetsChange = (catKey, assets) => {
+        setCategoryAssets((prev) => ({ ...prev, [catKey]: assets }))
+        const assetIds = assets.filter((a) => a?.asset_id).map((a) => a.asset_id)
+        const updated = { ...cats }
+        updated[catKey] = { ...(updated[catKey] || {}), asset_ids: assetIds }
+        if (updated[catKey].use_for_scoring === undefined) updated[catKey].use_for_scoring = false
+        onChange(updated)
+    }
+
+    const handleScoringToggle = (catKey, checked) => {
+        const updated = { ...cats }
+        updated[catKey] = { ...(updated[catKey] || { asset_ids: [] }), use_for_scoring: checked }
+        onChange(updated)
+    }
+
+    const activeCatDef = REFERENCE_CATEGORIES.find((c) => c.key === activeCategory) || REFERENCE_CATEGORIES[0]
+
+    return (
+        <div className="pt-6 border-t border-gray-200">
+            <div className="mb-4">
+                <h4 className="text-sm font-semibold text-gray-900">Visual References</h4>
+                <p className="text-xs text-gray-500 mt-0.5">Select reference images by category for brand guidelines and scoring.</p>
+            </div>
+            <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1">
+                {REFERENCE_CATEGORIES.map((cat) => {
+                    const count = cats[cat.key]?.asset_ids?.length || 0
+                    return (
+                        <button
+                            key={cat.key}
+                            type="button"
+                            onClick={() => setActiveCategory(cat.key)}
+                            className={`flex-1 text-xs font-medium px-3 py-2 rounded-md transition-colors ${activeCategory === cat.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                                {cat.label}
+                            {count > 0 && <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-700 rounded-full px-1.5">{count}</span>}
+                        </button>
+                    )
+                })}
+            </div>
+            <AssetImagePickerFieldMulti
+                key={activeCatDef.key}
+                value={categoryAssets[activeCatDef.key] || []}
+                onChange={(assets) => handleCategoryAssetsChange(activeCatDef.key, assets)}
+                fetchAssets={(opts) => fetchAssetsForRefs(opts)}
+                title={`Select ${activeCatDef.label}`}
+                defaultCategoryLabel={activeCatDef.label}
+                contextCategory={activeCatDef.contextCategory}
+                maxSelection={12}
+                label={activeCatDef.label}
+                brandId={brandId}
+            />
+            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={!!cats[activeCatDef.key]?.use_for_scoring}
+                    onChange={(e) => handleScoringToggle(activeCatDef.key, e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                />
+                <span className="text-xs text-gray-600">Use <strong>{activeCatDef.label}</strong> for brand scoring</span>
+            </label>
+        </div>
+    )
 }
 
 export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [] }) {
@@ -1198,10 +1363,206 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <label className="block text-sm font-medium text-gray-900 mb-2">Allowed fonts</label>
                                         <textarea rows={2} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Visual references (asset IDs)</label>
-                                        <textarea rows={2} value={(modelPayload.standards?.visual_references || []).join(', ')} onChange={(e) => setModelPayloadField('standards.visual_references', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated asset IDs" />
+                                    {/* Visual References by Category */}
+                                    <VisualReferenceCategoryPicker
+                                        brandId={brand.id}
+                                        referenceCategories={modelPayload.standards?.reference_categories || {}}
+                                        onChange={(updated) => setModelPayloadField('standards.reference_categories', updated)}
+                                    />
+
+                                    {/* Logo Usage Guidelines */}
+                                    <div className="pt-6 border-t border-gray-200">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div>
+                                                <h4 className="text-sm font-semibold text-gray-900">Logo Usage Guidelines</h4>
+                                                <p className="text-xs text-gray-500 mt-0.5">Rules for how the logo should and shouldn&apos;t be used in brand guidelines.</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Visual Treatment Toggle */}
+                                        <div className="flex items-center gap-3 mb-6 p-4 rounded-lg bg-gray-50 ring-1 ring-gray-200/50">
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={modelPayload.standards?.show_logo_visual_treatment !== false}
+                                                onClick={() => setModelPayloadField('standards.show_logo_visual_treatment', !(modelPayload.standards?.show_logo_visual_treatment !== false))}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${modelPayload.standards?.show_logo_visual_treatment !== false ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                                            >
+                                                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${modelPayload.standards?.show_logo_visual_treatment !== false ? 'translate-x-5' : 'translate-x-0'}`} />
+                                            </button>
+                                            <div>
+                                                <span className="text-sm font-medium text-gray-900">Show visual treatment</span>
+                                                <p className="text-xs text-gray-500">Display logo proofs alongside each guideline in brand guidelines (e.g., stretched, rotated, cropped examples).</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Editable guideline rules */}
+                                        {(() => {
+                                            const guidelines = modelPayload.standards?.logo_usage_guidelines || {}
+                                            const guidelineKeys = [
+                                                { key: 'clear_space', label: 'Clear Space', category: 'do' },
+                                                { key: 'minimum_size', label: 'Minimum Size', category: 'do' },
+                                                { key: 'color_usage', label: 'Color Usage', category: 'do' },
+                                                { key: 'background_contrast', label: 'Background Contrast', category: 'do' },
+                                                { key: 'dont_crop', label: "Don't Crop", category: 'dont' },
+                                                { key: 'dont_stretch', label: "Don't Stretch", category: 'dont' },
+                                                { key: 'dont_rotate', label: "Don't Rotate", category: 'dont' },
+                                                { key: 'dont_recolor', label: "Don't Recolor", category: 'dont' },
+                                                { key: 'dont_add_effects', label: "Don't Add Effects", category: 'dont' },
+                                            ]
+                                            const hasGuidelines = Object.keys(guidelines).length > 0
+                                            return (
+                                                <div className="space-y-4">
+                                                    {hasGuidelines ? (
+                                                        <>
+                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                                {guidelineKeys.map(({ key, label, category }) => {
+                                                                    const val = guidelines[key] ?? ''
+                                                                    const isActive = !!val
+                                                                    return (
+                                                                        <div key={key} className={`rounded-lg border p-3 transition-all ${isActive ? (category === 'dont' ? 'border-red-200 bg-red-50/30' : 'border-indigo-200 bg-indigo-50/30') : 'border-gray-200 bg-gray-50/50'}`}>
+                                                                            <div className="flex items-center justify-between mb-2">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={isActive}
+                                                                                        onChange={(e) => {
+                                                                                            const next = { ...guidelines }
+                                                                                            if (e.target.checked) {
+                                                                                                next[key] = `${label} guideline description.`
+                                                                                            } else {
+                                                                                                delete next[key]
+                                                                                            }
+                                                                                            setModelPayloadField('standards.logo_usage_guidelines', next)
+                                                                                        }}
+                                                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                                                    />
+                                                                                    <span className={`text-xs font-semibold uppercase tracking-wide ${category === 'dont' ? 'text-red-600' : 'text-gray-700'}`}>{label}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                            {isActive && (
+                                                                                <textarea
+                                                                                    rows={2}
+                                                                                    value={typeof val === 'string' ? val : ''}
+                                                                                    onChange={(e) => {
+                                                                                        const next = { ...guidelines, [key]: e.target.value }
+                                                                                        setModelPayloadField('standards.logo_usage_guidelines', next)
+                                                                                    }}
+                                                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-xs resize-none"
+                                                                                    placeholder={`Describe the ${label.toLowerCase()} rule...`}
+                                                                                />
+                                                                            )}
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+
+                                                            {/* Visual preview */}
+                                                            {modelPayload.standards?.show_logo_visual_treatment !== false && (data.logo_preview || brand.logo_thumbnail_url || brand.logo_path) && (
+                                                                <div className="mt-6 pt-4 border-t border-gray-200">
+                                                                    <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Visual Treatment Preview</h5>
+                                                                    <div className="grid grid-cols-3 gap-3">
+                                                                        {guidelineKeys.filter(({ key }) => !!guidelines[key]).slice(0, 6).map(({ key, label, category }) => {
+                                                                            const logoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
+                                                                            const isDont = category === 'dont'
+                                                                            const treatments = {
+                                                                                clear_space: (src) => (
+                                                                                    <div className="relative w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center">
+                                                                                        <div className="relative">
+                                                                                            <div className="absolute inset-0 -m-3 border-2 border-dashed border-blue-400/50 rounded" />
+                                                                                            <img src={src} alt="" className="h-6 max-w-[60px] object-contain" />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ),
+                                                                                minimum_size: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center gap-2 px-2">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[50px] object-contain" />
+                                                                                        <img src={src} alt="" className="h-3 max-w-[25px] object-contain" />
+                                                                                        <img src={src} alt="" className="h-1.5 max-w-[12px] object-contain opacity-30" />
+                                                                                    </div>
+                                                                                ),
+                                                                                color_usage: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
+                                                                                        <div className="bg-white flex items-center justify-center p-1"><img src={src} alt="" className="h-5 max-w-[40px] object-contain" /></div>
+                                                                                        <div className="flex items-center justify-center p-1" style={{ backgroundColor: brand.primary_color || '#1a1a2e' }}><img src={src} alt="" className="h-5 max-w-[40px] object-contain brightness-0 invert" /></div>
+                                                                                    </div>
+                                                                                ),
+                                                                                background_contrast: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
+                                                                                        <div className="flex items-center justify-center p-1" style={{ backgroundColor: brand.primary_color || '#002A3A' }}><img src={src} alt="" className="h-5 max-w-[40px] object-contain brightness-0 invert" /></div>
+                                                                                        <div className="flex items-center justify-center p-1 bg-[repeating-conic-gradient(#e0e0e0_0%_25%,#fff_0%_50%)] bg-[length:10px_10px]"><img src={src} alt="" className="h-5 max-w-[40px] object-contain opacity-30" /></div>
+                                                                                    </div>
+                                                                                ),
+                                                                                dont_stretch: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center relative">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[40px] object-contain" style={{ transform: 'scaleX(1.6)' }} />
+                                                                                    </div>
+                                                                                ),
+                                                                                dont_rotate: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center relative">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[50px] object-contain" style={{ transform: 'rotate(-15deg)' }} />
+                                                                                    </div>
+                                                                                ),
+                                                                                dont_recolor: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center relative">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[50px] object-contain" style={{ filter: 'hue-rotate(180deg) saturate(2)' }} />
+                                                                                    </div>
+                                                                                ),
+                                                                                dont_crop: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-end overflow-hidden relative">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[50px] object-contain mr-[-12px]" />
+                                                                                    </div>
+                                                                                ),
+                                                                                dont_add_effects: (src) => (
+                                                                                    <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center relative">
+                                                                                        <img src={src} alt="" className="h-6 max-w-[50px] object-contain" style={{ filter: 'drop-shadow(3px 3px 4px rgba(0,0,0,0.5))' }} />
+                                                                                    </div>
+                                                                                ),
+                                                                            }
+                                                                            const renderTreatment = treatments[key]
+                                                                            if (!renderTreatment) return null
+                                                                            return (
+                                                                                <div key={key} className={`rounded-lg overflow-hidden border ${isDont ? 'border-red-200' : 'border-gray-200'}`}>
+                                                                                    {renderTreatment(logoSrc)}
+                                                                                    <div className={`px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide ${isDont ? 'bg-red-50 text-red-600' : 'bg-gray-50 text-gray-600'}`}>
+                                                                                        {label}
+                                                                                    </div>
+                                                                                </div>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <div className="text-center py-6 border border-dashed border-gray-300 rounded-lg">
+                                                            <p className="text-sm text-gray-500 mb-3">No logo usage guidelines configured yet.</p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setModelPayloadField('standards.logo_usage_guidelines', {
+                                                                        clear_space: 'Maintain a minimum clear space equal to the height of the logo mark on all sides.',
+                                                                        minimum_size: 'The logo should never be displayed smaller than 24px in height on digital, or 0.5 inches in print.',
+                                                                        color_usage: 'Use the primary brand color version on light backgrounds. Use the reversed (white) version on dark or busy backgrounds.',
+                                                                        dont_stretch: 'Never stretch, compress, or distort the logo in any direction.',
+                                                                        dont_rotate: 'Never rotate or tilt the logo at an angle.',
+                                                                        dont_recolor: 'Never apply unapproved colors, gradients, or effects to the logo.',
+                                                                        dont_crop: 'Never crop or partially obscure the logo.',
+                                                                        dont_add_effects: 'Never add shadows, outlines, glows, or other visual effects to the logo.',
+                                                                        background_contrast: 'Ensure sufficient contrast between the logo and its background. Avoid placing on busy imagery without a container.',
+                                                                    })
+                                                                }}
+                                                                className="rounded-md bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-100 transition-colors"
+                                                            >
+                                                                Add Standard Defaults
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )
+                                        })()}
                                     </div>
+
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>

@@ -28,10 +28,8 @@ class FieldCandidateValidationService
 
     protected const FRAGMENTARY_ENDINGS = [
         'within a category',
-        'for the consumer',
         'of voice',
         'in the market',
-        'for our',
     ];
 
     protected const STOPWORDS = [
@@ -45,7 +43,7 @@ class FieldCandidateValidationService
 
     protected const MAX_POSITIONING_CHARS = 500;
 
-    protected const MIN_POSITIONING_TOKENS = 5;
+    protected const MIN_POSITIONING_TOKENS = 3;
 
     /**
      * Validate a single extraction candidate.
@@ -83,7 +81,7 @@ class FieldCandidateValidationService
             ['identity', 'industry'],
             ['identity', 'tagline'],
             ['personality', 'primary_archetype'],
-            ['visual', 'logo_detected'],
+            ['visual', 'logo_description'],
         ];
 
         foreach ($pathsToCheck as [$section, $key]) {
@@ -346,7 +344,7 @@ class FieldCandidateValidationService
     public function isSentenceQualityText(string $value): bool
     {
         $str = trim($value);
-        if (strlen($str) < 20) {
+        if (strlen($str) < 10) {
             return false;
         }
         $tokens = preg_split('/\s+/', $str, -1, PREG_SPLIT_NO_EMPTY);
@@ -409,7 +407,7 @@ class FieldCandidateValidationService
                 return true;
             }
         }
-        if (preg_match('/^(within|for|of|in|to)\s+/i', $lower) && strlen($lower) < 80) {
+        if (preg_match('/^(within|of|in)\s+/i', $lower) && strlen($lower) < 80) {
             return true;
         }
         return false;

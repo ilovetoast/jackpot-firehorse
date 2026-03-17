@@ -1637,6 +1637,7 @@ class UploadController extends Controller
             'manifest.*.upload_key' => 'required|string',
             'manifest.*.expected_size' => 'required|integer|min:1',
             'manifest.*.category_id' => 'nullable|integer|exists:categories,id', // Phase J.3.1: Optional for replace mode
+            'manifest.*.category_slug' => 'nullable|string|max:100', // Fallback: resolve slug → category (auto-creates from system template if needed)
             'manifest.*.metadata' => 'nullable|array',
             'manifest.*.title' => 'nullable|string|max:255',
             'manifest.*.resolved_filename' => 'nullable|string|max:255',
@@ -1716,29 +1717,52 @@ class UploadController extends Controller
                 // Assets are created with the active brand_id to match UI queries
                 // Phase J.3.1: Skip category validation for replace mode, builder staged, or existing assets
                 $category = null;
+                $categorySlug = $item['category_slug'] ?? null;
                 if (!$isReplaceMode && !$isBuilderStaged && !$existingAsset) {
-                    // C9.1: DEBUG - Log category_id check
                     Log::info('[UploadController::finalize] Category validation check', [
                         'upload_key' => $uploadKey,
                         'category_id_provided' => $categoryId,
-                        'has_category_id_key' => array_key_exists('category_id', $item),
+                        'category_slug_provided' => $categorySlug,
                         'is_replace_mode' => $isReplaceMode,
                         'existing_asset' => $existingAsset ? $existingAsset->id : null,
                         'brand_id' => $brand->id ?? null,
                         'tenant_id' => $tenant->id ?? null,
                     ]);
-                    
-                    if (!$categoryId) {
-                        throw new \RuntimeException("Category ID is required for new asset uploads. Please select a category before finalizing.");
+
+                    if ($categoryId) {
+                        $category = Category::where('id', $categoryId)
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->first();
                     }
-                    
-                    $category = Category::where('id', $categoryId)
-                        ->where('tenant_id', $tenant->id)
-                        ->where('brand_id', $brand->id)
-                        ->first();
+
+                    // Fallback: resolve by slug and auto-create from system template if needed
+                    if (!$category && $categorySlug) {
+                        $category = Category::where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->where('slug', $categorySlug)
+                            ->where('asset_type', \App\Enums\AssetType::ASSET)
+                            ->first();
+
+                        if (!$category) {
+                            $template = \App\Models\SystemCategory::where('slug', $categorySlug)
+                                ->where('asset_type', \App\Enums\AssetType::ASSET)
+                                ->orderByDesc('version')
+                                ->first();
+                            if ($template) {
+                                $systemCategoryService = app(\App\Services\SystemCategoryService::class);
+                                $created = $systemCategoryService->addTemplateToBrand($brand, $template);
+                                $category = $created ?? Category::where('tenant_id', $tenant->id)
+                                    ->where('brand_id', $brand->id)
+                                    ->where('slug', $categorySlug)
+                                    ->where('asset_type', \App\Enums\AssetType::ASSET)
+                                    ->first();
+                            }
+                        }
+                    }
 
                     if (!$category) {
-                        throw new \RuntimeException("Category not found or does not belong to tenant/brand");
+                        throw new \RuntimeException("Category ID is required for new asset uploads. Please select a category before finalizing.");
                     }
                 }
 

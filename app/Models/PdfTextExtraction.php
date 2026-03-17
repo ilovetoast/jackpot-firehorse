@@ -30,7 +30,6 @@ class PdfTextExtraction extends Model
         'processed_at',
         'error_message',
         'failure_reason',
-        'vision_fallback_triggered',
     ];
 
     protected function casts(): array
@@ -38,7 +37,6 @@ class PdfTextExtraction extends Model
         return [
             'processed_at' => 'datetime',
             'character_count' => 'integer',
-            'vision_fallback_triggered' => 'boolean',
         ];
     }
 
