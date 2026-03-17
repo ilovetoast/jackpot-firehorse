@@ -1052,9 +1052,8 @@ export default function AdminCompanyView({
                                         <p className="text-sm text-gray-500">
                                             Change {company.name}'s plan from <strong>{planChangeConfirm.oldPlan}</strong> to <strong>{planChangeConfirm.newPlan}</strong>
                                         </p>
-                                        {planChangeConfirm.newPlan !== 'free' && (
-                                            <div className="mt-4 space-y-4">
-                                                {/* Plan Selector */}
+                                        <div className="mt-4 space-y-4">
+                                                {/* Plan Selector — always visible */}
                                                 <div>
                                                     <label htmlFor="new_plan" className="block text-sm font-medium text-gray-700">
                                                         New Plan
@@ -1073,69 +1072,72 @@ export default function AdminCompanyView({
                                                     </select>
                                                 </div>
 
-                                                {/* Billing Status */}
-                                                <div>
-                                                    <label htmlFor="billing_status" className="block text-sm font-medium text-gray-700">
-                                                        Billing Status
-                                                    </label>
-                                                    <select
-                                                        id="billing_status"
-                                                        value={planChangeConfirm.billingStatus || 'comped'}
-                                                        onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, billingStatus: e.target.value, equivalentPlanValue: e.target.value !== 'comped' ? null : planChangeConfirm.equivalentPlanValue })}
-                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                                    >
-                                                        <option value="comped">Comped (Free/Complimentary)</option>
-                                                        <option value="trial">Trial</option>
-                                                    </select>
-                                                    <p className="mt-1 text-xs text-gray-500">Internal accounting status - not visible to customers</p>
-                                                </div>
-
-                                                {/* Expiration Months */}
-                                                <div>
-                                                    <label htmlFor="expiration_months" className="block text-sm font-medium text-gray-700">
-                                                        Expiration (Months) <span className="text-red-500">*</span>
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        id="expiration_months"
-                                                        min="1"
-                                                        max="36"
-                                                        value={planChangeConfirm.expirationMonths || ''}
-                                                        onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, expirationMonths: parseInt(e.target.value) || '' })}
-                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                                        required
-                                                    />
-                                                    <p className="mt-1 text-xs text-gray-500">Plan will auto-downgrade to Free after expiration if not upgraded (1-36 months)</p>
-                                                </div>
-
-                                                {/* Equivalent Plan Value (only for comped) */}
-                                                {planChangeConfirm.billingStatus === 'comped' && (
-                                                    <div>
-                                                        <label htmlFor="equivalent_plan_value" className="block text-sm font-medium text-gray-700">
-                                                            Equivalent Plan Value (Optional)
-                                                        </label>
-                                                        <div className="mt-1">
-                                                            <div className="relative rounded-md shadow-sm">
-                                                                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                                                                    <span className="text-gray-500 sm:text-sm">$</span>
-                                                                </div>
-                                                                <input
-                                                                    type="number"
-                                                                    id="equivalent_plan_value"
-                                                                    min="0"
-                                                                    step="0.01"
-                                                                    value={planChangeConfirm.equivalentPlanValue || ''}
-                                                                    onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, equivalentPlanValue: e.target.value ? parseFloat(e.target.value) : null })}
-                                                                    className="block w-full rounded-md border-gray-300 pl-7 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                                                    placeholder="0.00"
-                                                                />
-                                                            </div>
+                                                {planChangeConfirm.newPlan !== 'free' && (
+                                                    <>
+                                                        {/* Billing Status */}
+                                                        <div>
+                                                            <label htmlFor="billing_status" className="block text-sm font-medium text-gray-700">
+                                                                Billing Status
+                                                            </label>
+                                                            <select
+                                                                id="billing_status"
+                                                                value={planChangeConfirm.billingStatus || 'comped'}
+                                                                onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, billingStatus: e.target.value, equivalentPlanValue: e.target.value !== 'comped' ? null : planChangeConfirm.equivalentPlanValue })}
+                                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                            >
+                                                                <option value="comped">Comped (Free/Complimentary)</option>
+                                                                <option value="trial">Trial</option>
+                                                            </select>
+                                                            <p className="mt-1 text-xs text-gray-500">Internal accounting status - not visible to customers</p>
                                                         </div>
-                                                        <p className="mt-1 text-xs text-gray-500">Sales insight only - NOT counted as revenue (for internal tracking)</p>
-                                                    </div>
+
+                                                        {/* Expiration Months */}
+                                                        <div>
+                                                            <label htmlFor="expiration_months" className="block text-sm font-medium text-gray-700">
+                                                                Expiration (Months) <span className="text-red-500">*</span>
+                                                            </label>
+                                                            <input
+                                                                type="number"
+                                                                id="expiration_months"
+                                                                min="1"
+                                                                max="36"
+                                                                value={planChangeConfirm.expirationMonths || ''}
+                                                                onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, expirationMonths: parseInt(e.target.value) || '' })}
+                                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                                required
+                                                            />
+                                                            <p className="mt-1 text-xs text-gray-500">Plan will auto-downgrade to Free after expiration if not upgraded (1-36 months)</p>
+                                                        </div>
+
+                                                        {/* Equivalent Plan Value (only for comped) */}
+                                                        {planChangeConfirm.billingStatus === 'comped' && (
+                                                            <div>
+                                                                <label htmlFor="equivalent_plan_value" className="block text-sm font-medium text-gray-700">
+                                                                    Equivalent Plan Value (Optional)
+                                                                </label>
+                                                                <div className="mt-1">
+                                                                    <div className="relative rounded-md shadow-sm">
+                                                                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                                                            <span className="text-gray-500 sm:text-sm">$</span>
+                                                                        </div>
+                                                                        <input
+                                                                            type="number"
+                                                                            id="equivalent_plan_value"
+                                                                            min="0"
+                                                                            step="0.01"
+                                                                            value={planChangeConfirm.equivalentPlanValue || ''}
+                                                                            onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, equivalentPlanValue: e.target.value ? parseFloat(e.target.value) : null })}
+                                                                            className="block w-full rounded-md border-gray-300 pl-7 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                                            placeholder="0.00"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <p className="mt-1 text-xs text-gray-500">Sales insight only - NOT counted as revenue (for internal tracking)</p>
+                                                            </div>
+                                                        )}
+                                                    </>
                                                 )}
                                             </div>
-                                        )}
                                     </div>
                                 </div>
                             </div>
