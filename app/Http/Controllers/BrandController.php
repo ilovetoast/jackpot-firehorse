@@ -212,7 +212,7 @@ class BrandController extends Controller
     /**
      * Show the form for creating a new brand.
      */
-    public function create(): Response
+    public function create(): Response|\Illuminate\Http\RedirectResponse
     {
         $user = Auth::user();
         $tenant = app('tenant');
@@ -767,7 +767,7 @@ class BrandController extends Controller
         try {
             $this->brandService->update($brand, $validated);
 
-            return redirect()->route('app')->with('success', 'Brand updated successfully.');
+            return redirect()->back()->with('success', 'Brand updated successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),

@@ -161,7 +161,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             className="truncate min-w-0"
                             style={{ 
                                 fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                                maxWidth: '200px'
+                                maxWidth: '200px',
+                                color: textColor || '#ffffff',
                             }}
                             title={displayLabel}
                         >
@@ -309,8 +310,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
     const singleBrandHref = rootLinkHref ?? '/app'
+    const effectiveTextColor = textColor || '#ffffff'
     return (
-        <Link href={singleBrandHref} className="flex items-center gap-2 min-w-0 max-w-full">
+        <Link href={singleBrandHref} className="flex items-center gap-2 min-w-0 max-w-full" style={{ color: effectiveTextColor }}>
             {showLogoInNav ? (
                 <img
                     src={activeBrand.logo_path}
@@ -331,7 +333,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         className="truncate min-w-0"
                         style={{ 
                             fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                            maxWidth: '200px'
+                            maxWidth: '200px',
+                            color: effectiveTextColor,
                         }}
                         title={brandName}
                     >

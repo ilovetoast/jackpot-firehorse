@@ -1,45 +1,18 @@
 import { useState, useEffect } from 'react'
 import { Link } from '@inertiajs/react'
 import {
-    PhotoIcon,
-    SwatchIcon,
-    RectangleGroupIcon,
     GlobeAltIcon,
     UsersIcon,
     ChartBarIcon,
 } from '@heroicons/react/24/outline'
 
 const ICON_MAP = {
-    assets: PhotoIcon,
-    guidelines: SwatchIcon,
-    collections: RectangleGroupIcon,
     portal: GlobeAltIcon,
     team: UsersIcon,
     analytics: ChartBarIcon,
 }
 
 const ALL_ACTIONS = [
-    {
-        key: 'assets',
-        title: 'Assets',
-        description: 'Browse and manage your brand assets',
-        href: '/app/assets',
-        always: true,
-    },
-    {
-        key: 'guidelines',
-        title: 'Brand Guidelines',
-        description: 'View identity, voice, and rules',
-        href: '/app/brand-guidelines',
-        always: true,
-    },
-    {
-        key: 'collections',
-        title: 'Collections',
-        description: 'Organize and share grouped assets',
-        href: '/app/collections',
-        always: true,
-    },
     {
         key: 'portal',
         title: 'Brand Portal',

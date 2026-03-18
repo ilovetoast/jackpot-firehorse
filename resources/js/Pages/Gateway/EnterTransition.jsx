@@ -25,11 +25,11 @@ export default function EnterTransition() {
             return () => { clearTimeout(t1); clearTimeout(t2) }
         }
 
-        const t1 = setTimeout(() => setStage('enter'), 50)
-        const t2 = setTimeout(() => setStage('zoom'), 600)
+        const t1 = setTimeout(() => setStage('enter'), 100)
+        const t2 = setTimeout(() => setStage('zoom'), 1200)
         const t3 = setTimeout(() => {
             window.location.href = destination
-        }, 1200)
+        }, 2800)
         return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
     }, [isInstant, destination])
 
@@ -65,7 +65,7 @@ export default function EnterTransition() {
         <div className="relative flex flex-col items-center justify-center text-center">
             {/* Independent background zoom layer */}
             <div
-                className={`absolute inset-0 -m-32 transition-transform duration-[1400ms] ease-out ${stage === 'zoom' ? 'scale-110' : 'scale-100'}`}
+                className={`absolute inset-0 -m-32 transition-transform duration-[2000ms] ease-out ${stage === 'zoom' ? 'scale-110' : 'scale-100'}`}
                 style={{ background: theme?.background?.value || '#0B0B0D' }}
             />
 

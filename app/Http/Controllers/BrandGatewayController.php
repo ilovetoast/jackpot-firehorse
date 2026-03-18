@@ -509,13 +509,18 @@ class BrandGatewayController extends Controller
             return 'company_select';
         }
 
-        // If a brand is already resolved (from session or URL), go to enter.
-        // User can explicitly request brand selection with ?switch=1 or ?mode=brand_select.
+        // When user has multiple brands, ALWAYS show brand selector — never auto-enter.
+        // Ensures they can switch brands/accounts before entering.
+        if ($context['is_multi_brand']) {
+            return 'brand_select';
+        }
+
+        // Single brand: if tenant + brand resolved, go to enter.
         if ($context['tenant'] && $context['brand']) {
             return 'enter';
         }
 
-        if ($context['is_multi_brand'] || ($context['tenant'] && ! $context['brand'])) {
+        if ($context['tenant'] && ! $context['brand']) {
             return 'brand_select';
         }
 

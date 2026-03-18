@@ -13,6 +13,7 @@ import {
     FolderIcon,
     HomeIcon,
     PhotoIcon,
+    RectangleGroupIcon,
     SparklesIcon,
     Squares2X2Icon,
 } from '@heroicons/react/24/outline'
@@ -521,7 +522,7 @@ export default function AppNav({ brand, tenant, variant }) {
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute left-64 xl:left-[18rem]">
                                 <Link
                                     href="/app/overview"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
@@ -531,11 +532,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <HomeIcon className="h-4 w-4 shrink-0" />
                                     Overview
                                 </Link>
                                 <Link
                                     href="/app/assets"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -545,11 +547,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <PhotoIcon className="h-4 w-4 shrink-0" />
                                     Assets
                                 </Link>
                                 <Link
                                     href="/app/executions"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -559,11 +562,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <Squares2X2Icon className="h-4 w-4 shrink-0" />
                                     {DELIVERABLES_PAGE_LABEL}
                                 </Link>
                                 <Link
                                     href="/app/collections"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/collections')
                                             ? textColor
@@ -573,11 +577,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <RectangleGroupIcon className="h-4 w-4 shrink-0" />
                                     Collections
                                 </Link>
                                 <Link
                                     href="/app/generative"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/generative')
                                             ? textColor
@@ -587,6 +592,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <SparklesIcon className="h-4 w-4 shrink-0" />
                                     Generative
                                 </Link>
                             </div>
@@ -594,7 +600,7 @@ export default function AppNav({ brand, tenant, variant }) {
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 sm:ml-6">
                                 <Link
                                     href="/app/overview"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
@@ -604,11 +610,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <HomeIcon className="h-4 w-4 shrink-0" />
                                     Overview
                                 </Link>
                                 <Link
                                     href="/app/assets"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -618,11 +625,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <PhotoIcon className="h-4 w-4 shrink-0" />
                                     Assets
                                 </Link>
                                 <Link
                                     href="/app/executions"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -632,11 +640,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <Squares2X2Icon className="h-4 w-4 shrink-0" />
                                     {DELIVERABLES_PAGE_LABEL}
                                 </Link>
                                 <Link
                                     href="/app/collections"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/collections')
                                             ? textColor
@@ -646,11 +655,12 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <RectangleGroupIcon className="h-4 w-4 shrink-0" />
                                     Collections
                                 </Link>
                                 <Link
                                     href="/app/generative"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/generative')
                                             ? textColor
@@ -660,6 +670,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                             : 'transparent'
                                     }}
                                 >
+                                    <SparklesIcon className="h-4 w-4 shrink-0" />
                                     Generative
                                 </Link>
                             </div>
