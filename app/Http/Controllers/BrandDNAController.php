@@ -2,17 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\AssetType;
 use App\Models\Brand;
-use App\Models\BrandComplianceScore;
 use App\Models\BrandModelVersion;
 use App\Models\BrandModelVersionAsset;
-use App\Models\Category;
 use App\Services\BrandDNA\BrandModelService;
 use App\Services\BrandDNA\BrandVisualReferenceSyncService;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
-use Inertia\Response;
 
 /**
  * Brand DNA Settings — internal editor for versioned Brand DNA model.
@@ -25,113 +20,12 @@ class BrandDNAController extends Controller
     ) {}
 
     /**
-     * Show Brand DNA settings page.
+     * Redirect to Brand Settings page (Brand Model tab).
+     * The standalone DNA page has been consolidated into the Brand Model tab on Edit.
      */
-    public function index(Request $request, Brand $brand): Response
+    public function index(Request $request, Brand $brand)
     {
-        $tenant = app('tenant');
-        if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
-        }
-        $this->authorize('update', $brand);
-
-        $brandModel = $brand->brandModel;
-        if (! $brandModel) {
-            $brandModel = $brand->brandModel()->create(['is_enabled' => false]);
-        }
-
-        $activeVersion = $brandModel->activeVersion;
-        $allVersions = $brandModel->versions()
-            ->orderByDesc('version_number')
-            ->get(['id', 'version_number', 'status', 'source_type', 'created_at'])
-            ->map(fn ($v) => [
-                'id' => $v->id,
-                'version_number' => $v->version_number,
-                'status' => $v->status,
-                'source_type' => $v->source_type,
-                'created_at' => $v->created_at->toISOString(),
-            ]);
-
-        $editingVersionId = $request->query('editing');
-        $editingVersion = null;
-        if ($editingVersionId) {
-            $v = BrandModelVersion::find($editingVersionId);
-            if ($v && $v->brand_model_id === $brandModel->id) {
-                $editingVersion = [
-                    'id' => $v->id,
-                    'version_number' => $v->version_number,
-                    'status' => $v->status,
-                    'model_payload' => self::deepUnwrap($v->model_payload ?? []),
-                ];
-            }
-        }
-
-        $complianceAggregate = $brand->complianceAggregate;
-        $deliverableCategoryIds = Category::where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::DELIVERABLE)
-            ->pluck('id')
-            ->toArray();
-
-        $topExecutions = [];
-        $bottomExecutions = [];
-        if (! empty($deliverableCategoryIds)) {
-            $topScores = BrandComplianceScore::where('brand_id', $brand->id)
-                ->where('evaluation_status', 'evaluated')
-                ->whereNotNull('overall_score')
-                ->with('asset:id,title,metadata')
-                ->orderByDesc('overall_score')
-                ->limit(3)
-                ->get();
-            $bottomScores = BrandComplianceScore::where('brand_id', $brand->id)
-                ->where('evaluation_status', 'evaluated')
-                ->whereNotNull('overall_score')
-                ->with('asset:id,title,metadata')
-                ->orderBy('overall_score')
-                ->limit(3)
-                ->get();
-
-            foreach ($topScores as $s) {
-                $catId = $s->asset?->metadata['category_id'] ?? null;
-                if ($catId && in_array((int) $catId, $deliverableCategoryIds, true)) {
-                    $topExecutions[] = ['id' => $s->asset_id, 'title' => $s->asset?->title ?? '—', 'score' => $s->overall_score];
-                }
-            }
-            foreach ($bottomScores as $s) {
-                $catId = $s->asset?->metadata['category_id'] ?? null;
-                if ($catId && in_array((int) $catId, $deliverableCategoryIds, true)) {
-                    $bottomExecutions[] = ['id' => $s->asset_id, 'title' => $s->asset?->title ?? '—', 'score' => $s->overall_score];
-                }
-            }
-        }
-
-        return Inertia::render('Brands/BrandDNA/Index', [
-            'brand' => [
-                'id' => $brand->id,
-                'name' => $brand->name,
-            ],
-            'brandModel' => [
-                'id' => $brandModel->id,
-                'is_enabled' => $brandModel->is_enabled,
-            ],
-            'activeVersion' => $activeVersion ? [
-                'id' => $activeVersion->id,
-                'version_number' => $activeVersion->version_number,
-                'status' => $activeVersion->status,
-                'model_payload' => self::deepUnwrap($activeVersion->model_payload ?? []),
-            ] : null,
-            'editingVersion' => $editingVersion,
-            'allVersions' => $allVersions,
-            'complianceAggregate' => $complianceAggregate ? [
-                'avg_score' => $complianceAggregate->execution_count > 0 ? (float) $complianceAggregate->avg_score : null,
-                'execution_count' => (int) $complianceAggregate->execution_count,
-                'high_score_count' => (int) $complianceAggregate->high_score_count,
-                'low_score_count' => (int) $complianceAggregate->low_score_count,
-                'last_scored_at' => $complianceAggregate->last_scored_at?->toISOString(),
-            ] : null,
-            'topExecutions' => $topExecutions,
-            'bottomExecutions' => $bottomExecutions,
-            'visualReferences' => $this->getVisualReferencesForBrand($brand, $activeVersion),
-        ]);
+        return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model']);
     }
 
     /**
@@ -179,13 +73,7 @@ class BrandDNAController extends Controller
             }
         }
 
-        $returnTo = $request->input('return_to');
-        if ($returnTo === 'edit') {
-            return redirect()->route('brands.edit', ['brand' => $brand->id])
-                ->with('success', 'Brand DNA saved.');
-        }
-
-        return redirect()->route('brands.dna.index', ['brand' => $brand->id])
+        return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])
             ->with('success', 'Brand DNA saved.');
     }
 
@@ -227,7 +115,7 @@ class BrandDNAController extends Controller
 
         $version = $this->brandModelService->createNewVersionFromExisting($brand);
 
-        return redirect()->route('brands.dna.index', ['brand' => $brand->id, 'editing' => $version->id])
+        return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])
             ->with('success', "Draft version {$version->version_number} created.");
     }
 
@@ -248,7 +136,7 @@ class BrandDNAController extends Controller
 
         $this->brandModelService->activateVersion($version);
 
-        return redirect()->route('brands.dna.index', ['brand' => $brand->id])
+        return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])
             ->with('success', "Version {$version->version_number} activated.");
     }
 
@@ -359,7 +247,7 @@ class BrandDNAController extends Controller
 
         app(BrandVisualReferenceSyncService::class)->syncFromVersion($version);
 
-        return redirect()->route('brands.dna.index', ['brand' => $brand->id])
+        return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])
             ->with('success', 'Visual references saved.');
     }
 

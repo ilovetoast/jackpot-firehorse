@@ -194,6 +194,7 @@ class BrandGuidelineSectionParser
     {
         $s = trim($line);
         $s = preg_replace('/\s+/', ' ', $s);
+        $s = self::collapseLetterSpacedText($s);
         $s = preg_replace('/^[\s\-\.\*•]+|[\s\-\.\*•]+$/', '', $s);
         $s = preg_replace('/^[\d]+$/m', '', $s);
         $s = trim($s);
@@ -202,6 +203,22 @@ class BrandGuidelineSectionParser
         }
 
         return $s;
+    }
+
+    /**
+     * Collapse letter-spaced uppercase text from PDF typography.
+     * "N A R R A T I V E" → "NARRATIVE", "B R A N D" → "BRAND"
+     * Handles mixed groups like "N A R R AT I V E" (1-2 char groups).
+     */
+    public static function collapseLetterSpacedText(string $text): string
+    {
+        return preg_replace_callback(
+            '/(?<![A-Za-z])([A-Z]{1,2}(?:\s[A-Z]{1,2}){3,})(?![A-Za-z])/',
+            function (array $m) {
+                return str_replace(' ', '', $m[1]);
+            },
+            $text
+        );
     }
 
     protected static function isGarbageLine(string $line): bool

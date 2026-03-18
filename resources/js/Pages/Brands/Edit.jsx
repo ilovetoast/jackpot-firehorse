@@ -1,5 +1,6 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
+import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import { ARCHETYPES } from '../../constants/brandOptions'
 import AppHead from '../../Components/AppHead'
@@ -581,6 +582,15 @@ function modelPayloadToForm(payload) {
         },
         beliefs: Array.isArray(identity.beliefs) ? identity.beliefs : [],
         values: Array.isArray(identity.values) ? identity.values : [],
+        scoring_config: {
+            color_weight: payload.scoring_config?.color_weight ?? 0.1,
+            typography_weight: payload.scoring_config?.typography_weight ?? 0.2,
+            tone_weight: payload.scoring_config?.tone_weight ?? 0.2,
+            imagery_weight: payload.scoring_config?.imagery_weight ?? 0.5,
+        },
+        scoring_rules_extra: {
+            banned_keywords: Array.isArray(scoringRules.banned_keywords) ? scoringRules.banned_keywords : [],
+        },
     }
 }
 
@@ -645,11 +655,21 @@ function formToModelPayload(form, existingPayload) {
         visual.approved_references = scoringIds
     }
 
+    const scoringConfig = { ...(existing.scoring_config || {}) }
+    if (form.scoring_config) {
+        scoringConfig.color_weight = form.scoring_config.color_weight ?? scoringConfig.color_weight
+        scoringConfig.typography_weight = form.scoring_config.typography_weight ?? scoringConfig.typography_weight
+        scoringConfig.tone_weight = form.scoring_config.tone_weight ?? scoringConfig.tone_weight
+        scoringConfig.imagery_weight = form.scoring_config.imagery_weight ?? scoringConfig.imagery_weight
+    }
+    scoringRules.banned_keywords = form.scoring_rules_extra?.banned_keywords ?? scoringRules.banned_keywords
+
     return {
         ...existing,
         identity,
         personality,
         typography,
+        scoring_config: scoringConfig,
         scoring_rules: scoringRules,
         visual,
         visual_references: form.standards?.visual_references ?? existing.visual_references,
@@ -778,17 +798,20 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [] }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], compliance_aggregate, top_executions, bottom_executions }) {
     const { auth } = usePage().props
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
-    const [activeSection, setActiveSection] = useState('basic-information')
     const [topLevelNav, setTopLevelNav] = useState('brand_settings') // brand_model | brand_settings
     const [activeTab, setActiveTab] = useState('identity') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|public-pages|members
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
     const [showCreateCategoryForm, setShowCreateCategoryForm] = useState(false)
+    const [scoringRuleInputs, setScoringRuleInputs] = useState({})
+    const [newColorInput, setNewColorInput] = useState('')
+    const [selectedVersionId, setSelectedVersionId] = useState(null)
+    const [executionAlignmentOpen, setExecutionAlignmentOpen] = useState(false)
     
     // Category creation form
     const { data: categoryFormData, setData: setCategoryFormData, post: postCategory, processing: creatingCategory, reset: resetCategoryForm } = useForm({
@@ -849,6 +872,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         accent_color: brand.accent_color || '',
         nav_color: brand.nav_color || brand.primary_color || '',
         workspace_button_style: brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary',
+        logo_filter: brand.logo_filter || 'none',
         settings: {
             // Preserve any other settings that might exist first
             ...(brand.settings || {}),
@@ -856,6 +880,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             metadata_approval_enabled: brand.settings?.metadata_approval_enabled === true || brand.settings?.metadata_approval_enabled === '1' || brand.settings?.metadata_approval_enabled === 1, // Phase M-2
             contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
             asset_grid_style: brand.settings?.asset_grid_style || 'clean', // clean | impact
+            nav_display_mode: brand.settings?.nav_display_mode || 'logo', // logo | text
         },
         // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
         download_landing_settings: {
@@ -903,19 +928,160 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         })
     }
 
+    const handleToggleEnabled = () => {
+        const url = typeof route === 'function'
+            ? route('brands.dna.store', { brand: brand.id })
+            : `/app/brands/${brand.id}/dna`
+        router.post(url, { is_enabled: !brand_model?.is_enabled, return_to: 'edit' }, { preserveScroll: true })
+    }
+
+    const handleVersionSelect = async (versionId) => {
+        setSelectedVersionId(versionId)
+        if (!versionId) {
+            setModelPayload(modelPayloadToForm(active_version ? model_payload : {}))
+            return
+        }
+        const activeId = active_version?.id
+        if (versionId == activeId) {
+            setModelPayload(modelPayloadToForm(model_payload))
+            return
+        }
+        try {
+            const url = typeof route === 'function'
+                ? route('brands.dna.versions.show', { brand: brand.id, version: versionId })
+                : `/app/brands/${brand.id}/dna/versions/${versionId}`
+            const { data: respData } = await axios.get(url)
+            setModelPayload(modelPayloadToForm(respData.version?.model_payload || {}))
+        } catch {
+            setModelPayload(modelPayloadToForm({}))
+        }
+    }
+
+    const COLOR_ROLES = [
+        { value: null, label: '—' },
+        { value: 'primary', label: 'Primary' },
+        { value: 'secondary', label: 'Secondary' },
+        { value: 'accent', label: 'Accent' },
+        { value: 'neutral', label: 'Neutral' },
+    ]
+
+    const addScoringRuleItem = (ruleKey, value) => {
+        const v = (typeof value === 'string' ? value : '').trim()
+        if (!v) return
+        const getItems = (key) => {
+            if (key === 'banned_keywords') return modelPayload.scoring_rules_extra?.banned_keywords ?? []
+            if (key === 'tone_keywords' || key === 'photography_attributes') return modelPayload.expression?.[key] ?? []
+            return modelPayload.standards?.[key] ?? []
+        }
+        const arr = getItems(ruleKey)
+        if (arr.includes(v)) return
+        if (ruleKey === 'banned_keywords') {
+            setModelPayloadField('scoring_rules_extra.banned_keywords', [...arr, v])
+        } else if (ruleKey === 'tone_keywords' || ruleKey === 'photography_attributes') {
+            setModelPayloadField(`expression.${ruleKey}`, [...arr, v])
+        } else {
+            setModelPayloadField(`standards.${ruleKey}`, [...arr, v])
+        }
+        setScoringRuleInputs((prev) => ({ ...prev, [ruleKey]: '' }))
+    }
+
+    const removeScoringRuleItem = (ruleKey, idx) => {
+        if (ruleKey === 'banned_keywords') {
+            const arr = (modelPayload.scoring_rules_extra?.banned_keywords ?? []).filter((_, i) => i !== idx)
+            setModelPayloadField('scoring_rules_extra.banned_keywords', arr)
+        } else if (ruleKey === 'tone_keywords' || ruleKey === 'photography_attributes') {
+            const arr = (modelPayload.expression?.[ruleKey] ?? []).filter((_, i) => i !== idx)
+            setModelPayloadField(`expression.${ruleKey}`, [...arr])
+        } else {
+            const arr = (modelPayload.standards?.[ruleKey] ?? []).filter((_, i) => i !== idx)
+            setModelPayloadField(`standards.${ruleKey}`, [...arr])
+        }
+    }
+
+    const addColorToPalette = (hex, role = null) => {
+        let h = (hex || '').trim()
+        if (!h) return
+        if (!h.startsWith('#')) h = '#' + h
+        const arr = modelPayload.standards?.allowed_colors ?? []
+        if (arr.some((c) => c === h)) return
+        setModelPayloadField('standards.allowed_colors', [...arr, h])
+        setNewColorInput('')
+    }
+
+    const renderTagArrayField = (ruleKey, label, placeholder) => {
+        const getItems = (key) => {
+            if (key === 'banned_keywords') return modelPayload.scoring_rules_extra?.banned_keywords ?? []
+            if (key === 'tone_keywords' || key === 'photography_attributes') return modelPayload.expression?.[key] ?? []
+            return modelPayload.standards?.[key] ?? []
+        }
+        const items = getItems(ruleKey)
+        const inputVal = scoringRuleInputs[ruleKey] ?? ''
+        return (
+            <div key={ruleKey}>
+                <label className="block text-sm font-medium text-gray-700">{label}</label>
+                <div className="mt-1 flex flex-wrap gap-2">
+                    {items.map((t, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-sm text-gray-800">
+                            {t}
+                            <button type="button" onClick={() => removeScoringRuleItem(ruleKey, i)} className="text-gray-500 hover:text-gray-700">&times;</button>
+                        </span>
+                    ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                    <input
+                        type="text"
+                        value={inputVal}
+                        onChange={(e) => setScoringRuleInputs((prev) => ({ ...prev, [ruleKey]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addScoringRuleItem(ruleKey, inputVal))}
+                        placeholder={placeholder}
+                        className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                    <button type="button" onClick={() => addScoringRuleItem(ruleKey, inputVal)} className="rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Add</button>
+                </div>
+            </div>
+        )
+    }
+
+    const weightTotal = Math.round(
+        ((modelPayload.scoring_config?.color_weight ?? 0.1) +
+        (modelPayload.scoring_config?.typography_weight ?? 0.2) +
+        (modelPayload.scoring_config?.tone_weight ?? 0.2) +
+        (modelPayload.scoring_config?.imagery_weight ?? 0.5)) * 100
+    )
+
+    const autoSaveBrandField = (overrides) => {
+        const payload = { ...data, ...overrides }
+        router.put(`/app/brands/${brand.id}`, payload, {
+            preserveScroll: true,
+            preserveState: true,
+            forceFormData: true,
+        })
+    }
+
+    const getFilterStyleForColor = (hex) => {
+        if (!hex) return { filter: 'brightness(0)' }
+        const c = hex.replace('#', '')
+        const r = parseInt(c.substr(0, 2), 16) / 255
+        const g = parseInt(c.substr(2, 2), 16) / 255
+        const b = parseInt(c.substr(4, 2), 16) / 255
+        const max = Math.max(r, g, b), min = Math.min(r, g, b)
+        let h = 0
+        if (max !== min) {
+            const d = max - min
+            if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+            else if (max === g) h = (b - r) / d + 2
+            else h = (r - g) / d + 4
+            h *= 60
+        }
+        return { filter: `brightness(0) sepia(1) saturate(5) hue-rotate(${h - 30}deg)` }
+    }
+
     const submit = (e) => {
         e.preventDefault()
         
-        console.log('[Brands/Edit] Submitting form with data:', {
-            settings: data.settings,
-            contributor_upload_requires_approval: data.settings?.contributor_upload_requires_approval,
-        })
-        
         put(`/app/brands/${brand.id}`, {
-            forceFormData: true, // Important for file uploads
-            // Inertia flattens nested objects; download_landing_settings.* sent as nested fields
+            forceFormData: true,
             onSuccess: () => {
-                // Cleanup preview URLs
                 if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
                     URL.revokeObjectURL(data.logo_preview)
                 }
@@ -964,47 +1130,15 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         }
     }, [data.icon_preview])
 
-    // Handle hash-based navigation and scrolling
+    // Handle ?tab= query param
     useEffect(() => {
-        const hash = window.location.hash.replace('#', '')
-        if (hash) {
-            setActiveSection(hash)
-            const element = document.getElementById(hash)
-            if (element) {
-                setTimeout(() => {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }, 100)
-            }
+        const params = new URLSearchParams(window.location.search)
+        const tabParam = params.get('tab')
+        if (tabParam === 'brand_model') {
+            setTopLevelNav('brand_model')
+            setActiveTab('strategy')
         }
     }, [])
-
-    // Update active section on scroll
-    useEffect(() => {
-        const handleScroll = () => {
-            const sections = ['basic-information', 'brand-colors', 'public-pages', 'workspace-appearance', 'metadata', 'categories']
-            const scrollPosition = window.scrollY + 100
-
-            for (let i = sections.length - 1; i >= 0; i--) {
-                const section = document.getElementById(sections[i])
-                if (section && section.offsetTop <= scrollPosition) {
-                    setActiveSection(sections[i])
-                    break
-                }
-            }
-        }
-
-        window.addEventListener('scroll', handleScroll)
-        return () => window.removeEventListener('scroll', handleScroll)
-    }, [])
-
-    const handleSectionClick = (sectionId) => {
-        setActiveSection(sectionId)
-        window.location.hash = sectionId
-        const element = document.getElementById(sectionId)
-        if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-    }
 
     return (
         <div className="min-h-full">
@@ -1057,10 +1191,51 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             Brand Guidelines →
                         </Link>
                     </div>
+                </div>
 
-                    {/* Brand Builder entry panel — encourages guided builder over manual editing */}
+                {/* Two-column layout: left sidebar nav + main content */}
+                <div className="flex flex-col lg:flex-row gap-8">
+                    {/* Left sidebar nav */}
+                    <aside className="lg:w-56 flex-shrink-0">
+                        <nav className="sticky top-8 space-y-1" aria-label={topLevelNav === 'brand_model' ? 'Brand Model sections' : 'Brand Settings sections'}>
+                            {(topLevelNav === 'brand_model'
+                                ? [
+                                    { id: 'strategy', label: 'Strategy' },
+                                    { id: 'positioning', label: 'Positioning' },
+                                    { id: 'expression', label: 'Expression' },
+                                    { id: 'standards', label: 'Standards' },
+                                    { id: 'scoring', label: 'Scoring' },
+                                ]
+                                : [
+                                    { id: 'identity', label: 'Identity' },
+                                    { id: 'workspace', label: 'Workspace' },
+                                    { id: 'public-pages', label: 'Public Pages' },
+                                    { id: 'members', label: 'Members' },
+                                ]
+                            ).map((item) => (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(item.id)}
+                                    className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                                        activeTab === item.id
+                                            ? 'bg-indigo-50 text-indigo-700'
+                                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                    }`}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </nav>
+                    </aside>
+
+                    {/* Main content */}
+                    <div className="flex-1 min-w-0">
+
+                    {/* Brand Builder entry panel — with enabled toggle, version selector, AI research */}
                     {topLevelNav === 'brand_model' && (() => {
                         const draftVersion = (all_versions || []).find((v) => v.status === 'draft')
+                        const hasActiveVersion = !!active_version && active_version.status === 'active'
                         const formatDate = (iso) => {
                             if (!iso) return '—'
                             try {
@@ -1070,8 +1245,57 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         }
                         return (
                             <div className="mt-4 rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200/20">
+                                {/* Top row: enabled toggle + version selector */}
+                                <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-sm text-gray-600">Enabled</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleToggleEnabled}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                brand_model?.is_enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                            }`}
+                                            role="switch"
+                                            aria-checked={brand_model?.is_enabled}
+                                        >
+                                            <span
+                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                    brand_model?.is_enabled ? 'translate-x-5' : 'translate-x-0'
+                                                }`}
+                                            />
+                                        </button>
+                                    </div>
+                                    {all_versions.length > 0 && (
+                                        <div className="flex items-center gap-3">
+                                            {hasActiveVersion && (
+                                                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                                                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    Active: v{active_version.version_number}
+                                                </span>
+                                            )}
+                                            <select
+                                                value={selectedVersionId ?? ''}
+                                                onChange={(e) => handleVersionSelect(e.target.value ? Number(e.target.value) : null)}
+                                                className="rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                            >
+                                                <option value="">Select version</option>
+                                                {all_versions.map((v) => (
+                                                    <option key={v.id} value={v.id}>
+                                                        v{v.version_number} ({v.status}) {v.created_at ? new Date(v.created_at).toLocaleDateString() : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {draftVersion ? (
                                     <>
+                                        {hasActiveVersion && (
+                                            <div className="mb-3 flex items-center gap-2 text-sm">
+                                                <span className="text-gray-500">Last updated {formatDate(active_version.updated_at)}</span>
+                                            </div>
+                                        )}
                                         <h3 className="text-sm font-semibold text-amber-800">Draft Version Available</h3>
                                         <p className="mt-1 text-sm text-gray-600">You have unpublished changes.</p>
                                         <div className="mt-4 flex flex-wrap gap-3">
@@ -1088,13 +1312,47 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             >
                                                 Publish Draft
                                             </button>
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.dna.bootstrap.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna/bootstrap`}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Run AI Brand Research
+                                            </Link>
+                                        </div>
+                                    </>
+                                ) : hasActiveVersion ? (
+                                    <>
+                                        <p className="text-sm text-gray-600">
+                                            Your brand model is live. Run the Brand Builder again to create a new draft version.
+                                        </p>
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.brand-guidelines.builder', { brand: brand.id }) : `/app/brands/${brand.id}/brand-guidelines/builder`}
+                                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                                            >
+                                                Run Brand Builder
+                                            </Link>
+                                            <button
+                                                type="button"
+                                                onClick={() => router.post(typeof route === 'function' ? route('brands.dna.versions.store', { brand: brand.id }) : `/app/brands/${brand.id}/dna/versions`, {}, { preserveScroll: true })}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Create Draft Version
+                                            </button>
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.dna.bootstrap.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna/bootstrap`}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Run AI Brand Research
+                                            </Link>
                                         </div>
                                     </>
                                 ) : (
                                     <>
                                         <div className="flex flex-wrap items-center gap-4 text-sm">
-                                            <span><strong className="text-gray-700">Active Version</strong> {active_version ? `v${active_version.version_number}` : '—'}</span>
-                                            <span><strong className="text-gray-700">Last Updated</strong> {formatDate(active_version?.updated_at)}</span>
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                                                Not Published
+                                            </span>
                                         </div>
                                         <p className="mt-3 text-sm text-gray-600">
                                             Define your brand DNA using the guided Brand Builder or edit fields manually below.
@@ -1113,6 +1371,12 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             >
                                                 Create Draft Version
                                             </button>
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.dna.bootstrap.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna/bootstrap`}
+                                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                                            >
+                                                Run AI Brand Research
+                                            </Link>
                                         </div>
                                     </>
                                 )}
@@ -1120,43 +1384,81 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         )
                     })()}
 
-                    {/* Tab navigation — Brand Model or Brand Settings tabs */}
-                    <nav className="mt-4 p-1 rounded-xl bg-gray-100 inline-flex flex-wrap gap-0.5 shadow-sm" aria-label={topLevelNav === 'brand_model' ? 'Brand Model tabs' : 'Brand Settings tabs'}>
-                        {topLevelNav === 'brand_model' ? (
-                            ['strategy', 'positioning', 'expression', 'standards'].map((tabId) => {
-                                const labels = { strategy: 'Strategy', positioning: 'Positioning', expression: 'Expression', standards: 'Standards' }
-                                return (
-                                    <button
-                                        key={tabId}
-                                        type="button"
-                                        onClick={() => setActiveTab(tabId)}
-                                        className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
-                                            activeTab === tabId ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
-                                        }`}
-                                    >
-                                        {labels[tabId]}
-                                    </button>
-                                )
-                            })
-                        ) : (
-                            ['identity', 'workspace', 'public-pages', 'members'].map((tabId) => {
-                                const labels = { identity: 'Identity', workspace: 'Workspace', 'public-pages': 'Public Pages', members: 'Members' }
-                                return (
-                                    <button
-                                        key={tabId}
-                                        type="button"
-                                        onClick={() => setActiveTab(tabId)}
-                                        className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
-                                            activeTab === tabId ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
-                                        }`}
-                                    >
-                                        {labels[tabId]}
-                                    </button>
-                                )
-                            })
-                        )}
-                    </nav>
-                </div>
+                    {/* Execution Alignment Overview — collapsible */}
+                    {topLevelNav === 'brand_model' && compliance_aggregate && (
+                        <div className="mt-4">
+                            <button
+                                type="button"
+                                onClick={() => setExecutionAlignmentOpen(!executionAlignmentOpen)}
+                                className="w-full flex items-center justify-between rounded-xl bg-gradient-to-br from-indigo-50/80 to-slate-50/80 px-6 py-4 ring-1 ring-indigo-100/50 text-left hover:from-indigo-50 hover:to-slate-50 transition-colors"
+                            >
+                                <h2 className="text-sm font-semibold uppercase tracking-wide text-indigo-800/90">Execution Alignment Overview</h2>
+                                <svg className={`h-5 w-5 text-indigo-400 transition-transform ${executionAlignmentOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                            </button>
+                            {executionAlignmentOpen && (
+                                <div className="rounded-b-xl bg-gradient-to-br from-indigo-50/80 to-slate-50/80 px-6 pb-6 ring-1 ring-indigo-100/50 -mt-1">
+                                    <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                                        <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
+                                            <p className="text-xs font-medium text-slate-500">Average On-Brand Score</p>
+                                            <p className="mt-1 text-2xl font-bold text-indigo-700">
+                                                {compliance_aggregate.avg_score != null ? `${compliance_aggregate.avg_score.toFixed(1)}%` : 'No data yet.'}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
+                                            <p className="text-xs font-medium text-slate-500">Total Executions</p>
+                                            <p className="mt-1 text-2xl font-bold text-slate-800">{compliance_aggregate.execution_count ?? 0}</p>
+                                        </div>
+                                        <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
+                                            <p className="text-xs font-medium text-slate-500">% High Alignment (&ge;85)</p>
+                                            <p className="mt-1 text-2xl font-bold text-emerald-600">
+                                                {compliance_aggregate.execution_count > 0 && compliance_aggregate.avg_score != null
+                                                    ? ((compliance_aggregate.high_score_count / compliance_aggregate.execution_count) * 100).toFixed(0) + '%'
+                                                    : '—'}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
+                                            <p className="text-xs font-medium text-slate-500">% Low Alignment (&lt;60)</p>
+                                            <p className="mt-1 text-2xl font-bold text-amber-600">
+                                                {compliance_aggregate.execution_count > 0 && compliance_aggregate.avg_score != null
+                                                    ? ((compliance_aggregate.low_score_count / compliance_aggregate.execution_count) * 100).toFixed(0) + '%'
+                                                    : '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {(top_executions?.length > 0 || bottom_executions?.length > 0) && (
+                                        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                            <div className="rounded-lg bg-white/60 p-4 backdrop-blur-sm">
+                                                <p className="text-xs font-semibold text-emerald-700">Top 3 Aligned</p>
+                                                <ul className="mt-2 space-y-1.5">
+                                                    {top_executions?.map((e, i) => (
+                                                        <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                                                            <span className="truncate text-slate-700">{e.title || 'Untitled'}</span>
+                                                            <span className="flex-shrink-0 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">{e.score != null ? `${e.score}%` : '—'}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                            <div className="rounded-lg bg-white/60 p-4 backdrop-blur-sm">
+                                                <p className="text-xs font-semibold text-amber-700">Bottom 3 — Review</p>
+                                                <ul className="mt-2 space-y-1.5">
+                                                    {bottom_executions?.map((e, i) => (
+                                                        <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                                                            <span className="truncate text-slate-700">{e.title || 'Untitled'}</span>
+                                                            <span className="flex-shrink-0 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">{e.score != null ? `${e.score}%` : '—'}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {compliance_aggregate.last_scored_at && (
+                                        <p className="mt-3 text-xs text-slate-500">Last scored: {new Date(compliance_aggregate.last_scored_at).toLocaleString()}</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
 
                 {activeTab === 'members' ? (
                     /* Members tab: outside form to avoid nested <form> (UserInviteForm has its own form) */
@@ -1181,7 +1483,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
-                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards') ? (
+                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'scoring') ? (
                 /* DNA tabs: separate form, saves to model_payload */
                 <form onSubmit={handleSaveDna} className="space-y-8">
                     {activeTab === 'strategy' && (
@@ -1564,6 +1866,64 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </div>
 
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+
+                    {activeTab === 'scoring' && (
+                    <div id="scoring" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Scoring Rules</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Define rules for deterministic compliance scoring. Used when Brand DNA is enabled.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                                        <h3 className="text-sm font-medium text-gray-700 mb-3">Scoring Weights (must total 100%)</h3>
+                                        {[
+                                            { key: 'color_weight', label: 'Color Weight' },
+                                            { key: 'typography_weight', label: 'Typography Weight' },
+                                            { key: 'tone_weight', label: 'Tone Weight' },
+                                            { key: 'imagery_weight', label: 'Imagery Weight' },
+                                        ].map(({ key, label }) => {
+                                            const val = Math.round((modelPayload.scoring_config?.[key] ?? 0.2) * 100)
+                                            return (
+                                                <div key={key} className="flex items-center gap-3 mb-3">
+                                                    <label className="w-40 text-sm text-gray-700">{label}</label>
+                                                    <input
+                                                        type="range"
+                                                        min={0}
+                                                        max={100}
+                                                        value={val}
+                                                        onChange={(e) => {
+                                                            const v = Number(e.target.value) / 100
+                                                            setModelPayloadField(`scoring_config.${key}`, v)
+                                                        }}
+                                                        className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 accent-indigo-600"
+                                                    />
+                                                    <span className="w-10 text-sm font-medium text-gray-700">{val}%</span>
+                                                </div>
+                                            )
+                                        })}
+                                        <div className={`mt-2 text-sm font-medium ${weightTotal === 100 ? 'text-green-600' : 'text-red-600'}`}>
+                                            Total: {weightTotal}% {weightTotal !== 100 && '— Must equal 100% to save'}
+                                        </div>
+                                    </div>
+
+                                    {renderTagArrayField('allowed_fonts', 'Allowed Fonts', 'e.g. Helvetica, Inter')}
+                                    {renderTagArrayField('banned_colors', 'Banned Colors', 'Colors to penalize')}
+                                    {renderTagArrayField('tone_keywords', 'Tone Keywords', 'Words that match brand tone')}
+                                    {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
+                                    {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
+
+                                    <button type="submit" disabled={dnaSaving || weightTotal !== 100} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2130,7 +2490,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
 
                     {/* Tab: Workspace Appearance */}
                     {activeTab === 'workspace' && (
-                    <div id="workspace-appearance" className="scroll-mt-8">
+                    <div id="workspace-appearance" className="scroll-mt-8 space-y-6">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-1">
@@ -2139,7 +2499,141 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         Control how the DAM interface looks for this brand.
                                     </p>
                                 </div>
-                                <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
+
+                                {/* Navigation Display */}
+                                <div className="mt-10">
+                                    <h3 className="text-base font-semibold text-gray-900 mb-1">Navigation Display</h3>
+                                    <p className="text-sm text-gray-500 mb-5">
+                                        Choose what appears in the top navigation bar for this brand.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const newSettings = { ...data.settings, nav_display_mode: 'logo' }
+                                                setData('settings', newSettings)
+                                                autoSaveBrandField({ settings: newSettings })
+                                            }}
+                                            className={`relative flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
+                                                (data.settings?.nav_display_mode || 'logo') === 'logo' ? 'border-indigo-600 ring-2 ring-indigo-600 bg-indigo-50/30' : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                                                <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
+                                            </div>
+                                            <div>
+                                                <span className="text-sm font-medium text-gray-900">Logo</span>
+                                                <p className="text-xs text-gray-500 mt-0.5">Show your brand logo</p>
+                                            </div>
+                                            {(data.settings?.nav_display_mode || 'logo') === 'logo' && (
+                                                <div className="absolute top-2 right-2">
+                                                    <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                </div>
+                                            )}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const newSettings = { ...data.settings, nav_display_mode: 'text' }
+                                                setData('settings', newSettings)
+                                                autoSaveBrandField({ settings: newSettings })
+                                            }}
+                                            className={`relative flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
+                                                data.settings?.nav_display_mode === 'text' ? 'border-indigo-600 ring-2 ring-indigo-600 bg-indigo-50/30' : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                                                <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
+                                            </div>
+                                            <div>
+                                                <span className="text-sm font-medium text-gray-900">Brand Name</span>
+                                                <p className="text-xs text-gray-500 mt-0.5">Show text instead of logo</p>
+                                            </div>
+                                            {data.settings?.nav_display_mode === 'text' && (
+                                                <div className="absolute top-2 right-2">
+                                                    <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                </div>
+                                            )}
+                                        </button>
+                                    </div>
+                                    {!(data.logo_preview || brand.logo_thumbnail_url || brand.logo_path) && (data.settings?.nav_display_mode || 'logo') === 'logo' && (
+                                        <p className="mt-3 text-xs text-amber-600 flex items-center gap-1.5">
+                                            <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
+                                            No logo uploaded. Upload a logo on the Identity tab or switch to Brand Name mode.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Logo Filter — only when logo mode is selected and a logo exists */}
+                                {(data.settings?.nav_display_mode || 'logo') === 'logo' && (data.logo_preview || brand.logo_thumbnail_url || brand.logo_path) && (
+                                    <div className="mt-8">
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Logo Appearance in Navigation</h4>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            Apply a filter to ensure your logo is visible on the white navigation bar.
+                                        </p>
+                                        <div className="flex gap-3 max-w-2xl flex-wrap">
+                                            {[
+                                                { value: 'none', label: 'Original', desc: 'No filter applied' },
+                                                { value: 'black', label: 'Dark', desc: 'Force dark version' },
+                                                { value: 'white', label: 'Light', desc: 'Force light version' },
+                                                { value: 'primary', label: 'Primary', desc: 'Use brand primary color' },
+                                            ].map((opt) => {
+                                                const primaryColor = data.primary_color || brand.primary_color || '#6366f1'
+                                                const filterStyle = opt.value === 'white'
+                                                    ? { filter: 'brightness(0) invert(1)' }
+                                                    : opt.value === 'black'
+                                                    ? { filter: 'brightness(0)' }
+                                                    : opt.value === 'primary'
+                                                    ? getFilterStyleForColor(primaryColor)
+                                                    : {}
+                                                return (
+                                                    <button
+                                                        key={opt.value}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setData('logo_filter', opt.value)
+                                                            autoSaveBrandField({ logo_filter: opt.value })
+                                                        }}
+                                                        className={`flex-1 min-w-[120px] flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                            (data.logo_filter || 'none') === opt.value ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
+                                                        }`}
+                                                    >
+                                                        <div className="w-full h-10 rounded-md mb-2 bg-white border border-gray-100 flex items-center justify-center overflow-hidden">
+                                                            <img
+                                                                src={data.logo_preview || brand.logo_thumbnail_url || brand.logo_path}
+                                                                alt=""
+                                                                className="h-6 w-auto object-contain"
+                                                                style={filterStyle}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs font-medium text-gray-900">{opt.label}</span>
+                                                        <span className="text-[10px] text-gray-500">{opt.desc}</span>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                        {(data.logo_filter || 'none') === 'none' && (
+                                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 max-w-lg">
+                                                <svg className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
+                                                <p className="text-xs text-amber-700 leading-relaxed">
+                                                    If your logo uses light colors it may be hard to read on the white navigation bar. Consider applying the <strong>Dark</strong> filter for better visibility.
+                                                </p>
+                                            </div>
+                                        )}
+                                        {(data.logo_filter || 'none') === 'white' && (
+                                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 max-w-lg">
+                                                <svg className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
+                                                <p className="text-xs text-amber-700 leading-relaxed">
+                                                    The <strong>Light</strong> filter will make the logo white, which will not be visible on the white navigation bar. Use <strong>Original</strong> or <strong>Dark</strong> instead.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <hr className="my-10 border-gray-200" />
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                                     {/* Button style selection */}
                                     <div>
                                         <h4 className="text-sm font-medium text-gray-900 mb-1">Button Style</h4>
@@ -2274,56 +2768,65 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             const sidebarTextColor = getContrastTextColor(sidebarColor)
                                             const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
                                             const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                            const previewLogoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
+                                            const previewNavMode = data.settings?.nav_display_mode || 'logo'
+                                            const previewFilterValue = data.logo_filter || 'none'
+                                            const previewLogoFilter = previewFilterValue === 'white'
+                                                ? { filter: 'brightness(0) invert(1)' }
+                                                : previewFilterValue === 'black'
+                                                ? { filter: 'brightness(0)' }
+                                                : previewFilterValue === 'primary'
+                                                ? getFilterStyleForColor(data.primary_color || brand.primary_color || '#6366f1')
+                                                : {}
                                             return (
                                                 <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 shadow-inner">
-                                                    <div className="flex" style={{ minHeight: 220 }}>
+                                                    {/* Top navigation bar (white) */}
+                                                    <div className="bg-white border-b border-gray-200 px-3 py-1.5 flex items-center gap-2">
+                                                        {previewNavMode === 'logo' && previewLogoSrc ? (
+                                                            <img src={previewLogoSrc} alt="" className="h-5 w-auto max-w-[80px] object-contain" style={previewLogoFilter} />
+                                                        ) : (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: data.primary_color || brand.primary_color || '#6366f1' }} />
+                                                                <span className="text-[9px] font-semibold text-gray-800 truncate max-w-[70px]">{data.name || brand.name}</span>
+                                                            </div>
+                                                        )}
+                                                        <div className="flex-1" />
+                                                        <div className="flex gap-2">
+                                                            {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL_SINGULAR + 's'].map((l) => (
+                                                                <span key={l} className="text-[8px] text-gray-400 font-medium">{l}</span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex" style={{ minHeight: 190 }}>
                                                         {/* Sidebar */}
                                                         <aside
-                                                            className="w-14 flex flex-col flex-shrink-0"
+                                                            className="w-[52px] flex flex-col flex-shrink-0"
                                                             style={{ backgroundColor: sidebarColor, color: sidebarTextColor }}
                                                         >
-                                                            <div className="p-2 flex items-center justify-center border-b border-current/10">
-                                                                {(data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_path) ? (
-                                                                    <img src={data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_path} alt="" className="w-8 h-6 object-contain" />
-                                                                ) : (
-                                                                    <div className="w-8 h-6 rounded bg-black/10 flex items-center justify-center" style={{ color: 'inherit' }}>
-                                                                        <span className="text-[8px] font-medium opacity-90">Logo</span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
                                                             <nav className="flex-1 py-2 space-y-0.5">
-                                                                {['Assets', 'Collections', 'Executions'].map((label) => (
-                                                                    <div key={label} className="px-2 py-1.5 text-[9px] font-medium truncate opacity-90" style={{ color: 'inherit' }}>
+                                                                {['All', 'Logos', 'Photos', 'Graphics'].map((label, idx) => (
+                                                                    <div key={label} className={`px-2 py-1 text-[8px] font-medium truncate ${idx === 0 ? 'opacity-100' : 'opacity-60'}`} style={{ color: 'inherit' }}>
                                                                         {label}
                                                                     </div>
                                                                 ))}
                                                             </nav>
                                                         </aside>
                                                         {/* Main content */}
-                                                        <main className="flex-1 flex flex-col bg-white min-w-0">
-                                                            {/* Header row — Add Asset top-left */}
-                                                            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 flex-shrink-0">
+                                                        <main className="flex-1 flex flex-col bg-[#f8f9fa] min-w-0">
+                                                            <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
                                                                 <span
-                                                                    className="px-2.5 py-1 rounded text-[10px] font-medium text-white"
+                                                                    className="px-2 py-0.5 rounded text-[9px] font-medium text-white"
                                                                     style={{ backgroundColor: btnColor }}
                                                                 >
                                                                     Add Asset
                                                                 </span>
+                                                                <div className="flex-1" />
+                                                                <div className="h-5 bg-white border border-gray-200 rounded w-full max-w-[100px]" />
                                                             </div>
-                                                            {/* Search bar + filter row */}
-                                                            <div className="px-3 py-2 space-y-2 border-b border-gray-100 flex-shrink-0">
-                                                                <div className="h-6 bg-gray-100 rounded w-full max-w-[140px]" />
-                                                                <div className="flex gap-1.5">
-                                                                    <div className="h-5 w-12 bg-gray-100 rounded" />
-                                                                    <div className="h-5 w-10 bg-gray-100 rounded" />
-                                                                    <div className="h-5 w-14 bg-gray-100 rounded" />
-                                                                </div>
-                                                            </div>
-                                                            {/* Asset grid blocks */}
-                                                            <div className="flex-1 p-3 overflow-hidden">
+                                                            <div className="flex-1 px-3 pb-2 overflow-hidden">
                                                                 <div className="grid grid-cols-4 gap-1.5">
                                                                     {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                                                                        <div key={i} className="aspect-square bg-gray-200 rounded" />
+                                                                        <div key={i} className="aspect-square bg-white border border-gray-100 rounded" />
                                                                     ))}
                                                                 </div>
                                                             </div>
@@ -2799,6 +3302,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                 </form>
                 )}
+                    </div>{/* end main content */}
+                </div>{/* end two-column layout */}
                 </div>
                     </main>
                     <AppFooter />

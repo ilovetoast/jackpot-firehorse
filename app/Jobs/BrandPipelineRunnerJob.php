@@ -118,10 +118,9 @@ class BrandPipelineRunnerJob implements ShouldQueue
             $processor = app(SectionAwareBrandGuidelinesProcessor::class);
             $extractions[] = $processor->process($text);
         }
-        $websiteUrl = $draft->model_payload['sources']['website_url'] ?? null;
-        if (! empty(trim((string) $websiteUrl))) {
-            $crawler = app(BrandWebsiteCrawlerService::class);
-            $crawlData = $crawler->crawl($websiteUrl);
+
+        $crawlData = $this->runWebsiteCrawl($draft, $brand);
+        if ($crawlData) {
             $extractions[] = app(WebsiteExtractionProcessor::class)->process($crawlData);
         }
 
@@ -142,6 +141,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
             return;
         }
 
+        $websiteUrl = $draft->model_payload['sources']['website_url'] ?? null;
         $activeSources = $this->deriveActiveSources($run->asset_id, $websiteUrl, $materialIds ?? []);
         $snapshot = $snapshotService->createFromExtractions(
             $brand,
@@ -206,11 +206,42 @@ class BrandPipelineRunnerJob implements ShouldQueue
             'pages_processed' => 1,
         ]);
 
+        // Run website crawl alongside Claude extraction (merge happens in snapshot job)
+        $crawlData = $this->runWebsiteCrawl($run->brandModelVersion, $brand);
+        if ($crawlData) {
+            $websiteExtraction = app(WebsiteExtractionProcessor::class)->process($crawlData);
+            $existing = $run->merged_extraction_json ?? [];
+            if (! empty($existing)) {
+                $merged = \App\Services\BrandDNA\Extraction\BrandExtractionSchema::merge($existing, $websiteExtraction);
+                $run->update(['merged_extraction_json' => $merged]);
+            }
+        }
+
         Log::channel('pipeline')->info('[BrandPipelineRunnerJob] Claude extraction stored, dispatching snapshot', [
             'run_id' => $run->id,
         ]);
 
         BrandPipelineSnapshotJob::dispatch($run->id);
+    }
+
+    /**
+     * Run website crawl if a URL is set on the draft. Downloads logo as asset if found.
+     */
+    protected function runWebsiteCrawl(BrandModelVersion $draft, Brand $brand): ?array
+    {
+        $websiteUrl = $draft->model_payload['sources']['website_url'] ?? null;
+        if (empty(trim((string) $websiteUrl))) {
+            return null;
+        }
+
+        $crawler = app(BrandWebsiteCrawlerService::class);
+        $crawlData = $crawler->crawl($websiteUrl);
+
+        if (! empty($crawlData['logo_svg']) || ! empty($crawlData['logo_url'])) {
+            $crawler->downloadLogoAsAsset($crawlData, $brand, $draft);
+        }
+
+        return $crawlData;
     }
 
     protected function deriveActiveSources(?string $pdfAssetId, ?string $websiteUrl, array $materialIds): array

@@ -139,7 +139,7 @@ class BrandBootstrapController extends Controller
         $run->update(['approved_version_id' => $version->id]);
 
         return redirect()
-            ->route('brands.dna.index', ['brand' => $brand->id, 'editing' => $version->id])
+            ->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])
             ->with('success', 'Draft created from AI research. Review and activate when ready.');
     }
 

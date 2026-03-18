@@ -733,7 +733,17 @@ PROMPT;
             ->first();
         $snapshotExists = $latestSnapshot !== null;
 
-        $websiteState = ['status' => 'pending', 'signals_detected' => 0];
+        $websiteUrl = $draft->model_payload['sources']['website_url'] ?? null;
+        $hasWebsite = ! empty(trim((string) $websiteUrl));
+        $websiteStatus = 'pending';
+        if ($hasWebsite) {
+            if ($pipelineProcessing) {
+                $websiteStatus = 'processing';
+            } elseif ($snapshotExists) {
+                $websiteStatus = 'completed';
+            }
+        }
+        $websiteState = ['status' => $websiteStatus, 'signals_detected' => 0];
         $socialState = ['status' => 'pending'];
         $materialsState = ['status' => 'pending', 'assets_total' => 0, 'assets_processed' => 0];
 
@@ -880,12 +890,19 @@ PROMPT;
             app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($brand, $draft);
         }
 
-        $websiteState = ['status' => 'pending', 'signals_detected' => 0];
+        $websiteUrlForState = $draft->model_payload['sources']['website_url'] ?? null;
+        $hasWebsiteForState = ! empty(trim((string) $websiteUrlForState));
+        $websiteStatusForState = 'pending';
+        if ($hasWebsiteForState) {
+            if ($runningSnapshot !== null || ($latestRun && $latestRun->status === BrandPipelineRun::STATUS_PROCESSING)) {
+                $websiteStatusForState = 'processing';
+            } elseif ($latestCompletedSnapshot) {
+                $websiteStatusForState = 'completed';
+            }
+        }
+        $websiteState = ['status' => $websiteStatusForState, 'signals_detected' => 0];
         $socialState = ['status' => 'pending'];
         $materialsState = ['status' => 'pending', 'assets_total' => 0, 'assets_processed' => 0];
-        if ($runningSnapshot !== null) {
-            $websiteState['status'] = 'processing';
-        }
 
         $snapshotData = $latestCompletedSnapshot?->snapshot ?? [];
 

@@ -51,10 +51,10 @@ export default function BrandBootstrapIndex({ brand, runs }) {
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8">
                     <Link
-                        href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna`}
+                        href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`}
                         className="text-sm font-medium text-gray-500 hover:text-gray-700"
                     >
-                        ← Back to Brand DNA
+                        ← Back to Brand Settings
                     </Link>
                     <h1 className="mt-6 text-2xl font-bold text-gray-900">Run AI Brand Research</h1>
                     {flash.success && (
@@ -122,7 +122,7 @@ export default function BrandBootstrapIndex({ brand, runs }) {
                                                     <>
                                                         <span className="text-xs text-gray-500">Draft Created: v{run.approved_version?.version_number ?? '?'}</span>
                                                         <Link
-                                                            href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id, editing: run.approved_version_id }) : `/app/brands/${brand.id}/dna?editing=${run.approved_version_id}`}
+                                                            href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`}
                                                             className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
                                                         >
                                                             View Draft

@@ -127,11 +127,28 @@ export default function AppNav({ brand, tenant }) {
     
     // Use default dark text color
     const textColor = '#000000'
-    const logoFilterStyle = logoFilter === 'white' 
-        ? { filter: 'brightness(0) invert(1)' }
-        : logoFilter === 'black'
-        ? { filter: 'brightness(0)' }
-        : {}
+    const computeLogoFilterStyle = (filter, primaryColor) => {
+        if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
+        if (filter === 'black') return { filter: 'brightness(0)' }
+        if (filter === 'primary' && primaryColor) {
+            const c = primaryColor.replace('#', '')
+            const r = parseInt(c.substr(0, 2), 16) / 255
+            const g = parseInt(c.substr(2, 2), 16) / 255
+            const b = parseInt(c.substr(4, 2), 16) / 255
+            const max = Math.max(r, g, b), min = Math.min(r, g, b)
+            let h = 0
+            if (max !== min) {
+                const d = max - min
+                if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+                else if (max === g) h = (b - r) / d + 2
+                else h = (r - g) / d + 4
+                h *= 60
+            }
+            return { filter: `brightness(0) sepia(1) saturate(5) hue-rotate(${h - 30}deg)` }
+        }
+        return {}
+    }
+    const logoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')
@@ -374,7 +391,7 @@ export default function AppNav({ brand, tenant }) {
                                     activeBrand={effectiveCollection.brand}
                                     brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === effectiveCollection?.brand?.id }])).values()] : []}
                                     textColor={textColor}
-                                    logoFilterStyle={effectiveCollection.brand?.logo_filter === 'white' ? { filter: 'brightness(0) invert(1)' } : effectiveCollection.brand?.logo_filter === 'black' ? { filter: 'brightness(0)' } : {}}
+                                    logoFilterStyle={computeLogoFilterStyle(effectiveCollection.brand?.logo_filter, effectiveCollection.brand?.primary_color)}
                                     onSwitchBrand={(brandId) => {
                                         const col = effectiveCollectionsList.find(c => c.brand?.id === brandId)
                                         if (col) router.post(route('collection-invite.switch', { collection: col.id }))

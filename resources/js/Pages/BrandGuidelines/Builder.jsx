@@ -1639,10 +1639,10 @@ export default function BrandGuidelinesBuilder({
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
     const hasProcessingEarly = pdfExtractionPolling || ingestionProcessing || ingestionPolling || (researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning))
-    // Always include research-summary as step 2 (after background). Include 'processing' only when actively processing.
+    // Always include processing + research-summary between background and the data steps.
     const allStepKeys = [
         stepKeys[0],
-        ...(hasProcessingEarly ? ['processing'] : []),
+        'processing',
         'research-summary',
         ...stepKeys.slice(1),
         REVIEW_STEP,
@@ -1719,27 +1719,65 @@ export default function BrandGuidelinesBuilder({
         }
     }, [currentStep, isReviewStep, buildPayloadForStep, brand.id, REVIEW_STEP])
 
-    const handleNext = useCallback(() => {
+    // PDF gate: never allow progression until every page is processed. Override backend.
+    const pages = polledResearch?.processing_progress?.pages ?? {}
+    const hasPdfPages = (pages?.total ?? 0) > 0
+    const pagesAnalyzed = pages?.extracted ?? pages?.classified ?? 0
+    const pagesTotal = pages?.total ?? 0
+    const allPdfPagesDone = hasPdfPages ? pagesAnalyzed >= pagesTotal : true
+    const effectiveResearchFinalizedForGate = hasPdfPages
+        ? (allPdfPagesDone && (polledResearch?.researchFinalized ?? researchFinalized ?? false))
+        : (polledResearch?.researchFinalized ?? researchFinalized ?? false)
+
+    const triggerIngestion = useCallback(async (opts = {}) => {
+        try {
+            await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
+                pdf_asset_id: opts.pdf_asset_id || null,
+                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
+                material_asset_ids: opts.material_asset_ids || undefined,
+            })
+            setIngestionPolling(true)
+        } catch (e) {
+            const status = e.response?.status
+            const data = e.response?.data
+            if (status === 403 && data?.gate) {
+                setErrors((prev) => [...prev, data.error || 'AI brand research requires a paid plan.'])
+            } else if (status === 429 && data?.gate) {
+                setErrors((prev) => [...prev, data.error || 'Monthly brand research limit reached.'])
+            } else if (status !== 422) {
+                setErrors((prev) => [...prev, data?.error || 'Failed to start processing'])
+            }
+        }
+    }, [brand.id, payload.sources?.website_url])
+
+    const handleNext = useCallback(async () => {
         if (isReviewStep) return
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
         } else if (currentStep === 'background') {
-            // If items are processing, go to processing step. Else go to research-summary (always step 2).
-            if (hasProcessingEarly) {
-                patchAndNavigate('processing')
-            } else {
-                patchAndNavigate('research-summary')
+            // Auto-trigger ingestion if there are unprocessed sources and nothing is running
+            const websiteUrl = (payload.sources?.website_url || '').trim()
+            const hasPdfAsset = !!(guidelinesPdfAssetId || pdfAttachedThisSession)
+            const hasSources = hasPdfAsset || websiteUrl || brandMaterialCount > 0
+            const alreadyProcessing = hasProcessingEarly
+
+            if (hasSources && !alreadyProcessing && !effectiveResearchFinalizedForGate) {
+                try {
+                    await triggerIngestion({
+                        pdf_asset_id: guidelinesPdfAssetId || null,
+                        website_url: websiteUrl || null,
+                    })
+                } catch {}
             }
+            patchAndNavigate('processing')
         } else if (currentStep === 'processing') {
-            // Processing step: Next goes to research-summary
             patchAndNavigate('research-summary')
         } else if (currentStep === 'research-summary') {
-            // Research summary: Next goes to archetype
             patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
         } else {
             patchAndNavigate(stepKeys[stepKeys.indexOf(currentStep) + 1])
         }
-    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, hasProcessingEarly])
+    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, hasProcessingEarly, payload.sources?.website_url, guidelinesPdfAssetId, pdfAttachedThisSession, brandMaterialCount, triggerIngestion, effectiveResearchFinalizedForGate])
 
     const handleBack = useCallback(() => {
         if (viewingReview) {
@@ -1803,37 +1841,6 @@ export default function BrandGuidelinesBuilder({
     }, [brand.id, draft.id, enableScoring, acknowledgeWarnings])
 
     const effectiveOverallStatus = polledResearch?.overall_status ?? initialOverallStatus
-
-    // PDF gate: never allow progression until every page is processed. Override backend.
-    const pages = polledResearch?.processing_progress?.pages ?? {}
-    const hasPdfPages = (pages?.total ?? 0) > 0
-    const pagesAnalyzed = pages?.extracted ?? pages?.classified ?? 0
-    const pagesTotal = pages?.total ?? 0
-    const allPdfPagesDone = hasPdfPages ? pagesAnalyzed >= pagesTotal : true
-    const effectiveResearchFinalizedForGate = hasPdfPages
-        ? (allPdfPagesDone && (polledResearch?.researchFinalized ?? researchFinalized ?? false))
-        : (polledResearch?.researchFinalized ?? researchFinalized ?? false)
-
-    const triggerIngestion = useCallback(async (opts = {}) => {
-        try {
-            await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
-                pdf_asset_id: opts.pdf_asset_id || null,
-                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
-                material_asset_ids: opts.material_asset_ids || undefined,
-            })
-            setIngestionPolling(true)
-        } catch (e) {
-            const status = e.response?.status
-            const data = e.response?.data
-            if (status === 403 && data?.gate) {
-                setErrors((prev) => [...prev, data.error || 'AI brand research requires a paid plan.'])
-            } else if (status === 429 && data?.gate) {
-                setErrors((prev) => [...prev, data.error || 'Monthly brand research limit reached.'])
-            } else if (status !== 422) {
-                setErrors((prev) => [...prev, data?.error || 'Failed to start processing'])
-            }
-        }
-    }, [brand.id, payload.sources?.website_url])
 
     const handleAnalyzeAll = useCallback(async () => {
         const websiteUrl = (payload.sources?.website_url || '').trim()
@@ -2426,7 +2433,7 @@ export default function BrandGuidelinesBuilder({
                                                 polledResearch={polledResearch}
                                                 guidelinesPdfFilename={guidelinesPdfFilename}
                                                 hasPdf={!!(guidelinesPdfAssetId || guidelinesPdfFilename)}
-                                                hasWebsite={!!(sources?.website_url?.trim?.())}
+                                                hasWebsite={!!(unwrapValue(sources.website_url) || '').trim()}
                                                 hasSocial={!!(sources?.social_urls?.length)}
                                                 hasMaterials={brandMaterialCount > 0}
                                                 brandId={brand?.id}
@@ -3226,72 +3233,58 @@ export default function BrandGuidelinesBuilder({
                                             <FieldCard title="Brand Colors">
                                                 <p className="text-white/60 text-sm mb-4">Define your brand&apos;s color palette. These colors will be used throughout the application.</p>
                                                 <div className="grid sm:grid-cols-3 gap-6">
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-white/80 mb-2">Primary Color</label>
-                                                        <div className="flex gap-2">
-                                                            <input
-                                                                type="color"
-                                                                value={(() => { const v = brandColors.primary_color || '#6366f1'; return v.startsWith('#') ? v : '#' + v; })()}
-                                                                onChange={(e) => setBrandColors((c) => ({ ...c, primary_color: e.target.value || null }))}
-                                                                className="h-10 w-12 rounded-lg border border-white/20 cursor-pointer bg-transparent flex-shrink-0"
-                                                                style={{ padding: 2 }}
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={brandColors.primary_color || ''}
-                                                                onChange={(e) => {
-                                                                    const v = e.target.value.trim()
-                                                                    setBrandColors((c) => ({ ...c, primary_color: v ? (v.startsWith('#') ? v : '#' + v) : null }))
-                                                                }}
-                                                                placeholder="#6366f1"
-                                                                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white text-sm placeholder-white/40"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-white/80 mb-2">Secondary Color</label>
-                                                        <div className="flex gap-2">
-                                                            <input
-                                                                type="color"
-                                                                value={(() => { const v = brandColors.secondary_color || '#8b5cf6'; return v.startsWith('#') ? v : '#' + v; })()}
-                                                                onChange={(e) => setBrandColors((c) => ({ ...c, secondary_color: e.target.value || null }))}
-                                                                className="h-10 w-12 rounded-lg border border-white/20 cursor-pointer bg-transparent flex-shrink-0"
-                                                                style={{ padding: 2 }}
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={brandColors.secondary_color || ''}
-                                                                onChange={(e) => {
-                                                                    const v = e.target.value.trim()
-                                                                    setBrandColors((c) => ({ ...c, secondary_color: v ? (v.startsWith('#') ? v : '#' + v) : null }))
-                                                                }}
-                                                                placeholder="#8b5cf6"
-                                                                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white text-sm placeholder-white/40"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-white/80 mb-2">Accent Color</label>
-                                                        <div className="flex gap-2">
-                                                            <input
-                                                                type="color"
-                                                                value={(() => { const v = brandColors.accent_color || '#06b6d4'; return v.startsWith('#') ? v : '#' + v; })()}
-                                                                onChange={(e) => setBrandColors((c) => ({ ...c, accent_color: e.target.value || null }))}
-                                                                className="h-10 w-12 rounded-lg border border-white/20 cursor-pointer bg-transparent flex-shrink-0"
-                                                                style={{ padding: 2 }}
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={brandColors.accent_color || ''}
-                                                                onChange={(e) => {
-                                                                    const v = e.target.value.trim()
-                                                                    setBrandColors((c) => ({ ...c, accent_color: v ? (v.startsWith('#') ? v : '#' + v) : null }))
-                                                                }}
-                                                                placeholder="#06b6d4"
-                                                                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white text-sm placeholder-white/40"
-                                                            />
-                                                        </div>
-                                                    </div>
+                                                    {[
+                                                        { key: 'primary_color', label: 'Primary Color', placeholder: '#6366f1' },
+                                                        { key: 'secondary_color', label: 'Secondary Color', placeholder: '#8b5cf6' },
+                                                        { key: 'accent_color', label: 'Accent Color', placeholder: '#06b6d4' },
+                                                    ].map(({ key, label, placeholder }) => {
+                                                        const colorVal = brandColors[key]
+                                                        const hasColor = !!colorVal
+                                                        return (
+                                                            <div key={key}>
+                                                                <label className="block text-sm font-medium text-white/80 mb-2">{label}</label>
+                                                                <div className="flex gap-2">
+                                                                    {hasColor ? (
+                                                                        <input
+                                                                            type="color"
+                                                                            value={colorVal.startsWith('#') ? colorVal : '#' + colorVal}
+                                                                            onChange={(e) => setBrandColors((c) => ({ ...c, [key]: e.target.value || null }))}
+                                                                            className="h-10 w-12 rounded-lg border border-white/20 cursor-pointer bg-transparent flex-shrink-0"
+                                                                            style={{ padding: 2 }}
+                                                                        />
+                                                                    ) : (
+                                                                        <div
+                                                                            className="h-10 w-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center flex-shrink-0 cursor-pointer"
+                                                                            title="Click to set a color"
+                                                                            onClick={() => setBrandColors((c) => ({ ...c, [key]: placeholder }))}
+                                                                        >
+                                                                            <span className="text-white/30 text-lg">+</span>
+                                                                        </div>
+                                                                    )}
+                                                                    <input
+                                                                        type="text"
+                                                                        value={colorVal || ''}
+                                                                        onChange={(e) => {
+                                                                            const v = e.target.value.trim()
+                                                                            setBrandColors((c) => ({ ...c, [key]: v ? (v.startsWith('#') ? v : '#' + v) : null }))
+                                                                        }}
+                                                                        placeholder={placeholder}
+                                                                        className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white text-sm placeholder-white/40"
+                                                                    />
+                                                                    {hasColor && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setBrandColors((c) => ({ ...c, [key]: null }))}
+                                                                            className="h-10 w-10 rounded-lg border border-white/20 bg-white/5 flex items-center justify-center text-white/40 hover:text-red-400 hover:border-red-400/30 transition-colors flex-shrink-0"
+                                                                            title={`Clear ${label.toLowerCase()}`}
+                                                                        >
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
                                                 </div>
                                                 {effectiveSuggestions?.brand_color_suggestions?.length > 0 && !dismissedInlineSuggestions.includes('standards:brand_colors') && (
                                                     <div className="mt-4 rounded-xl bg-indigo-900/30 border border-indigo-500/30 p-4">

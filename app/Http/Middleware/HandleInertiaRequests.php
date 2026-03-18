@@ -220,12 +220,16 @@ class HandleInertiaRequests extends Middleware
                         'name' => $brand->name,
                         'slug' => $brand->slug,
                         'logo_path' => $brand->logo_path,
+                        'icon_path' => $brand->icon_path,
                         'is_default' => $brand->is_default,
                         'is_active' => $isActive,
                         'is_disabled' => $isDisabled,
                         'logo_filter' => $brand->logo_filter ?? 'none',
                         'primary_color' => $brand->primary_color,
                         'show_in_selector' => $brand->show_in_selector ?? true,
+                        'settings' => [
+                            'nav_display_mode' => $brand->settings['nav_display_mode'] ?? 'logo',
+                        ],
                     ];
                     
                     return $brandData;
@@ -406,6 +410,7 @@ class HandleInertiaRequests extends Middleware
                     'name' => $activeBrand->name,
                     'slug' => $activeBrand->slug,
                     'logo_path' => $activeBrand->logo_path,
+                    'icon_path' => $activeBrand->icon_path,
                     'primary_color' => $activeBrand->primary_color,
                     'secondary_color' => $activeBrand->secondary_color,
                     'accent_color' => $activeBrand->accent_color,

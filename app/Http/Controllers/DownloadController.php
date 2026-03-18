@@ -36,6 +36,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -328,6 +329,8 @@ class DownloadController extends Controller
             'public_url' => route('downloads.public', ['download' => $download->id]),
             'access_mode' => $accessMode,
             'password_protected' => $download->requiresPassword(),
+            'password_plain' => $this->resolvePasswordPlain($download, $canManage),
+            'allowed_user_ids' => $download->allowedUsers()->pluck('users.id')->all(),
             'brand' => $brandPayload,
             'brands' => $brandPayload ? [$brandPayload] : [],
             'source' => $source,
@@ -585,7 +588,9 @@ class DownloadController extends Controller
         $download->allow_reshare = true;
         $download->landing_copy = is_array($request->input('landing_copy')) ? $request->input('landing_copy') : null;
         if ($request->filled('password') && trim((string) $request->input('password')) !== '') {
-            $download->password_hash = Hash::make(trim((string) $request->input('password')));
+            $plain = trim((string) $request->input('password'));
+            $download->password_hash = Hash::make($plain);
+            $download->password_encrypted = Crypt::encryptString($plain);
         }
         $download->save();
 
@@ -774,6 +779,246 @@ class DownloadController extends Controller
             ->with('success', 'Download revoked.')
             ->with('download_action', 'revoke')
             ->with('download_action_id', $download->id);
+    }
+
+    /**
+     * Update download settings (access mode, password, etc.).
+     * PUT /app/downloads/{download}/settings
+     */
+    public function updateSettings(Request $request, Download $download): RedirectResponse|JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant || $download->tenant_id !== $tenant->id) {
+            return $this->settingsErrorResponse($request, $download, 'Download not found.', 404);
+        }
+
+        if (! $this->canManageDownload($download, $user, $tenant)) {
+            return $this->settingsErrorResponse($request, $download, 'You do not have permission to manage this download.', 403);
+        }
+
+        $request->validate([
+            'access_mode' => 'nullable|string|in:public,brand,company,team,users,restricted',
+            'user_ids' => 'nullable|array',
+            'user_ids.*' => 'uuid',
+            'password' => 'nullable|string|max:255',
+            'landing_copy' => 'nullable|array',
+            'landing_copy.headline' => 'nullable|string',
+            'landing_copy.subtext' => 'nullable|string',
+        ]);
+
+        $updates = [];
+        if ($request->has('access_mode')) {
+            $updates['access_mode'] = $this->normalizeAccessMode($request->input('access_mode'))->value;
+        }
+        if ($request->has('user_ids')) {
+            $updates['user_ids'] = $request->input('user_ids');
+        }
+        if ($request->has('landing_copy')) {
+            $updates['landing_copy'] = $request->input('landing_copy');
+        }
+        if ($request->filled('password')) {
+            $plain = trim($request->input('password'));
+            $updates['password_hash'] = Hash::make($plain);
+            $download->update(['password_encrypted' => Crypt::encryptString($plain)]);
+        }
+
+        try {
+            app(DownloadManagementService::class)->updateSettings($download, $updates, $user);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            }
+            return redirect()->route('downloads.index')->withErrors($e->errors());
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Settings updated.']);
+        }
+        return redirect()->route('downloads.index')->with('success', 'Download settings updated.');
+    }
+
+    /**
+     * Change download access mode.
+     * POST /app/downloads/{download}/change-access
+     */
+    public function changeAccess(Request $request, Download $download): RedirectResponse|JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant || $download->tenant_id !== $tenant->id) {
+            return $this->settingsErrorResponse($request, $download, 'Download not found.', 404);
+        }
+
+        if (! $this->canManageDownload($download, $user, $tenant)) {
+            return $this->settingsErrorResponse($request, $download, 'You do not have permission to manage this download.', 403);
+        }
+
+        $request->validate([
+            'access_mode' => 'required|string|in:public,brand,company,team,users,restricted',
+            'user_ids' => 'nullable|array',
+            'user_ids.*' => 'uuid',
+        ]);
+
+        $accessMode = $this->normalizeAccessMode($request->input('access_mode'))->value;
+        $userIds = $request->input('user_ids');
+
+        try {
+            app(DownloadManagementService::class)->changeAccess($download, $accessMode, $userIds, $user);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            }
+            return redirect()->route('downloads.index')->withErrors($e->errors());
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Access updated.']);
+        }
+        return redirect()->route('downloads.index')->with('success', 'Download access updated.');
+    }
+
+    /**
+     * Extend download expiration.
+     * POST /app/downloads/{download}/extend
+     */
+    public function extend(Request $request, Download $download): RedirectResponse|JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant || $download->tenant_id !== $tenant->id) {
+            return $this->settingsErrorResponse($request, $download, 'Download not found.', 404);
+        }
+
+        if (! $this->canManageDownload($download, $user, $tenant)) {
+            return $this->settingsErrorResponse($request, $download, 'You do not have permission to manage this download.', 403);
+        }
+
+        $planService = app(PlanService::class);
+        $features = $planService->getDownloadManagementFeatures($tenant);
+        if (! ($features['extend_expiration'] ?? false)) {
+            return $this->settingsErrorResponse($request, $download, 'Extend expiration is not available on your plan.', 403);
+        }
+
+        $request->validate([
+            'expires_at' => 'required|date|after:now',
+        ]);
+
+        $newExpiresAt = \Carbon\Carbon::parse($request->input('expires_at'));
+
+        try {
+            app(DownloadManagementService::class)->extend($download, $newExpiresAt, $user);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            }
+            return redirect()->route('downloads.index')->withErrors($e->errors());
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Expiration extended.']);
+        }
+        return redirect()->route('downloads.index')->with('success', 'Download expiration extended.');
+    }
+
+    /**
+     * Return list of company users for the "specific people" access selector.
+     * GET /app/downloads/company-users
+     */
+    public function companyUsers(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant) {
+            return response()->json(['users' => []], 200);
+        }
+
+        $users = $tenant->users()
+            ->select('users.id', 'users.first_name', 'users.last_name', 'users.email')
+            ->orderBy('users.first_name')
+            ->orderBy('users.last_name')
+            ->get()
+            ->map(fn (User $u) => [
+                'id' => $u->id,
+                'first_name' => $u->first_name,
+                'last_name' => $u->last_name,
+                'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->email,
+                'email' => $u->email,
+            ])
+            ->values()
+            ->all();
+
+        return response()->json(['users' => $users]);
+    }
+
+    /**
+     * Check if a user can manage a specific download (creator, tenant admin/owner, or brand manager).
+     */
+    protected function canManageDownload(Download $download, User $user, Tenant $tenant): bool
+    {
+        if ($download->created_by_user_id === $user->id) {
+            return true;
+        }
+
+        $tenantRole = $user->getRoleForTenant($tenant);
+        if ($tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true)) {
+            return true;
+        }
+
+        if ($download->brand_id) {
+            $brandRole = $user->getRoleForBrand($download->brand);
+            if ($brandRole && in_array(strtolower((string) $brandRole), ['brand_manager', 'manager'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Decrypt the stored password for authorized users. Returns null if not authorized or not set.
+     */
+    protected function resolvePasswordPlain(Download $download, bool $canManage): ?string
+    {
+        if (! $download->requiresPassword() || ! $download->password_encrypted) {
+            return null;
+        }
+
+        $user = Auth::user();
+        if (! $user) {
+            return null;
+        }
+
+        $isCreator = $download->created_by_user_id === $user->id;
+        if (! $canManage && ! $isCreator) {
+            $tenant = app()->bound('tenant') ? app('tenant') : null;
+            if ($tenant && $download->brand_id) {
+                $brandRole = $user->getRoleForBrand($download->brand);
+                $canManage = $brandRole && in_array(strtolower((string) $brandRole), ['brand_manager', 'manager'], true);
+            }
+        }
+
+        if (! $canManage && ! $isCreator) {
+            return null;
+        }
+
+        try {
+            return Crypt::decryptString($download->password_encrypted);
+        } catch (\Throwable $e) {
+            Log::debug('[DownloadController] Failed to decrypt password', ['download_id' => $download->id]);
+            return null;
+        }
+    }
+
+    /**
+     * Consistent error response for settings/management endpoints.
+     */
+    protected function settingsErrorResponse(Request $request, Download $download, string $message, int $status): RedirectResponse|JsonResponse
+    {
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $message], $status);
+        }
+        return redirect()->route('downloads.index')->withErrors(['message' => $message]);
     }
 
     /**

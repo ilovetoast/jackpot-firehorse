@@ -125,7 +125,40 @@ class FieldCandidateValidationService
             }
         }
 
+        $extraction = $this->cleanDesignTypography($extraction);
+
         return $extraction;
+    }
+
+    /**
+     * Deep-clean letter-spaced typography artifacts from all string values.
+     * E.g. "N A R R A T I V E" → "NARRATIVE"
+     */
+    protected function cleanDesignTypography(array $extraction): array
+    {
+        $textSections = ['identity', 'personality', 'sources'];
+
+        foreach ($textSections as $section) {
+            if (! isset($extraction[$section]) || ! is_array($extraction[$section])) {
+                continue;
+            }
+            $extraction[$section] = $this->deepCleanStrings($extraction[$section]);
+        }
+
+        return $extraction;
+    }
+
+    protected function deepCleanStrings(mixed $data): mixed
+    {
+        if (is_string($data)) {
+            $cleaned = BrandGuidelineSectionParser::collapseLetterSpacedText($data);
+            return preg_replace('/\s{3,}/', '  ', $cleaned);
+        }
+        if (is_array($data)) {
+            return array_map(fn ($v) => $this->deepCleanStrings($v), $data);
+        }
+
+        return $data;
     }
 
     /**

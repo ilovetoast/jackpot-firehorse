@@ -45,6 +45,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const [companyUsers, setCompanyUsers] = useState([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [password, setPassword] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
@@ -59,6 +60,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
     setAccessMode(mode === 'brand' && !canRestrict ? 'public' : mode)
     setAllowedUserIds(Array.isArray(download.allowed_user_ids) ? [...download.allowed_user_ids] : [])
     setPassword('')
+    setShowCurrentPassword(false)
     setError(null)
     setAnalytics({ loading: false, error: null, data: null })
     analyticsFetchedRef.current = false
@@ -329,24 +331,46 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                   Password (optional)
                 </label>
                 {download.password_protected && (
-                  <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700" role="status">
-                    <LockClosedIcon className="h-4 w-4 shrink-0" aria-hidden />
-                    Password is set — enter a new one to change, or leave blank to keep it.
-                  </p>
+                  <div className="mb-2">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700" role="status">
+                      <LockClosedIcon className="h-4 w-4 shrink-0" aria-hidden />
+                      Password is set
+                    </p>
+                    {download.password_plain ? (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <div className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5">
+                          <code className="text-sm font-mono text-gray-800">
+                            {showCurrentPassword ? download.password_plain : '••••••••'}
+                          </code>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                          className="rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                        >
+                          {showCurrentPassword ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-gray-500">Password cannot be displayed.</p>
+                    )}
+                  </div>
                 )}
                 <input
                   id="edit-download-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Leave blank to keep current; enter new to change; not shown"
+                  placeholder={download.password_protected ? 'Enter new password to change' : 'Set a password'}
                   className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm sm:text-sm ${getFieldError('password') ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'}`}
                   autoComplete="new-password"
                 />
                 {getFieldError('password') && (
                   <p className="mt-1 text-sm text-red-600">{getFieldError('password')}</p>
                 )}
-                <p className="mt-1 text-xs text-gray-500">Enter a new password to change it, or leave blank to keep the current one.</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {download.password_protected ? 'Enter a new password to change it, or leave blank to keep the current one.' : 'Optionally set a password to protect this download.'}
+                </p>
               </div>
             )}
 

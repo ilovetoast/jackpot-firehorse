@@ -461,6 +461,45 @@ class BrandController extends Controller
                 ])
             : [];
 
+        // Execution alignment data (ported from BrandDNAController::index)
+        $complianceAggregate = $brand->complianceAggregate;
+        $deliverableCategoryIds = \App\Models\Category::where('brand_id', $brand->id)
+            ->where('asset_type', \App\Enums\AssetType::DELIVERABLE)
+            ->pluck('id')
+            ->toArray();
+
+        $topExecutions = [];
+        $bottomExecutions = [];
+        if (! empty($deliverableCategoryIds)) {
+            $topScores = \App\Models\BrandComplianceScore::where('brand_id', $brand->id)
+                ->where('evaluation_status', 'evaluated')
+                ->whereNotNull('overall_score')
+                ->with('asset:id,title,metadata')
+                ->orderByDesc('overall_score')
+                ->limit(3)
+                ->get();
+            $bottomScores = \App\Models\BrandComplianceScore::where('brand_id', $brand->id)
+                ->where('evaluation_status', 'evaluated')
+                ->whereNotNull('overall_score')
+                ->with('asset:id,title,metadata')
+                ->orderBy('overall_score')
+                ->limit(3)
+                ->get();
+
+            foreach ($topScores as $s) {
+                $catId = $s->asset?->metadata['category_id'] ?? null;
+                if ($catId && in_array((int) $catId, $deliverableCategoryIds, true)) {
+                    $topExecutions[] = ['id' => $s->asset_id, 'title' => $s->asset?->title ?? '—', 'score' => $s->overall_score];
+                }
+            }
+            foreach ($bottomScores as $s) {
+                $catId = $s->asset?->metadata['category_id'] ?? null;
+                if ($catId && in_array((int) $catId, $deliverableCategoryIds, true)) {
+                    $bottomExecutions[] = ['id' => $s->asset_id, 'title' => $s->asset?->title ?? '—', 'score' => $s->overall_score];
+                }
+            }
+        }
+
         return Inertia::render('Brands/Edit', [
             'brand' => [
                 'id' => $brand->id,
@@ -552,6 +591,15 @@ class BrandController extends Controller
                 'updated_at' => $activeVersion->updated_at->toISOString(),
             ] : null,
             'all_versions' => $allVersions,
+            'compliance_aggregate' => $complianceAggregate ? [
+                'avg_score' => $complianceAggregate->execution_count > 0 ? (float) $complianceAggregate->avg_score : null,
+                'execution_count' => (int) $complianceAggregate->execution_count,
+                'high_score_count' => (int) $complianceAggregate->high_score_count,
+                'low_score_count' => (int) $complianceAggregate->low_score_count,
+                'last_scored_at' => $complianceAggregate->last_scored_at?->toISOString(),
+            ] : null,
+            'top_executions' => $topExecutions,
+            'bottom_executions' => $bottomExecutions,
         ]);
     }
 
@@ -584,10 +632,12 @@ class BrandController extends Controller
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'workspace_button_style' => 'nullable|string|in:primary,secondary,accent',
+            'logo_filter' => 'nullable|string|in:none,white,black,primary',
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
             'settings.asset_grid_style' => 'nullable|string|in:clean,impact',
+            'settings.nav_display_mode' => 'nullable|string|in:logo,text',
         ]);
 
         // Handle logo: explicit clear or asset_id (all logos must be assets, no direct file upload)

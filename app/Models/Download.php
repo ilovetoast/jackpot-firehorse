@@ -83,7 +83,8 @@ class Download extends Model
         'download_options',
         'access_mode',
         'allow_reshare',
-        'password_hash',   // D7: bcrypt hash for public download link (optional)
+        'password_hash',       // D7: bcrypt hash for public download link (optional)
+        'password_encrypted',  // AES-encrypted plaintext for authorized retrieval
         'branding_options', // D7: legacy; R3.1+ use landing_copy + brand settings
         'uses_landing_page', // R3.1: when true, show landing page; when false, go straight to ZIP
         'landing_copy',     // R3.1: JSON { headline?, subtext? } copy overrides
@@ -94,6 +95,14 @@ class Download extends Model
         'zip_total_chunks',      // D-Progress: total chunks when build started (observability)
         'zip_last_progress_at',  // D-Progress: last chunk completion timestamp (heartbeat)
         'escalation_ticket_id',  // Ticket created for failure escalation
+    ];
+
+    /**
+     * @var list<string>
+     */
+    protected $hidden = [
+        'password_hash',
+        'password_encrypted',
     ];
 
     /**

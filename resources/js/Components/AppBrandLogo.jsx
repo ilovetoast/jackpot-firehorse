@@ -8,9 +8,33 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const tenant = auth?.activeCompany
     const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
-    // Filter out disabled brands and ensure we have a valid array
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
     const hasMultipleBrands = validBrands && validBrands.length > 1
+
+    const navDisplayMode = activeBrand?.settings?.nav_display_mode || 'logo'
+    const showLogoInNav = navDisplayMode === 'logo' && !!activeBrand?.logo_path
+
+    const computeFilterStyle = (filter, primaryColor) => {
+        if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
+        if (filter === 'black') return { filter: 'brightness(0)' }
+        if (filter === 'primary' && primaryColor) {
+            const c = primaryColor.replace('#', '')
+            const r = parseInt(c.substr(0, 2), 16) / 255
+            const g = parseInt(c.substr(2, 2), 16) / 255
+            const b = parseInt(c.substr(4, 2), 16) / 255
+            const max = Math.max(r, g, b), min = Math.min(r, g, b)
+            let h = 0
+            if (max !== min) {
+                const d = max - min
+                if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+                else if (max === g) h = (b - r) / d + 2
+                else h = (r - g) / d + 4
+                h *= 60
+            }
+            return { filter: `brightness(0) sepia(1) saturate(5) hue-rotate(${h - 30}deg)` }
+        }
+        return {}
+    }
 
     const handleSwitchBrand = (brandId, e) => {
         if (e) {
@@ -109,7 +133,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     style={{ color: textColor }}
                 >
                     {!(isOnCompanyOverview && canViewCompanyOverview && tenant) && (
-                        activeBrand.logo_path ? (
+                        showLogoInNav ? (
                             <img
                                 src={activeBrand.logo_path}
                                 alt={brandName}
@@ -125,16 +149,18 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             </div>
                         )
                     )}
-                    <span 
-                        className="truncate min-w-0"
-                        style={{ 
-                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                            maxWidth: '200px'
-                        }}
-                        title={displayLabel}
-                    >
-                        {displayLabel}
-                    </span>
+                    {!showLogoInNav && (
+                        <span 
+                            className="truncate min-w-0"
+                            style={{ 
+                                fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
+                                maxWidth: '200px'
+                            }}
+                            title={displayLabel}
+                        >
+                            {displayLabel}
+                        </span>
+                    )}
                     <svg
                         className="h-5 w-5 flex-shrink-0"
                         style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
@@ -186,6 +212,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                     brands.map((brandOption) => {
                                         const isDisabled = brandOption.is_disabled
                                         const isActive = brandOption.is_active
+                                        const optionFilter = computeFilterStyle(brandOption.logo_filter, brandOption.primary_color)
+                                        const optionImage = brandOption.icon_path || brandOption.logo_path
                                         
                                         return (
                                             <button
@@ -207,12 +235,13 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                                 title={isDisabled ? 'This brand is not accessible on your current plan. Upgrade to access it.' : undefined}
                                             >
                                         {(() => {
-                                            if (brandOption.logo_path) {
+                                            if (optionImage) {
                                                 return (
                                                     <img
-                                                        src={brandOption.logo_path}
+                                                        src={optionImage}
                                                         alt={brandOption.name}
-                                                        className="h-8 w-auto flex-shrink-0"
+                                                        className="h-8 w-8 flex-shrink-0 rounded-full object-contain"
+                                                        style={optionFilter}
                                                     />
                                                 )
                                             }
@@ -274,8 +303,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
     const singleBrandHref = rootLinkHref ?? '/app'
     return (
-        <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
-            {activeBrand.logo_path ? (
+        <Link href={singleBrandHref} className="flex items-center gap-2 min-w-0 max-w-full">
+            {showLogoInNav ? (
                 <img
                     src={activeBrand.logo_path}
                     alt={brandName}
@@ -291,7 +320,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
                     </div>
                     <span 
-                        className="truncate min-w-0 ml-2"
+                        className="truncate min-w-0"
                         style={{ 
                             fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
                             maxWidth: '200px'

@@ -37,6 +37,7 @@ class BrandExtractionSchema
                 'secondary_colors' => [],
                 'fonts' => [],
                 'logo_description' => null,
+                'logo_url' => null,
                 'photography_style' => null,
                 'visual_style' => null,
                 'design_cues' => [],

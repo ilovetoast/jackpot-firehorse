@@ -433,7 +433,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                 </div>
                                 <p className="text-sm text-gray-500">{hasDraft ? 'Resume where you left off, or start fresh.' : 'You can import a PDF or start from scratch on the first step.'}</p>
                             </div>
-                            <Link href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna`} className="block text-sm text-gray-500 hover:text-gray-700">Or configure Brand DNA in Settings</Link>
+                            <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`} className="block text-sm text-gray-500 hover:text-gray-700">Or configure Brand DNA in Settings</Link>
                         </div>
                     </div>
                 ) : (
