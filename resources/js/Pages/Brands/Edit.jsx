@@ -18,6 +18,11 @@ import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
 import AssetImagePickerFieldMulti from '../../Components/media/AssetImagePickerFieldMulti'
 import BrandMembersSection from '../../Components/brand/BrandMembersSection'
 import PublicPageTheme from '../../Components/branding/PublicPageTheme'
+import EntryExperience from '../../Components/portal/EntryExperience'
+import PublicAccess from '../../Components/portal/PublicAccess'
+import SharingLinks from '../../Components/portal/SharingLinks'
+import InviteExperience from '../../Components/portal/InviteExperience'
+import AgencyTemplates from '../../Components/portal/AgencyTemplates'
 
 // Phase 1: Categories and Metadata sections hidden from Brand Identity page (will be re-homed later)
 const SHOW_CATEGORIES_AND_METADATA = false
@@ -798,12 +803,12 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], compliance_aggregate, top_executions, bottom_executions }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
     const { auth } = usePage().props
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const [topLevelNav, setTopLevelNav] = useState('brand_settings') // brand_model | brand_settings
-    const [activeTab, setActiveTab] = useState('identity') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|public-pages|members
+    const [activeTab, setActiveTab] = useState('identity') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|brand-portal|members
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
@@ -893,6 +898,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             default_subtext: brand.download_landing_settings?.default_subtext || '',
             background_asset_ids: Array.isArray(brand.download_landing_settings?.background_asset_ids) ? brand.download_landing_settings.background_asset_ids : [],
         },
+        portal_settings: portal_settings || {},
     })
 
     // Brand DNA: model_payload from active version (Strategy, Positioning, Expression, Standards tabs)
@@ -1209,7 +1215,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 : [
                                     { id: 'identity', label: 'Identity' },
                                     { id: 'workspace', label: 'Workspace' },
-                                    { id: 'public-pages', label: 'Public Pages' },
+                                    { id: 'brand-portal', label: 'Brand Portal' },
                                     { id: 'members', label: 'Members' },
                                 ]
                             ).map((item) => (
@@ -1244,7 +1250,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             } catch { return '—' }
                         }
                         return (
-                            <div className="mt-4 rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200/20">
+                            <div className="mt-4 mb-6 rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200/20">
                                 {/* Top row: enabled toggle + version selector */}
                                 <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                                     <div className="flex items-center gap-4">
@@ -1485,7 +1491,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                 ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'scoring') ? (
                 /* DNA tabs: separate form, saves to model_payload */
-                <form onSubmit={handleSaveDna} className="space-y-8">
+                <form onSubmit={handleSaveDna} className="mt-8 space-y-8">
                     {activeTab === 'strategy' && (
                     <div id="strategy" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
@@ -1503,7 +1509,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             id="archetype"
                                             value={modelPayload.strategy?.archetype ?? ''}
                                             onChange={(e) => setModelPayloadField('strategy.archetype', e.target.value || null)}
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 focus:border-indigo-500 sm:text-sm"
+                                            className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm"
                                         >
                                             <option value="">Select archetype</option>
                                             {ARCHETYPES.map((a) => (
@@ -1513,32 +1519,32 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </div>
                                     <div>
                                         <label htmlFor="tone" className="block text-sm font-medium text-gray-900">Tone</label>
-                                        <input type="text" id="tone" value={modelPayload.strategy?.tone ?? ''} onChange={(e) => setModelPayloadField('strategy.tone', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Professional, Playful" />
+                                        <input type="text" id="tone" value={modelPayload.strategy?.tone ?? ''} onChange={(e) => setModelPayloadField('strategy.tone', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" placeholder="e.g. Professional, Playful" />
                                     </div>
                                     <div>
                                         <label htmlFor="voice_description" className="block text-sm font-medium text-gray-900">Voice description</label>
-                                        <textarea id="voice_description" rows={3} value={modelPayload.strategy?.voice_description ?? ''} onChange={(e) => setModelPayloadField('strategy.voice_description', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="How your brand sounds in communication" />
+                                        <textarea id="voice_description" rows={5} value={modelPayload.strategy?.voice_description ?? ''} onChange={(e) => setModelPayloadField('strategy.voice_description', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="How your brand sounds in communication" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Traits</label>
-                                        <p className="text-xs text-gray-500 mb-2">Comma-separated or add one per line</p>
-                                        <textarea rows={2} value={(modelPayload.strategy?.traits || []).join(', ')} onChange={(e) => setModelPayloadField('strategy.traits', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="e.g. Bold, Innovative, Trustworthy" />
+                                        <label className="block text-sm font-medium text-gray-900">Traits</label>
+                                        <p className="text-xs text-gray-500 mt-1 mb-2">Comma-separated or add one per line</p>
+                                        <textarea rows={3} value={(modelPayload.strategy?.traits || []).join(', ')} onChange={(e) => setModelPayloadField('strategy.traits', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="e.g. Bold, Innovative, Trustworthy" />
                                     </div>
                                     <div>
                                         <label htmlFor="purpose_why" className="block text-sm font-medium text-gray-900">Purpose — Why</label>
-                                        <textarea id="purpose_why" rows={2} value={modelPayload.purpose?.why ?? ''} onChange={(e) => setModelPayloadField('purpose.why', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Why does your brand exist?" />
+                                        <textarea id="purpose_why" rows={3} value={modelPayload.purpose?.why ?? ''} onChange={(e) => setModelPayloadField('purpose.why', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Why does your brand exist?" />
                                     </div>
                                     <div>
                                         <label htmlFor="purpose_what" className="block text-sm font-medium text-gray-900">Purpose — What</label>
-                                        <textarea id="purpose_what" rows={2} value={modelPayload.purpose?.what ?? ''} onChange={(e) => setModelPayloadField('purpose.what', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="What does your brand do?" />
+                                        <textarea id="purpose_what" rows={3} value={modelPayload.purpose?.what ?? ''} onChange={(e) => setModelPayloadField('purpose.what', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="What does your brand do?" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Beliefs</label>
-                                        <textarea rows={2} value={(modelPayload.beliefs || []).join('\n')} onChange={(e) => setModelPayloadField('beliefs', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="One belief per line" />
+                                        <label className="block text-sm font-medium text-gray-900">Beliefs</label>
+                                        <textarea rows={4} value={(modelPayload.beliefs || []).join('\n')} onChange={(e) => setModelPayloadField('beliefs', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="One belief per line" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Values</label>
-                                        <textarea rows={2} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="One value per line" />
+                                        <label className="block text-sm font-medium text-gray-900">Values</label>
+                                        <textarea rows={4} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="One value per line" />
                                     </div>
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
@@ -1561,23 +1567,23 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mt-6 space-y-6">
                                     <div>
                                         <label htmlFor="industry" className="block text-sm font-medium text-gray-900">Industry</label>
-                                        <input type="text" id="industry" value={modelPayload.positioning?.industry ?? ''} onChange={(e) => setModelPayloadField('positioning.industry', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <input type="text" id="industry" value={modelPayload.positioning?.industry ?? ''} onChange={(e) => setModelPayloadField('positioning.industry', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="target_audience" className="block text-sm font-medium text-gray-900">Target audience</label>
-                                        <textarea id="target_audience" rows={2} value={modelPayload.positioning?.target_audience ?? ''} onChange={(e) => setModelPayloadField('positioning.target_audience', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <textarea id="target_audience" rows={3} value={modelPayload.positioning?.target_audience ?? ''} onChange={(e) => setModelPayloadField('positioning.target_audience', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" />
                                     </div>
                                     <div>
                                         <label htmlFor="market_category" className="block text-sm font-medium text-gray-900">Market category</label>
-                                        <input type="text" id="market_category" value={modelPayload.positioning?.market_category ?? ''} onChange={(e) => setModelPayloadField('positioning.market_category', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <input type="text" id="market_category" value={modelPayload.positioning?.market_category ?? ''} onChange={(e) => setModelPayloadField('positioning.market_category', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="competitive_position" className="block text-sm font-medium text-gray-900">Competitive position</label>
-                                        <input type="text" id="competitive_position" value={modelPayload.positioning?.competitive_position ?? ''} onChange={(e) => setModelPayloadField('positioning.competitive_position', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <input type="text" id="competitive_position" value={modelPayload.positioning?.competitive_position ?? ''} onChange={(e) => setModelPayloadField('positioning.competitive_position', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="tagline" className="block text-sm font-medium text-gray-900">Tagline</label>
-                                        <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                     </div>
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
@@ -1600,19 +1606,19 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mt-6 space-y-6">
                                     <div>
                                         <label htmlFor="brand_look" className="block text-sm font-medium text-gray-900">Brand look</label>
-                                        <textarea id="brand_look" rows={2} value={modelPayload.expression?.brand_look ?? ''} onChange={(e) => setModelPayloadField('expression.brand_look', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Visual style, photography style" />
+                                        <textarea id="brand_look" rows={4} value={modelPayload.expression?.brand_look ?? ''} onChange={(e) => setModelPayloadField('expression.brand_look', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Visual style, photography style" />
                                     </div>
                                     <div>
                                         <label htmlFor="brand_voice" className="block text-sm font-medium text-gray-900">Brand voice</label>
-                                        <textarea id="brand_voice" rows={2} value={modelPayload.expression?.brand_voice ?? ''} onChange={(e) => setModelPayloadField('expression.brand_voice', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                        <textarea id="brand_voice" rows={4} value={modelPayload.expression?.brand_voice ?? ''} onChange={(e) => setModelPayloadField('expression.brand_voice', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Tone keywords</label>
-                                        <textarea rows={2} value={(modelPayload.expression?.tone_keywords || []).join(', ')} onChange={(e) => setModelPayloadField('expression.tone_keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                        <label className="block text-sm font-medium text-gray-900">Tone keywords</label>
+                                        <textarea rows={3} value={(modelPayload.expression?.tone_keywords || []).join(', ')} onChange={(e) => setModelPayloadField('expression.tone_keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Photography attributes</label>
-                                        <textarea rows={2} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                        <label className="block text-sm font-medium text-gray-900">Photography attributes</label>
+                                        <textarea rows={3} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
@@ -1636,34 +1642,34 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                         <div>
                                             <label htmlFor="primary_font" className="block text-sm font-medium text-gray-900">Primary font</label>
-                                            <input type="text" id="primary_font" value={modelPayload.standards?.primary_font ?? ''} onChange={(e) => setModelPayloadField('standards.primary_font', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                            <input type="text" id="primary_font" value={modelPayload.standards?.primary_font ?? ''} onChange={(e) => setModelPayloadField('standards.primary_font', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                         </div>
                                         <div>
                                             <label htmlFor="secondary_font" className="block text-sm font-medium text-gray-900">Secondary font</label>
-                                            <input type="text" id="secondary_font" value={modelPayload.standards?.secondary_font ?? ''} onChange={(e) => setModelPayloadField('standards.secondary_font', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                            <input type="text" id="secondary_font" value={modelPayload.standards?.secondary_font ?? ''} onChange={(e) => setModelPayloadField('standards.secondary_font', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                         <div>
                                             <label htmlFor="heading_style" className="block text-sm font-medium text-gray-900">Heading style</label>
-                                            <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                            <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                         </div>
                                         <div>
                                             <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
-                                            <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" />
+                                            <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Allowed colors</label>
-                                        <textarea rows={2} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
+                                        <label className="block text-sm font-medium text-gray-900">Allowed colors</label>
+                                        <textarea rows={3} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Banned colors</label>
-                                        <textarea rows={2} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Hex codes, comma-separated" />
+                                        <label className="block text-sm font-medium text-gray-900">Banned colors</label>
+                                        <textarea rows={3} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">Allowed fonts</label>
-                                        <textarea rows={2} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-600 sm:text-sm" placeholder="Comma-separated" />
+                                        <label className="block text-sm font-medium text-gray-900">Allowed fonts</label>
+                                        <textarea rows={3} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
                                     {/* Visual References by Category */}
                                     <VisualReferenceCategoryPicker
@@ -2462,26 +2468,98 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </>
                     )}
 
-                    {/* Tab: Public Pages — Public page theming (design system) */}
-                    {activeTab === 'public-pages' && (
-                    <div id="public-pages" className="scroll-mt-8">
+                    {/* Tab: Brand Portal — Unified portal control surface */}
+                    {activeTab === 'brand-portal' && (
+                    <div id="brand-portal" className="scroll-mt-8 space-y-6">
+                        {/* Quick Actions Bar */}
+                        {portal_url && (
+                            <div className="rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 px-5 py-4 flex items-center justify-between">
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-800">Public Portal</p>
+                                    <a
+                                        href={portal_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs font-mono text-indigo-600 hover:text-indigo-700 truncate block"
+                                    >
+                                        {portal_url}
+                                    </a>
+                                </div>
+                                <a
+                                    href={portal_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors"
+                                >
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    View as Client
+                                </a>
+                            </div>
+                        )}
+
+                        {/* Section A: Entry Experience */}
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
-                                <div className="mb-2">
-                                    <h2 className="text-xl font-semibold text-gray-900">Public Page Theme</h2>
-                                    <p className="mt-3 text-sm text-gray-600 leading-relaxed max-w-xl">
-                                        Define how brand-facing pages look — downloads, shared links, collections, and campaign pages.
-                                    </p>
-                                </div>
-                                <PublicPageTheme
-                                    brand={brand}
+                                <EntryExperience
                                     data={data}
                                     setData={setData}
+                                    portalFeatures={portal_features}
+                                    brand={brand}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Section B: Public Access (absorbs old Public Pages) */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <PublicAccess
+                                    data={data}
+                                    setData={setData}
+                                    portalFeatures={portal_features}
+                                    brand={brand}
+                                    portalUrl={portal_url}
                                     route={typeof route === 'function' ? route : (name, params) => {
                                         const p = params && typeof params === 'object' && !Array.isArray(params) ? params : {}
                                         if (name === 'brands.download-background-candidates') return `/app/brands/${p.brand ?? params ?? brand.id}/download-background-candidates`
                                         return '#'
                                     }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Section C: Sharing & Links */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <SharingLinks
+                                    data={data}
+                                    setData={setData}
+                                    portalFeatures={portal_features}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Section D: Invite Experience */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <InviteExperience
+                                    data={data}
+                                    setData={setData}
+                                    portalFeatures={portal_features}
+                                    brand={brand}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Section E: Agency Templates */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <AgencyTemplates
+                                    data={data}
+                                    setData={setData}
+                                    portalFeatures={portal_features}
                                 />
                             </div>
                         </div>

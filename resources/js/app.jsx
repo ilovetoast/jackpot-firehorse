@@ -67,8 +67,8 @@ createInertiaApp({
         const pageModule = await component()
         const PageComponent = pageModule.default || pageModule
         
-        // Standalone cinematic experience: no global UI (FlashMessage, tray, download bar)
-        const isExperience = name.startsWith('Experience/')
+        // Standalone cinematic pages: no global UI (FlashMessage, tray, download bar)
+        const isExperience = name.startsWith('Experience/') || name.startsWith('Gateway/')
         if (isExperience) {
             return (props) => <PageComponent {...props} />
         }

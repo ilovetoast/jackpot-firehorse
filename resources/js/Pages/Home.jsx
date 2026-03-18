@@ -7,22 +7,14 @@ export default function Home() {
     // Determine the button text and link based on auth status
     const getButtonProps = () => {
         if (auth?.user) {
-            // Check if user has a tenant, if so go to dashboard, otherwise companies page
-            if (auth.companies && auth.companies.length > 0) {
-                return {
-                    text: 'Dashboard',
-                    href: '/app/overview',
-                }
-            } else {
-                return {
-                    text: 'Dashboard',
-                    href: '/app/companies',
-                }
+            return {
+                text: 'Dashboard',
+                href: '/gateway',
             }
         } else {
             return {
                 text: 'Sign in',
-                href: '/login',
+                href: '/gateway',
             }
         }
     }
@@ -51,14 +43,14 @@ export default function Home() {
                             ) : (
                                 <>
                                     <Link
-                                        href="/login"
+                                        href="/gateway"
                                         className="text-sm font-semibold leading-6 text-gray-900 hover:text-gray-700"
                                     >
                                         Login
                                     </Link>
                                     {signup_enabled !== false && (
                                         <Link
-                                            href="/signup"
+                                            href="/gateway?mode=register"
                                             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                         >
                                             Sign up

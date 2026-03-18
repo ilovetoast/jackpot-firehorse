@@ -136,4 +136,16 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Root Domain (for subdomain routing)
+    |--------------------------------------------------------------------------
+    |
+    | The root domain used to resolve brand portal subdomains.
+    | e.g. "jackpot.com" → {brandSlug}.jackpot.com
+    |
+    */
+
+    'root_domain' => env('ROOT_DOMAIN', parse_url(env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+
 ];

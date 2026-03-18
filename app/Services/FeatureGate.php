@@ -117,6 +117,54 @@ class FeatureGate
     }
 
     /**
+     * Brand Portal: Check if tenant can customize portal entry experience, tagline, invite branding.
+     * Available on Pro+.
+     */
+    public function brandPortalCustomization(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+
+        return (bool) ($plan['brand_portal']['customization'] ?? false);
+    }
+
+    /**
+     * Brand Portal: Check if tenant can enable public portal access (subdomain, public links).
+     * Available on Premium+.
+     */
+    public function brandPortalPublicAccess(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+
+        return (bool) ($plan['brand_portal']['public_access'] ?? false);
+    }
+
+    /**
+     * Brand Portal: Check if tenant has advanced sharing (external collections, expiring links).
+     * Available on Enterprise only.
+     */
+    public function brandPortalAdvancedSharing(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+
+        return (bool) ($plan['brand_portal']['sharing'] ?? false);
+    }
+
+    /**
+     * Brand Portal: Check if tenant can use agency portal templates.
+     * Available on Enterprise only.
+     */
+    public function brandPortalAgencyTemplates(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+
+        return (bool) ($plan['brand_portal']['agency_templates'] ?? false);
+    }
+
+    /**
      * Phase M-2: Check if metadata approval is enabled for company and brand.
      * 
      * Returns true ONLY if:

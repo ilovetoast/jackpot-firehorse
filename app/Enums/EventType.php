@@ -246,6 +246,21 @@ class EventType
     // AI System Insight events
     public const AI_SYSTEM_INSIGHT = 'ai.system_insight';
 
+    // Gateway events (Brand Portal entry funnel analytics)
+    public const GATEWAY_VIEWED = 'gateway.viewed';
+    public const GATEWAY_LOGIN = 'gateway.login';
+    public const GATEWAY_REGISTER = 'gateway.register';
+    public const GATEWAY_ENTER_CLICKED = 'gateway.enter_clicked';
+    public const GATEWAY_AUTO_ENTER = 'gateway.auto_enter';
+    public const GATEWAY_SWITCH_USED = 'gateway.switch_used';
+    public const GATEWAY_INVITE_ACCEPTED = 'gateway.invite_accepted';
+
+    // Public portal events (external brand portal analytics)
+    public const PORTAL_VIEWED = 'portal.viewed';
+    public const PORTAL_COLLECTION_VIEWED = 'portal.collection_viewed';
+    public const PORTAL_ASSET_CLICKED = 'portal.asset_clicked';
+    public const PORTAL_DOWNLOAD = 'portal.download';
+
     /**
      * Get all event types as an array.
      * 
@@ -386,6 +401,17 @@ class EventType
             self::AI_BUDGET_EXCEEDED,
             self::AI_BUDGET_BLOCKED,
             self::AI_SYSTEM_INSIGHT,
+            self::GATEWAY_VIEWED,
+            self::GATEWAY_LOGIN,
+            self::GATEWAY_REGISTER,
+            self::GATEWAY_ENTER_CLICKED,
+            self::GATEWAY_AUTO_ENTER,
+            self::GATEWAY_SWITCH_USED,
+            self::GATEWAY_INVITE_ACCEPTED,
+            self::PORTAL_VIEWED,
+            self::PORTAL_COLLECTION_VIEWED,
+            self::PORTAL_ASSET_CLICKED,
+            self::PORTAL_DOWNLOAD,
         ];
     }
 

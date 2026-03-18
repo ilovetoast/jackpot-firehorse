@@ -39,6 +39,12 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
+        'brand_portal' => [
+            'customization' => false,
+            'public_access' => false,
+            'sharing' => false,
+            'agency_templates' => false,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
@@ -97,6 +103,12 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
+        'brand_portal' => [
+            'customization' => false,
+            'public_access' => false,
+            'sharing' => false,
+            'agency_templates' => false,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 200,
@@ -163,6 +175,12 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => false,
+        'brand_portal' => [
+            'customization' => true,
+            'public_access' => false,
+            'sharing' => false,
+            'agency_templates' => false,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 1000,
@@ -229,6 +247,12 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => true, // C10: Premium
+        'brand_portal' => [
+            'customization' => true,
+            'public_access' => true,
+            'sharing' => true,
+            'agency_templates' => false,
+        ],
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999, // Unlimited
@@ -303,6 +327,12 @@ return [
         ],
         'public_collections_enabled' => true,
         'public_collection_downloads_enabled' => true,
+        'brand_portal' => [
+            'customization' => true,
+            'public_access' => true,
+            'sharing' => true,
+            'agency_templates' => true,
+        ],
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999,

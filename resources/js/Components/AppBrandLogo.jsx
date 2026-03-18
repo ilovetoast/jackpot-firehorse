@@ -51,7 +51,6 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 preserveState: true,
                 preserveScroll: true,
                 onSuccess: () => {
-                    // If on a brand-specific URL (e.g. guidelines, edit, dna), navigate to the same page for the new brand
                     const path = typeof window !== 'undefined' ? window.location.pathname : ''
                     const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
                     if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
@@ -59,7 +58,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         const search = typeof window !== 'undefined' ? window.location.search : ''
                         router.visit(newPath + search)
                     } else {
-                        router.reload({ only: ['auth'] })
+                        router.visit('/app/overview')
                     }
                 },
             })
@@ -149,7 +148,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             </div>
                         )
                     )}
-                    {!showLogoInNav && (
+                    {(!showLogoInNav || (isOnCompanyOverview && canViewCompanyOverview && tenant)) && (
                         <span 
                             className="truncate min-w-0"
                             style={{ 

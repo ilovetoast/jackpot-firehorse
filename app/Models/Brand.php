@@ -51,6 +51,7 @@ class Brand extends Model
         'logo_filter',
         'settings',
         'download_landing_settings', // D10: JSON { enabled, logo_asset_id, color_role, background_asset_ids, default_headline, default_subtext }
+        'portal_settings', // Brand Portal: JSON { entry, public, sharing, invite }
     ];
 
     /**
@@ -68,6 +69,7 @@ class Brand extends Model
         'accent_color_user_defined' => 'boolean',
         'settings' => 'array',
         'download_landing_settings' => 'array', // R3.2
+        'portal_settings' => 'array',
     ];
     }
 
@@ -252,6 +254,17 @@ class Brand extends Model
     public function tickets(): BelongsToMany
     {
         return $this->belongsToMany(Ticket::class)->withTimestamps();
+    }
+
+    /**
+     * Get a portal setting using dot notation with a fallback default.
+     * Example: $brand->getPortalSetting('entry.style', 'cinematic')
+     */
+    public function getPortalSetting(string $key, mixed $default = null): mixed
+    {
+        $settings = $this->portal_settings ?? [];
+
+        return data_get($settings, $key, $default);
     }
 
     /**

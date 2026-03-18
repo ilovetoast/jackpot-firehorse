@@ -2,11 +2,29 @@
 
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\SignupController;
+use App\Http\Controllers\BrandGatewayController;
+use App\Http\Controllers\PublicBrandPortalController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-
+// ─── Public Brand Portal ─────────────────────────────────────────────
+// Subdomain mode: {brandSlug}.rootdomain.com → branded public portal (no auth)
+// Path fallback: /portal/{brandSlug} → same portal, for dev or non-subdomain envs
+$rootDomain = config('app.root_domain', config('subdomain.main_domain'));
+if ($rootDomain && config('subdomain.enabled')) {
+    Route::domain("{brandSlug}.{$rootDomain}")->group(function () {
+        Route::get('/', [PublicBrandPortalController::class, 'index'])->name('public-portal.index');
+        Route::get('/collections/{collection}', [PublicBrandPortalController::class, 'collection'])->name('public-portal.collection');
+        Route::get('/assets/{asset}', [PublicBrandPortalController::class, 'asset'])->name('public-portal.asset');
+    });
+}
+// Path-based fallback (always available — useful for dev + preview)
+Route::prefix('portal/{brandSlug}')->group(function () {
+    Route::get('/', [PublicBrandPortalController::class, 'index'])->name('public-portal.path.index');
+    Route::get('/collections/{collection}', [PublicBrandPortalController::class, 'collection'])->name('public-portal.path.collection');
+    Route::get('/assets/{asset}', [PublicBrandPortalController::class, 'asset'])->name('public-portal.path.asset');
+});
 
 // Handle OPTIONS preflight requests for CORS
 Route::options('/{any}', function () {
@@ -38,6 +56,16 @@ Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
 
 // Standalone cinematic experience (frontend-only, no auth)
 Route::get('/experience', fn () => Inertia::render('Experience/Index'));
+
+// Brand Gateway — unified entry layer (auth-agnostic)
+Route::get('/gateway', [BrandGatewayController::class, 'index'])->name('gateway');
+Route::post('/gateway/login', [BrandGatewayController::class, 'login'])->name('gateway.login');
+Route::post('/gateway/register', [BrandGatewayController::class, 'register'])->name('gateway.register');
+Route::get('/gateway/invite/{token}', [BrandGatewayController::class, 'invite'])->name('gateway.invite');
+Route::post('/gateway/invite/{token}/accept', [BrandGatewayController::class, 'acceptInvite'])->name('gateway.invite.accept')->middleware('auth');
+Route::post('/gateway/invite/{token}/complete', [BrandGatewayController::class, 'completeInviteRegistration'])->name('gateway.invite.complete');
+Route::post('/gateway/select-company', [BrandGatewayController::class, 'selectCompany'])->name('gateway.select-company')->middleware('auth');
+Route::post('/gateway/select-brand', [BrandGatewayController::class, 'selectBrand'])->name('gateway.select-brand')->middleware('auth');
 
 Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'show'])->name('login');

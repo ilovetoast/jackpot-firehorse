@@ -600,6 +600,9 @@ class BrandController extends Controller
             ] : null,
             'top_executions' => $topExecutions,
             'bottom_executions' => $bottomExecutions,
+            'portal_settings' => $brand->portal_settings ?? [],
+            'portal_features' => $this->resolvePortalFeatures($tenant),
+            'portal_url' => \App\Http\Controllers\PublicBrandPortalController::portalUrl($brand),
         ]);
     }
 
@@ -638,6 +641,31 @@ class BrandController extends Controller
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
             'settings.asset_grid_style' => 'nullable|string|in:clean,impact',
             'settings.nav_display_mode' => 'nullable|string|in:logo,text',
+            'portal_settings' => 'nullable|array',
+            'portal_settings.entry' => 'nullable|array',
+            'portal_settings.entry.style' => 'nullable|string|in:cinematic,instant',
+            'portal_settings.entry.auto_enter' => 'nullable|boolean',
+            'portal_settings.entry.default_destination' => 'nullable|string|in:assets,guidelines,collections',
+            'portal_settings.entry.primary_button' => 'nullable|string|in:assets,guidelines,collections',
+            'portal_settings.entry.secondary_button' => 'nullable|string|in:assets,guidelines,collections',
+            'portal_settings.entry.tagline_override' => 'nullable|string|max:255',
+            'portal_settings.public' => 'nullable|array',
+            'portal_settings.public.enabled' => 'nullable|boolean',
+            'portal_settings.public.visibility' => 'nullable|string|in:private,link_only,public',
+            'portal_settings.public.indexable' => 'nullable|boolean',
+            'portal_settings.sharing' => 'nullable|array',
+            'portal_settings.sharing.external_collections' => 'nullable|boolean',
+            'portal_settings.sharing.expiring_links' => 'nullable|boolean',
+            'portal_settings.sharing.watermark_branding' => 'nullable|boolean',
+            'portal_settings.agency_template' => 'nullable|array',
+            'portal_settings.agency_template.enabled' => 'nullable|boolean',
+            'portal_settings.agency_template.template_id' => 'nullable|string|max:100',
+            'portal_settings.agency_template.locked_fields' => 'nullable|array',
+            'portal_settings.invite' => 'nullable|array',
+            'portal_settings.invite.headline' => 'nullable|string|max:255',
+            'portal_settings.invite.subtext' => 'nullable|string|max:500',
+            'portal_settings.invite.background_style' => 'nullable|string|in:brand,minimal,dark',
+            'portal_settings.invite.cta_label' => 'nullable|string|max:100',
         ]);
 
         // Handle logo: explicit clear or asset_id (all logos must be assets, no direct file upload)
@@ -702,6 +730,14 @@ class BrandController extends Controller
         if (is_array($dls)) {
             $current = $brand->download_landing_settings ?? [];
             $validated['download_landing_settings'] = array_merge($current, $dls);
+        }
+
+        // Handle portal_settings (Brand Portal system) — recursive merge preserves
+        // sibling keys so saving { entry: { auto_enter: true } } won't wipe style/destination.
+        $portalInput = $request->input('portal_settings');
+        if (is_array($portalInput)) {
+            $current = $brand->portal_settings ?? [];
+            $validated['portal_settings'] = self::deepMergePortal($current, $portalInput);
         }
 
         // Handle workspace_button_style (dedicated column; fallback from settings.button_style for backward compat)
@@ -1325,6 +1361,36 @@ class BrandController extends Controller
             ->where('brand_id', $brand->id)
             ->first();
         return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+    }
+
+    protected function resolvePortalFeatures(\App\Models\Tenant $tenant): array
+    {
+        $featureGate = app(FeatureGate::class);
+
+        return [
+            'customization' => $featureGate->brandPortalCustomization($tenant),
+            'public_access' => $featureGate->brandPortalPublicAccess($tenant),
+            'sharing' => $featureGate->brandPortalAdvancedSharing($tenant),
+            'agency_templates' => $featureGate->brandPortalAgencyTemplates($tenant),
+        ];
+    }
+
+    /**
+     * Recursively merge portal settings so partial updates never overwrite sibling keys.
+     * Unlike array_replace_recursive, this also strips null leaves so clearing a field
+     * via the UI (sending null) doesn't leave phantom keys.
+     */
+    protected static function deepMergePortal(array $original, array $incoming): array
+    {
+        foreach ($incoming as $key => $value) {
+            if (is_array($value) && isset($original[$key]) && is_array($original[$key])) {
+                $original[$key] = self::deepMergePortal($original[$key], $value);
+            } else {
+                $original[$key] = $value;
+            }
+        }
+
+        return $original;
     }
 
     protected static function deepUnwrapPayload(array $data): array

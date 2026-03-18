@@ -52,7 +52,6 @@ export default function AppNav({ brand, tenant }) {
                 if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
                     const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
                     let search = typeof window !== 'undefined' ? window.location.search : ''
-                    // Strip transient builder steps that are brand-specific
                     if (newPath.includes('/brand-guidelines/builder') && search) {
                         const params = new URLSearchParams(search)
                         const step = params.get('step')
@@ -63,7 +62,7 @@ export default function AppNav({ brand, tenant }) {
                     }
                     router.visit(newPath + search)
                 } else {
-                    router.reload({ only: ['auth'] })
+                    router.visit('/app/overview')
                 }
             },
         })
