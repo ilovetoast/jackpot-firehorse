@@ -146,7 +146,10 @@ export default function AppNav({ brand, tenant, variant }) {
         }
         return {}
     }
-    const logoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
+    const baseLogoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
+    const logoFilterStyle = isTransparentVariant
+        ? { filter: 'brightness(0) invert(1)', transition: 'filter 0.3s ease' }
+        : { ...baseLogoFilterStyle, transition: 'filter 0.3s ease' }
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')

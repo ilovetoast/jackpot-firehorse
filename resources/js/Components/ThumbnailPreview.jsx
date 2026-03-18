@@ -86,12 +86,17 @@ export default function ThumbnailPreview({
         ? (asset?.thumbnail_url_large ?? asset?.final_thumbnail_url)
         : asset?.final_thumbnail_url
 
+    // SVG fallback: when no thumbnails exist, use the original SVG file (renders natively)
+    const svgOriginalFallback = isSvg && !effectiveFinalUrl && !asset?.preview_thumbnail_url
+        ? (asset?.original || null)
+        : null
+
     // Lock the URL on first render for grid, but allow updates for drawer
     const [lockedUrl, setLockedUrl] = useState(() => {
-        // Determine initial URL: final > preview > null
+        // Determine initial URL: final > preview > SVG original > null
         const initialFinal = effectiveFinalUrl
         const initialPreview = asset?.preview_thumbnail_url
-        return initialFinal || initialPreview || null
+        return initialFinal || initialPreview || svgOriginalFallback || null
     })
     
     // Also lock the type (final vs preview) at mount time
@@ -522,6 +527,20 @@ export default function ThumbnailPreview({
         return null
     }
     
+    // SVG fallback: render original SVG inline when thumbnails were skipped/failed
+    if (isSvg && svgOriginalFallback && (state === 'SKIPPED' || state === 'FAILED' || state === 'PENDING')) {
+        return (
+            <div className={`flex items-center justify-center bg-white ${className}`}>
+                <img
+                    src={svgOriginalFallback}
+                    alt={alt}
+                    className="max-w-full max-h-full object-contain p-2"
+                    loading="lazy"
+                />
+            </div>
+        )
+    }
+
     if (state === 'NOT_SUPPORTED' || state === 'FAILED' || state === 'SKIPPED') {
         return (
             <div className={`flex items-center justify-center bg-gray-50 ${className}`}>

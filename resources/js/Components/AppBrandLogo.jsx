@@ -8,11 +8,12 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const tenant = auth?.activeCompany
     const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
+    const [logoError, setLogoError] = useState(false)
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
     const hasMultipleBrands = validBrands && validBrands.length > 1
 
     const navDisplayMode = activeBrand?.settings?.nav_display_mode || 'logo'
-    const showLogoInNav = navDisplayMode === 'logo' && !!activeBrand?.logo_path
+    const showLogoInNav = navDisplayMode === 'logo' && !!activeBrand?.logo_path && !logoError
 
     const computeFilterStyle = (filter, primaryColor) => {
         if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
@@ -138,6 +139,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                 alt={brandName}
                                 className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
                                 style={logoFilterStyle}
+                                onError={() => setLogoError(true)}
                             />
                         ) : (
                             <div 
@@ -309,6 +311,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     alt={brandName}
                     className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
                     style={logoFilterStyle}
+                    onError={() => setLogoError(true)}
                 />
             ) : (
                 <>

@@ -339,7 +339,8 @@ export default function AssetImagePicker({
     }
     if (!isMulti && selectedAssetId) {
       const asset = assets.find((a) => a.id === selectedAssetId)
-      const thumb = asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url
+      const isSvgAsset = asset?.mime_type === 'image/svg+xml' || asset?.original_filename?.toLowerCase().endsWith('.svg')
+      const thumb = asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? (isSvgAsset ? asset?.original : null)
       if (getAssetDownloadUrl) {
         try {
           const url = getAssetDownloadUrl(selectedAssetId)
@@ -554,7 +555,8 @@ export default function AssetImagePicker({
                   ) : (
                     <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3">
                       {assets.map((asset) => {
-                        const thumb = asset.thumbnail_url ?? asset.final_thumbnail_url ?? asset.preview_thumbnail_url
+                        const isSvgBrowse = asset?.mime_type === 'image/svg+xml' || asset?.original_filename?.toLowerCase().endsWith('.svg')
+                        const thumb = asset.thumbnail_url ?? asset.final_thumbnail_url ?? asset.preview_thumbnail_url ?? (isSvgBrowse ? asset?.original : null)
                         const isSelected = isMulti ? selectedAssetIds.includes(asset.id) : selectedAssetId === asset.id
                         return (
                           <button

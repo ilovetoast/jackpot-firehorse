@@ -12,6 +12,7 @@
  * @param {string} size - Size variant: 'sm', 'md', 'lg', 'xl' or custom className
  * @param {string} className - Additional CSS classes
  */
+import { useState } from 'react'
 import { getContrastTextColor, getLuminance } from '../utils/colorUtils'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 
@@ -26,6 +27,7 @@ export default function BrandAvatar({
     size = 'md',
     className = '' 
 }) {
+    const [imgError, setImgError] = useState(false)
     // Get first letter of brand name
     const firstLetter = name ? name.charAt(0).toUpperCase() : 'B'
     
@@ -129,12 +131,13 @@ export default function BrandAvatar({
     
     // Show logo if available (when NOT using icon mode). Use contain so full logo is visible (same as graphics).
     // IMPORTANT: Do NOT add icon background color to logos
-    if (logoPath) {
+    if (logoPath && !imgError) {
         return (
             <img
                 src={logoPath}
                 alt={name || 'Brand'}
                 className={`${baseClasses} ${sizeClass} ${className} object-contain`}
+                onError={() => setImgError(true)}
             />
         )
     }

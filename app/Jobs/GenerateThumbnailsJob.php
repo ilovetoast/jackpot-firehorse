@@ -230,7 +230,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             $mime = $version ? $version->mime_type : $asset->mime_type;
             $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
             $fileType = $fileTypeService->detectFileType($mime, $ext);
-            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video'], true);
+            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg'], true);
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;

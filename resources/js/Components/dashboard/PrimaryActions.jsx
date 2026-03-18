@@ -64,11 +64,12 @@ const ALL_ACTIONS = [
 ]
 
 export default function PrimaryActions({ permissions = {}, brand = null }) {
-    const [compact, setCompact] = useState(false)
+    const [compact, setCompact] = useState(() =>
+        typeof window !== 'undefined' ? window.innerHeight < 820 : false
+    )
 
     useEffect(() => {
         const check = () => setCompact(window.innerHeight < 820)
-        check()
         window.addEventListener('resize', check, { passive: true })
         return () => window.removeEventListener('resize', check)
     }, [])

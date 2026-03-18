@@ -76,8 +76,8 @@ class Brand extends Model
     /**
      * Resolve logo_path from logo_id when logo_path is null.
      * When logo references an asset (logo_id), returns the thumbnail URL so the logo displays
-     * in nav, brand selector, etc. For SVG assets, the thumbnail route serves the original
-     * (passthrough); for raster, it serves the generated thumbnail.
+     * in nav, brand selector, etc. For SVG assets without thumbnails, serves the original
+     * file directly since SVGs render natively in browsers.
      */
     public function getLogoPathAttribute($value): ?string
     {
@@ -86,7 +86,23 @@ class Brand extends Model
         }
         $logoId = $this->attributes['logo_id'] ?? null;
         if ($logoId) {
-            return Asset::find($logoId)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+            $asset = Asset::find($logoId);
+            if (!$asset) {
+                return null;
+            }
+
+            $isSvg = $asset->mime_type === 'image/svg+xml'
+                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
+            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status
+                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
+
+            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+            }
+
+            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
         }
         return null;
     }
@@ -94,6 +110,7 @@ class Brand extends Model
     /**
      * Resolve icon_path from icon_id when icon_path is null.
      * When icon references an asset (icon_id), returns the thumbnail URL for display.
+     * For SVG assets without thumbnails, serves the original file directly.
      */
     public function getIconPathAttribute($value): ?string
     {
@@ -102,7 +119,23 @@ class Brand extends Model
         }
         $iconId = $this->attributes['icon_id'] ?? null;
         if ($iconId) {
-            return Asset::find($iconId)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+            $asset = Asset::find($iconId);
+            if (!$asset) {
+                return null;
+            }
+
+            $isSvg = $asset->mime_type === 'image/svg+xml'
+                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
+            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status
+                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
+
+            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+            }
+
+            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
         }
         return null;
     }

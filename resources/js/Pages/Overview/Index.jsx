@@ -1,7 +1,6 @@
 import { usePage, Link } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
-import LogoMark from '../../Components/Brand/LogoMark'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
 import AssetCollage from '../../Components/dashboard/AssetCollage'
 import { ChartBarSquareIcon } from '@heroicons/react/24/outline'
@@ -106,13 +105,27 @@ export default function Overview({
                             </div>
                         )}
 
-                        {/* LogoMark */}
-                        <div className="animate-fadeInUp-d1 mb-6">
-                            <LogoMark
-                                name={theme.name}
-                                logo={theme.logo}
-                                size="lg"
-                            />
+                        {/* Brand logo or initial */}
+                        <div className="animate-fadeInUp-d1 mb-5">
+                            {theme.logo ? (
+                                <img
+                                    src={theme.logo}
+                                    alt={theme.name || 'Brand'}
+                                    className="h-16 md:h-20 w-auto max-w-[240px] object-contain"
+                                    style={{ filter: 'brightness(0) invert(1)' }}
+                                />
+                            ) : (
+                                <div
+                                    className="h-14 w-14 rounded-xl flex items-center justify-center"
+                                    style={{
+                                        background: `linear-gradient(135deg, ${theme.colors?.primary || '#6366f1'}, ${theme.colors?.secondary || '#8b5cf6'})`,
+                                    }}
+                                >
+                                    <span className="text-xl font-bold text-white">
+                                        {(theme.name || 'J').charAt(0).toUpperCase()}
+                                    </span>
+                                </div>
+                            )}
                         </div>
 
                         {/* Brand name */}

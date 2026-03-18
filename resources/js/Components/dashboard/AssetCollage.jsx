@@ -1,12 +1,40 @@
 import { useState, useEffect, useCallback } from 'react'
 
-const COL_CONFIG = [
+const FULL_COL_CONFIG = [
     { w: '17%', bottom: '-30%', slots: 1 },
     { w: '19%', bottom: '-15%', slots: 2 },
     { w: '24%', bottom: '0%',   slots: 2 },
     { w: '26%', bottom: '10%',  slots: 2 },
     { w: '20%', bottom: '18%',  slots: 1 },
 ]
+
+function getLayout(count) {
+    if (count === 1) {
+        return [{ w: '50%', bottom: '5%', slots: 1 }]
+    }
+    if (count === 2) {
+        return [
+            { w: '40%', bottom: '-5%', slots: 1 },
+            { w: '50%', bottom: '10%', slots: 1 },
+        ]
+    }
+    if (count === 3) {
+        return [
+            { w: '28%', bottom: '-10%', slots: 1 },
+            { w: '36%', bottom: '5%',   slots: 1 },
+            { w: '30%', bottom: '15%',  slots: 1 },
+        ]
+    }
+    if (count <= 5) {
+        return [
+            { w: '22%', bottom: '-20%', slots: 1 },
+            { w: '26%', bottom: '-5%',  slots: 1 },
+            { w: '28%', bottom: '5%',   slots: 1 },
+            { w: '24%', bottom: '15%',  slots: 1 },
+        ]
+    }
+    return FULL_COL_CONFIG
+}
 
 export default function AssetCollage({ assets = [] }) {
     const [visible, setVisible] = useState(false)
@@ -40,8 +68,10 @@ export default function AssetCollage({ assets = [] }) {
 
     if (thumbs.length === 0) return null
 
+    const layout = getLayout(thumbs.length)
+
     let idx = 0
-    const columns = COL_CONFIG.map((col) => {
+    const columns = layout.map((col) => {
         const imgs = []
         for (let s = 0; s < col.slots && idx < thumbs.length; s++, idx++) {
             imgs.push(thumbs[idx])
@@ -49,10 +79,12 @@ export default function AssetCollage({ assets = [] }) {
         return { ...col, imgs }
     }).filter((col) => col.imgs.length > 0)
 
+    const isFew = thumbs.length <= 2
+
     return (
         <div className="absolute right-0 bottom-0 h-full w-[55%] pointer-events-none hidden lg:block overflow-hidden">
             <div
-                className="absolute bottom-0 left-0 right-0 flex gap-3 items-end px-2"
+                className={`absolute bottom-0 right-0 flex gap-3 items-end ${isFew ? 'pr-12' : 'left-0 px-2'}`}
                 style={{
                     transform: `translate(${mouseOffset.x}px, ${mouseOffset.y}px)`,
                     transition: 'transform 0.8s cubic-bezier(0.25, 0.1, 0.25, 1)',
@@ -74,7 +106,7 @@ export default function AssetCollage({ assets = [] }) {
                             <div
                                 key={ii}
                                 className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
-                                style={{ aspectRatio: ii === 0 && col.slots === 2 ? '3/4' : '4/5' }}
+                                style={{ aspectRatio: isFew ? '3/4' : (ii === 0 && col.slots === 2 ? '3/4' : '4/5') }}
                             >
                                 <img
                                     src={src}

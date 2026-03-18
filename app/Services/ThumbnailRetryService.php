@@ -159,6 +159,9 @@ class ThumbnailRetryService
             } elseif ($skipReason === 'unsupported_format:svg' &&
                       ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                 $isNowSupported = true;
+            } elseif ($skipReason === 'dimensions_unknown' &&
+                      ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {
