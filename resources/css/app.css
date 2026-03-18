@@ -89,6 +89,25 @@
         animation: fade-in 600ms ease-in-out forwards;
     }
 
+    /* Cinematic Dashboard: staggered hero entrance */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeInUp {
+        animation: fadeInUp 0.7s ease-out both;
+    }
+    .animate-fadeInUp-d1 { animation: fadeInUp 0.7s ease-out 0.1s both; }
+    .animate-fadeInUp-d2 { animation: fadeInUp 0.7s ease-out 0.2s both; }
+    .animate-fadeInUp-d3 { animation: fadeInUp 0.7s ease-out 0.35s both; }
+    .animate-fadeInUp-d4 { animation: fadeInUp 0.7s ease-out 0.5s both; }
+
+    /* Cinematic Dashboard: slow floating for collage items */
+    @keyframes collageFloat {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-8px); }
+    }
+
     /* Download landing: fluid, abstract jackpot-inspired animation — morphing blobs + subtle shimmer */
     @keyframes download-blob-1 {
         0%, 100% {
@@ -177,6 +196,13 @@ nav.app-nav[data-collection-only="true"] .app-nav-main-links .nav-link-disabled,
 }
 
 /* Optional: use the CSS variable for your own overrides, e.g. .my-thing { opacity: var(--collection-only-user, 1); } */
+
+/* Transparent nav variant: smooth color transitions on all interactive elements */
+nav.app-nav a,
+nav.app-nav button,
+nav.app-nav span {
+    transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
+}
 
 /* Selected items preview drawer: fit above bottom nav + selection bar on mobile */
 .selected-items-drawer-max-h {

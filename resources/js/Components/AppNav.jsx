@@ -16,7 +16,7 @@ import {
     Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 
-export default function AppNav({ brand, tenant }) {
+export default function AppNav({ brand, tenant, variant }) {
     const page = usePage()
     const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
     const { post } = useForm()
@@ -24,6 +24,7 @@ export default function AppNav({ brand, tenant }) {
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
+    const [navHovered, setNavHovered] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
@@ -120,12 +121,10 @@ export default function AppNav({ brand, tenant }) {
     // Also show when user has brand_settings.manage permission even if brands array is empty (e.g. stale/cache) — so Brand Settings stays reachable
     const hasAnyBrandAccess = (hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)) || (activeBrand && hasBrandSettingsAccess)
 
-    // Use default white background for nav (no brand color)
-    const navColor = '#ffffff'
+    const isTransparentVariant = variant === 'transparent' && !navHovered
+    const navColor = isTransparentVariant ? 'transparent' : '#ffffff'
     const logoFilter = activeBrand?.logo_filter || 'none'
-    
-    // Use default dark text color
-    const textColor = '#000000'
+    const textColor = isTransparentVariant ? '#ffffff' : '#000000'
     const computeLogoFilterStyle = (filter, primaryColor) => {
         if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
         if (filter === 'black') return { filter: 'brightness(0)' }
@@ -356,11 +355,14 @@ export default function AppNav({ brand, tenant }) {
             )}
             
             <nav
-                className={`shadow-sm relative app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''}`}
+                className={`relative app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''} ${variant === 'transparent' && !navHovered ? '' : 'shadow-sm'}`}
                 style={{
                     backgroundColor: navColor,
+                    transition: 'background-color 0.3s ease, box-shadow 0.3s ease',
                     ...(isCollectionOnlyNav ? { '--collection-only-user': '1' } : {}),
                 }}
+                onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
+                onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
                 data-collection-only={isCollectionOnlyNav ? 'true' : undefined}
                 aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
             >
@@ -660,7 +662,7 @@ export default function AppNav({ brand, tenant }) {
                         {isAppPage && (
                             <Link
                                 href="/app/brand-guidelines"
-                                className="hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                 style={{
                                     color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                 }}
@@ -672,7 +674,7 @@ export default function AppNav({ brand, tenant }) {
                             <>
                                 <Link
                                     href="/app/downloads"
-                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                     style={{
                                         color: currentUrl.startsWith('/app/downloads')
                                             ? (activeBrand?.primary_color || '#4f46e5')
@@ -686,7 +688,7 @@ export default function AppNav({ brand, tenant }) {
                                 </Link>
                                 <Link
                                     href="/app/brand-guidelines"
-                                    className="lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className={`lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                     style={{
                                         color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
                                             ? (activeBrand?.primary_color || '#4f46e5')
@@ -709,7 +711,7 @@ export default function AppNav({ brand, tenant }) {
                             <div className="relative">
                                 <button
                                     type="button"
-                                    className="flex max-w-xs items-center rounded-full bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className={`flex max-w-xs items-center rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${isTransparentVariant ? 'bg-transparent' : 'bg-white'}`}
                                     onClick={() => setUserMenuOpen(!userMenuOpen)}
                                     aria-expanded="false"
                                     aria-haspopup="true"

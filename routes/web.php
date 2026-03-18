@@ -451,9 +451,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
-            Route::get('/dashboard', function () {
-                return redirect()->route('overview');
-            });
+            Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'dashboard'])->name('dashboard');
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');

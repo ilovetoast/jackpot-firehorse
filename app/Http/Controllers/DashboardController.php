@@ -13,11 +13,13 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetMetric;
 use App\Models\Category;
+use App\Models\Collection;
 use App\Models\Download;
 use App\Enums\DownloadStatus;
 use App\Enums\MetricType;
 use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
+use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -35,9 +37,22 @@ class DashboardController extends Controller
     }
 
     /**
-     * Display the dashboard with asset statistics.
+     * Display the cinematic brand overview.
      */
     public function index(Request $request): Response
+    {
+        return $this->buildDashboardResponse($request, 'Overview/Index');
+    }
+
+    /**
+     * Display the detailed brand dashboard (stat cards, activity, top assets).
+     */
+    public function dashboard(Request $request): Response
+    {
+        return $this->buildDashboardResponse($request, 'Overview/Dashboard');
+    }
+
+    private function buildDashboardResponse(Request $request, string $view): Response
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -150,6 +165,16 @@ class DashboardController extends Controller
             ? round((($downloadLinksThisMonth - $downloadLinksLastMonthPeriod) / $downloadLinksLastMonthPeriod) * 100, 2)
             : ($downloadLinksThisMonth > 0 ? 100 : 0);
         
+        $collectionsCount = Collection::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->count();
+
+        $executionsCount = Asset::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', \App\Enums\AssetType::DELIVERABLE)
+            ->whereNull('deleted_at')
+            ->count();
+
         // Get AI usage data (tenant-scoped, shared across all brands)
         // Only include if user has permission to view AI usage
         $aiUsageData = null;
@@ -795,9 +820,75 @@ class DashboardController extends Controller
         $userRole = strtolower($userRole ?? 'viewer');
         $userWidgetVisibility = $roleWidgetVisibility[$userRole] ?? $roleWidgetVisibility['viewer'];
         
-        return Inertia::render('Overview/Index', [
+        // Admin preview hook: ?as=viewer|contributor overrides permission flags for UX testing
+        // Not enforced on backend routes — purely cosmetic for dashboard tile visibility
+        $previewRole = $isAdmin ? $request->query('as') : null;
+
+        $permissions = [
+            'canManageBrand' => $user->hasPermissionForTenant($tenant, 'brand_settings.manage'),
+            'canManageTeam' => $user->hasPermissionForTenant($tenant, 'team.manage'),
+            'canViewAnalytics' => $user->hasPermissionForTenant($tenant, 'activity_logs.view'),
+        ];
+
+        if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
+            $permissions = [
+                'canManageBrand' => false,
+                'canManageTeam' => false,
+                'canViewAnalytics' => false,
+            ];
+        }
+
+        $theme = app(BrandThemeBuilder::class)->build($tenant, $brand);
+
+        // Collage assets: best visual quality first (compliance score), then most viewed
+        $collageAssets = Asset::where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.status', AssetStatus::VISIBLE)
+            ->where('assets.thumbnail_status', ThumbnailStatus::COMPLETED)
+            ->whereNull('assets.deleted_at')
+            ->leftJoin('brand_compliance_scores', function ($join) {
+                $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
+                    ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+            })
+            ->leftJoin(DB::raw('(SELECT asset_id, COUNT(*) as view_count FROM asset_metrics WHERE metric_type = \'' . MetricType::VIEW->value . '\' GROUP BY asset_id) as views'), 'assets.id', '=', 'views.asset_id')
+            ->select('assets.*')
+            ->orderByRaw('COALESCE(brand_compliance_scores.overall_score, 0) DESC')
+            ->orderByRaw('COALESCE(views.view_count, 0) DESC')
+            ->limit(8)
+            ->get()
+            ->map(function ($asset) {
+                $metadata = $asset->metadata ?? [];
+                $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+                    ? $asset->thumbnail_status->value
+                    : ($asset->thumbnail_status ?? 'pending');
+
+                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+                $finalThumbnailUrl = null;
+                if ($thumbnailStatus === 'completed') {
+                    $thumbnails = $metadata['thumbnails'] ?? [];
+                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
+                    $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
+                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                    if ($finalThumbnailUrl && $thumbnailVersion && !str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                    }
+                }
+
+                return [
+                    'id' => $asset->id,
+                    'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
+                    'final_thumbnail_url' => $finalThumbnailUrl,
+                    'preview_thumbnail_url' => $previewThumbnailUrl,
+                    'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl,
+                ];
+            })->filter(fn ($a) => $a['thumbnail_url'])->values();
+
+        return Inertia::render($view, [
             'tenant' => $tenant,
             'brand' => $brand,
+            'permissions' => $permissions,
+            'theme' => $theme,
             'plan' => [
                 'name' => $planDisplayName,
                 'key' => $planName,
@@ -821,8 +912,12 @@ class DashboardController extends Controller
                     'is_positive' => $downloadLinksChange >= 0,
                     'limit' => $maxDownloadsPerMonth, // Monthly download limit
                 ],
+                'collections_count' => $collectionsCount,
+                'executions_count' => $executionsCount,
             ],
+            'is_manager' => $isAdmin || $isBrandManager,
             'widget_visibility' => $userWidgetVisibility, // Widget visibility for current user's role
+            'collage_assets' => $collageAssets,
             'most_viewed_assets' => $mostViewedAssets,
             'most_downloaded_assets' => $mostDownloadedAssets,
             'most_trending_assets' => $mostTrendingAssets,
