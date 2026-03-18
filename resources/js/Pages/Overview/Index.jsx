@@ -1,6 +1,7 @@
 import { usePage, Link } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
+import useLogoBrightness from '../../utils/useLogoBrightness'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
 import AssetCollage from '../../Components/dashboard/AssetCollage'
 import { ChartBarSquareIcon } from '@heroicons/react/24/outline'
@@ -30,6 +31,7 @@ export default function Overview({
 }) {
     const { auth: authFromPage } = usePage().props
     const activeBrand = brand ?? authFromPage?.activeBrand ?? auth?.activeBrand
+    const heroLogoIsDark = useLogoBrightness(theme.logo || null)
 
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
     const collageAssets = collage_assets?.length
@@ -112,7 +114,7 @@ export default function Overview({
                                     src={theme.logo}
                                     alt={theme.name || 'Brand'}
                                     className="h-16 md:h-20 w-auto max-w-[240px] object-contain"
-                                    style={{ filter: 'brightness(0) invert(1)' }}
+                                    style={heroLogoIsDark ? { filter: 'brightness(0) invert(1)' } : undefined}
                                 />
                             ) : (
                                 <div

@@ -48,20 +48,26 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         if (onSwitchBrand) {
             onSwitchBrand(brandId)
         } else {
-            router.post(`/app/brands/${brandId}/switch`, {}, {
-                preserveState: true,
-                preserveScroll: true,
-                onSuccess: () => {
-                    const path = typeof window !== 'undefined' ? window.location.pathname : ''
-                    const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
-                    if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
-                        const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
-                        const search = typeof window !== 'undefined' ? window.location.search : ''
-                        router.visit(newPath + search)
-                    } else {
-                        router.visit('/app/overview')
-                    }
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+            fetch(`/app/brands/${brandId}/switch`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json',
                 },
+                credentials: 'same-origin',
+            }).then(() => {
+                const path = typeof window !== 'undefined' ? window.location.pathname : ''
+                const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
+                if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
+                    const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
+                    const search = typeof window !== 'undefined' ? window.location.search : ''
+                    window.location.href = newPath + search
+                } else {
+                    window.location.href = '/app/overview'
+                }
+            }).catch(() => {
+                window.location.href = '/app/overview'
             })
         }
     }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
+import useLogoBrightness from '../utils/useLogoBrightness'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
 import PermissionGate from './PermissionGate'
@@ -34,38 +35,50 @@ export default function AppNav({ brand, tenant, variant }) {
     }
 
     const handleSwitchCompany = (companyId) => {
-        router.post(`/app/companies/${companyId}/switch`, {}, {
-            preserveState: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                window.location.reload()
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        fetch(`/app/companies/${companyId}/switch`, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': csrfToken,
+                'Accept': 'application/json',
             },
+            credentials: 'same-origin',
+        }).then(() => {
+            window.location.href = '/app/overview'
+        }).catch(() => {
+            window.location.href = '/app/overview'
         })
     }
 
     const handleSwitchBrand = (brandId) => {
-        router.post(`/app/brands/${brandId}/switch`, {}, {
-            preserveState: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                const path = typeof window !== 'undefined' ? window.location.pathname : ''
-                const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
-                if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
-                    const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
-                    let search = typeof window !== 'undefined' ? window.location.search : ''
-                    if (newPath.includes('/brand-guidelines/builder') && search) {
-                        const params = new URLSearchParams(search)
-                        const step = params.get('step')
-                        if (step === 'processing' || step === 'research-summary') {
-                            params.delete('step')
-                        }
-                        search = params.toString() ? `?${params}` : ''
-                    }
-                    router.visit(newPath + search)
-                } else {
-                    router.visit('/app/overview')
-                }
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        fetch(`/app/brands/${brandId}/switch`, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': csrfToken,
+                'Accept': 'application/json',
             },
+            credentials: 'same-origin',
+        }).then(() => {
+            const path = typeof window !== 'undefined' ? window.location.pathname : ''
+            const brandUrlMatch = path.match(/^\/app\/brands\/(\d+)(\/.*)?$/)
+            if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
+                const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
+                let search = typeof window !== 'undefined' ? window.location.search : ''
+                if (newPath.includes('/brand-guidelines/builder') && search) {
+                    const params = new URLSearchParams(search)
+                    const step = params.get('step')
+                    if (step === 'processing' || step === 'research-summary') {
+                        params.delete('step')
+                    }
+                    search = params.toString() ? `?${params}` : ''
+                }
+                window.location.href = newPath + search
+            } else {
+                window.location.href = '/app/overview'
+            }
+        }).catch(() => {
+            window.location.href = '/app/overview'
         })
     }
 
@@ -147,8 +160,12 @@ export default function AppNav({ brand, tenant, variant }) {
         return {}
     }
     const baseLogoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
+    const logoSrc = activeBrand?.logo_path || null
+    const logoIsDark = useLogoBrightness(variant === 'transparent' ? logoSrc : null)
     const logoFilterStyle = isTransparentVariant
-        ? { filter: 'brightness(0) invert(1)', transition: 'filter 0.3s ease' }
+        ? (logoIsDark
+            ? { filter: 'brightness(0) invert(1)', transition: 'filter 0.3s ease' }
+            : { filter: 'none', transition: 'filter 0.3s ease' })
         : { ...baseLogoFilterStyle, transition: 'filter 0.3s ease' }
 
     // Check if we're on any /app page (full width nav for all app pages)
