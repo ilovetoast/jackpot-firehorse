@@ -228,4 +228,23 @@ class BrandPipelineRunnerJob implements ShouldQueue
 
         return $sources;
     }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $run = BrandPipelineRun::find($this->runId);
+        if (! $run || in_array($run->status, [BrandPipelineRun::STATUS_COMPLETED, BrandPipelineRun::STATUS_FAILED])) {
+            return;
+        }
+
+        $run->update([
+            'stage' => BrandPipelineRun::STAGE_FAILED,
+            'status' => BrandPipelineRun::STATUS_FAILED,
+            'error_message' => $exception?->getMessage() ?? 'Pipeline processing failed',
+        ]);
+
+        Log::channel('pipeline')->error('[BrandPipelineRunnerJob] Job failed permanently', [
+            'run_id' => $this->runId,
+            'error' => $exception?->getMessage(),
+        ]);
+    }
 }

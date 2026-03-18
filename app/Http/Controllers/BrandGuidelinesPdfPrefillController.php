@@ -52,10 +52,6 @@ class BrandGuidelinesPdfPrefillController extends Controller
             return response()->json(['message' => 'Asset must belong to this brand.'], 422);
         }
 
-        if (! $asset->builder_staged) {
-            return response()->json(['message' => 'Asset must be a builder-staged guidelines PDF.'], 422);
-        }
-
         $context = $asset->builder_context ?? '';
         if ($context !== self::CONTEXT_GUIDELINES_PDF) {
             return response()->json(['message' => 'Asset must have builder_context guidelines_pdf.'], 422);

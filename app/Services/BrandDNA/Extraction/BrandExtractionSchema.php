@@ -141,7 +141,8 @@ class BrandExtractionSchema
                 } else {
                     $baseArr = $base[$section][$key] ?? [];
                     $incomingArr = is_array($incoming) ? $incoming : [$incoming];
-                    $baseArr = array_values(array_unique(array_merge($baseArr, self::unwrapArray($incomingArr))));
+                    $merged = array_merge($baseArr, self::unwrapArray($incomingArr));
+                    $baseArr = array_values(self::arrayUniqueDeep($merged));
                     $base[$section][$key] = $baseArr;
                 }
             }
@@ -243,5 +244,23 @@ class BrandExtractionSchema
             $out[] = is_array($item) && isset($item['value']) ? $item['value'] : $item;
         }
         return $out;
+    }
+
+    /**
+     * Deduplicate an array that may contain nested arrays/objects
+     * where plain array_unique() would throw "Array to string conversion".
+     */
+    protected static function arrayUniqueDeep(array $items): array
+    {
+        $seen = [];
+        $result = [];
+        foreach ($items as $item) {
+            $key = is_scalar($item) ? (string) $item : json_encode($item);
+            if (! isset($seen[$key])) {
+                $seen[$key] = true;
+                $result[] = $item;
+            }
+        }
+        return $result;
     }
 }

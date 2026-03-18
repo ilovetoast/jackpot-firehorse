@@ -54,4 +54,23 @@ class BrandPipelineSnapshotJob implements ShouldQueue
             'pages_total' => $run->pages_total,
         ]);
     }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $run = BrandPipelineRun::find($this->runId);
+        if (! $run || $run->status === BrandPipelineRun::STATUS_COMPLETED) {
+            return;
+        }
+
+        $run->update([
+            'stage' => BrandPipelineRun::STAGE_FAILED,
+            'status' => BrandPipelineRun::STATUS_FAILED,
+            'error_message' => $exception?->getMessage() ?? 'Snapshot generation failed',
+        ]);
+
+        Log::channel('pipeline')->error('[BrandPipelineSnapshotJob] Job failed permanently', [
+            'run_id' => $this->runId,
+            'error' => $exception?->getMessage(),
+        ]);
+    }
 }
