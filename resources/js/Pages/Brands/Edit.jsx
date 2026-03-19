@@ -805,10 +805,35 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
 
 export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
     const { auth } = usePage().props
+    const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
+    const can = (p) => effectivePermissions.includes(p)
+    const canAccessCategoriesAndFields = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
-    const [topLevelNav, setTopLevelNav] = useState('brand_settings') // brand_model | brand_settings
-    const [activeTab, setActiveTab] = useState('identity') // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|brand-portal|members
+    // Parse ?tab= from URL to restore state after redirects (e.g. auto-save)
+    const getInitialTabState = () => {
+        if (typeof window === 'undefined') return { topLevelNav: 'brand_settings', activeTab: 'identity' }
+        const params = new URLSearchParams(window.location.search)
+        const tabParam = params.get('tab')
+        const brandSettingsSections = ['identity', 'workspace', 'brand-portal', 'members']
+        const brandModelSections = ['strategy', 'positioning', 'expression', 'standards', 'scoring']
+        if (brandSettingsSections.includes(tabParam)) {
+            return { topLevelNav: 'brand_settings', activeTab: tabParam }
+        }
+        if (tabParam === 'brand_model' || brandModelSections.includes(tabParam)) {
+            return { topLevelNav: 'brand_model', activeTab: brandModelSections.includes(tabParam) ? tabParam : 'strategy' }
+        }
+        return { topLevelNav: 'brand_settings', activeTab: 'identity' }
+    }
+    const initialTab = getInitialTabState()
+    const [topLevelNav, setTopLevelNav] = useState(initialTab.topLevelNav) // brand_model | brand_settings
+    const [activeTab, setActiveTab] = useState(initialTab.activeTab) // brand_model: strategy|positioning|expression|standards; brand_settings: identity|workspace|brand-portal|members
+
+    const updateTabInUrl = (tab) => {
+        const url = new URL(window.location.href)
+        url.searchParams.set('tab', tab)
+        window.history.replaceState({}, '', url.toString())
+    }
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
@@ -1136,15 +1161,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         }
     }, [data.icon_preview])
 
-    // Handle ?tab= query param
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search)
-        const tabParam = params.get('tab')
-        if (tabParam === 'brand_model') {
-            setTopLevelNav('brand_model')
-            setActiveTab('strategy')
-        }
-    }, [])
 
     return (
         <div className="min-h-full">
@@ -1171,7 +1187,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 type="button"
                                 role="tab"
                                 aria-selected={topLevelNav === 'brand_settings'}
-                                onClick={() => { setTopLevelNav('brand_settings'); setActiveTab('identity') }}
+                                onClick={() => { setTopLevelNav('brand_settings'); setActiveTab('identity'); updateTabInUrl('identity') }}
                                 className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
                                     topLevelNav === 'brand_settings' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
                                 }`}
@@ -1182,7 +1198,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 type="button"
                                 role="tab"
                                 aria-selected={topLevelNav === 'brand_model'}
-                                onClick={() => { setTopLevelNav('brand_model'); setActiveTab('strategy') }}
+                                onClick={() => { setTopLevelNav('brand_model'); setActiveTab('strategy'); updateTabInUrl('strategy') }}
                                 className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
                                     topLevelNav === 'brand_model' ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
                                 }`}
@@ -1190,12 +1206,22 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 Brand Model
                             </button>
                         </div>
-                        <Link
-                            href={typeof route === 'function' ? route('brands.guidelines.index', { brand: brand.id }) : `/app/brands/${brand.id}/guidelines`}
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                        >
-                            Brand Guidelines →
-                        </Link>
+                        {canAccessCategoriesAndFields && (
+                            <Link
+                                href={typeof route === 'function' ? route('tenant.metadata.registry.index', { brand: brand.id }) : `/app/tenant/metadata/registry?brand=${brand.id}`}
+                                className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                            >
+                                Categories & Fields →
+                            </Link>
+                        )}
+                        {can('brand_settings.manage') && (
+                            <Link
+                                href={typeof route === 'function' ? route('analytics.metadata') : '/app/analytics/metadata'}
+                                className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                            >
+                                Analytics →
+                            </Link>
+                        )}
                     </div>
                 </div>
 
@@ -1222,7 +1248,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <button
                                     key={item.id}
                                     type="button"
-                                    onClick={() => setActiveTab(item.id)}
+                                    onClick={() => { setActiveTab(item.id); updateTabInUrl(item.id) }}
                                     className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                                         activeTab === item.id
                                             ? 'bg-indigo-50 text-indigo-700'
@@ -2725,7 +2751,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                     <button
                                                         key={style}
                                                         type="button"
-                                                        onClick={() => setData('workspace_button_style', style)}
+                                                        onClick={() => {
+                                                            setData('workspace_button_style', style)
+                                                            autoSaveBrandField({ workspace_button_style: style })
+                                                        }}
                                                         className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                             (data.workspace_button_style ?? data.settings?.button_style ?? 'primary') === style ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                                                         }`}
@@ -2753,7 +2782,11 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 <button
                                                     key={opt.value}
                                                     type="button"
-                                                    onClick={() => setData('settings', { ...data.settings, asset_grid_style: opt.value })}
+                                                    onClick={() => {
+                                                        const newSettings = { ...data.settings, asset_grid_style: opt.value }
+                                                        setData('settings', newSettings)
+                                                        autoSaveBrandField({ settings: newSettings })
+                                                    }}
                                                     className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                         (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                                                     }`}
@@ -2773,7 +2806,11 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                             <button
                                                 type="button"
-                                                onClick={() => setData('nav_color', data.primary_color || '')}
+                                                onClick={() => {
+                                                    const val = data.primary_color || ''
+                                                    setData('nav_color', val)
+                                                    autoSaveBrandField({ nav_color: val })
+                                                }}
                                                 className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                     (data.nav_color && data.nav_color === data.primary_color) ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                                                 }`}
@@ -2787,7 +2824,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 )}
                                             </button>
                                             {data.secondary_color ? (
-                                                <button type="button" onClick={() => setData('nav_color', data.secondary_color)}
+                                                <button type="button" onClick={() => {
+                                                    setData('nav_color', data.secondary_color)
+                                                    autoSaveBrandField({ nav_color: data.secondary_color })
+                                                }}
                                                     className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${data.nav_color === data.secondary_color ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
                                                     <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: data.secondary_color }} />
                                                     <span className="text-xs font-medium text-gray-900">Secondary</span>
@@ -2804,7 +2844,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 </div>
                                             )}
                                             {data.accent_color ? (
-                                                <button type="button" onClick={() => setData('nav_color', data.accent_color)}
+                                                <button type="button" onClick={() => {
+                                                    setData('nav_color', data.accent_color)
+                                                    autoSaveBrandField({ nav_color: data.accent_color })
+                                                }}
                                                     className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${data.nav_color === data.accent_color ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
                                                     <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: data.accent_color }} />
                                                     <span className="text-xs font-medium text-gray-900">Accent</span>
@@ -2820,7 +2863,11 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                     <span className="text-xs font-medium text-gray-400">Accent</span>
                                                 </div>
                                             )}
-                                            <button type="button" onClick={() => setData('nav_color', '')}
+                                            <button type="button" onClick={() => {
+                                                setData('nav_color', '')
+                                                // "Use Primary" = store primary color so validation passes
+                                                autoSaveBrandField({ nav_color: data.primary_color || brand.primary_color || '#6366f1' })
+                                            }}
                                                 className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${(!data.nav_color || data.nav_color === '') ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
                                                 <div className="w-full h-12 rounded-md mb-1.5 bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
                                                     <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>

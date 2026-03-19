@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { router } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 import ByCategoryView from './ByCategory'
@@ -55,30 +55,40 @@ export default function TenantMetadataRegistryIndex({
             <AppHead title="Categories & Fields" />
             <AppNav />
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-                {/* Page Header */}
-                <div className="mb-6 flex items-start justify-between gap-4">
-                    <div>
-                        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
-                            Categories & Fields
-                        </h1>
-                        <p className="mt-1 text-sm text-gray-500">
-                            Define how your brand content is organized and behaves.
-                        </p>
-                    </div>
-                    {customFieldsLimit && customFieldsLimit.max > 0 && (
-                        <span
-                            className={`flex-shrink-0 text-xs uppercase tracking-wide ${
-                                customFieldsLimit.current / customFieldsLimit.max >= 0.95
-                                    ? 'text-red-600 rounded-full px-2.5 py-0.5 bg-red-50'
-                                    : customFieldsLimit.current / customFieldsLimit.max >= 0.8
-                                        ? 'text-amber-600 rounded-full px-2.5 py-0.5 bg-amber-50'
-                                        : 'text-gray-500'
-                            }`}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {/* Page Header — aligned with Brand Settings */}
+                <div className="mb-8">
+                    {(selectedBrandId ?? brands[0]?.id) && (
+                        <Link
+                            href={typeof route === 'function' ? route('brands.edit', { brand: selectedBrandId ?? brands[0].id }) : `/app/brands/${selectedBrandId ?? brands[0].id}/edit`}
+                            className="text-sm font-medium text-gray-500 hover:text-gray-700"
                         >
-                            Custom Fields {customFieldsLimit.current} / {customFieldsLimit.max}
-                        </span>
+                            ← Back to Brand Settings
+                        </Link>
                     )}
+                    <div className="mt-4 flex items-start justify-between gap-4">
+                        <div>
+                            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                                Categories & Fields
+                            </h1>
+                            <p className="mt-1 text-sm text-gray-600">
+                                Define how your brand content is organized and behaves.
+                            </p>
+                        </div>
+                        {customFieldsLimit && customFieldsLimit.max > 0 && (
+                            <span
+                                className={`flex-shrink-0 text-xs uppercase tracking-wide ${
+                                    customFieldsLimit.current / customFieldsLimit.max >= 0.95
+                                        ? 'text-red-600 rounded-full px-2.5 py-0.5 bg-red-50'
+                                        : customFieldsLimit.current / customFieldsLimit.max >= 0.8
+                                            ? 'text-amber-600 rounded-full px-2.5 py-0.5 bg-amber-50'
+                                            : 'text-gray-500'
+                                }`}
+                            >
+                                Custom Fields {customFieldsLimit.current} / {customFieldsLimit.max}
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 <ByCategoryView

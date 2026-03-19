@@ -570,13 +570,33 @@ class CategoryController extends Controller
             $category = $this->systemCategoryService->addTemplateToBrand($brand, $systemCategory);
 
             if (!$category) {
+                if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json(['error' => 'This system category already exists for this brand.'], 422);
+                }
                 return back()->withErrors([
                     'error' => 'This system category already exists for this brand.',
                 ]);
             }
 
+            if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'System category added successfully.',
+                    'category' => [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug,
+                        'asset_type' => $category->asset_type?->value ?? 'asset',
+                        'is_system' => $category->is_system,
+                        'brand_id' => $category->brand_id,
+                    ],
+                ]);
+            }
             return redirect()->route('brands.edit', $brand)->with('success', 'System category added successfully.');
         } catch (\Exception $e) {
+            if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json(['error' => $e->getMessage()], 422);
+            }
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ]);

@@ -487,10 +487,6 @@ class TenantMetadataFieldService
             throw new \InvalidArgumentException('System fields cannot be archived.');
         }
 
-        if (($field->key ?? null) === 'dominant_color_bucket') {
-            throw new \InvalidArgumentException('dominant_color_bucket is a filter-only system field and cannot be archived.');
-        }
-
         if (($field->tenant_id ?? null) != $tenant->id || ($field->scope ?? null) !== 'tenant') {
             throw new \InvalidArgumentException("Field {$fieldId} does not belong to tenant {$tenant->id}.");
         }

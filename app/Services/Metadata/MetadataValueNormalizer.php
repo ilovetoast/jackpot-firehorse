@@ -4,7 +4,7 @@ namespace App\Services\Metadata;
 
 /**
  * Normalizes metadata values for filter harvest and display.
- * Ensures scalar fields (e.g. dominant_color_bucket) always get a single string;
+ * Ensures scalar fields (e.g. dominant_hue_group) always get a single string;
  * handles legacy values incorrectly stored as arrays.
  */
 class MetadataValueNormalizer

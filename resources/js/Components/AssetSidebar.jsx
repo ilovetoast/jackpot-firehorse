@@ -10,7 +10,7 @@
  * Trash = soft-deleted assets
  */
 import { useState, useCallback } from 'react'
-import { router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
 import {
     TagIcon,
     DocumentTextIcon,
@@ -18,6 +18,8 @@ import {
     TrashIcon,
     ChevronRightIcon,
     LockClosedIcon,
+    Cog6ToothIcon,
+    PlusIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 import OnlineUsersIndicator from './OnlineUsersIndicator'
@@ -111,6 +113,9 @@ export default function AssetSidebar({
     isLightColor,
     tooltipVisible,
     setTooltipVisible,
+    canManageCategoriesAndFields = false,
+    activeBrandId = null,
+    onAddCategoryClick,
 }) {
     const isResearchView = source === 'reference_materials'
     const isStagedView = source === 'staged'
@@ -165,12 +170,37 @@ export default function AssetSidebar({
 
                     {(categories?.length > 0 || showAllButton) && (
                         <div className="px-2 py-1.5 lg:px-3 lg:py-2">
-                            <h3
-                                className="px-2 lg:px-3 text-xs font-semibold uppercase tracking-wider"
+                            <div
+                                className="flex items-center justify-between gap-1 px-2 lg:px-3"
                                 style={sectionLabelStyle(textColor)}
                             >
-                                LIBRARY
-                            </h3>
+                                <h3 className="text-xs font-semibold uppercase tracking-wider">
+                                    LIBRARY
+                                </h3>
+                                {canManageCategoriesAndFields && (
+                                    <div className="flex items-center gap-0.5">
+                                        {activeBrandId && (
+                                            <Link
+                                                href={typeof route === 'function' ? route('tenant.metadata.registry.index', { brand: activeBrandId }) : `/app/tenant/metadata/registry?brand=${activeBrandId}`}
+                                                className="rounded p-1 opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/30"
+                                                title="Manage categories and fields"
+                                                aria-label="Manage categories and fields"
+                                            >
+                                                <Cog6ToothIcon className="h-3.5 w-3.5" />
+                                            </Link>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={onAddCategoryClick ?? (() => {})}
+                                            className="rounded p-1 opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/30"
+                                            title="Add category"
+                                            aria-label="Add category"
+                                        >
+                                            <PlusIcon className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                             <div className="mt-1.5 lg:mt-2 space-y-1">
                                 {showAllButton && (
                                     <NavButton

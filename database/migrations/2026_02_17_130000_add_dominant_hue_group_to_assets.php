@@ -9,7 +9,7 @@ return new class extends Migration
     /**
      * Run the migrations.
      * Adds dominant_hue_group column for perceptual hue cluster filtering.
-     * Does NOT remove dominant_color_bucket (deprecated, kept for safety).
+     * (dominant_color_bucket was removed in a later migration.)
      */
     public function up(): void
     {

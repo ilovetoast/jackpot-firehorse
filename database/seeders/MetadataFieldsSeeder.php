@@ -56,7 +56,7 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function ensureDefaultSystemFields(): void
     {
-        $systemFieldKeys = ['dominant_colors', 'dominant_color_bucket', 'dominant_hue_group', 'color_space', 'orientation', 'resolution_class'];
+        $systemFieldKeys = ['dominant_colors', 'dominant_hue_group', 'color_space', 'orientation', 'resolution_class'];
 
         DB::table('metadata_fields')
             ->whereIn('key', $systemFieldKeys)
@@ -560,22 +560,6 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => false,
             'is_internal_only' => false, // Visible in drawer
-            'ai_eligible' => false,
-        ]);
-
-        // Dominant Color Bucket (DEPRECATED) — kept for safety, not used.
-        $this->getOrCreateField([
-            'key' => 'dominant_color_bucket',
-            'system_label' => 'Dominant Color Bucket (Deprecated)',
-            'type' => 'text',
-            'applies_to' => 'image',
-            'scope' => 'system',
-            'group_key' => 'technical',
-            'is_filterable' => false,
-            'is_user_editable' => false,
-            'is_ai_trainable' => false,
-            'is_upload_visible' => false,
-            'is_internal_only' => true,
             'ai_eligible' => false,
         ]);
 

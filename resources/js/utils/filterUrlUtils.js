@@ -22,7 +22,7 @@ const RESERVED_PARAMS = new Set([
 /** Keys that must be included in URL for load_more / infinite scroll to respect filters (backend applies these even if not in schema). */
 const SPECIAL_FILTER_KEYS = ['tags', 'collection']
 
-/** Keys that support multiple values in the URL (repeated param or dominant_color_bucket[]=X). Backend accepts array for these. */
+/** Keys that support multiple values in the URL (repeated param or dominant_hue_group[]=X). Backend accepts array for these. */
 const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_hue_group'])
 
 /**

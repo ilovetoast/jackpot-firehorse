@@ -32,6 +32,8 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import AssetSidebar from '../../Components/AssetSidebar'
+import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
+import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
 
 export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
@@ -109,6 +111,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
     const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
+
+    // Category management modals (sidebar plus icon)
+    const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false)
+    const [addExistingCategoryOpen, setAddExistingCategoryOpen] = useState(false)
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
     
@@ -638,6 +644,9 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         tooltipVisible={tooltipVisible}
                         setTooltipVisible={setTooltipVisible}
                         emptyMessage="No execution categories yet"
+                        canManageCategoriesAndFields={(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) || can('brand_categories.manage')}
+                        activeBrandId={auth?.activeBrand?.id ?? null}
+                        onAddCategoryClick={can('brand_categories.manage') ? () => setAddCategoryModalOpen(true) : undefined}
                     />
                 </div>
 
@@ -979,6 +988,34 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 />
             )}
 
+            {/* Category management modals */}
+            {addCategoryModalOpen && auth?.activeBrand && (
+                <AddCategoryModal
+                    isOpen={true}
+                    onClose={() => setAddCategoryModalOpen(false)}
+                    assetType="deliverable"
+                    brandId={auth.activeBrand.id}
+                    brandName={auth.activeBrand.name ?? ''}
+                    categoryLimits={null}
+                    canViewMetadataRegistry={can('metadata.registry.view') || can('metadata.tenant.visibility.manage')}
+                    onSuccess={() => {
+                        router.reload({ only: ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count'] })
+                        setAddCategoryModalOpen(false)
+                    }}
+                />
+            )}
+            {addExistingCategoryOpen && auth?.activeBrand && (
+                <AddExistingCategoryModal
+                    isOpen={true}
+                    onClose={() => setAddExistingCategoryOpen(false)}
+                    brandId={auth.activeBrand.id}
+                    assetType="deliverable"
+                    onSuccess={() => {
+                        router.reload({ only: ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count'] })
+                        setAddExistingCategoryOpen(false)
+                    }}
+                />
+            )}
             {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
                 Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (

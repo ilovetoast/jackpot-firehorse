@@ -467,7 +467,7 @@ class MetadataFilterService
             ]);
 
             // System automated filters (population_mode=automatic + show_in_filters=true) should always be included
-            // even if is_internal_only=true. This ensures system query-only fields like dominant_color_bucket
+            // even if is_internal_only=true. This ensures system automated filter fields
             // appear in filters regardless of category toggles.
             $isSystemAutomatedFilter = (
                 ($field['population_mode'] ?? 'manual') === 'automatic' &&

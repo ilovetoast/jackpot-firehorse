@@ -878,6 +878,25 @@ class BrandController extends Controller
 
         $brandRoles = User::getValidBrandRoles();
 
+        // Available system templates (not yet added to this brand) for Add Existing flow
+        $categories = $brand->categories()->get();
+        $systemTemplates = $this->systemCategoryService->getAllTemplates();
+        $availableTemplates = collect();
+        foreach ($systemTemplates as $template) {
+            $exists = $categories->contains(fn ($c) => $c->slug === $template->slug && $c->asset_type->value === $template->asset_type->value);
+            if (! $exists) {
+                $availableTemplates->push([
+                    'system_category_id' => $template->id,
+                    'name' => $template->name,
+                    'slug' => $template->slug,
+                    'icon' => $template->icon ?? 'folder',
+                    'asset_type' => $template->asset_type->value,
+                    'is_private' => $template->is_private,
+                    'system_version' => $template->version,
+                ]);
+            }
+        }
+
         return response()->json([
             'category_limits' => [
                 'current' => $currentCount,
@@ -886,6 +905,7 @@ class BrandController extends Controller
             ],
             'brand_users' => $brandUsers->values(),
             'brand_roles' => $brandRoles,
+            'available_system_templates' => $availableTemplates->values(),
         ]);
     }
 

@@ -18,6 +18,8 @@ import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
 import AssetSidebar from '../../Components/AssetSidebar'
+import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
+import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
 import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
@@ -143,6 +145,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
     const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
+
+    // Category management modals (sidebar plus icon)
+    const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false)
+    const [addExistingCategoryOpen, setAddExistingCategoryOpen] = useState(false)
 
     // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext.
     const handleAssetClick = useCallback((asset) => {
@@ -793,6 +799,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         isLightColor={isLightColor}
                         tooltipVisible={tooltipVisible}
                         setTooltipVisible={setTooltipVisible}
+                        canManageCategoriesAndFields={(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) || can('brand_categories.manage')}
+                        activeBrandId={auth?.activeBrand?.id ?? null}
+                        onAddCategoryClick={can('brand_categories.manage') ? () => setAddCategoryModalOpen(true) : undefined}
                     />
                 </div>
 
@@ -1242,6 +1251,34 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 />
             )}
 
+            {/* Category management modals */}
+            {addCategoryModalOpen && auth?.activeBrand && (
+                <AddCategoryModal
+                    isOpen={true}
+                    onClose={() => setAddCategoryModalOpen(false)}
+                    assetType="asset"
+                    brandId={auth.activeBrand.id}
+                    brandName={auth.activeBrand.name ?? ''}
+                    categoryLimits={null}
+                    canViewMetadataRegistry={can('metadata.registry.view') || can('metadata.tenant.visibility.manage')}
+                    onSuccess={() => {
+                        router.reload({ only: ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count'] })
+                        setAddCategoryModalOpen(false)
+                    }}
+                />
+            )}
+            {addExistingCategoryOpen && auth?.activeBrand && (
+                <AddExistingCategoryModal
+                    isOpen={true}
+                    onClose={() => setAddExistingCategoryOpen(false)}
+                    brandId={auth.activeBrand.id}
+                    assetType="asset"
+                    onSuccess={() => {
+                        router.reload({ only: ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count'] })
+                        setAddExistingCategoryOpen(false)
+                    }}
+                />
+            )}
             {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
                 Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (

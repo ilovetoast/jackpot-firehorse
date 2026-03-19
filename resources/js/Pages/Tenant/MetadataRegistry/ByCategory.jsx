@@ -43,9 +43,9 @@ import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
 import ArchiveFieldModal from '../../../Components/ArchiveFieldModal'
 import MetadataFieldModal from '../../../Components/MetadataFieldModal'
-import AddCategorySlideOver from '../../../Components/Metadata/AddCategorySlideOver'
+import AddCategoryModal from '../../../Components/Metadata/AddCategoryModal'
 import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSettingsSlideOver'
-import CategorySettingsSlideOver from '../../../Components/Metadata/CategorySettingsSlideOver'
+import CategorySettingsModal from '../../../Components/Metadata/CategorySettingsModal'
 import UpgradeCategoryModal from '../../../Components/Metadata/UpgradeCategoryModal'
 import CategoryList from '../../../Components/Metadata/CategoryList'
 
@@ -2102,24 +2102,26 @@ export default function ByCategoryView({
                 loading={upgradeLoading}
             />
 
-            {/* Add Category Slide-over */}
-            <AddCategorySlideOver
+            {/* Add Category Modal */}
+            <AddCategoryModal
                 isOpen={addCategoryOpen}
                 onClose={() => setAddCategoryOpen(false)}
                 brandId={brandId}
                 brandName={brands.find(b => b.id === brandId)?.name ?? ''}
                 categoryLimits={brands.find(b => b.id === brandId)?.category_limits ?? null}
+                canViewMetadataRegistry={canManageVisibility || canManageFields}
                 onSuccess={handleAddCategorySuccess}
             />
 
-            {/* Category Settings Slide-over */}
-            <CategorySettingsSlideOver
+            {/* Category Settings Modal */}
+            <CategorySettingsModal
                 isOpen={categorySettingsOpen}
                 onClose={() => { setCategorySettingsOpen(false); setCategorySettingsCategory(null) }}
                 category={categorySettingsCategory}
                 brandId={brandId}
                 brandRoles={categoryFormData.brand_roles}
                 brandUsers={categoryFormData.brand_users}
+                canViewMetadataRegistry={canManageVisibility || canManageFields}
                 onSuccess={handleCategorySettingsSuccess}
                 onDelete={handleCategorySettingsDelete}
             />

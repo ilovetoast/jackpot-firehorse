@@ -12,7 +12,7 @@ export default function AddCategorySlideOver({
     assetType: assetTypeProp,
     brandId,
     brandName,
-    categoryLimits = null,
+    categoryLimits: categoryLimitsProp = null,
     onSuccess,
 }) {
     const [name, setName] = useState('')
@@ -25,6 +25,7 @@ export default function AddCategorySlideOver({
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
     const [slideIn, setSlideIn] = useState(false)
+    const [fetchedCategoryLimits, setFetchedCategoryLimits] = useState(null)
     const nameInputRef = useRef(null)
 
     useEffect(() => {
@@ -57,6 +58,7 @@ export default function AddCategorySlideOver({
                     .then((data) => {
                         setBrandRoles(data.brand_roles || [])
                         setBrandUsers(data.brand_users || [])
+                        setFetchedCategoryLimits(data.category_limits || null)
                     })
                     .catch(() => {
                         setBrandRoles([])
@@ -95,7 +97,8 @@ export default function AddCategorySlideOver({
             return
         }
 
-        if (categoryLimits && !categoryLimits.can_create) {
+        const limits = categoryLimitsProp ?? fetchedCategoryLimits
+        if (limits && !limits.can_create) {
             setError("You've reached your category limit for this plan.")
             return
         }
@@ -155,7 +158,8 @@ export default function AddCategorySlideOver({
     if (!isOpen) return null
 
     const type = assetTypeProp ?? assetType
-    const atLimit = categoryLimits && !categoryLimits.can_create
+    const limits = categoryLimitsProp ?? fetchedCategoryLimits
+    const atLimit = limits && !limits.can_create
     const canSave =
         (name?.trim().length ?? 0) > 2 &&
         !loading &&
@@ -163,8 +167,8 @@ export default function AddCategorySlideOver({
         (!isPrivate || hasRestrictSelection)
 
     const limitsLabel =
-        categoryLimits && categoryLimits.max > 0
-            ? `${categoryLimits.current} of ${categoryLimits.max} custom categories used`
+        limits && limits.max > 0
+            ? `${limits.current} of ${limits.max} custom categories used`
             : null
 
     return (

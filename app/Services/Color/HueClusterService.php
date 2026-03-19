@@ -5,7 +5,7 @@ namespace App\Services\Color;
 /**
  * Hue Cluster Service — perceptual hue clusters for filtering.
  *
- * Replaces dominant_color_bucket with semantic clusters.
+ * Provides perceptual hue clusters for color filtering.
  * Max 18 clusters. Assignment via ΔE to LAB centroids.
  * Used for filtering only; BrandComplianceService scoring remains LAB ΔE based.
  */

@@ -131,7 +131,6 @@ php artisan test tests/Unit
 | `DominantColorGenerationTest.php` | Dominant color generation |
 | `DominantColorPersistenceTest.php` | Dominant color persistence |
 | `DominantColorsGenerationForNewAssetTest.php` | Dominant color for new asset |
-| `DominantColorBucketSwatchTest.php` | Dominant color bucket swatch |
 | `AvifDominantColorExtractionTest.php` | AVIF dominant color extraction |
 | `ThumbnailFailureStateTest.php` | Thumbnail failure state |
 | `Feature/Jobs/AiMetadataGenerationJobTest.php` | AI metadata generation job |
