@@ -1,5 +1,6 @@
 import { router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
+import BrandIconUnified from '../../Components/BrandIconUnified'
 
 export default function BrandSelector({ brands, tenant }) {
     const { theme } = usePage().props
@@ -36,7 +37,7 @@ export default function BrandSelector({ brands, tenant }) {
                             className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-left transition-all duration-200 hover:scale-[1.02] hover:border-white/[0.16] hover:bg-white/10 disabled:opacity-50"
                         >
                             <div className="flex flex-col items-start gap-4">
-                                <BrandIcon brand={brand} color={color} />
+                                <BrandIconUnified brand={brand} size="lg" />
                                 <div>
                                     <h2 className="text-lg font-medium text-white">
                                         {brand.name}
@@ -68,37 +69,3 @@ export default function BrandSelector({ brands, tenant }) {
     )
 }
 
-function BrandIcon({ brand, color }) {
-    const [imgError, setImgError] = useState(false)
-
-    if (brand.logo_path && !imgError) {
-        return (
-            <img
-                src={brand.logo_path}
-                alt={brand.name}
-                className="h-10 w-auto object-contain opacity-90"
-                onError={() => setImgError(true)}
-            />
-        )
-    }
-
-    if (brand.icon) {
-        return (
-            <div
-                className="h-10 w-10 rounded-lg flex items-center justify-center text-sm font-semibold text-white"
-                style={{ backgroundColor: brand.icon_bg_color || color }}
-            >
-                {brand.icon}
-            </div>
-        )
-    }
-
-    return (
-        <div
-            className="h-10 w-10 rounded-lg flex items-center justify-center text-lg font-semibold text-white"
-            style={{ backgroundColor: `${color}30` }}
-        >
-            {brand.name?.charAt(0)?.toUpperCase()}
-        </div>
-    )
-}

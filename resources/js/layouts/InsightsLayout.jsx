@@ -1,6 +1,7 @@
 import { Link, usePage } from '@inertiajs/react'
 import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
+import AppFooter from '../Components/AppFooter'
 import {
     ChartBarIcon,
     TableCellsIcon,
@@ -21,14 +22,23 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
     const { auth, tenant } = usePage().props
 
     return (
-        <div className="min-h-full bg-gray-50">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title={title} />
             <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="flex flex-col lg:flex-row gap-8">
-                    {/* Left sidebar */}
-                    <aside className="lg:w-56 flex-shrink-0">
+            <div className="flex-1">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    {/* Header */}
+                    <div className="mb-6">
+                        <h1 className="text-3xl font-bold text-gray-900">Insights</h1>
+                        <p className="mt-2 text-sm text-gray-600">
+                            Analytics and metadata health for your brand.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col lg:flex-row gap-8">
+                        {/* Left sidebar */}
+                        <aside className="lg:w-56 flex-shrink-0">
                         <nav className="sticky top-8 space-y-1" aria-label="Insights sections">
                             {SIDEBAR_ITEMS.map((item) => {
                                 const Icon = item.icon
@@ -70,12 +80,15 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
                         </nav>
                     </aside>
 
-                    {/* Right content */}
-                    <main className="flex-1 min-w-0">
-                        {children}
-                    </main>
+                        {/* Right content */}
+                        <main className="flex-1 min-w-0">
+                            {children}
+                        </main>
+                    </div>
                 </div>
             </div>
+
+            <AppFooter />
         </div>
     )
 }

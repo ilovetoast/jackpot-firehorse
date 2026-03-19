@@ -55,243 +55,12 @@ class TeamController extends Controller
             abort(403, 'Only administrators and owners can access team management.');
         }
 
-        // Get all team members
-        $firstUserId = $tenant->users()->orderBy('created_at')->first()?->id;
-        $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
-        
-        \Log::info('TeamController::index() - Loading team members', [
-            'tenant_id' => $tenant->id,
-            'tenant_name' => $tenant->name,
-            'brand_ids' => $tenantBrandIds,
-        ]);
-        
-        $members = $tenant->users()->orderBy('created_at')->get()->map(function ($member) use ($tenant, $firstUserId, $tenantBrandIds) {
-            // Get role from pivot table
-            $role = $member->pivot->role;
-            
-            // If no role in pivot, fall back to: first user (oldest) is owner, others are members
-            if (empty($role)) {
-                $isOwner = $firstUserId && $firstUserId === $member->id;
-                $role = $isOwner ? 'owner' : 'member';
-            }
-            
-            // Capitalize first letter for display
-            $roleDisplay = ucfirst($role);
-            
-            // Phase MI-1: Get brand assignments for this user in this tenant (active memberships only)
-            // Query directly from brand_user table - filter to active memberships (removed_at IS NULL)
-            $brandUserRecords = DB::table('brand_user')
-                ->where('user_id', $member->id)
-                ->whereIn('brand_id', $tenantBrandIds)
-                ->whereNull('removed_at') // Phase MI-1: Only active memberships
-                ->get();
-            
-            \Log::info('TeamController - Querying brand_user for member', [
-                'user_id' => $member->id,
-                'user_email' => $member->email,
-                'tenant_id' => $tenant->id,
-                'brand_ids_to_check' => $tenantBrandIds,
-                'records_found' => $brandUserRecords->count(),
-                'records' => $brandUserRecords->map(fn($r) => ['pivot_id' => $r->id, 'brand_id' => $r->brand_id, 'role' => $r->role])->toArray(),
-            ]);
-            
-            $brandAssignments = collect($brandUserRecords)->map(function ($pivot) use ($member, $tenant) {
-                $brand = \App\Models\Brand::find($pivot->brand_id);
-                
-                // Skip if brand was deleted
-                if (!$brand) {
-                    \Log::warning('TeamController - Brand not found for pivot record', [
-                        'pivot_id' => $pivot->id,
-                        'brand_id' => $pivot->brand_id,
-                        'user_id' => $member->id,
-                    ]);
-                    return null;
-                }
-                
-                // Verify brand belongs to this tenant (safety check)
-                if ($brand->tenant_id !== $tenant->id) {
-                    \Log::warning('TeamController - Brand does not belong to tenant', [
-                        'pivot_id' => $pivot->id,
-                        'brand_id' => $brand->id,
-                        'brand_tenant_id' => $brand->tenant_id,
-                        'current_tenant_id' => $tenant->id,
-                        'user_id' => $member->id,
-                    ]);
-                    return null;
-                }
-                
-                $brandRole = $pivot->role ?? 'viewer';
-                // Validate brand role - if invalid, default to viewer
-                // NO automatic conversion - invalid roles should be fixed manually
-                if (!RoleRegistry::isValidBrandRole($brandRole)) {
-                    \Log::warning('[TeamController] Invalid brand role detected, defaulting to viewer', [
-                        'user_id' => $member->id,
-                        'brand_id' => $brand->id,
-                        'invalid_role' => $brandRole,
-                    ]);
-                    $brandRole = 'viewer';
-                    // Update the database to fix invalid role
-                    $member->setRoleForBrand($brand, 'viewer');
-                }
-                
-                \Log::info('TeamController - Brand assignment found', [
-                    'user_id' => $member->id,
-                    'user_email' => $member->email,
-                    'brand_id' => $brand->id,
-                    'brand_name' => $brand->name,
-                    'role' => $brandRole,
-                    'pivot_id' => $pivot->id,
-                ]);
-                
-                return [
-                    'id' => $brand->id,
-                    'name' => $brand->name,
-                    'role' => $brandRole,
-                    'pivot_id' => $pivot->id, // Include for debugging/cleanup
-                ];
-            })->filter()->values()->toArray(); // Convert to array for proper JSON serialization
-            
-            \Log::info('TeamController - Final brand assignments for member', [
-                'user_id' => $member->id,
-                'user_email' => $member->email,
-                'assignments_count' => count($brandAssignments),
-                'assignments' => $brandAssignments,
-            ]);
-            
-            // C12: Collection-only users have no brand assignments but have collection_user grants for this tenant
-            $hasCollectionGrants = $member->collectionAccessGrants()
-                ->whereNotNull('accepted_at')
-                ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
-                ->exists();
-            $collectionOnly = empty($brandAssignments) && $hasCollectionGrants;
-            $collectionGrantNames = $collectionOnly
-                ? $member->collectionAccessGrants()
-                    ->whereNotNull('accepted_at')
-                    ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
-                    ->with('collection:id,name')
-                    ->get()
-                    ->pluck('collection.name')
-                    ->unique()
-                    ->values()
-                    ->toArray()
-                : [];
-
-            return [
-                'id' => $member->id,
-                'first_name' => $member->first_name,
-                'last_name' => $member->last_name,
-                'email' => $member->email,
-                'avatar_url' => $member->avatar_url,
-                'role' => $collectionOnly ? 'Collection access' : $roleDisplay,
-                'role_value' => $collectionOnly ? 'collection_only' : strtolower($role), // C12: Never show Owner/Admin for collection-only
-                'joined_at' => $member->pivot->created_at ?? $member->created_at,
-                'brand_assignments' => $brandAssignments, // Already converted to array on line 144
-                'is_orphaned' => false, // Current tenant members are not orphaned
-                'collection_only' => $collectionOnly,
-                'collection_grants' => $collectionGrantNames,
-            ];
-        });
-
-        // Find orphaned brand_user records (users not in tenant but have brand assignments)
-        // This catches cases where user was removed from tenant but brand_user records remain
-        $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
-        $orphanedBrandUsers = \DB::table('brand_user')
-            ->whereIn('brand_id', $tenantBrandIds)
-            ->whereNotIn('user_id', $tenant->users()->pluck('users.id')->toArray())
-            ->get()
-            ->map(function ($pivot) use ($tenant) {
-                $user = \App\Models\User::find($pivot->user_id);
-                $brand = \App\Models\Brand::find($pivot->brand_id);
-                
-                // Skip if user or brand was deleted (shouldn't happen due to CASCADE, but safety check)
-                if (!$user || !$brand) {
-                    return null;
-                }
-                
-                $brandRole = $pivot->role ?? 'viewer';
-                // Validate brand role - if invalid, default to viewer
-                // NO automatic conversion - invalid roles should be fixed manually
-                if (!RoleRegistry::isValidBrandRole($brandRole)) {
-                    \Log::warning('[TeamController] Invalid brand role detected in orphaned record, defaulting to viewer', [
-                        'user_id' => $pivot->user_id,
-                        'brand_id' => $pivot->brand_id,
-                        'invalid_role' => $brandRole,
-                    ]);
-                    $brandRole = 'viewer';
-                }
-                
-                return [
-                    'id' => $user->id,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'email' => $user->email,
-                    'avatar_url' => $user->avatar_url,
-                    'role' => 'N/A', // No tenant role since they're not in tenant
-                    'role_value' => null,
-                    'joined_at' => $pivot->created_at,
-                    'brand_assignments' => [
-                        [
-                            'id' => $brand->id,
-                            'name' => $brand->name,
-                            'role' => $brandRole,
-                            'pivot_id' => $pivot->id, // Include pivot ID for cleanup
-                        ],
-                    ],
-                    'is_orphaned' => true, // Mark as orphaned
-                ];
-            })
-            ->filter() // Remove null entries
-            ->values();
-        
-        // C12: Find collection-only orphans (users with collection_user for this tenant but not in tenant and not already in orphanedBrandUsers)
-        $tenantUserIds = $tenant->users()->pluck('users.id')->toArray();
-        $orphanedBrandUserIds = $orphanedBrandUsers->pluck('id')->unique()->values()->toArray();
-        $tenantCollectionIds = \App\Models\Collection::where('tenant_id', $tenant->id)->pluck('id')->toArray();
-        $collectionOnlyOrphans = collect();
-        if (! empty($tenantCollectionIds)) {
-            $collectionUserUserIds = CollectionUser::whereIn('collection_id', $tenantCollectionIds)
-                ->pluck('user_id')
-                ->unique()
-                ->diff($tenantUserIds)
-                ->diff($orphanedBrandUserIds)
-                ->values()
-                ->toArray();
-            foreach ($collectionUserUserIds as $uid) {
-                $user = User::find($uid);
-                if (! $user) {
-                    continue;
-                }
-                $grants = CollectionUser::where('user_id', $uid)
-                    ->whereIn('collection_id', $tenantCollectionIds)
-                    ->with('collection:id,name')
-                    ->get();
-                $collectionGrantNames = $grants->map(fn ($g) => $g->collection?->name)->filter()->values()->toArray();
-                $collectionOnlyOrphans->push([
-                    'id' => $user->id,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'email' => $user->email,
-                    'avatar_url' => $user->avatar_url,
-                    'role' => 'N/A',
-                    'role_value' => null,
-                    'joined_at' => $grants->min('created_at'),
-                    'brand_assignments' => [],
-                    'is_orphaned' => true,
-                    'collection_grants' => $collectionGrantNames,
-                ]);
-            }
-        }
-
-        // Merge orphaned records with regular members
-        $allMembers = $members->merge($orphanedBrandUsers)->merge($collectionOnlyOrphans)->values();
-
-        // Get plan limits
+        // Refactored: Users list loaded via API (GET /api/companies/users) for pagination/scalability.
         $planLimits = $this->planService->getPlanLimits($tenant);
         $maxUsers = $planLimits['max_users'] ?? PHP_INT_MAX;
-        $currentUserCount = $members->count();
+        $currentUserCount = $tenant->users()->count();
         $userLimitReached = $currentUserCount >= $maxUsers;
 
-        // Get brands for brand selection in invite form
         $brands = $tenant->brands()->orderBy('is_default', 'desc')->orderBy('name')->get()->map(function ($brand) {
             return [
                 'id' => $brand->id,
@@ -300,7 +69,6 @@ class TeamController extends Controller
             ];
         });
 
-        // Get assignable tenant roles from RoleRegistry (excludes owner)
         $tenantRoles = collect(RoleRegistry::assignableTenantRoles())->map(function ($role) {
             return [
                 'value' => $role,
@@ -308,49 +76,11 @@ class TeamController extends Controller
             ];
         })->values()->toArray();
 
-        // Convert to array and ensure proper serialization for Inertia
-        $membersArray = $allMembers->map(function ($member) {
-            // Ensure brand_assignments is an array, not a Collection
-            $brandAssignments = $member['brand_assignments'] ?? [];
-            if ($brandAssignments instanceof \Illuminate\Support\Collection) {
-                $brandAssignments = $brandAssignments->toArray();
-            }
-            
-            return [
-                'id' => $member['id'],
-                'first_name' => $member['first_name'],
-                'last_name' => $member['last_name'],
-                'email' => $member['email'],
-                'avatar_url' => $member['avatar_url'],
-                'role' => $member['role'],
-                'role_value' => $member['role_value'],
-                'joined_at' => $member['joined_at'],
-                'brand_assignments' => $brandAssignments,
-                'is_orphaned' => $member['is_orphaned'] ?? false,
-                'collection_only' => $member['collection_only'] ?? false,
-                'collection_grants' => $member['collection_grants'] ?? [],
-            ];
-        })->values()->toArray();
-        
-        // Log final response for debugging
-        \Log::info('TeamController::index() - Final response', [
-            'total_members' => count($membersArray),
-            'members_data' => array_map(function ($member) {
-                return [
-                    'id' => $member['id'],
-                    'email' => $member['email'],
-                    'brand_assignments_count' => count($member['brand_assignments'] ?? []),
-                    'brand_assignments' => $member['brand_assignments'] ?? [],
-                ];
-            }, $membersArray),
-        ]);
-        
         return Inertia::render('Companies/Team', [
             'tenant' => [
                 'id' => $tenant->id,
                 'name' => $tenant->name,
             ],
-            'members' => $membersArray,
             'brands' => $brands,
             'tenant_roles' => $tenantRoles,
             'current_user_count' => $currentUserCount,

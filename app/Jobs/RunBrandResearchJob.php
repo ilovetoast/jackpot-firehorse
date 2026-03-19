@@ -9,6 +9,7 @@ use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandArchetypeSuggestionService;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
 use App\Services\BrandDNA\BrandSnapshotSuggestionService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\BrandWebsiteCrawlerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -111,6 +112,7 @@ class RunBrandResearchJob implements ShouldQueue
         ]);
 
         $draft->getOrCreateInsightState($snapshot->id);
+        app(BrandVersionService::class)->markResearchComplete($draft);
     }
 
     protected function buildStructuredSnapshot(array $crawlData): array

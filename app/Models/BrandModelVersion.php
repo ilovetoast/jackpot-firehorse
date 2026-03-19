@@ -13,9 +13,24 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * Brand DNA / Brand Guidelines — versioned JSON model.
  * source_type: manual | scrape | ai | retrain
  * status: draft | active | archived
+ * lifecycle_stage: research | review | build | published
  */
 class BrandModelVersion extends Model
 {
+    public const LIFECYCLE_RESEARCH = 'research';
+    public const LIFECYCLE_REVIEW = 'review';
+    public const LIFECYCLE_BUILD = 'build';
+    public const LIFECYCLE_PUBLISHED = 'published';
+
+    public const RESEARCH_NOT_STARTED = 'not_started';
+    public const RESEARCH_RUNNING = 'running';
+    public const RESEARCH_COMPLETE = 'complete';
+    public const RESEARCH_FAILED = 'failed';
+
+    public const REVIEW_PENDING = 'pending';
+    public const REVIEW_IN_PROGRESS = 'in_progress';
+    public const REVIEW_COMPLETE = 'complete';
+
     protected $fillable = [
         'brand_model_id',
         'version_number',
@@ -23,6 +38,12 @@ class BrandModelVersion extends Model
         'model_payload',
         'metrics_payload',
         'builder_progress',
+        'lifecycle_stage',
+        'research_status',
+        'review_status',
+        'research_started_at',
+        'research_completed_at',
+        'review_completed_at',
         'status',
         'created_by',
     ];
@@ -33,7 +54,30 @@ class BrandModelVersion extends Model
             'model_payload' => 'array',
             'metrics_payload' => 'array',
             'builder_progress' => 'array',
+            'research_started_at' => 'datetime',
+            'research_completed_at' => 'datetime',
+            'review_completed_at' => 'datetime',
         ];
+    }
+
+    public function isResearchComplete(): bool
+    {
+        return $this->research_status === self::RESEARCH_COMPLETE;
+    }
+
+    public function isReviewComplete(): bool
+    {
+        return $this->review_status === self::REVIEW_COMPLETE;
+    }
+
+    public function canEnterBuilder(): bool
+    {
+        return $this->isResearchComplete();
+    }
+
+    public function isInLifecycleStage(string $stage): bool
+    {
+        return $this->lifecycle_stage === $stage;
     }
 
     /**

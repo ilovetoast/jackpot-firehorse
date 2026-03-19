@@ -1,10 +1,22 @@
-import { router, usePage } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
+import { parseUserAgent } from '../../utils/userAgentParser'
+import {
+    ArrowUpTrayIcon,
+    PencilSquareIcon,
+    TrashIcon,
+    UserPlusIcon,
+    SparklesIcon,
+    DocumentIcon,
+    FolderIcon,
+    BuildingOfficeIcon,
+    Cog6ToothIcon,
+} from '@heroicons/react/24/outline'
 
 export default function CompanyActivity({ tenant, events, pagination, filters, filter_options }) {
     const { auth } = usePage().props
@@ -14,6 +26,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
         brand_id: filters?.brand_id || '',
         date_from: filters?.date_from || '',
         date_to: filters?.date_to || '',
+        exclude_portal_views: filters?.exclude_portal_views ?? true,
     })
 
     // Sync local filters when filters prop changes
@@ -23,16 +36,72 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
             brand_id: filters?.brand_id || '',
             date_from: filters?.date_from || '',
             date_to: filters?.date_to || '',
+            exclude_portal_views: filters?.exclude_portal_views ?? true,
         })
     }, [filters])
 
     const formatEventType = (eventType) => {
         return eventType
-            .split('.')
+            ?.split('.')
             .map(word => word.charAt(0).toUpperCase() + word.slice(1))
             .join(' ')
-            .replace(/Tenant/g, 'Company')
+            .replace(/Tenant/g, 'Company') ?? ''
     }
+
+    const getEventGroup = (createdAt) => {
+        if (!createdAt) return 'Older'
+        const d = new Date(createdAt)
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const eventDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        const diffDays = Math.floor((today - eventDate) / (1000 * 60 * 60 * 24))
+        if (diffDays === 0) return 'Today'
+        if (diffDays === 1) return 'Yesterday'
+        if (diffDays <= 7) return 'This week'
+        return 'Older'
+    }
+
+    const getEventIcon = (eventType) => {
+        if (!eventType) return DocumentIcon
+        if (eventType.includes('.deleted')) return TrashIcon
+        if (eventType.includes('asset.uploaded') || eventType.includes('asset.created')) return ArrowUpTrayIcon
+        if (eventType.includes('asset.') || eventType.includes('metadata')) return DocumentIcon
+        if (eventType.includes('category')) return FolderIcon
+        if (eventType.includes('user.') || eventType.includes('invited') || eventType.includes('added')) return UserPlusIcon
+        if (eventType.includes('brand')) return BuildingOfficeIcon
+        if (eventType.includes('tenant') || eventType.includes('plan') || eventType.includes('subscription')) return Cog6ToothIcon
+        if (eventType.includes('ai_') || eventType.includes('ai.') || eventType.includes('suggestion')) return SparklesIcon
+        return PencilSquareIcon
+    }
+
+    const applyTodayFilter = () => {
+        const today = new Date().toISOString().slice(0, 10)
+        setLocalFilters({ ...localFilters, date_from: today, date_to: today })
+        router.get('/app/companies/activity', { date_from: today, date_to: today, exclude_portal_views: localFilters.exclude_portal_views }, { preserveState: false })
+    }
+
+    const dedupeKey = (event) => {
+        const desc = event?.description || ''
+        const actor = event?.actor?.name || event?.actor?.id || ''
+        const brand = event?.brand?.name || event?.brand?.id || ''
+        const subj = event?.subject?.id || ''
+        return `${event?.event_type}|${desc}|${event?.created_at}|${actor}|${brand}|${subj}`
+    }
+    const seenKeys = new Set()
+    const dedupedEvents = (events || []).filter((event) => {
+        const key = dedupeKey(event)
+        if (seenKeys.has(key)) return false
+        seenKeys.add(key)
+        return true
+    })
+
+    const groupedEvents = dedupedEvents.reduce((acc, event) => {
+        const group = getEventGroup(event.created_at)
+        if (!acc[group]) acc[group] = []
+        acc[group].push(event)
+        return acc
+    }, {})
+    const groupOrder = ['Today', 'Yesterday', 'This week', 'Older']
 
     const getActorLabel = (event) => {
         return event?.actor?.name || 'System'
@@ -130,9 +199,9 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
 
     const applyFilters = () => {
         const params = { ...localFilters, page: 1 }
-        // Remove empty filters
+        // Remove empty filters (keep exclude_portal_views as boolean)
         Object.keys(params).forEach(key => {
-            if (!params[key]) delete params[key]
+            if (key !== 'exclude_portal_views' && !params[key]) delete params[key]
         })
         router.get('/app/companies/activity', params, { preserveState: false })
     }
@@ -143,6 +212,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
             brand_id: '',
             date_from: '',
             date_to: '',
+            exclude_portal_views: true,
         })
         router.get('/app/companies/activity', {}, { preserveState: false })
     }
@@ -157,32 +227,32 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
     }
 
     return (
-        <div className="min-h-full">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Activity Log" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
-            <main className="bg-gray-50">
+            <main className="flex-1">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-6">
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Activity Log</h1>
-                        <p className="mt-2 text-sm text-gray-700">A running history of important events in your company.</p>
+                        <h1 className="text-3xl font-bold text-gray-900">Activity Log</h1>
+                        <p className="mt-2 text-sm text-gray-600">A running history of important events in your company.</p>
                     </div>
 
                     <CompanyTabs />
 
                     {/* Filters */}
-                    <div className="mb-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-gray-200">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                            {/* Event Type Filter */}
-                            <div>
-                                <label htmlFor="event_type" className="block text-xs font-medium text-gray-700 mb-1">
+                    <div className="mb-6 space-y-4">
+                        <div className="flex flex-wrap items-center gap-6">
+                            {/* Event Type */}
+                            <div className="flex items-center gap-2">
+                                <label htmlFor="event_type" className="text-sm font-medium text-slate-600">
                                     Event Type
                                 </label>
                                 <select
                                     id="event_type"
                                     value={localFilters.event_type}
                                     onChange={(e) => setLocalFilters({ ...localFilters, event_type: e.target.value })}
-                                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400/20 min-w-[160px]"
                                 >
                                     <option value="">All Events</option>
                                     {filter_options?.event_types?.map((type) => (
@@ -193,17 +263,17 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                 </select>
                             </div>
 
-                            {/* Brand Filter */}
+                            {/* Brand */}
                             {filter_options?.brands && filter_options.brands.length > 0 && (
-                                <div>
-                                    <label htmlFor="brand_id" className="block text-xs font-medium text-gray-700 mb-1">
+                                <div className="flex items-center gap-2">
+                                    <label htmlFor="brand_id" className="text-sm font-medium text-slate-600">
                                         Brand
                                     </label>
                                     <select
                                         id="brand_id"
                                         value={localFilters.brand_id}
                                         onChange={(e) => setLocalFilters({ ...localFilters, brand_id: e.target.value })}
-                                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400/20 min-w-[160px]"
                                     >
                                         <option value="">All Brands</option>
                                         {filter_options.brands.map((brand) => (
@@ -216,143 +286,251 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                             )}
 
                             {/* Date From */}
-                            <div>
-                                <label htmlFor="date_from" className="block text-xs font-medium text-gray-700 mb-1">
-                                    From Date
+                            <div className="flex items-center gap-2">
+                                <label htmlFor="date_from" className="text-sm font-medium text-slate-600">
+                                    From
                                 </label>
                                 <input
                                     type="date"
                                     id="date_from"
                                     value={localFilters.date_from}
                                     onChange={(e) => setLocalFilters({ ...localFilters, date_from: e.target.value })}
-                                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
                                 />
                             </div>
 
                             {/* Date To */}
-                            <div>
-                                <label htmlFor="date_to" className="block text-xs font-medium text-gray-700 mb-1">
-                                    To Date
+                            <div className="flex items-center gap-2">
+                                <label htmlFor="date_to" className="text-sm font-medium text-slate-600">
+                                    To
                                 </label>
                                 <input
                                     type="date"
                                     id="date_to"
                                     value={localFilters.date_to}
                                     onChange={(e) => setLocalFilters({ ...localFilters, date_to: e.target.value })}
-                                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
                                 />
                             </div>
-                        </div>
 
-                        {/* Filter Actions */}
-                        <div className="mt-4 flex gap-2">
-                            <button
-                                onClick={applyFilters}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                            >
-                                Apply Filters
-                            </button>
-                            {(localFilters.event_type || localFilters.brand_id || localFilters.date_from || localFilters.date_to) && (
+                            {/* Exclude portal views */}
+                            <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!localFilters.exclude_portal_views}
+                                        onChange={(e) => setLocalFilters({ ...localFilters, exclude_portal_views: e.target.checked })}
+                                        className="rounded border-slate-300 text-indigo-600 focus:ring-slate-400/20"
+                                    />
+                                    <span className="text-sm font-medium text-slate-600">Exclude portal views</span>
+                                </label>
+                            </div>
+
+                            {/* Filter Actions */}
+                            <div className="flex items-center gap-2">
                                 <button
-                                    onClick={clearFilters}
-                                    className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                    onClick={applyTodayFilter}
+                                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50"
                                 >
-                                    Clear
+                                    Today
                                 </button>
-                            )}
+                                <button
+                                    onClick={applyFilters}
+                                    className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+                                >
+                                    Apply
+                                </button>
+                                {(localFilters.event_type || localFilters.brand_id || localFilters.date_from || localFilters.date_to || !localFilters.exclude_portal_views) && (
+                                    <button
+                                        onClick={clearFilters}
+                                        className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50"
+                                    >
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
 
                     {/* Events Timeline */}
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5">
+                        <div className="px-6 py-5 max-w-4xl">
                             {events?.length === 0 ? (
                                 <div className="py-10 text-center text-sm text-gray-500">No activity events found</div>
                             ) : (
                                 <div className="flow-root">
-                                    <ul role="list" className="-mb-8">
-                                        {events?.map((event, idx) => {
-                                            const isExpanded = expandedRows.has(event.id)
-                                            const hasMetadata = event.metadata && Object.keys(event.metadata).length > 0
-                                            const isLast = idx === events.length - 1
-                                            const text = buildEventText(event)
+                                    {groupOrder.map((groupName) => {
+                                        const groupEvents = groupedEvents[groupName]
+                                        if (!groupEvents?.length) return null
+                                        return (
+                                            <div key={groupName} className="mb-8 last:mb-0">
+                                                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+                                                    {groupName}
+                                                </h3>
+                                                <ul role="list" className="-mb-8">
+                                                    {groupEvents.map((event, idx) => {
+                                                        const isExpanded = expandedRows.has(event.id)
+                                                        const hasMetadata = event.metadata && Object.keys(event.metadata).length > 0
+                                                        const metadataSummary = event.metadata_summary || []
+                                                        const rawMetaKeys = ['changed', 'original']
+                                                        const displayableMeta = metadataSummary.filter(
+                                                            (item) => !rawMetaKeys.includes((item.label || '').toLowerCase())
+                                                        )
+                                                        const inlineMeta = displayableMeta.slice(0, 3)
+                                                        const isLast = idx === groupEvents.length - 1
+                                                        const text = buildEventText(event)
+                                                        const EventIcon = getEventIcon(event.event_type)
 
-                                            return (
-                                                <li key={event.id}>
-                                                    <div className="relative pb-8">
-                                                        {!isLast && (
-                                                            <span
-                                                                aria-hidden="true"
-                                                                className="absolute left-5 top-5 -ml-px h-full w-0.5 bg-gray-200"
-                                                            />
-                                                        )}
+                                                        return (
+                                                            <li key={event.id}>
+                                                                <div className="relative pb-8">
+                                                                    {!isLast && (
+                                                                        <span
+                                                                            aria-hidden="true"
+                                                                            className="absolute left-5 top-5 -ml-px h-full w-0.5 bg-gray-200"
+                                                                        />
+                                                                    )}
 
-                                                        <div className="relative flex items-start space-x-3">
-                                                            {/* Timeline dot / actor icon */}
-                                                            <div className="relative">
-                                                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white ring-2 ring-gray-200">
-                                                                    <Avatar
-                                                                        avatarUrl={event?.actor?.avatar_url}
-                                                                        firstName={event?.actor?.first_name || event?.actor?.name}
-                                                                        lastName={event?.actor?.last_name}
-                                                                        email={event?.actor?.email || event?.actor?.type}
-                                                                        size="sm"
-                                                                    />
-                                                                </div>
-                                                            </div>
-
-                                                            {/* Content */}
-                                                            <div className="min-w-0 flex-1">
-                                                                <div className="flex items-start justify-between gap-4">
-                                                                    <p className="text-sm leading-6 text-gray-900">
-                                                                        <span className="font-semibold">{text.actor}</span>{' '}
-                                                                        <span className="text-gray-600">{text.subtle}</span>{' '}
-                                                                        {text.model ? <span className="font-semibold">{text.model}</span> : null}
-                                                                    </p>
-                                                                    <p className="shrink-0 whitespace-nowrap text-xs text-gray-500">
-                                                                        {event.created_at_human || ''}
-                                                                    </p>
-                                                                </div>
-
-                                                                {event.brand?.name ? (
-                                                                    <div className="mt-1">
-                                                                        <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-600 ring-1 ring-inset ring-gray-200">
-                                                                            {event.brand.name}
-                                                                        </span>
-                                                                    </div>
-                                                                ) : null}
-
-                                                                {hasMetadata ? (
-                                                                    <div className="mt-2">
-                                                                        <button
-                                                                            onClick={() => toggleRowExpansion(event.id)}
-                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
-                                                                        >
-                                                                            {isExpanded ? 'Hide details' : 'View details'}
-                                                                        </button>
-                                                                    </div>
-                                                                ) : null}
-
-                                                                {isExpanded && hasMetadata ? (
-                                                                    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                                                                        <h4 className="text-xs font-semibold text-gray-900">Event details</h4>
-                                                                        <pre className="mt-2 max-h-96 overflow-auto rounded border border-gray-200 bg-white p-3 text-xs">
-                                                                            {JSON.stringify(event.metadata, null, 2)}
-                                                                        </pre>
-                                                                        {event.user_agent ? (
-                                                                            <div className="mt-3 text-xs text-gray-500">
-                                                                                <span className="font-medium">User Agent:</span> {event.user_agent}
+                                                                    <div className="relative flex items-start gap-3">
+                                                                        {/* Event type icon + actor avatar - stacked so line aligns through center */}
+                                                                        <div className="flex flex-col items-center gap-1.5 shrink-0 w-10">
+                                                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500">
+                                                                                <EventIcon className="h-4 w-4" />
                                                                             </div>
-                                                                        ) : null}
+                                                                            <div className="flex h-8 w-8 items-center justify-center rounded-full ring-2 ring-gray-200 overflow-hidden">
+                                                                                <Avatar
+                                                                                    avatarUrl={event?.actor?.avatar_url}
+                                                                                    firstName={event?.actor?.first_name || event?.actor?.name}
+                                                                                    lastName={event?.actor?.last_name}
+                                                                                    email={event?.actor?.email || event?.actor?.type}
+                                                                                    size="sm"
+                                                                                />
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Content */}
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                                                                <p className="text-sm leading-6 text-gray-900">
+                                                                                    <span className="font-semibold">{text.actor}</span>{' '}
+                                                                                    <span className="text-gray-600">{text.subtle}</span>{' '}
+                                                                                    {text.model ? <span className="font-semibold">{text.model}</span> : null}
+                                                                                </p>
+                                                                                <p className="shrink-0 text-xs text-gray-500">
+                                                                                    {event.created_at_human || ''}
+                                                                                </p>
+                                                                            </div>
+
+                                                                            {/* Inline metadata preview */}
+                                                                            {inlineMeta.length > 0 && (
+                                                                                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                                                                                    {inlineMeta.map((item, i) => (
+                                                                                        <span key={i}>
+                                                                                            <span className="font-medium text-gray-500">{item.label}:</span> {String(item.value)}
+                                                                                        </span>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+
+                                                                            {event.brand?.name ? (
+                                                                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                                                                    <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-0.5 text-xs text-gray-600 ring-1 ring-inset ring-gray-200">
+                                                                                        {event.brand.name}
+                                                                                    </span>
+                                                                                    {event.subject_url && (
+                                                                                        <Link
+                                                                                            href={event.subject_url}
+                                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                        >
+                                                                                            View →
+                                                                                        </Link>
+                                                                                    )}
+                                                                                </div>
+                                                                            ) : event.subject_url ? (
+                                                                                <div className="mt-1.5">
+                                                                                    <Link
+                                                                                        href={event.subject_url}
+                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                    >
+                                                                                        View details →
+                                                                                    </Link>
+                                                                                </div>
+                                                                            ) : null}
+
+                                                                            {hasMetadata ? (
+                                                                                <div className="mt-2">
+                                                                                    <button
+                                                                                        onClick={() => toggleRowExpansion(event.id)}
+                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                    >
+                                                                                        {isExpanded ? 'Hide details' : 'More details'}
+                                                                                    </button>
+                                                                                </div>
+                                                                            ) : null}
+
+                                                                            {isExpanded && hasMetadata ? (
+                                                                                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                                                                    <h4 className="text-xs font-semibold text-gray-900">Event details</h4>
+                                                                                    {metadataSummary.length > 0 ? (
+                                                                                        <dl className="mt-2 space-y-3 text-xs">
+                                                                                            {metadataSummary.map((item, i) => {
+                                                                                                const val = String(item.value)
+                                                                                                const isRawJson = /^[\{\[]/.test(val.trim())
+                                                                                                return (
+                                                                                                    <div key={i} className="flex flex-col gap-1">
+                                                                                                        <dt className="font-medium text-gray-600">{item.label}</dt>
+                                                                                                        <dd className="text-gray-900">
+                                                                                                            {isRawJson ? (
+                                                                                                                <pre className="mt-1 max-h-48 overflow-auto rounded border border-gray-200 bg-white p-3 text-xs whitespace-pre-wrap break-all">
+                                                                                                                    {(() => {
+                                                                                                                        try {
+                                                                                                                            const jsonPart = val.replace(/,?\s*\d{4}-\d{2}-\d{2}.*$/, '').trim()
+                                                                                                                            const parsed = JSON.parse(jsonPart)
+                                                                                                                            return JSON.stringify(parsed, null, 2)
+                                                                                                                        } catch {
+                                                                                                                            return val
+                                                                                                                        }
+                                                                                                                    })()}
+                                                                                                                </pre>
+                                                                                                            ) : (
+                                                                                                                val
+                                                                                                            )}
+                                                                                                        </dd>
+                                                                                                    </div>
+                                                                                                )
+                                                                                            })}
+                                                                                        </dl>
+                                                                                    ) : (
+                                                                                        <pre className="mt-2 max-h-96 overflow-auto rounded border border-gray-200 bg-white p-3 text-xs">
+                                                                                            {JSON.stringify(event.metadata, null, 2)}
+                                                                                        </pre>
+                                                                                    )}
+                                                                                    {event.user_agent ? (
+                                                                                        <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
+                                                                                            {(() => {
+                                                                                                const ua = parseUserAgent(event.user_agent)
+                                                                                                const short = [ua.browser, ua.os].filter(Boolean).join(' on ')
+                                                                                                return (
+                                                                                                    <span>
+                                                                                                        <span className="font-medium">Device:</span> {short}
+                                                                                                        {ua.device && ua.device !== 'Desktop' ? ` (${ua.device})` : ''}
+                                                                                                    </span>
+                                                                                                )
+                                                                                            })()}
+                                                                                        </div>
+                                                                                    ) : null}
+                                                                                </div>
+                                                                            ) : null}
+                                                                        </div>
                                                                     </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </li>
-                                            )
-                                        })}
-                                    </ul>
+                                                                </div>
+                                                            </li>
+                                                        )
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                             )}
                         </div>

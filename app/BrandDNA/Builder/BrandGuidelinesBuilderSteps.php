@@ -18,11 +18,24 @@ class BrandGuidelinesBuilderSteps
     public const STEP_STANDARDS = 'standards';
 
     /**
-     * All step keys in order.
-     * Order: Background → Archetype → Purpose → Expression → Positioning → Standards
-     * (Processing and research-summary are interstitial steps inserted at runtime)
+     * Builder step keys in order (build phase only).
+     * Background/processing/research-summary are handled by the Research page.
      */
     public static function stepKeys(): array
+    {
+        return [
+            self::STEP_ARCHETYPE,
+            self::STEP_PURPOSE_PROMISE,
+            self::STEP_EXPRESSION,
+            self::STEP_POSITIONING,
+            self::STEP_STANDARDS,
+        ];
+    }
+
+    /**
+     * All step keys including research-phase steps (for backward compatibility).
+     */
+    public static function allStepKeys(): array
     {
         return [
             self::STEP_BACKGROUND,
@@ -124,10 +137,18 @@ class BrandGuidelinesBuilderSteps
     }
 
     /**
-     * Check if step_key is valid.
+     * Check if step_key is valid (includes background for backward compat).
      */
     public static function isValidStepKey(string $stepKey): bool
     {
         return self::stepByKey($stepKey) !== null;
+    }
+
+    /**
+     * Check if step_key is a valid builder step (excludes background).
+     */
+    public static function isValidBuilderStepKey(string $stepKey): bool
+    {
+        return in_array($stepKey, self::stepKeys(), true);
     }
 }

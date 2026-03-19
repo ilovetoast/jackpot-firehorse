@@ -117,6 +117,18 @@
         50% { transform: translateY(-8px); }
     }
 
+    /* Overview slot-machine: subtle vertical drift */
+    @keyframes slot-machine-drift {
+        0%, 100% { transform: translateY(0) translateZ(0) rotateX(1deg); }
+        50% { transform: translateY(-12px) translateZ(0) rotateX(1deg); }
+    }
+    .animate-slot-drift {
+        animation: slot-machine-drift 12s ease-in-out infinite;
+    }
+    .animate-slot-drift-1 { animation: slot-machine-drift 11s ease-in-out infinite 0s; }
+    .animate-slot-drift-2 { animation: slot-machine-drift 13s ease-in-out infinite 1.5s; }
+    .animate-slot-drift-3 { animation: slot-machine-drift 12s ease-in-out infinite 3s; }
+
     /* Download landing: fluid, abstract jackpot-inspired animation — morphing blobs + subtle shimmer */
     @keyframes download-blob-1 {
         0%, 100% {

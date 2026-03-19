@@ -56,14 +56,14 @@ export default function TenantMetadataRegistryIndex({
             <AppNav />
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* Page Header — aligned with Brand Settings */}
+                {/* Page Header — aligned with Brand Portal */}
                 <div className="mb-8">
                     {(selectedBrandId ?? brands[0]?.id) && (
                         <Link
                             href={typeof route === 'function' ? route('brands.edit', { brand: selectedBrandId ?? brands[0].id }) : `/app/brands/${selectedBrandId ?? brands[0].id}/edit`}
                             className="text-sm font-medium text-gray-500 hover:text-gray-700"
                         >
-                            ← Back to Brand Settings
+                            ← Back to Brand Portal
                         </Link>
                     )}
                     <div className="mt-4 flex items-start justify-between gap-4">

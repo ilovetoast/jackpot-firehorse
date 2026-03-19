@@ -9,46 +9,29 @@ use App\Models\BrandModelVersion;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Brand DNA Draft Service — wizard write path for Brand Guidelines Builder.
+ * Brand Version Service — unified lifecycle + draft management for Brand Guidelines.
  *
- * Logic:
- * - If a draft BrandModelVersion exists: use it.
- * - If not: create one by copying the active version's model_payload.
- * - Wizard edits update the draft version only (model_payload).
- *
- * Brand table during wizard: only brand_colors, logo references, icon references may be updated.
- * All other wizard data is stored in the draft's model_payload.
- *
- * Uses BrandGuidelinesBuilderSteps as single source of truth for allowed paths.
+ * Replaces BrandDnaDraftService. Handles:
+ * - Version creation, retrieval, and lifecycle transitions
+ * - Payload patching (wizard write path)
+ * - Prefill application
  */
-class BrandDnaDraftService
+class BrandVersionService
 {
     public function __construct(
         private BrandDnaPayloadNormalizer $normalizer
     ) {}
 
-    /**
-     * Allowed paths per builder step. Uses step config.
-     */
-    protected static function allowedPathsForStep(string $stepKey): array
-    {
-        return BrandGuidelinesBuilderSteps::allowedPathsForStep($stepKey);
-    }
+    // ─── Version retrieval ───────────────────────────────────────────
 
     /**
-     * Get or create the draft BrandModelVersion for the brand.
+     * Get or create the working draft for a brand.
      * Returns the latest draft (status=draft); creates one if none exists.
      * New drafts are seeded from the active version's model_payload (or empty if none).
      */
-    public function getOrCreateDraftVersion(Brand $brand): BrandModelVersion
+    public function getWorkingVersion(Brand $brand): BrandModelVersion
     {
-        $brandModel = $brand->brandModel;
-        if (! $brandModel) {
-            $brandModel = $brand->brandModel()->create([
-                'is_enabled' => false,
-                'brand_dna_scoring_enabled' => true,
-            ]);
-        }
+        $brandModel = $this->ensureBrandModel($brand);
 
         $draft = $brandModel->versions()
             ->where('status', 'draft')
@@ -59,7 +42,7 @@ class BrandDnaDraftService
             return $draft;
         }
 
-        return DB::transaction(function () use ($brandModel, $brand) {
+        return DB::transaction(function () use ($brandModel) {
             $activeVersion = $brandModel->activeVersion;
             $basePayload = $activeVersion
                 ? ($activeVersion->model_payload ?? [])
@@ -73,20 +56,103 @@ class BrandDnaDraftService
                 'model_payload' => $this->normalizer->normalize($basePayload),
                 'metrics_payload' => null,
                 'status' => 'draft',
+                'lifecycle_stage' => BrandModelVersion::LIFECYCLE_RESEARCH,
+                'research_status' => BrandModelVersion::RESEARCH_NOT_STARTED,
+                'review_status' => BrandModelVersion::REVIEW_PENDING,
                 'created_by' => auth()->id(),
             ]);
         });
     }
 
     /**
+     * Create a NEW draft version (e.g. "Start Over" / "Run Builder Again").
+     * Seeds from active version. Does not reuse existing draft.
+     */
+    public function createNewVersion(Brand $brand): BrandModelVersion
+    {
+        $brandModel = $this->ensureBrandModel($brand);
+
+        return DB::transaction(function () use ($brandModel) {
+            $activeVersion = $brandModel->activeVersion;
+            $basePayload = $activeVersion
+                ? ($activeVersion->model_payload ?? [])
+                : [];
+
+            $versionNumber = $brandModel->versions()->max('version_number') + 1;
+
+            return $brandModel->versions()->create([
+                'version_number' => $versionNumber,
+                'source_type' => 'manual',
+                'model_payload' => $this->normalizer->normalize($basePayload),
+                'metrics_payload' => null,
+                'status' => 'draft',
+                'lifecycle_stage' => BrandModelVersion::LIFECYCLE_RESEARCH,
+                'research_status' => BrandModelVersion::RESEARCH_NOT_STARTED,
+                'review_status' => BrandModelVersion::REVIEW_PENDING,
+                'created_by' => auth()->id(),
+            ]);
+        });
+    }
+
+    // ─── Lifecycle transitions ───────────────────────────────────────
+
+    public function markResearchRunning(BrandModelVersion $version): void
+    {
+        $version->update([
+            'research_status' => BrandModelVersion::RESEARCH_RUNNING,
+            'research_started_at' => $version->research_started_at ?? now(),
+        ]);
+    }
+
+    public function markResearchComplete(BrandModelVersion $version): void
+    {
+        $version->update([
+            'research_status' => BrandModelVersion::RESEARCH_COMPLETE,
+            'research_completed_at' => now(),
+        ]);
+    }
+
+    public function markResearchFailed(BrandModelVersion $version): void
+    {
+        $version->update([
+            'research_status' => BrandModelVersion::RESEARCH_FAILED,
+        ]);
+    }
+
+    public function advanceToReview(BrandModelVersion $version): void
+    {
+        $version->update([
+            'lifecycle_stage' => BrandModelVersion::LIFECYCLE_REVIEW,
+            'research_status' => BrandModelVersion::RESEARCH_COMPLETE,
+            'research_completed_at' => $version->research_completed_at ?? now(),
+        ]);
+    }
+
+    public function advanceToBuild(BrandModelVersion $version): void
+    {
+        $version->update([
+            'lifecycle_stage' => BrandModelVersion::LIFECYCLE_BUILD,
+            'review_status' => BrandModelVersion::REVIEW_COMPLETE,
+            'review_completed_at' => now(),
+        ]);
+    }
+
+    // ─── Payload patching (wizard write path) ────────────────────────
+
+    /**
+     * Allowed paths per builder step. Uses step config.
+     */
+    protected static function allowedPathsForStep(string $stepKey): array
+    {
+        return BrandGuidelinesBuilderSteps::allowedPathsForStep($stepKey);
+    }
+
+    /**
      * Patch draft payload with incoming data. Deep merge restricted to allowed paths.
-     * Preserves existing keys not present in incoming payload.
-     *
-     * @param  array<string>  $allowedPaths  Top-level keys allowed (e.g. ['identity', 'personality'])
      */
     public function patchDraftPayload(Brand $brand, array $patch, array $allowedPaths): BrandModelVersion
     {
-        $draft = $this->getOrCreateDraftVersion($brand);
+        $draft = $this->getWorkingVersion($brand);
         $current = $draft->model_payload ?? [];
         if (! is_array($current)) {
             $current = [];
@@ -101,55 +167,7 @@ class BrandDnaDraftService
     }
 
     /**
-     * Deep merge: only merge keys under allowed top-level paths.
-     * For each allowed path, recursively merge patch into current (patch wins for conflicts).
-     * Sibling sections not in allowedPaths are left untouched.
-     */
-    protected function deepMergeRestricted(array $current, array $patch, array $allowedPaths): array
-    {
-        $result = $current;
-
-        foreach ($allowedPaths as $path) {
-            if (! array_key_exists($path, $patch)) {
-                continue;
-            }
-            $patchValue = $patch[$path];
-            $currentValue = $result[$path] ?? [];
-            if (! is_array($currentValue)) {
-                $currentValue = [];
-            }
-            if (! is_array($patchValue)) {
-                $result[$path] = $patchValue;
-            } else {
-                $result[$path] = $this->arrayMergeRecursive($currentValue, $patchValue);
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Recursive merge: patch values overwrite current for same keys.
-     * Preserves current keys not in patch.
-     */
-    protected function arrayMergeRecursive(array $current, array $patch): array
-    {
-        foreach ($patch as $key => $value) {
-            if (is_array($value) && isset($current[$key]) && is_array($current[$key])) {
-                $current[$key] = $this->arrayMergeRecursive($current[$key], $value);
-            } else {
-                $current[$key] = $value;
-            }
-        }
-
-        return $current;
-    }
-
-    /**
      * Patch from builder step. Updates the draft version only.
-     * - Filters payload to allowed paths from step config.
-     * - brand_colors: updates brands table (primary_color, secondary_color, accent_color).
-     * - All other paths: updates brand_model_versions.model_payload on the draft.
      */
     public function patchFromStep(Brand $brand, string $stepKey, array $payload): BrandModelVersion
     {
@@ -162,7 +180,6 @@ class BrandDnaDraftService
             throw new \InvalidArgumentException("Unknown step_key: {$stepKey}");
         }
 
-        // Filter payload to only allowed paths (server enforces; client cannot invent keys)
         $filteredPatch = [];
         foreach ($allowedPaths as $path) {
             if (array_key_exists($path, $payload)) {
@@ -170,8 +187,6 @@ class BrandDnaDraftService
             }
         }
 
-        // brand_colors: update Brand model directly (allowed during wizard).
-        // Logo/icon references would also be allowed; currently only colors are updated here.
         if (array_key_exists('brand_colors', $filteredPatch)) {
             $colors = $filteredPatch['brand_colors'];
             if (is_array($colors)) {
@@ -189,13 +204,13 @@ class BrandDnaDraftService
                     $updates['accent_color_user_defined'] = true;
                 }
                 if (! empty($updates)) {
+                    $brand = Brand::find($brand->id);
                     $brand->update($updates);
                 }
             }
             unset($filteredPatch['brand_colors']);
         }
 
-        // Paths for model_payload only (exclude brand_colors which updates Brand)
         $modelPayloadPaths = array_values(array_filter($allowedPaths, fn ($p) => $p !== 'brand_colors'));
 
         return $this->patchDraftPayload($brand, $filteredPatch, $modelPayloadPaths);
@@ -203,8 +218,6 @@ class BrandDnaDraftService
 
     /**
      * Apply a prefill patch to the draft with fill_empty or replace semantics.
-     * fill_empty: only write keys that are currently empty/null/[] in the draft (deep).
-     * replace: overwrite those keys.
      *
      * @return array{applied: array, skipped: array<string>, draft: BrandModelVersion}
      */
@@ -212,7 +225,7 @@ class BrandDnaDraftService
     {
         $draft = $targetVersionId
             ? BrandModelVersion::where('brand_model_id', $brand->brandModel?->id)->where('id', $targetVersionId)->where('status', 'draft')->first()
-            : $this->getOrCreateDraftVersion($brand);
+            : $this->getWorkingVersion($brand);
 
         if (! $draft) {
             throw new \InvalidArgumentException('Draft version not found.');
@@ -263,6 +276,57 @@ class BrandDnaDraftService
         ];
     }
 
+    // ─── Internal helpers ────────────────────────────────────────────
+
+    protected function ensureBrandModel(Brand $brand): BrandModel
+    {
+        $brandModel = $brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = $brand->brandModel()->create([
+                'is_enabled' => false,
+                'brand_dna_scoring_enabled' => true,
+            ]);
+        }
+
+        return $brandModel;
+    }
+
+    protected function deepMergeRestricted(array $current, array $patch, array $allowedPaths): array
+    {
+        $result = $current;
+
+        foreach ($allowedPaths as $path) {
+            if (! array_key_exists($path, $patch)) {
+                continue;
+            }
+            $patchValue = $patch[$path];
+            $currentValue = $result[$path] ?? [];
+            if (! is_array($currentValue)) {
+                $currentValue = [];
+            }
+            if (! is_array($patchValue)) {
+                $result[$path] = $patchValue;
+            } else {
+                $result[$path] = $this->arrayMergeRecursive($currentValue, $patchValue);
+            }
+        }
+
+        return $result;
+    }
+
+    protected function arrayMergeRecursive(array $current, array $patch): array
+    {
+        foreach ($patch as $key => $value) {
+            if (is_array($value) && isset($current[$key]) && is_array($current[$key])) {
+                $current[$key] = $this->arrayMergeRecursive($current[$key], $value);
+            } else {
+                $current[$key] = $value;
+            }
+        }
+
+        return $current;
+    }
+
     protected function filterFillEmptyOnly(array $current, array $patch, string $pathPrefix, array &$skipped): array
     {
         $result = [];
@@ -287,38 +351,5 @@ class BrandDnaDraftService
         }
 
         return $result;
-    }
-
-    /**
-     * Create a NEW draft version (for "Run Builder Again").
-     * Seeds from active version if exists. Does not reuse existing draft.
-     */
-    public function createNewDraftVersion(Brand $brand): BrandModelVersion
-    {
-        $brandModel = $brand->brandModel;
-        if (! $brandModel) {
-            $brandModel = $brand->brandModel()->create([
-                'is_enabled' => false,
-                'brand_dna_scoring_enabled' => true,
-            ]);
-        }
-
-        return DB::transaction(function () use ($brandModel, $brand) {
-            $activeVersion = $brandModel->activeVersion;
-            $basePayload = $activeVersion
-                ? ($activeVersion->model_payload ?? [])
-                : [];
-
-            $versionNumber = $brandModel->versions()->max('version_number') + 1;
-
-            return $brandModel->versions()->create([
-                'version_number' => $versionNumber,
-                'source_type' => 'manual',
-                'model_payload' => $this->normalizer->normalize($basePayload),
-                'metrics_payload' => null,
-                'status' => 'draft',
-                'created_by' => auth()->id(),
-            ]);
-        });
     }
 }

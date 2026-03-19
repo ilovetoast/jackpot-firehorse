@@ -28,17 +28,20 @@ class BrandThemeBuilder
         $mode = $this->resolveMode($tenant, $brand);
         $colors = $this->resolveColors($effectiveBrand);
         $logo = $this->resolveLogo($effectiveBrand);
+        $logoDark = $this->resolveLogoDark($effectiveBrand);
         $name = $this->resolveName($tenant, $brand);
         $tagline = $this->resolveTagline($effectiveBrand);
 
         return [
             'mode' => $mode,
             'logo' => $logo,
+            'logo_dark' => $logoDark,
             'name' => $name,
             'tagline' => $tagline,
             'colors' => $colors,
             'background' => $this->resolveBackground($colors),
             'portal' => $this->resolvePortalOverrides($effectiveBrand),
+            'presentation_style' => $this->resolvePresentationStyle($effectiveBrand),
         ];
     }
 
@@ -87,6 +90,21 @@ class BrandThemeBuilder
             $logo = $brand->logo_path;
 
             return ($logo !== null && $logo !== '') ? $logo : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function resolveLogoDark(?Brand $brand): ?string
+    {
+        if (! $brand) {
+            return null;
+        }
+
+        try {
+            $logoDark = $brand->logo_dark_path;
+
+            return ($logoDark !== null && $logoDark !== '') ? $logoDark : null;
         } catch (\Throwable) {
             return null;
         }
@@ -268,5 +286,20 @@ class BrandThemeBuilder
     private function saturate(string $hex, float $amount = 0.3): string
     {
         return $this->lighten($hex, $amount * 0.5);
+    }
+
+    private function resolvePresentationStyle(?Brand $brand): string
+    {
+        if (! $brand) {
+            return 'clean';
+        }
+
+        $activeVersion = $brand->brandModel?->activeVersion;
+        $payload = $activeVersion?->model_payload ?? [];
+        if ($payload instanceof \Illuminate\Support\Collection) {
+            $payload = $payload->toArray();
+        }
+
+        return data_get($payload, 'presentation.style', 'clean');
     }
 }

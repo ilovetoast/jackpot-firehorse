@@ -127,118 +127,49 @@ export default function CompanyPermissions({
     }
 
     return (
-        <div className="min-h-full">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Company Permissions" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
-            <main className="bg-gray-50">
+            <main className="flex-1">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-6">
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Permissions</h1>
-                        <p className="mt-2 text-sm text-gray-700">
+                        <h1 className="text-3xl font-bold text-gray-900">Company Permissions</h1>
+                        <p className="mt-2 text-sm text-gray-600">
                             View which permissions each role has for {tenant.name}. Owners and admins can view all restricted categories.
                         </p>
                     </div>
 
                     <CompanyTabs />
 
-                    {/* Info Boxes */}
-                    <div className="mb-8 space-y-4">
-                        {/* Company vs Brand Permissions Info */}
-                        <div className="rounded-lg bg-indigo-50 border border-indigo-200">
-                            <div className="px-6 py-4">
-                                <div className="flex items-start">
-                                    <div className="flex-shrink-0">
-                                        <svg className="h-5 w-5 text-indigo-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                        </svg>
-                                    </div>
-                                    <div className="ml-3 flex-1">
-                                        <h3 className="text-sm font-semibold text-indigo-900 mb-2">Company vs Brand Permissions</h3>
-                                        <div className="text-sm text-indigo-800 space-y-2">
-                                            <p>
-                                                <strong>Company-Level Permissions</strong> (🏢) apply at the company/tenant level and control access to company-wide features like billing, team management, and company settings.
-                                            </p>
-                                            <p>
-                                                <strong>Brand-Level Permissions</strong> (🏷️) can be scoped to specific brands but may be inherited from company roles. These control access to assets, metadata, and brand-specific features.
-                                            </p>
-                                            <p className="mt-2 font-semibold text-indigo-900">
-                                                ⚡ <strong>Important:</strong> Company Owner and Admin permissions <strong>override</strong> brand-level restrictions. Owners and Admins have full access to all brands regardless of brand role assignments.
-                                            </p>
-                                        </div>
-                                    </div>
+                    {/* Permissions Overview */}
+                    <div className="mb-8 rounded-lg bg-gray-50 border border-gray-200 px-6 py-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                            <div className="flex items-start gap-2.5">
+                                <span className="mt-0.5 flex-shrink-0 text-base">🏢</span>
+                                <div>
+                                    <span className="font-semibold text-gray-900">Company-level</span>
+                                    <span className="text-gray-500"> — billing, team, settings. Apply to all brands.</span>
+                                </div>
+                            </div>
+                            <div className="flex items-start gap-2.5">
+                                <span className="mt-0.5 flex-shrink-0 text-base">🏷️</span>
+                                <div>
+                                    <span className="font-semibold text-gray-900">Brand-level</span>
+                                    <span className="text-gray-500"> — assets, metadata. Scoped per brand.</span>
+                                </div>
+                            </div>
+                            <div className="flex items-start gap-2.5">
+                                <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-indigo-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                                </svg>
+                                <div>
+                                    <span className="font-semibold text-gray-900">Owner & Admin override</span>
+                                    <span className="text-gray-500"> — full access to all brands and restricted categories.</span>
                                 </div>
                             </div>
                         </div>
-
-                        {/* Asset Lifecycle & Approval Permissions Info */}
-                        <div className="rounded-lg bg-amber-50 border border-amber-200">
-                            <div className="px-6 py-4">
-                                <div className="flex items-start">
-                                    <div className="flex-shrink-0">
-                                        <svg className="h-5 w-5 text-amber-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                        </svg>
-                                    </div>
-                                    <div className="ml-3 flex-1">
-                                        <h3 className="text-sm font-semibold text-amber-900 mb-2">Asset Lifecycle & Approval Permissions</h3>
-                                        <div className="text-sm text-amber-800 space-y-2">
-                                            <p>
-                                                <strong>Publication Permissions:</strong>
-                                            </p>
-                                            <ul className="list-disc list-inside ml-2 space-y-1">
-                                                <li><strong>Asset Publish</strong> — Required to publish unpublished assets. Users with this permission can see and approve assets pending publication.</li>
-                                                <li><strong>Asset Unpublish</strong> — Required to unpublish (hide) published assets.</li>
-                                                <li><strong>Metadata Bypass Approval</strong> — Allows viewing all unpublished assets (both visible and hidden) without requiring publish permission. Useful for content managers who need to review drafts.</li>
-                                            </ul>
-                                            <p className="mt-2">
-                                                <strong>Archival Permissions:</strong>
-                                            </p>
-                                            <ul className="list-disc list-inside ml-2 space-y-1">
-                                                <li><strong>Asset Archive</strong> — Required to archive assets (moves to inactive storage, hidden from normal views).</li>
-                                                <li><strong>Asset Restore</strong> — Required to restore archived assets back to active use.</li>
-                                            </ul>
-                                            <p className="mt-2 text-xs text-amber-700">
-                                                <strong>Note:</strong> Assets are unpublished by default. Publishing requires explicit action by a user with <strong>Asset Publish</strong> permission. Archived assets are hidden by default and only visible via the "Archived" filter to users with archive/restore permissions.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Restricted Categories Info */}
-                        <div className="rounded-lg bg-blue-50 border border-blue-200">
-                            <div className="px-6 py-4">
-                                <div className="flex items-start">
-                                    <div className="flex-shrink-0">
-                                        <svg className="h-5 w-5 text-blue-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                        </svg>
-                                    </div>
-                                    <div className="ml-3 flex-1">
-                                        <h3 className="text-sm font-semibold text-blue-900 mb-2">Permission Cascade</h3>
-                                        <div className="text-sm text-blue-800 space-y-2">
-                                            <p>
-                                                <strong>Tenant-level permissions override brand-level restrictions.</strong> Owners and Admins can manage brands, create collections, and perform other brand operations even when their brand role is Viewer or when they have no brand assignment. This matches AssetPolicy, BrandPolicy, and CategoryPolicy.
-                                            </p>
-                                        </div>
-                                        <h3 className="text-sm font-semibold text-blue-900 mb-2 mt-4">About Restricted Categories</h3>
-                                        <div className="text-sm text-blue-800 space-y-2">
-                                            <p>
-                                                <strong>Owners</strong> and <strong>Admins</strong> automatically have access to view all restricted (private) categories, regardless of category-level access rules. This ensures company administrators can always access important content.
-                                            </p>
-                                            <p>
-                                                Users with the <strong>"View Any Restricted Categories"</strong> permission can also bypass category access rules and view all private categories.
-                                            </p>
-                                            <p className="mt-2 text-xs text-blue-700">
-                                                <strong>Note:</strong> This page is read-only. All permissions shown are pulled directly from the database. To modify permissions, contact your system administrator.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <p className="mt-3 text-xs text-gray-400">This page is read-only. Permissions are pulled from the database.</p>
                     </div>
 
                     {/* Company Roles & Permissions */}

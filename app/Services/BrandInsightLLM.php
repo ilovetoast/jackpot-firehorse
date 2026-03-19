@@ -194,6 +194,7 @@ Rules:
 - Be specific and actionable
 - No fluff
 - No generic statements
+- Never refer to the viewer as "the user" or "users" in third person—the person reading this IS the user. Use "you" or "your team" instead, or phrase without mentioning users at all (e.g. "consider re-engaging your team" not "re-engage users")
 
 Signals:
 {$signalsJson}

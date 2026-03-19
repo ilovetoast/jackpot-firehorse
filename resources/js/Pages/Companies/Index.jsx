@@ -29,14 +29,15 @@ export default function CompaniesIndex({ companies }) {
     }
 
     return (
-        <div className="min-h-full bg-gray-50">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Companies" />
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Management</h1>
-                    <p className="mt-2 text-sm text-gray-700">Manage and switch between your companies</p>
-                </div>
+            <main className="flex-1">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="mb-8">
+                        <h1 className="text-3xl font-bold text-gray-900">Company Management</h1>
+                        <p className="mt-2 text-sm text-gray-600">Manage and switch between your companies</p>
+                    </div>
 
                 <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden">
                     {companies.length === 0 ? (
@@ -122,7 +123,8 @@ export default function CompaniesIndex({ companies }) {
                         </div>
                     )}
                 </div>
-            </div>
+                </div>
+            </main>
             <AppFooter />
         </div>
     )

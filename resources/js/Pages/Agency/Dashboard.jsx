@@ -59,20 +59,20 @@ export default function AgencyDashboard({ auth, tenant, agency, rewards = [], cl
     const hasExpiringSoon = incubated.some(client => client.expiring_soon)
 
     return (
-        <>
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Agency Dashboard" />
             <AppNav auth={auth} tenant={tenant} />
-            
-            <div className="min-h-screen bg-gray-50 py-8">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <CompanyTabs />
+            <main className="flex-1">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
-                    <div className="mb-8">
+                    <div className="mb-6">
                         <h1 className="text-3xl font-bold text-gray-900">Agency Partner Dashboard</h1>
                         <p className="mt-2 text-sm text-gray-600">
                             View your partner tier, activated clients, and rewards.
                         </p>
                     </div>
+
+                    <CompanyTabs />
 
                     {/* Tier Status Card */}
                     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
@@ -455,9 +455,8 @@ export default function AgencyDashboard({ auth, tenant, agency, rewards = [], cl
                         </div>
                     )}
                 </div>
-            </div>
-
+            </main>
             <AppFooter />
-        </>
+        </div>
     )
 }

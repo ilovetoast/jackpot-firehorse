@@ -1,39 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const FULL_COL_CONFIG = [
-    { w: '17%', bottom: '-30%', slots: 1 },
-    { w: '19%', bottom: '-15%', slots: 2 },
-    { w: '24%', bottom: '0%',   slots: 2 },
-    { w: '26%', bottom: '10%',  slots: 2 },
-    { w: '20%', bottom: '18%',  slots: 1 },
+const NUM_COLUMNS = 3
+const MAX_ASSETS = 12
+
+/** Vertical stagger between columns (slot-machine reel offset) */
+const COLUMN_BOTTOM_OFFSETS = ['-42%', '0%', '48%']
+
+/** Per-card horizontal nudge (px) for subtle reel wobble within each column */
+const CARD_HORIZONTAL_NUDGE = [
+    [0, 4, -3, 5, -2, 4],
+    [0, -3, 4, -4, 3, -2],
+    [0, 3, -4, 2, -5, 3],
 ]
 
-function getLayout(count) {
-    if (count === 1) {
-        return [{ w: '50%', bottom: '5%', slots: 1 }]
-    }
-    if (count === 2) {
-        return [
-            { w: '40%', bottom: '-5%', slots: 1 },
-            { w: '50%', bottom: '10%', slots: 1 },
-        ]
-    }
-    if (count === 3) {
-        return [
-            { w: '28%', bottom: '-10%', slots: 1 },
-            { w: '36%', bottom: '5%',   slots: 1 },
-            { w: '30%', bottom: '15%',  slots: 1 },
-        ]
-    }
-    if (count <= 5) {
-        return [
-            { w: '22%', bottom: '-20%', slots: 1 },
-            { w: '26%', bottom: '-5%',  slots: 1 },
-            { w: '28%', bottom: '5%',   slots: 1 },
-            { w: '24%', bottom: '15%',  slots: 1 },
-        ]
-    }
-    return FULL_COL_CONFIG
+function getCardNudge(colIndex, cardIndex) {
+    const arr = CARD_HORIZONTAL_NUDGE[colIndex % NUM_COLUMNS]
+    return arr[cardIndex % arr.length] ?? 0
 }
 
 export default function AssetCollage({ assets = [] }) {
@@ -69,27 +51,28 @@ export default function AssetCollage({ assets = [] }) {
         }
     }, [handleMouseMove])
 
-    if (!assets.length) return null
-
     const thumbs = assets
-        .slice(0, 8)
+        .slice(0, MAX_ASSETS)
         .map((a) => a.final_thumbnail_url || a.thumbnail_url || a.preview_thumbnail_url)
         .filter(Boolean)
 
-    if (thumbs.length === 0) return null
-
-    const layout = getLayout(thumbs.length)
-
-    let idx = 0
-    const columns = layout.map((col) => {
-        const imgs = []
-        for (let s = 0; s < col.slots && idx < thumbs.length; s++, idx++) {
-            imgs.push(thumbs[idx])
-        }
-        return { ...col, imgs }
-    }).filter((col) => col.imgs.length > 0)
-
+    const hasAssets = thumbs.length > 0
     const isFew = thumbs.length <= 2
+
+    if (!hasAssets) return null
+
+    // Distribute assets round-robin across 3 columns
+    const columns = Array.from({ length: NUM_COLUMNS }, () => [])
+    thumbs.forEach((src, i) => {
+        columns[i % NUM_COLUMNS].push(src)
+    })
+
+    // For 1 asset: center in middle column; for 2: col 0 and col 2
+    const displayColumns = isFew && hasAssets
+        ? thumbs.length === 1
+            ? [[], thumbs, []]
+            : [[thumbs[0]], [], [thumbs[1]]]
+        : columns
 
     const parallaxStyle = {
         transform: `translate3d(${mouseOffset.x}px, ${mouseOffset.y}px, 0)`,
@@ -99,48 +82,75 @@ export default function AssetCollage({ assets = [] }) {
     }
 
     return (
-        <div className="absolute right-0 bottom-0 h-full w-[55%] pointer-events-none hidden lg:block overflow-hidden" style={{ contain: 'layout paint' }}>
+        <div
+            className="absolute right-0 bottom-0 h-full w-[38%] pointer-events-none hidden lg:block overflow-hidden"
+            style={{
+                contain: 'layout paint',
+                perspective: '1200px',
+                maskImage: 'linear-gradient(to bottom, transparent 0%, black 22%, black 85%, transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 22%, black 85%, transparent 100%)',
+                maskSize: '100% 100%',
+                maskRepeat: 'no-repeat',
+                maskPosition: 'center',
+            }}
+        >
             <div
-                className={`absolute bottom-0 right-0 flex gap-3 items-end ${isFew ? 'pr-12' : 'left-0 px-2'}`}
-                style={parallaxStyle}
+                className="absolute inset-0 grid grid-cols-3 gap-8 items-end justify-items-center px-6 pb-4"
+                style={{
+                    ...parallaxStyle,
+                    transformStyle: 'preserve-3d',
+                }}
             >
-                {columns.map((col, ci) => {
-                    const isFarRight = ci >= columns.length - 2
+                {displayColumns.map((imgs, ci) => {
+                    const isEmpty = !imgs || imgs.length === 0
+                    const driftClass = `animate-slot-drift-${(ci % 3) + 1}`
+
                     return (
-                    <div
-                        key={ci}
-                        className="flex flex-col gap-3 shrink-0"
-                        style={{
-                            width: col.w,
-                            marginBottom: col.bottom,
-                            transition: `opacity 0.8s ease ${200 + ci * 120}ms, transform 0.8s ease ${200 + ci * 120}ms`,
-                            opacity: visible ? (isFarRight ? 0.9 : 1) : 0,
-                            transform: visible ? 'translate3d(0,0,0)' : 'translate3d(0,30px,0)',
-                            willChange: visible ? 'auto' : 'transform',
-                            backfaceVisibility: 'hidden',
-                        }}
-                    >
-                        {col.imgs.map((src, ii) => (
-                            <div
-                                key={ii}
-                                className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
-                                style={{
-                                    aspectRatio: isFew ? '3/4' : (ii === 0 && col.slots === 2 ? '3/4' : '4/5'),
-                                    contain: 'layout paint',
-                                    transform: 'translateZ(0)',
-                                }}
-                            >
-                                <img
-                                    src={src}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    loading={ci < 2 ? 'eager' : 'lazy'}
-                                    decoding="async"
-                                    fetchPriority={ci < 2 ? 'high' : 'low'}
+                        <div
+                            key={ci}
+                            className="flex flex-col-reverse justify-end min-h-0 w-full max-w-full"
+                            style={{
+                                marginBottom: COLUMN_BOTTOM_OFFSETS[ci] ?? '0%',
+                                transition: `opacity 0.8s ease ${200 + ci * 120}ms`,
+                                opacity: visible ? (ci === 1 && isFew ? 1 : 0.92) : 0,
+                                willChange: visible ? 'auto' : 'opacity',
+                                backfaceVisibility: 'hidden',
+                            }}
+                        >
+                            <div className={`flex flex-col-reverse gap-3 justify-end min-h-0 w-full ${driftClass}`}>
+                            {isEmpty ? (
+                                <div
+                                    className="w-full rounded-2xl border border-dashed border-white/[0.06] flex-1 min-h-[80px]"
+                                    aria-hidden
                                 />
+                            ) : (
+                                imgs.map((src, ii) => {
+                                    const nudge = getCardNudge(ci, ii)
+                                    return (
+                                        <div
+                                            key={ii}
+                                            className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
+                                            style={{
+                                                aspectRatio: isFew ? '3/4' : '4/5',
+                                                marginLeft: nudge !== 0 ? `${nudge}px` : undefined,
+                                                contain: 'layout paint',
+                                                transform: 'translateZ(0)',
+                                            }}
+                                        >
+                                            <img
+                                                src={src}
+                                                alt=""
+                                                className="w-full h-full object-cover"
+                                                loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
+                                                decoding="async"
+                                                fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
+                                            />
+                                        </div>
+                                    )
+                                })
+                            )}
                             </div>
-                        ))}
-                    </div>
+                        </div>
                     )
                 })}
             </div>

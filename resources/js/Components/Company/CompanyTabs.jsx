@@ -2,7 +2,7 @@ import { Link, usePage } from '@inertiajs/react'
 import PermissionGate from '../PermissionGate'
 
 /**
- * Tab navigation for Company section — Overview, Settings, Team, Activity, Permissions.
+ * Tab navigation for Company section — Overview, Team, Permissions, Activity, Setting, Agency.
  * Use on Company Overview and other company pages for consistent nav.
  */
 export default function CompanyTabs() {
@@ -23,19 +23,9 @@ export default function CompanyTabs() {
                 <Link href="/app" className={tabClass(currentPath === '/app' || currentPath === '/app/')}>
                     Overview
                 </Link>
-                <PermissionGate permission="company_settings.view">
-                    <Link href="/app/companies/settings" className={tabClass(currentPath.startsWith('/app/companies/settings'))}>
-                        Company Settings
-                    </Link>
-                </PermissionGate>
                 <PermissionGate permission="team.manage">
-                    <Link href="/app/companies/team" className={tabClass(currentPath.startsWith('/app/companies/team'))}>
-                        Team Management
-                    </Link>
-                </PermissionGate>
-                <PermissionGate permission="activity_logs.view">
-                    <Link href="/app/companies/activity" className={tabClass(currentPath.startsWith('/app/companies/activity'))}>
-                        Activity Logs
+                    <Link href="/app/companies/team" className={tabClass(currentPath === '/app/companies/team')}>
+                        Team
                     </Link>
                 </PermissionGate>
                 <PermissionGate permission="team.manage">
@@ -43,9 +33,19 @@ export default function CompanyTabs() {
                         Permissions
                     </Link>
                 </PermissionGate>
+                <PermissionGate permission="activity_logs.view">
+                    <Link href="/app/companies/activity" className={tabClass(currentPath.startsWith('/app/companies/activity'))}>
+                        Activity
+                    </Link>
+                </PermissionGate>
+                <PermissionGate permission="company_settings.view">
+                    <Link href="/app/companies/settings" className={tabClass(currentPath.startsWith('/app/companies/settings'))}>
+                        Setting
+                    </Link>
+                </PermissionGate>
                 {isAgency && (
                     <Link href="/app/agency/dashboard" className={tabClass(currentPath.startsWith('/app/agency/dashboard'))}>
-                        Agency overview
+                        Agency
                     </Link>
                 )}
             </nav>

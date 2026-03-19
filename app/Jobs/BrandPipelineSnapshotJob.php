@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\BrandPipelineRun;
 use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\BrandSnapshotService;
+use App\Services\BrandDNA\BrandVersionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -46,6 +47,7 @@ class BrandPipelineSnapshotJob implements ShouldQueue
         if ($draft && $snapshot) {
             $draft->getOrCreateInsightState($snapshot->id);
             app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($run->brand, $draft);
+            app(BrandVersionService::class)->markResearchComplete($draft);
         }
 
         Log::channel('pipeline')->info('[BrandPipelineSnapshotJob] Snapshot generated — progression gate will now allow user to view next page', [

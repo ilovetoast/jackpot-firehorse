@@ -314,15 +314,15 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
     ].filter((item) => item.id !== 'metadata-settings' || canViewMetadata)
 
     return (
-        <div className="min-h-full">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Company Settings" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
-            <main className="bg-gray-50">
+            <main className="flex-1">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-6">
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Settings</h1>
-                        <p className="mt-2 text-sm text-gray-700">Manage your company's settings and preferences</p>
+                        <h1 className="text-3xl font-bold text-gray-900">Company Settings</h1>
+                        <p className="mt-2 text-sm text-gray-600">Manage your company's settings and preferences</p>
                     </div>
 
                     <CompanyTabs />

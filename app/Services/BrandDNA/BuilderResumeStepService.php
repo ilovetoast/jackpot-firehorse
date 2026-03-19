@@ -7,73 +7,123 @@ use App\Models\Brand;
 use App\Models\BrandModelVersion;
 
 /**
- * Resolves the correct builder step for resuming based on draft/version state.
+ * Resolves the correct page/step for resuming based on draft lifecycle_stage.
  * Used by Brand Guidelines index "Continue" CTA.
+ *
+ * Primary signal: lifecycle_stage (research | review | build | published).
+ * Fallback: builder_progress for backward compatibility.
  */
 class BuilderResumeStepService
 {
-    protected const VALID_RESUME_STEPS = [
-        'background',
-        'processing',
-        'research-summary',
-        'archetype',
-        'purpose_promise',
-        'expression',
-        'positioning',
-        'standards',
-    ];
-
-    protected const STEPS_AFTER_RESEARCH = ['archetype', 'purpose_promise', 'expression', 'positioning', 'standards'];
+    protected const BUILDER_STEPS = ['archetype', 'purpose_promise', 'expression', 'positioning', 'standards'];
 
     public function __construct(
-        protected \App\Services\BrandDNA\PipelineFinalizationService $finalizationService
+        protected PipelineFinalizationService $finalizationService
     ) {}
 
     /**
-     * Resolve the resume step for the brand's current draft.
+     * Resolve the resume destination for a brand's current draft.
      *
-     * @return array{step: string, label: string}
+     * @return array{step: string, label: string, route: string, route_params: array}
      */
     public function resolve(Brand $brand, ?BrandModelVersion $draft): array
     {
         if (! $draft) {
-            return ['step' => 'background', 'label' => 'Start Brand Guidelines'];
+            return [
+                'step' => 'research',
+                'label' => 'Start Brand Guidelines',
+                'route' => 'brands.research.show',
+                'route_params' => ['brand' => $brand->id],
+            ];
         }
 
-        $researchFinalized = $this->isResearchFinalized($brand, $draft);
+        $stage = $draft->lifecycle_stage ?? BrandModelVersion::LIFECYCLE_RESEARCH;
 
-        // Rule 1: Processing incomplete
-        if (! $researchFinalized) {
-            return ['step' => 'processing', 'label' => 'Continue Processing'];
+        // Route by lifecycle stage
+        if ($stage === BrandModelVersion::LIFECYCLE_RESEARCH) {
+            return [
+                'step' => 'research',
+                'label' => $draft->research_status === BrandModelVersion::RESEARCH_RUNNING ? 'Continue Processing' : 'Continue Research',
+                'route' => 'brands.research.show',
+                'route_params' => ['brand' => $brand->id],
+            ];
         }
 
-        // Rule 2: Research ready but not yet reviewed
-        if (! $this->hasResearchBeenReviewed($draft)) {
-            return ['step' => 'research-summary', 'label' => 'Review Research'];
+        if ($stage === BrandModelVersion::LIFECYCLE_REVIEW) {
+            return [
+                'step' => 'review',
+                'label' => 'Review Research',
+                'route' => 'brands.review.show',
+                'route_params' => ['brand' => $brand->id],
+            ];
         }
 
-        // Rule 3: Resume from last meaningful builder step
+        if ($stage === BrandModelVersion::LIFECYCLE_BUILD || $stage === BrandModelVersion::LIFECYCLE_PUBLISHED) {
+            $builderStep = $this->resolveBuilderStep($draft);
+
+            return [
+                'step' => $builderStep,
+                'label' => $this->labelForStep($builderStep),
+                'route' => 'brands.brand-guidelines.builder',
+                'route_params' => ['brand' => $brand->id, 'step' => $builderStep],
+            ];
+        }
+
+        // Fallback for legacy rows without lifecycle_stage
+        return $this->resolveLegacy($brand, $draft);
+    }
+
+    protected function resolveBuilderStep(BrandModelVersion $draft): string
+    {
         $progress = $draft->builder_progress ?? [];
         $lastVisited = $progress['last_visited_step'] ?? null;
         $lastCompleted = $progress['last_completed_step'] ?? null;
 
-        if ($lastVisited && $this->isValidResumeStep($lastVisited)) {
+        if ($lastVisited && in_array($lastVisited, self::BUILDER_STEPS, true)) {
+            return $lastVisited;
+        }
+
+        if ($lastCompleted && in_array($lastCompleted, self::BUILDER_STEPS, true)) {
+            return $this->nextBuilderStepAfter($lastCompleted);
+        }
+
+        return BrandGuidelinesBuilderSteps::STEP_ARCHETYPE;
+    }
+
+    /**
+     * Legacy fallback for versions that don't yet have lifecycle_stage set.
+     */
+    protected function resolveLegacy(Brand $brand, BrandModelVersion $draft): array
+    {
+        $researchFinalized = $this->isResearchFinalized($brand, $draft);
+
+        if (! $researchFinalized) {
+            return [
+                'step' => 'research',
+                'label' => 'Continue Processing',
+                'route' => 'brands.research.show',
+                'route_params' => ['brand' => $brand->id],
+            ];
+        }
+
+        $progress = $draft->builder_progress ?? [];
+        $lastVisited = $progress['last_visited_step'] ?? null;
+
+        if ($lastVisited && in_array($lastVisited, self::BUILDER_STEPS, true)) {
             return [
                 'step' => $lastVisited,
                 'label' => $this->labelForStep($lastVisited),
+                'route' => 'brands.brand-guidelines.builder',
+                'route_params' => ['brand' => $brand->id, 'step' => $lastVisited],
             ];
         }
 
-        if ($lastCompleted && $this->isValidResumeStep($lastCompleted)) {
-            $nextStep = $this->nextStepAfter($lastCompleted);
-            return [
-                'step' => $nextStep,
-                'label' => $this->labelForStep($nextStep),
-            ];
-        }
-
-        // Rule 4: Safe fallback
-        return ['step' => 'background', 'label' => 'Continue Builder'];
+        return [
+            'step' => 'review',
+            'label' => 'Review Research',
+            'route' => 'brands.review.show',
+            'route_params' => ['brand' => $brand->id],
+        ];
     }
 
     protected function isResearchFinalized(Brand $brand, BrandModelVersion $draft): bool
@@ -96,45 +146,21 @@ class BuilderResumeStepService
         return (bool) ($finalization['research_finalized'] ?? false);
     }
 
-    protected function hasResearchBeenReviewed(BrandModelVersion $draft): bool
+    protected function nextBuilderStepAfter(string $step): string
     {
-        $progress = $draft->builder_progress ?? [];
-        $lastCompleted = $progress['last_completed_step'] ?? null;
-
-        if ($lastCompleted && in_array($lastCompleted, self::STEPS_AFTER_RESEARCH, true)) {
-            return true;
+        $idx = array_search($step, self::BUILDER_STEPS, true);
+        if ($idx === false || $idx >= count(self::BUILDER_STEPS) - 1) {
+            return self::BUILDER_STEPS[0];
         }
 
-        $state = $draft->insightState;
-        if ($state?->viewed_at) {
-            return true;
-        }
-
-        return (bool) ($progress['research_reviewed_at'] ?? false);
-    }
-
-    protected function isValidResumeStep(string $step): bool
-    {
-        return in_array($step, self::VALID_RESUME_STEPS, true);
-    }
-
-    protected function nextStepAfter(string $step): string
-    {
-        $allSteps = ['background', 'processing', 'research-summary', ...BrandGuidelinesBuilderSteps::stepKeys()];
-        $idx = array_search($step, $allSteps, true);
-        if ($idx === false || $idx >= count($allSteps) - 1) {
-            return 'background';
-        }
-
-        return $allSteps[$idx + 1];
+        return self::BUILDER_STEPS[$idx + 1];
     }
 
     protected function labelForStep(string $step): string
     {
         return match ($step) {
-            'background' => 'Continue Builder',
-            'processing' => 'Continue Processing',
-            'research-summary' => 'Review Research',
+            'research' => 'Continue Research',
+            'review' => 'Review Research',
             'archetype' => 'Continue Archetype',
             'purpose_promise' => 'Continue Purpose',
             'expression' => 'Continue Expression',

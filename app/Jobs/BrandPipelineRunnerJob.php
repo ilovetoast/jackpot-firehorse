@@ -13,6 +13,7 @@ use App\Services\BrandDNA\Extraction\SectionAwareBrandGuidelinesProcessor;
 use App\Services\BrandDNA\Extraction\WebsiteExtractionProcessor;
 use App\Services\BrandDNA\Extraction\BrandMaterialProcessor;
 use App\Services\BrandDNA\BrandResearchNotificationService;
+use App\Services\BrandDNA\BrandVersionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -154,6 +155,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
 
         $draft->getOrCreateInsightState($snapshot->id);
         app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($brand, $draft);
+        app(BrandVersionService::class)->markResearchComplete($draft);
 
         $run->update([
             'stage' => BrandPipelineRun::STAGE_COMPLETED,

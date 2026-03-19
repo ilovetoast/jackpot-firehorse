@@ -49,6 +49,8 @@ class Brand extends Model
         'nav_color',
         'workspace_button_style',
         'logo_filter',
+        'logo_dark_path',
+        'logo_dark_id',
         'settings',
         'download_landing_settings', // D10: JSON { enabled, logo_asset_id, color_role, background_asset_ids, default_headline, default_subtext }
         'portal_settings', // Brand Portal: JSON { entry, public, sharing, invite }
@@ -87,6 +89,38 @@ class Brand extends Model
         $logoId = $this->attributes['logo_id'] ?? null;
         if ($logoId) {
             $asset = Asset::find($logoId);
+            if (!$asset) {
+                return null;
+            }
+
+            $isSvg = $asset->mime_type === 'image/svg+xml'
+                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
+            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status
+                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
+
+            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+            }
+
+            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+        }
+        return null;
+    }
+
+    /**
+     * Resolve logo_dark_path from logo_dark_id when logo_dark_path is null.
+     * Dark variant of the logo for use on dark backgrounds (cinematic hero, etc.).
+     */
+    public function getLogoDarkPathAttribute($value): ?string
+    {
+        if ($value !== null && $value !== '') {
+            return $value;
+        }
+        $logoDarkId = $this->attributes['logo_dark_id'] ?? null;
+        if ($logoDarkId) {
+            $asset = Asset::find($logoDarkId);
             if (!$asset) {
                 return null;
             }

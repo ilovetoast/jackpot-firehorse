@@ -146,16 +146,17 @@ export default function CompanyOverview({
     )
 
     return (
-        <div className="min-h-full">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Company" />
             <AppNav brand={activeBrand} tenant={tenant} />
 
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <h1 className="text-2xl font-semibold text-gray-900">Company</h1>
-                        <p className="text-sm text-gray-500 mt-1">{tenant?.name} Organization</p>
-                    </div>
+            <main className="flex-1">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900">Company Portal</h1>
+                            <p className="mt-2 text-sm text-gray-600">{tenant?.name} organization</p>
+                        </div>
                     <div className="flex items-center gap-3">
                         {plan?.name && (
                             <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
@@ -358,6 +359,7 @@ export default function CompanyOverview({
                             </div>
                         ))}
                     </div>
+                </div>
                 </div>
             </main>
 

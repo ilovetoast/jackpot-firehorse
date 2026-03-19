@@ -23,7 +23,6 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 import FontListbox from '../../Components/BrandGuidelines/FontListbox'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
-import ResearchInsightsPanel from '../../Components/BrandGuidelines/ResearchInsightsPanel'
 import ResearchSummary, { canProceedFromResearchSummary } from '../../Components/BrandGuidelines/ResearchSummary'
 import ProcessingProgressPanel from '../../Components/BrandGuidelines/ProcessingProgressPanel'
 import BrandResearchReadyToast from '../../Components/BrandGuidelines/BrandResearchReadyToast'
@@ -1639,12 +1638,10 @@ export default function BrandGuidelinesBuilder({
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
     const hasProcessingEarly = pdfExtractionPolling || ingestionProcessing || ingestionPolling || (researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning))
-    // Always include processing + research-summary between background and the data steps.
+    // Steps: archetype -> purpose_promise -> expression -> positioning -> standards -> review
+    // Background/processing/research-summary are now handled by the Research page.
     const allStepKeys = [
-        stepKeys[0],
-        'processing',
-        'research-summary',
-        ...stepKeys.slice(1),
+        ...stepKeys.filter(k => k !== 'background'),
         REVIEW_STEP,
     ]
     const effectiveStep = viewingReview ? REVIEW_STEP : currentStep
@@ -1754,48 +1751,25 @@ export default function BrandGuidelinesBuilder({
         if (isReviewStep) return
         if (isLastDataStep) {
             patchAndNavigate(REVIEW_STEP)
-        } else if (currentStep === 'background') {
-            // Auto-trigger ingestion if there are unprocessed sources and nothing is running
-            const websiteUrl = (payload.sources?.website_url || '').trim()
-            const hasPdfAsset = !!(guidelinesPdfAssetId || pdfAttachedThisSession)
-            const hasSources = hasPdfAsset || websiteUrl || brandMaterialCount > 0
-            const alreadyProcessing = hasProcessingEarly
-
-            if (hasSources && !alreadyProcessing && !effectiveResearchFinalizedForGate) {
-                try {
-                    await triggerIngestion({
-                        pdf_asset_id: guidelinesPdfAssetId || null,
-                        website_url: websiteUrl || null,
-                    })
-                } catch {}
-            }
-            patchAndNavigate('processing')
-        } else if (currentStep === 'processing') {
-            patchAndNavigate('research-summary')
-        } else if (currentStep === 'research-summary') {
-            patchAndNavigate(stepKeys[stepKeys.indexOf('archetype')])
         } else {
-            patchAndNavigate(stepKeys[stepKeys.indexOf(currentStep) + 1])
+            const dataSteps = stepKeys.filter(k => k !== 'background')
+            const idx = dataSteps.indexOf(currentStep)
+            const nextKey = idx < dataSteps.length - 1 ? dataSteps[idx + 1] : REVIEW_STEP
+            patchAndNavigate(nextKey)
         }
-    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP, hasProcessingEarly, payload.sources?.website_url, guidelinesPdfAssetId, pdfAttachedThisSession, brandMaterialCount, triggerIngestion, effectiveResearchFinalizedForGate])
+    }, [isReviewStep, isLastDataStep, currentStep, stepKeys, patchAndNavigate, REVIEW_STEP])
 
     const handleBack = useCallback(() => {
         if (viewingReview) {
             setViewingReview(false)
             return
         }
-        if (currentStep === 'processing') {
-            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: 'background' }))
-            return
-        }
-        if (currentStep === 'research-summary') {
-            const prevIdx = allStepKeys.indexOf('research-summary') - 1
-            const prevStep = prevIdx >= 0 ? allStepKeys[prevIdx] : 'background'
-            router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: prevStep }))
-            return
-        }
         const idx = allStepKeys.indexOf(currentStep)
-        if (idx <= 0) return
+        if (idx <= 0) {
+            // First builder step — back goes to research/review
+            router.visit(route('brands.research.show', { brand: brand.id }))
+            return
+        }
         router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step: allStepKeys[idx - 1] }))
     }, [viewingReview, currentStep, allStepKeys, brand.id])
 
@@ -1998,13 +1972,6 @@ export default function BrandGuidelinesBuilder({
         } catch {}
     }, [brand.id])
 
-    const handleAcceptInsight = useCallback(async (key) => {
-        try {
-            const res = await axios.post(route('brands.brand-dna.builder.insights.accept', { brand: brand.id }), { key })
-            setInsightStateLocal((prev) => ({ ...prev, accepted: res.data?.accepted ?? [...(prev.accepted || []), key] }))
-        } catch {}
-    }, [brand.id])
-
     const handleApplySuggestion = useCallback((finding) => {
         if (!finding?.suggestion?.path || finding.suggestion.value === undefined) return
         const parts = finding.suggestion.path.split('.')
@@ -2150,7 +2117,6 @@ export default function BrandGuidelinesBuilder({
     const effectiveCoherence = polledResearch?.latestCoherence ?? latestCoherence
     const effectiveAlignment = polledResearch?.latestAlignment ?? latestAlignment
     const effectiveSuggestions = polledResearch?.latestSuggestions ?? latestSuggestions
-    const hasResearchData = researchPolling || effectiveCrawlerRunning || effectiveSnapshotLite || effectiveCoherence || effectiveAlignment || Object.keys(effectiveSuggestions || {}).length > 0
 
     const effectiveResearchFinalized = polledResearch?.researchFinalized ?? researchFinalized ?? null
 
@@ -2178,14 +2144,26 @@ export default function BrandGuidelinesBuilder({
     const visual = payload.visual || {}
 
     return (
-        <div className="h-screen flex flex-col bg-[#0f0e14] relative overflow-hidden">
-            {/* Cinema backdrop */}
+        <div className="h-screen flex flex-col bg-[#0B0B0D] relative overflow-hidden">
+            {/* Cinematic background — brand-driven radial gradients */}
             <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: `linear-gradient(160deg, #0f0e14 0%, ${displayPrimary}15 40%, #0f0e14 100%)`,
+                    background: `radial-gradient(ellipse at 20% 0%, ${displayPrimary}30, transparent 70%), radial-gradient(ellipse at 80% 100%, ${displayPrimary}20, transparent 60%), #0B0B0D`,
                 }}
             />
+            <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                    background: `radial-gradient(circle at 60% 30%, ${displayPrimary}12, transparent 50%)`,
+                }}
+            />
+            {/* Depth overlays */}
+            <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-0 bg-black/20" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/40" />
+            </div>
+            {/* Film grain */}
             <div
                 className="absolute inset-0 opacity-[0.03] pointer-events-none"
                 style={{
@@ -3354,31 +3332,12 @@ export default function BrandGuidelinesBuilder({
                         )}
                     </AnimatePresence>
                     </main>
-                    {hasResearchData && currentStep !== 'background' && currentStep !== 'processing' && (
-                        <aside className="w-80 lg:w-96 flex-shrink-0 border-l border-white/10 bg-[#0f0e14]/80 hidden lg:block">
-                            <ResearchInsightsPanel
-                                brandId={brand.id}
-                                crawlerRunning={effectiveCrawlerRunning}
-                                latestSnapshotLite={effectiveSnapshotLite}
-                                latestCoherence={effectiveCoherence}
-                                latestAlignment={effectiveAlignment}
-                                latestSuggestions={effectiveSuggestions}
-                                insightState={insightStateLocal}
-                                stepKeys={stepKeys}
-                                onDismiss={handleDismissInsight}
-                                onAccept={handleAcceptInsight}
-                                onApplySuggestion={handleApplySuggestion}
-                                onJumpToStep={(step) => router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step }))}
-                                defaultExpanded={!!effectiveSnapshotLite}
-                                isLocal={isLocal}
-                            />
-                        </aside>
-                    )}
+                
                 </div>
 
                 {/* Footer — always visible at bottom */}
                 <footer
-                    className="flex-shrink-0 px-4 sm:px-8 py-4 border-t border-white/10 bg-[#0f0e14]/95 backdrop-blur"
+                    className="flex-shrink-0 px-4 sm:px-8 py-4 border-t border-white/10 bg-[#0B0B0D]/80 backdrop-blur-xl"
                     style={{ borderTopColor: 'rgba(255,255,255,0.1)' }}
                 >
                     <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
@@ -3409,14 +3368,8 @@ export default function BrandGuidelinesBuilder({
                                     {currentStep === 'processing' && !effectiveResearchFinalizedForGate && (
                                         <span className="text-sm text-amber-200/90">Wait for processing to finish</span>
                                     )}
-                                    {currentStep === 'research-summary' && !canProceedFromResearch && (
-                                        <span className="text-sm text-amber-200/90">Review results before continuing</span>
-                                    )}
                                     {(() => {
-                                        const backgroundBlocked = currentStep === 'background' && backgroundUploadingCount > 0 && !(guidelinesPdfAssetId || pdfAttachedThisSession)
-                                        const processingBlocked = currentStep === 'processing' && !effectiveResearchFinalizedForGate
-                                        const researchBlocked = currentStep === 'research-summary' && !canProceedFromResearch
-                                        const isDisabled = saving || backgroundBlocked || processingBlocked || researchBlocked
+                                        const isDisabled = saving
                                         return (
                                             <button
                                                 type="button"
@@ -3425,7 +3378,7 @@ export default function BrandGuidelinesBuilder({
                                                 className="px-6 py-2.5 rounded-xl font-medium text-white transition-colors disabled:opacity-50"
                                                 style={{ backgroundColor: isDisabled ? '#4b5563' : displayAccent }}
                                             >
-                                                {saving ? 'Saving…' : backgroundBlocked ? 'Uploading…' : processingBlocked ? 'Processing…' : researchBlocked ? 'Waiting…' : isLastDataStep ? 'Review' : 'Next'}
+                                                {saving ? 'Saving…' : isLastDataStep ? 'Review' : 'Next'}
                                             </button>
                                         )
                                     })()}

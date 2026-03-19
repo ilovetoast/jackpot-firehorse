@@ -17,7 +17,7 @@ use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
 use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\PipelineFinalizationService;
-use App\Services\BrandDNA\BrandDnaDraftService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\CoherenceDeltaService;
 use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\BrandGuidelinesPublishValidator;
@@ -39,7 +39,7 @@ use Inertia\Response;
 class BrandDNABuilderController extends Controller
 {
     public function __construct(
-        private BrandDnaDraftService $draftService,
+        private BrandVersionService $draftService,
         private BrandModelService $brandModelService,
         private BrandGuidelinesPublishValidator $publishValidator,
         private BrandCoherenceScoringService $coherenceService,
@@ -65,49 +65,28 @@ class BrandDNABuilderController extends Controller
         }
 
         // Use existing draft or create one from active version's model_payload
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
+
+        // Lifecycle gate: redirect to research/review if not yet in build stage
+        if ($draft->isInLifecycleStage(BrandModelVersion::LIFECYCLE_RESEARCH)) {
+            return redirect()->route('brands.research.show', ['brand' => $brand->id]);
+        }
+        if ($draft->isInLifecycleStage(BrandModelVersion::LIFECYCLE_REVIEW)) {
+            return redirect()->route('brands.review.show', ['brand' => $brand->id]);
+        }
+
         $stepKeys = BrandGuidelinesBuilderSteps::stepKeys();
         $steps = BrandGuidelinesBuilderSteps::steps();
-        $currentStep = $request->query('step', BrandGuidelinesBuilderSteps::STEP_BACKGROUND);
+        $currentStep = $request->query('step', BrandGuidelinesBuilderSteps::STEP_ARCHETYPE);
         if ($currentStep === 'purpose') {
             $currentStep = BrandGuidelinesBuilderSteps::STEP_PURPOSE_PROMISE;
         }
-        if (! BrandGuidelinesBuilderSteps::isValidStepKey($currentStep) && ! in_array($currentStep, ['processing', 'research-summary'])) {
-            $currentStep = BrandGuidelinesBuilderSteps::STEP_BACKGROUND;
+        // Legacy step redirects: background/processing/research-summary now live on Research page
+        if (in_array($currentStep, ['background', 'processing', 'research-summary'])) {
+            $currentStep = BrandGuidelinesBuilderSteps::STEP_ARCHETYPE;
         }
-
-        // Guard: only allow processing/research-summary if this brand actually has active processing
-        if (in_array($currentStep, ['processing', 'research-summary'])) {
-            $hasActiveProcessing = BrandPipelineSnapshot::where('brand_id', $brand->id)
-                ->where('brand_model_version_id', $draft->id)
-                ->whereIn('status', ['pending', 'running'])
-                ->exists();
-            $hasCompletedResearch = BrandPipelineSnapshot::where('brand_id', $brand->id)
-                ->where('brand_model_version_id', $draft->id)
-                ->where('status', 'completed')
-                ->exists();
-            $hasPendingPdf = false;
-            $pdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
-            if ($pdfAsset) {
-                $latestPdfRun = BrandPipelineRun::where('asset_id', $pdfAsset->id)
-                    ->where('brand_id', $brand->id)
-                    ->where('brand_model_version_id', $draft->id)
-                    ->latest()
-                    ->first();
-                $hasPendingPdf = $latestPdfRun && in_array($latestPdfRun->status, ['pending', 'running', 'processing']);
-            }
-
-            $shouldBeOnProcessing = $hasActiveProcessing || $hasPendingPdf;
-            if ($currentStep === 'processing' && ! $shouldBeOnProcessing) {
-                $lastVisited = $draft->builder_progress['last_visited_step'] ?? null;
-                $fallback = ($lastVisited && BrandGuidelinesBuilderSteps::isValidStepKey($lastVisited))
-                    ? $lastVisited
-                    : ($hasCompletedResearch ? 'research-summary' : BrandGuidelinesBuilderSteps::STEP_BACKGROUND);
-                return redirect()->to(route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => $fallback]));
-            }
-            if ($currentStep === 'research-summary' && ! $hasCompletedResearch && ! $shouldBeOnProcessing) {
-                $currentStep = BrandGuidelinesBuilderSteps::STEP_BACKGROUND;
-            }
+        if (! BrandGuidelinesBuilderSteps::isValidStepKey($currentStep)) {
+            $currentStep = BrandGuidelinesBuilderSteps::STEP_ARCHETYPE;
         }
 
         $anchor = $request->query('anchor');
@@ -335,11 +314,10 @@ class BrandDNABuilderController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->createNewDraftVersion($brand);
+        $draft = $this->draftService->createNewVersion($brand);
 
-        return redirect()->route('brands.brand-guidelines.builder', [
+        return redirect()->route('brands.research.show', [
             'brand' => $brand->id,
-            'step' => BrandGuidelinesBuilderSteps::STEP_BACKGROUND,
         ]);
     }
 
@@ -363,7 +341,7 @@ class BrandDNABuilderController extends Controller
             'payload' => 'required|array',
         ]);
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         if ($this->publishedGuard->isPublished($draft) && $this->publishedGuard->patchTouchesStructuralField($validated['payload'])) {
             return response()->json([
                 'error' => 'Cannot edit structural fields on published version. Create a new version to make changes.',
@@ -508,7 +486,7 @@ class BrandDNABuilderController extends Controller
             'asset_id' => 'required|string|uuid|exists:assets,id',
             'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf',
         ]);
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $assetId = $validated['asset_id'];
         $context = $validated['builder_context'];
 
@@ -582,7 +560,7 @@ class BrandDNABuilderController extends Controller
             'asset_id' => 'required|string|uuid|exists:assets,id',
             'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf',
         ]);
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $context = $validated['builder_context'];
         $assetId = $validated['asset_id'];
         BrandModelVersionAsset::where('brand_model_version_id', $draft->id)
@@ -615,7 +593,7 @@ class BrandDNABuilderController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $payload = $draft->model_payload ?? [];
         $identity = $payload['identity'] ?? [];
         $personality = $payload['personality'] ?? [];
@@ -698,7 +676,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $runs = BrandPipelineRun::where('brand_id', $brand->id)
             ->where('brand_model_version_id', $draft->id)
             ->orderByDesc('created_at')
@@ -802,7 +780,7 @@ PROMPT;
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
         }
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $state = $draft->getOrCreateInsightState();
         $runningSnapshot = BrandPipelineSnapshot::where('brand_id', $brand->id)
             ->where('brand_model_version_id', $draft->id)
@@ -888,6 +866,7 @@ PROMPT;
 
         if ($finalization['research_finalized'] ?? false) {
             app(BrandResearchNotificationService::class)->maybeNotifyResearchReady($brand, $draft);
+            $this->draftService->markResearchComplete($draft);
         }
 
         $websiteUrlForState = $draft->model_payload['sources']['website_url'] ?? null;
@@ -1086,7 +1065,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $snapshots = BrandPipelineSnapshot::where('brand_id', $brand->id)
             ->where('brand_model_version_id', $draft->id)
             ->orderByDesc('created_at')
@@ -1345,7 +1324,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
         $validated = $request->validate(['key' => 'required|string|max:255']);
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $state = $draft->getOrCreateInsightState();
         $dismissed = $state->dismissed ?? [];
         if (! in_array($validated['key'], $dismissed)) {
@@ -1367,7 +1346,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
         $validated = $request->validate(['key' => 'required|string|max:255']);
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $state = $draft->getOrCreateInsightState();
         $accepted = $state->accepted ?? [];
         if (! in_array($validated['key'], $accepted)) {
@@ -1390,8 +1369,7 @@ PROMPT;
         }
         $validated = $request->validate(['url' => 'required|string|url']);
         $url = $validated['url'];
-        $draftService = app(\App\Services\BrandDNA\BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         RunBrandResearchJob::dispatch($brand->id, $draft->id, $url);
         return response()->json(['triggered' => true]);
     }
@@ -1436,7 +1414,7 @@ PROMPT;
             'material_asset_ids' => 'nullable|array',
             'material_asset_ids.*' => 'string|exists:assets,id',
         ]);
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $pdfAssetId = $validated['pdf_asset_id'] ?? null;
         $websiteUrl = $validated['website_url'] ?? null;
         $materialIds = $validated['material_asset_ids'] ?? [];
@@ -1504,7 +1482,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
 
         $pdfPageCount = null;
@@ -1580,7 +1558,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $draftPayload = $draft->model_payload ?? [];
         $brandMaterialCount = $draft->assetsForContext('brand_material')->count();
 
@@ -1777,7 +1755,7 @@ PROMPT;
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        $draft = $this->draftService->getOrCreateDraftVersion($brand);
+        $draft = $this->draftService->getWorkingVersion($brand);
         $latestRun = BrandPipelineRun::where('brand_id', $brand->id)
             ->where('brand_model_version_id', $draft->id)
             ->latest()

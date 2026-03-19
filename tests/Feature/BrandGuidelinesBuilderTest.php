@@ -21,7 +21,7 @@ use App\Models\UploadSession;
 use App\Models\User;
 use App\Jobs\ExtractPdfTextJob;
 use App\Jobs\RunBrandResearchJob;
-use App\Services\BrandDNA\BrandDnaDraftService;
+use App\Services\BrandDNA\BrandVersionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -86,8 +86,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_guidelines_index_resume_url_uses_resolved_step(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -151,7 +151,7 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_patch_endpoint_only_updates_allowed_paths_and_preserves_other_keys(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
+        $draftService = app(BrandVersionService::class);
         $draft = $draftService->patchFromStep($this->brand, 'positioning', [
             'identity' => [
                 'beliefs' => ['Original belief'],
@@ -540,7 +540,7 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_prefill_fill_empty_does_not_overwrite_existing_identity_mission(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
+        $draftService = app(BrandVersionService::class);
         $draft = $draftService->patchFromStep($this->brand, 'positioning', [
             'identity' => [
                 'mission' => 'Existing mission',
@@ -602,7 +602,7 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_prefill_replace_overwrites_identity_mission(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
+        $draftService = app(BrandVersionService::class);
         $draftService->patchFromStep($this->brand, 'positioning', [
             'identity' => [
                 'mission' => 'Existing mission',
@@ -784,10 +784,10 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_research_insights_snapshot_scoped_to_draft_version(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draftA = $draftService->getWorkingVersion($this->brand);
 
-        $draftB = $draftService->createNewDraftVersion($this->brand);
+        $draftB = $draftService->createNewVersion($this->brand);
 
         $snapshotA = BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -823,8 +823,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_run_brand_research_job_links_insight_state_to_snapshot(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         RunBrandResearchJob::dispatchSync($this->brand->id, $draft->id, 'https://example.com');
 
@@ -843,7 +843,7 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_run_brand_research_does_not_modify_draft_fields(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
+        $draftService = app(BrandVersionService::class);
         $draft = $draftService->patchFromStep($this->brand, 'purpose_promise', [
             'identity' => [
                 'mission' => 'Original',
@@ -871,8 +871,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_apply_suggestion_updates_draft_and_insight_state(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
         $draft->update([
             'model_payload' => array_merge($draft->model_payload ?? [], [
                 'scoring_rules' => ['allowed_color_palette' => []],
@@ -926,8 +926,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_dismiss_suggestion_adds_to_insight_state(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         $snapshot = BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -962,8 +962,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_show_research_snapshot_filters_dismissed_suggestions(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
         $state = $draft->getOrCreateInsightState();
         $state->update(['dismissed' => ['SUG:standards.logo']]);
 
@@ -1008,9 +1008,9 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_snapshot_listing_scoped_to_version(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
-        $draftB = $draftService->createNewDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draftA = $draftService->getWorkingVersion($this->brand);
+        $draftB = $draftService->createNewVersion($this->brand);
 
         BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -1049,9 +1049,9 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_snapshot_compare_requires_same_version(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draftA = $draftService->getOrCreateDraftVersion($this->brand);
-        $draftB = $draftService->createNewDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draftA = $draftService->getWorkingVersion($this->brand);
+        $draftB = $draftService->createNewVersion($this->brand);
 
         $snapshotA = BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -1085,8 +1085,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_apply_returns_coherence_delta(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
         $draft->update([
             'model_payload' => array_merge($draft->model_payload ?? [], [
                 'scoring_rules' => ['allowed_color_palette' => []],
@@ -1134,8 +1134,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_apply_rejected_when_overriding_user_data(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
         $draft->update([
             'model_payload' => array_merge($draft->model_payload ?? [], [
                 'personality' => ['primary_archetype' => 'Creator'],
@@ -1178,8 +1178,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_cannot_access_archetype_step_while_processing(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         $session = UploadSession::create([
             'tenant_id' => $this->tenant->id,
@@ -1231,8 +1231,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_cannot_proceed_without_snapshot(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draftService->getWorkingVersion($this->brand);
 
         $response = $this->actingAs($this->user)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
@@ -1307,8 +1307,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_research_insights_finalized_returns_all_stages_complete(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         BrandResearchSnapshot::create([
             'brand_id' => $this->brand->id,
@@ -1339,8 +1339,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_research_insights_returns_developer_data_when_snapshot_has_debug(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         $evidenceMap = [
             'identity.mission' => [
@@ -1391,8 +1391,8 @@ class BrandGuidelinesBuilderTest extends TestCase
 
     public function test_research_insights_evidence_map_missing_provenance_when_pdf_visual_winner_has_null_page(): void
     {
-        $draftService = app(BrandDnaDraftService::class);
-        $draft = $draftService->getOrCreateDraftVersion($this->brand);
+        $draftService = app(BrandVersionService::class);
+        $draft = $draftService->getWorkingVersion($this->brand);
 
         $evidenceMap = [
             'identity.mission' => [

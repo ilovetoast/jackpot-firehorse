@@ -77,15 +77,15 @@ class BrandGuidelinesController extends Controller
             );
         }
 
-        $resumeStep = 'background';
+        $resumeStep = 'research';
         $resumeLabel = 'Continue Brand Guidelines';
-        $resumeUrl = route('brands.brand-guidelines.builder', ['brand' => $brand->id]);
+        $resumeUrl = route('brands.research.show', ['brand' => $brand->id]);
         if ($draft) {
             $resumeService = app(BuilderResumeStepService::class);
             $resolved = $resumeService->resolve($brand, $draft);
             $resumeStep = $resolved['step'];
             $resumeLabel = $resolved['label'];
-            $resumeUrl = route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => $resumeStep]);
+            $resumeUrl = route($resolved['route'], $resolved['route_params']);
             if ($activeVersion && $hasDraft) {
                 $resumeLabel = 'Continue Editing Draft';
             }

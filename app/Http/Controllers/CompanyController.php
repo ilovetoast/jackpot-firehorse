@@ -497,6 +497,17 @@ class CompanyController extends Controller
             $query->where('event_type', $request->event_type);
         }
 
+        // Exclude portal/gateway views by default (often noisy; user can include via event_type filter)
+        $excludePortalViews = $request->has('exclude_portal_views')
+            ? $request->boolean('exclude_portal_views')
+            : true;
+        if ($excludePortalViews) {
+            $query->whereNotIn('event_type', [
+                \App\Enums\EventType::PORTAL_VIEWED,
+                \App\Enums\EventType::GATEWAY_VIEWED,
+            ]);
+        }
+
         // Filter by actor type
         if ($request->filled('actor_type')) {
             $query->where('actor_type', $request->actor_type);
@@ -578,7 +589,9 @@ class CompanyController extends Controller
                 'tenant' => $tenant->name,
                 'actor' => $this->formatActor($event),
                 'subject' => $this->formatSubject($event),
+                'subject_url' => $this->buildSubjectUrl($event),
                 'metadata' => $event->metadata,
+                'metadata_summary' => $this->formatMetadataSummary($event),
                 'ip_address' => $event->ip_address,
                 'user_agent' => $event->user_agent,
             ];
@@ -604,6 +617,7 @@ class CompanyController extends Controller
                 'brand_id' => $request->brand_id,
                 'date_from' => $request->date_from,
                 'date_to' => $request->date_to,
+                'exclude_portal_views' => $request->has('exclude_portal_views') ? $request->boolean('exclude_portal_views') : true,
                 'per_page' => $perPage,
             ],
             'filter_options' => [
@@ -691,6 +705,82 @@ class CompanyController extends Controller
             'id' => $event->subject_id,
             'name' => '#' . $event->subject_id,
         ];
+    }
+
+    /**
+     * Build a URL to the subject for quick navigation (asset, brand, category).
+     */
+    private function buildSubjectUrl($event): ?string
+    {
+        if (! $event->subject_type || ! $event->subject_id) {
+            return null;
+        }
+
+        $subjectType = $event->subject_type;
+        $subjectId = $event->subject_id;
+        $brandId = $event->brand_id;
+
+        if (str_ends_with($subjectType, 'Asset')) {
+            return url("/app/assets/{$subjectId}/view");
+        }
+        if (str_ends_with($subjectType, 'Brand')) {
+            return url("/app/brands/{$subjectId}/edit");
+        }
+        if (str_ends_with($subjectType, 'Category') && $brandId) {
+            return url("/app/brands/{$brandId}/categories/{$subjectId}/edit");
+        }
+
+        return null;
+    }
+
+    /**
+     * Format metadata as human-readable summary (excludes raw technical fields).
+     */
+    private function formatMetadataSummary($event): ?array
+    {
+        $metadata = $event->metadata ?? [];
+        if (empty($metadata) || ! is_array($metadata)) {
+            return null;
+        }
+
+        $skip = ['portal', 'brand_slug', 'subject_name', 'subject_type', 'subject_id'];
+        $labels = [
+            'collection_count' => 'Collections',
+            'asset_count' => 'Assets',
+            'has_content' => 'Has content',
+            'role' => 'Role',
+            'old_role' => 'Previous role',
+            'new_role' => 'New role',
+            'old_plan' => 'Previous plan',
+            'new_plan' => 'New plan',
+            'plan' => 'Plan',
+            'amount' => 'Amount',
+            'currency' => 'Currency',
+            'action' => 'Action',
+            'fields_updated' => 'Fields updated',
+            'old_version' => 'Old version',
+            'new_version' => 'New version',
+        ];
+
+        $summary = [];
+        foreach ($metadata as $key => $value) {
+            if (in_array($key, $skip, true)) {
+                continue;
+            }
+            $label = $labels[$key] ?? str_replace('_', ' ', ucfirst($key));
+            if (is_bool($value)) {
+                $value = $value ? 'Yes' : 'No';
+            } elseif (is_array($value)) {
+                $value = implode(', ', array_map(fn ($v) => is_scalar($v) ? (string) $v : json_encode($v), $value));
+            } elseif (is_object($value)) {
+                $value = json_encode($value);
+            } else {
+                $value = (string) $value;
+            }
+            $summary[] = ['label' => $label, 'value' => $value];
+        }
+
+        return empty($summary) ? null : $summary;
     }
 
     /**
@@ -933,6 +1023,49 @@ class CompanyController extends Controller
                     return "Invoice payment failed ({$currency} {$formattedAmount})";
                 }
                 return 'Invoice payment failed';
+            case \App\Enums\EventType::PORTAL_VIEWED:
+                $collections = $metadata['collection_count'] ?? 0;
+                $assets = $metadata['asset_count'] ?? 0;
+                $hasContent = $metadata['has_content'] ?? ($collections > 0 || $assets > 0);
+                if ($hasContent) {
+                    $parts = [];
+                    if ($collections > 0) {
+                        $parts[] = $collections . ' ' . ($collections === 1 ? 'collection' : 'collections');
+                    }
+                    if ($assets > 0) {
+                        $parts[] = $assets . ' ' . ($assets === 1 ? 'asset' : 'assets');
+                    }
+                    $content = implode(', ', $parts);
+                    return $content ? "Opened public portal ({$content})" : 'Opened public portal';
+                }
+                return 'Opened public portal (empty)';
+            case \App\Enums\EventType::PORTAL_COLLECTION_VIEWED:
+                return $subjectIdentifier ? "Viewed collection {$subjectIdentifier}" : 'Viewed collection';
+            case \App\Enums\EventType::PORTAL_ASSET_CLICKED:
+                return $subjectIdentifier ? "Viewed asset {$subjectIdentifier}" : 'Viewed asset';
+            case \App\Enums\EventType::PORTAL_DOWNLOAD:
+                return $subjectIdentifier ? "Downloaded {$subjectIdentifier}" : 'Downloaded asset';
+            case \App\Enums\EventType::ASSET_UPLOADED:
+                return $subjectIdentifier ? "Uploaded {$subjectIdentifier}" : 'Uploaded asset';
+            case \App\Enums\EventType::ASSET_DOWNLOAD_CREATED:
+            case \App\Enums\EventType::ASSET_DOWNLOAD_COMPLETED:
+                return $subjectIdentifier ? "Downloaded {$subjectIdentifier}" : 'Downloaded asset';
+            case \App\Enums\EventType::ASSET_SHARED_LINK_CREATED:
+                return $subjectIdentifier ? "Created share link for {$subjectIdentifier}" : 'Created share link';
+            case \App\Enums\EventType::ASSET_SHARED_LINK_ACCESSED:
+                return $subjectIdentifier ? "Accessed share link for {$subjectIdentifier}" : 'Accessed share link';
+            case \App\Enums\EventType::ASSET_SHARED_LINK_REVOKED:
+                return $subjectIdentifier ? "Revoked share link for {$subjectIdentifier}" : 'Revoked share link';
+            case \App\Enums\EventType::ASSET_PREVIEWED:
+                return $subjectIdentifier ? "Previewed {$subjectIdentifier}" : 'Previewed asset';
+            case \App\Enums\EventType::GATEWAY_VIEWED:
+                return 'Viewed brand gateway';
+            case \App\Enums\EventType::GATEWAY_LOGIN:
+                return 'Logged in via gateway';
+            case \App\Enums\EventType::GATEWAY_ENTER_CLICKED:
+                return 'Entered brand portal';
+            case \App\Enums\EventType::DOWNLOAD_LANDING_PAGE_VIEWED:
+                return $subjectIdentifier ? "Viewed download page for {$subjectIdentifier}" : 'Viewed download page';
             default:
                 // Fallback: format event type nicely
                 return ucfirst(str_replace(['_', '.'], ' ', $eventType));

@@ -1,49 +1,121 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import UserRow from '../../Components/Company/UserRow'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
-import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 
-export default function Team({ tenant, members, brands = [], tenant_roles = [], current_user_count, max_users, user_limit_reached }) {
-    const { auth } = usePage().props
-    const fullMembers = (members || []).filter(m => !m.collection_only)
-    const collectionOnlyMembers = (members || []).filter(m => m.collection_only === true)
+function useDebounce(value, delay) {
+    const [debouncedValue, setDebouncedValue] = useState(value)
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedValue(value), delay)
+        return () => clearTimeout(t)
+    }, [value, delay])
+    return debouncedValue
+}
 
+export default function Team({ tenant, brands = [], tenant_roles = [], current_user_count, max_users, user_limit_reached }) {
+    const { auth } = usePage().props
+
+    const [users, setUsers] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [meta, setMeta] = useState({ current_page: 1, last_page: 1, total: 0 })
+    const [page, setPage] = useState(1)
+    const [search, setSearch] = useState('')
+    const [filterBrand, setFilterBrand] = useState('')
+    const [filterRole, setFilterRole] = useState('')
+    const [updatingKeys, setUpdatingKeys] = useState({})
+    const [deleteFromCompanyConfirm, setDeleteFromCompanyConfirm] = useState({ open: false, userId: null, userName: '' })
     const [showInviteModal, setShowInviteModal] = useState(false)
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null)
     const [ownershipTransferSettingsLink, setOwnershipTransferSettingsLink] = useState(null)
-    const [updatingRoles, setUpdatingRoles] = useState({})
-    const [removeBrandConfirm, setRemoveBrandConfirm] = useState({ open: false, userId: null, brandId: null, brandName: '' })
-    const [removeMemberConfirm, setRemoveMemberConfirm] = useState({ open: false, userId: null, userName: '' })
-    const [deleteFromCompanyConfirm, setDeleteFromCompanyConfirm] = useState({ open: false, userId: null, userName: '' })
-    const [addToBrandModal, setAddToBrandModal] = useState({ open: false, user: null, brandId: '', role: 'viewer' })
-    const [addToBrandSubmitting, setAddToBrandSubmitting] = useState(false)
-    const [addToBrandErrors, setAddToBrandErrors] = useState({})
-    const { data, setData, post, processing, errors, reset } = useForm({
-        email: '',
-        role: 'member',
-        brands: [],
-    })
 
-    const handleRemoveMember = (userId, userName) => {
-        setRemoveMemberConfirm({ open: true, userId, userName })
-    }
+    const debouncedSearch = useDebounce(search, 300)
 
-    const confirmRemoveMember = () => {
-        if (removeMemberConfirm.userId) {
-            router.delete(`/app/companies/${tenant.id}/team/${removeMemberConfirm.userId}`, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setRemoveMemberConfirm({ open: false, userId: null, userName: '' })
+    const prevFiltersRef = useRef([debouncedSearch, filterBrand, filterRole])
+
+    const fetchUsers = useCallback(() => {
+        setLoading(true)
+        const filtersChanged =
+            prevFiltersRef.current[0] !== debouncedSearch ||
+            prevFiltersRef.current[1] !== filterBrand ||
+            prevFiltersRef.current[2] !== filterRole
+        if (filtersChanged) {
+            prevFiltersRef.current = [debouncedSearch, filterBrand, filterRole]
+        }
+        const pageToUse = filtersChanged ? 1 : page
+        const params = new URLSearchParams({ page: pageToUse })
+        if (debouncedSearch) params.set('search', debouncedSearch)
+        if (filterBrand) params.set('brand_id', filterBrand)
+        if (filterRole) params.set('role', filterRole)
+        fetch(`/app/api/companies/users?${params}`, { credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then((data) => {
+                if (data.data) {
+                    setUsers(data.data)
+                    setMeta(data.meta || {})
                 }
             })
-        }
+            .catch(() => setUsers([]))
+            .finally(() => setLoading(false))
+    }, [page, debouncedSearch, filterBrand, filterRole])
+
+    useEffect(() => {
+        setPage(1)
+    }, [debouncedSearch, filterBrand, filterRole])
+
+    useEffect(() => {
+        fetchUsers()
+    }, [page, debouncedSearch, filterBrand, filterRole])
+
+    const handleCompanyRoleChange = (userId, newRole) => {
+        setUpdatingKeys((prev) => ({ ...prev, [`tenant_${userId}`]: true }))
+        router.put(`/app/companies/${tenant.id}/team/${userId}/role`, { role: newRole }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setUpdatingKeys((prev) => ({ ...prev, [`tenant_${userId}`]: false }))
+                fetchUsers()
+            },
+            onError: (errors) => {
+                setUpdatingKeys((prev) => ({ ...prev, [`tenant_${userId}`]: false }))
+                if (errors?.error === 'cannot_assign_owner_role' || errors?.requires_ownership_transfer) {
+                    const targetUser = users.find((u) => u.id === userId)
+                    setOwnershipTransferTarget({
+                        id: userId,
+                        name: targetUser?.name || errors?.target_user_name || 'User',
+                        email: targetUser?.email || errors?.target_user_email || '',
+                    })
+                    setOwnershipTransferSettingsLink(errors?.settings_link || '/app/companies/settings#ownership-transfer')
+                    setShowOwnershipTransferModal(true)
+                }
+            },
+        })
+    }
+
+    const handleBrandRoleChange = (userId, brandId, newRole) => {
+        setUpdatingKeys((prev) => ({ ...prev, [`brand_${userId}_${brandId}`]: true }))
+        router.put(`/app/companies/${tenant.id}/team/${userId}/brands/${brandId}/role`, { role: newRole }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setUpdatingKeys((prev) => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
+                fetchUsers()
+            },
+            onError: () => {
+                setUpdatingKeys((prev) => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
+            },
+        })
+    }
+
+    const handleRemoveBrand = (userId, brandId, brandName) => {
+        router.delete(`/app/brands/${brandId}/users/${userId}`, {
+            preserveScroll: true,
+            onSuccess: () => fetchUsers(),
+        })
     }
 
     const handleDeleteFromCompany = (userId, userName) => {
@@ -56,10 +128,17 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                 preserveScroll: true,
                 onSuccess: () => {
                     setDeleteFromCompanyConfirm({ open: false, userId: null, userName: '' })
-                }
+                    fetchUsers()
+                },
             })
         }
     }
+
+    const { data, setData, post, processing, errors, reset } = useForm({
+        email: '',
+        role: 'member',
+        brands: [],
+    })
 
     const handleInviteSubmit = (e) => {
         e.preventDefault()
@@ -68,551 +147,181 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
             onSuccess: () => {
                 setShowInviteModal(false)
                 reset()
+                fetchUsers()
             },
         })
-    }
-
-    const handleCloseInviteModal = () => {
-        setShowInviteModal(false)
-        reset()
     }
 
     const handleBrandAssignmentsChange = (brandAssignments) => {
         setData('brands', brandAssignments)
     }
 
-    const handleTenantRoleChange = (userId, newRole) => {
-        setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: true }))
-        router.put(`/app/companies/${tenant.id}/team/${userId}/role`, {
-            role: newRole
-        }, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
-                router.reload({ preserveScroll: true })
-            },
-            onError: (errors) => {
-                setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
-                
-                // Check if this is an owner assignment attempt error
-                if (errors?.error === 'cannot_assign_owner_role' || errors?.requires_ownership_transfer) {
-                    const targetUser = members.find(m => m.id === userId)
-                    setOwnershipTransferTarget({
-                        id: userId,
-                        name: targetUser?.name || errors?.target_user_name || 'User',
-                        email: targetUser?.email || errors?.target_user_email || '',
-                    })
-                    setOwnershipTransferSettingsLink(errors?.settings_link || `/app/companies/settings#ownership-transfer`)
-                    setShowOwnershipTransferModal(true)
-                }
-            }
-        })
-    }
-
-    const handleInitiateOwnershipTransfer = () => {
-        if (ownershipTransferTarget) {
-            router.post(`/app/companies/${tenant.id}/ownership-transfer/initiate`, {
-                new_owner_id: ownershipTransferTarget.id
-            }, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setShowOwnershipTransferModal(false)
-                    setOwnershipTransferTarget(null)
-                }
-            })
-        }
-    }
-
-    const handleBrandRoleChange = (userId, brandId, newRole) => {
-        setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: true }))
-        router.put(`/app/companies/${tenant.id}/team/${userId}/brands/${brandId}/role`, {
-            role: newRole
-        }, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
-                router.reload({ preserveScroll: true })
-            },
-            onError: () => {
-                setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
-            }
-        })
-    }
-
-    const handleRemoveBrandAssignment = (userId, brandId, brandName) => {
-        setRemoveBrandConfirm({ open: true, userId, brandId, brandName })
-    }
-
-    const openAddToBrandModal = (user) => {
-        setAddToBrandModal({ open: true, user, brandId: '', role: 'viewer' })
-        setAddToBrandErrors({})
-    }
-
-    const openAddToBrandModalWithBrand = (user, brand) => {
-        setAddToBrandModal({ open: true, user, brandId: String(brand.id), role: 'viewer' })
-        setAddToBrandErrors({})
-    }
-
-    const handleAddToBrandSubmit = (e) => {
-        e.preventDefault()
-        if (!addToBrandModal.user?.id || !addToBrandModal.brandId) return
-        setAddToBrandSubmitting(true)
-        setAddToBrandErrors({})
-        router.post(
-            `/app/companies/${tenant.id}/team/${addToBrandModal.user.id}/add-to-brand`,
-            { brand_id: addToBrandModal.brandId, role: addToBrandModal.role },
-            {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setAddToBrandModal({ open: false, user: null, brandId: '', role: 'viewer' })
-                    setAddToBrandSubmitting(false)
-                    router.reload({ preserveScroll: true })
-                },
-                onError: (errors) => {
-                    setAddToBrandErrors(errors || {})
-                    setAddToBrandSubmitting(false)
-                },
-            }
-        )
-    }
-
-    const confirmRemoveBrandAssignment = () => {
-        if (removeBrandConfirm.userId && removeBrandConfirm.brandId) {
-            router.delete(`/app/brands/${removeBrandConfirm.brandId}/users/${removeBrandConfirm.userId}`, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setRemoveBrandConfirm({ open: false, userId: null, brandId: null, brandName: '' })
-                    router.reload({ preserveScroll: true })
-                }
-            })
-        }
-    }
-
-    const formatDate = (dateString) => {
-        const date = new Date(dateString)
-        return date.toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-        })
-    }
-
-    const getRoleColors = (role) => {
-        const roleLower = role?.toLowerCase()
-        // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-        // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
-        let normalizedRole = roleLower
-        if (roleLower === 'owner') {
-            normalizedRole = 'admin'
-        } else if (roleLower === 'member') {
-            normalizedRole = 'viewer'
-        }
-        const colors = {
-            // Tenant roles
-            owner: 'bg-orange-100 text-orange-800 border-orange-200',
-            admin: 'bg-purple-100 text-purple-800 border-purple-200',
-            member: 'bg-gray-100 text-gray-800 border-gray-200',
-            // Brand roles
-            brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
-            contributor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-            viewer: 'bg-gray-100 text-gray-800 border-gray-200',
-        }
-        return colors[normalizedRole] || colors.viewer || colors.member
-    }
+    const displayCount = meta.total ?? current_user_count ?? 0
+    const maxDisplay = max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Team" />
             <AppNav />
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                {/* Header */}
+            <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full">
                 <div className="mb-6">
                     <h1 className="text-3xl font-bold text-gray-900">Team Members</h1>
                     <p className="mt-2 text-sm text-gray-600">
-                        Manage members and invitations for {tenant.name} ({current_user_count} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users} users)
+                        Manage members and invitations for {tenant.name} ({displayCount} of {maxDisplay} users)
                     </p>
                 </div>
 
                 <CompanyTabs />
 
-                {/* Invite Button */}
-                <div className="mb-6 flex justify-end">
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                     <button
                         type="button"
                         onClick={() => setShowInviteModal(true)}
                         disabled={user_limit_reached}
-                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                         </svg>
                         Invite Member
                     </button>
-                </div>
 
-                {/* Active Members Section (full brand access) */}
-                <div className="mb-8">
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Active Members</h2>
-                            <p className="mt-1 text-sm text-gray-500">People who have joined {tenant.name} with brand access</p>
-                        </div>
-                        <span className="text-sm text-gray-500">{fullMembers.length} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users} users</span>
-                    </div>
-
-                    {/* User Limit Reached Banner */}
-                    {user_limit_reached && (
-                        <PlanLimitCallout
-                            title="User limit reached"
-                            message={`Users limit reached (${current_user_count} of ${max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? 'unlimited' : max_users}). Please upgrade your plan.`}
+                    {/* Search + Filters */}
+                    <div className="flex flex-wrap items-center gap-3">
+                        <input
+                            type="search"
+                            placeholder="Search users..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="rounded-md border-gray-300 text-sm py-1.5 px-3 w-48 focus:ring-indigo-500 focus:border-indigo-500"
                         />
-                    )}
-
-                    {/* Full Members List */}
-                    <div className="space-y-4">
-                        {fullMembers.map((member) => {
-                            const isOwner = member.role === 'Owner'
-                            const canRemove = !isOwner && member.id !== auth.user?.id
-                            const canDeleteFromCompany = !isOwner && member.id !== auth.user?.id
-
-                            return (
-                                <div key={member.id} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4">
-                                    <div className="flex items-center space-x-4">
-                                        {/* Avatar */}
-                                        <Avatar
-                                            avatarUrl={member.avatar_url}
-                                            firstName={member.first_name}
-                                            lastName={member.last_name}
-                                            email={member.email}
-                                            size="md"
-                                        />
-
-                                        {/* Member Info */}
-                                        <div className="flex-1">
-                                            <div className="flex items-center space-x-2 flex-wrap gap-2">
-                                                <span className="text-sm font-medium text-gray-900">
-                                                    {member.first_name} {member.last_name}
-                                                </span>
-                                                {member.is_orphaned && (
-                                                    <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20">
-                                                        ⚠️ Orphaned Record
-                                                    </span>
-                                                )}
-                                                {!member.is_orphaned && (
-                                                    <>
-                                                        {/* Tenant Role Selector */}
-                                                        <div className="relative inline-flex items-center">
-                                                            <select
-                                                                value={member.role_value || 'member'}
-                                                                onChange={(e) => handleTenantRoleChange(member.id, e.target.value)}
-                                                                disabled={isOwner || updatingRoles[`tenant_${member.id}`]}
-                                                                className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(member.role_value)}`}
-                                                            >
-                                                                <option value="owner">👑 Owner</option>
-                                                                <option value="admin">Admin</option>
-                                                                <option value="member">Member</option>
-                                                            </select>
-                                                            <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                            </svg>
-                                                        </div>
-                                                        {updatingRoles[`tenant_${member.id}`] && (
-                                                            <span className="text-xs text-gray-500">Updating...</span>
-                                                        )}
-                                                    </>
-                                                )}
-                                            </div>
-                                            <p className="mt-1 text-sm text-gray-500">{member.email}</p>
-                                            {member.is_orphaned && (
-                                                <p className="mt-1 text-xs text-yellow-700 bg-yellow-50 px-2 py-1 rounded">
-                                                    This user is not a member of the company but has brand or collection access. Remove brand assignments above or delete from company to remove all access.
-                                                </p>
-                                            )}
-                                            
-                                            {/* Brand Assignments - Show ALL tenant brands; for each: role or Add to brand */}
-                                            {brands && brands.length > 0 && (
-                                                <div className="mt-3">
-                                                    <p className="text-xs font-medium text-gray-700 mb-2">Brand Roles:</p>
-                                                    <div className="flex flex-col gap-2">
-                                                        {brands.map((brand) => {
-                                                            const ba = (member.brand_assignments || []).find(a => a.id === brand.id)
-                                                            const hasAccess = !!ba
-                                                            const isUpdating = updatingRoles[`brand_${member.id}_${brand.id}`]
-
-                                                            return (
-                                                                <div key={brand.id} className="flex items-center gap-1.5">
-                                                                    <span className="text-xs font-medium text-gray-700">{brand.name}:</span>
-                                                                    {hasAccess ? (
-                                                                        member.is_orphaned ? (
-                                                                            <div className="flex items-center gap-2">
-                                                                                <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${getRoleColors(ba.role)}`}>
-                                                                                    {ba.role || 'member'}
-                                                                                </span>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleRemoveBrandAssignment(member.id, brand.id, brand.name)}
-                                                                                    className="text-red-600 hover:text-red-800 text-xs"
-                                                                                    title="Remove orphaned brand assignment"
-                                                                                >
-                                                                                    Remove
-                                                                                </button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <>
-                                                                                <div className="relative inline-flex items-center">
-                                                                                    <select
-                                                                                        value={ba.role?.toLowerCase() === 'member' ? 'viewer' : (ba.role?.toLowerCase() || 'viewer')}
-                                                                                        onChange={(e) => {
-                                                                                            const role = e.target.value === 'member' ? 'viewer' : e.target.value;
-                                                                                            handleBrandRoleChange(member.id, brand.id, role);
-                                                                                        }}
-                                                                                        disabled={isUpdating}
-                                                                                        className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
-                                                                                    >
-                                                                                        <option value="viewer">Viewer</option>
-                                                                                        <option value="contributor">Contributor</option>
-                                                                                        <option value="brand_manager">Brand Manager</option>
-                                                                                        <option value="admin">Admin</option>
-                                                                                    </select>
-                                                                                    <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                                                    </svg>
-                                                                                </div>
-                                                                                {isUpdating && (
-                                                                                    <span className="text-xs text-gray-500">Updating...</span>
-                                                                                )}
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleRemoveBrandAssignment(member.id, brand.id, brand.name)}
-                                                                                    className="text-red-600 hover:text-red-800 text-xs font-medium ml-2"
-                                                                                    title="Remove brand access"
-                                                                                >
-                                                                                    Remove
-                                                                                </button>
-                                                                            </>
-                                                                        )
-                                                                    ) : !member.is_orphaned ? (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => openAddToBrandModalWithBrand(member, brand)}
-                                                                            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
-                                                                        >
-                                                                            Add to brand
-                                                                        </button>
-                                                                    ) : (
-                                                                        <span className="text-xs text-gray-400">—</span>
-                                                                    )}
-                                                                </div>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            
-                                            <p className="mt-2 text-xs text-gray-400">
-                                                Joined {formatDate(member.joined_at)}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {/* Delete from company (remove all relations: tenant, brand, collection) */}
-                                    {canDeleteFromCompany && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleDeleteFromCompany(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
-                                            className="p-1.5 rounded text-red-600 hover:bg-red-50 hover:text-red-800"
-                                            title="Delete from company — remove all access (brand and collection)"
-                                        >
-                                            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.12m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                            </svg>
-                                        </button>
-                                    )}
-                                </div>
-                            )
-                        })}
+                        <select
+                            value={filterBrand}
+                            onChange={(e) => setFilterBrand(e.target.value)}
+                            className="rounded-md border-gray-300 text-sm py-1.5"
+                        >
+                            <option value="">All brands</option>
+                            {(brands || []).map((b) => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={filterRole}
+                            onChange={(e) => setFilterRole(e.target.value)}
+                            className="rounded-md border-gray-300 text-sm py-1.5"
+                        >
+                            <option value="">All roles</option>
+                            <option value="owner">Owner</option>
+                            <option value="admin">Admin</option>
+                            <option value="member">Member</option>
+                        </select>
                     </div>
                 </div>
 
-                {/* Collection access only — sectioned off, muted, with Add to brand */}
-                {collectionOnlyMembers.length > 0 && (
-                    <div className="mb-8">
-                        <div className="mb-3">
-                            <h2 className="text-base font-semibold text-slate-600">Collection access only</h2>
-                            <p className="mt-0.5 text-sm text-slate-500">
-                                These users can only view specific collections. They don&apos;t have brand or company access. Add them to a brand to give full access.
-                            </p>
-                        </div>
-                        <div className="space-y-2">
-                            {collectionOnlyMembers.map((member) => (
-                                <div key={member.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-                                    <div className="flex items-center space-x-3 min-w-0">
-                                        <Avatar
-                                            avatarUrl={member.avatar_url}
-                                            firstName={member.first_name}
-                                            lastName={member.last_name}
-                                            email={member.email}
-                                            size="sm"
-                                        />
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="text-sm font-medium text-slate-700">
-                                                    {member.first_name} {member.last_name}
-                                                </span>
-                                                <span className="inline-flex items-center rounded bg-slate-200 text-slate-700 px-2 py-0.5 text-xs font-medium">
-                                                    Collection access only
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-slate-500 truncate">{member.email}</p>
-                                            {member.collection_grants && member.collection_grants.length > 0 && (
-                                                <p className="mt-0.5 text-xs text-slate-500">
-                                                    Access: {member.collection_grants.join(', ')}
-                                                </p>
-                                            )}
-                                            <p className="mt-0.5 text-xs text-slate-400">Joined {formatDate(member.joined_at)}</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-shrink-0">
-                                        <button
-                                            type="button"
-                                            onClick={() => openAddToBrandModal(member)}
-                                            className="inline-flex items-center rounded-md bg-slate-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-500"
-                                        >
-                                            Add to brand
-                                        </button>
-                                        {member.id !== auth.user?.id && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleDeleteFromCompany(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
-                                                className="p-1.5 rounded text-red-600 hover:bg-red-50 hover:text-red-800"
-                                                title="Delete from company — remove all collection access"
-                                            >
-                                                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.12m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                                </svg>
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
+                {user_limit_reached && (
+                    <PlanLimitCallout
+                        title="User limit reached"
+                        message={`Users limit reached (${current_user_count} of ${maxDisplay}). Please upgrade your plan.`}
+                    />
+                )}
+
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                    {loading ? (
+                        <div className="py-12 text-center text-gray-500">Loading...</div>
+                    ) : users.length === 0 ? (
+                        <div className="py-12 text-center text-gray-500">No users found.</div>
+                    ) : (
+                        users.map((user) => (
+                            <UserRow
+                                key={user.id}
+                                user={user}
+                                brands={brands}
+                                tenant={tenant}
+                                authUserId={auth?.user?.id}
+                                onCompanyRoleChange={handleCompanyRoleChange}
+                                onBrandRoleChange={handleBrandRoleChange}
+                                onRemoveBrand={handleRemoveBrand}
+                                onDeleteFromCompany={handleDeleteFromCompany}
+                                updatingKeys={updatingKeys}
+                            />
+                        ))
+                    )}
+                </div>
+
+                {/* Pagination */}
+                {meta.last_page > 1 && (
+                    <div className="mt-4 flex items-center justify-between">
+                        <p className="text-sm text-gray-600">
+                            Showing {(meta.current_page - 1) * 25 + 1}–{Math.min(meta.current_page * 25, meta.total)} of {meta.total} users
+                        </p>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                disabled={meta.current_page <= 1}
+                                className="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                            >
+                                Prev
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
+                                disabled={meta.current_page >= meta.last_page}
+                                className="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                            >
+                                Next
+                            </button>
                         </div>
                     </div>
                 )}
 
-                {/* Invite Member Modal */}
+                {/* Invite Modal */}
                 {showInviteModal && (
                     <div className="fixed inset-0 z-50 overflow-y-auto">
                         <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={handleCloseInviteModal}></div>
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowInviteModal(false)} />
                             <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                                 <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
-                                    <button
-                                        type="button"
-                                        onClick={handleCloseInviteModal}
-                                        className="rounded-md bg-white text-gray-400 hover:text-gray-500"
-                                    >
+                                    <button type="button" onClick={() => setShowInviteModal(false)} className="rounded-md bg-white text-gray-400 hover:text-gray-500">
                                         <span className="sr-only">Close</span>
-                                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
+                                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                                     </button>
                                 </div>
                                 <form onSubmit={handleInviteSubmit}>
-                                    <div>
-                                        <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">
-                                            Invite Team Member
-                                        </h3>
-                                        <div className="mb-4">
-                                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                                                Email Address
-                                            </label>
-                                            <input
-                                                type="email"
-                                                id="email"
-                                                value={data.email}
-                                                onChange={(e) => setData('email', e.target.value)}
-                                                className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                                placeholder="colleague@example.com"
-                                                required
-                                            />
-                                            {errors.email && (
-                                                <p className="mt-1 text-sm text-red-600">{errors.email}</p>
+                                    <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Invite Team Member</h3>
+                                    <div className="mb-4">
+                                        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                                        <input
+                                            type="email"
+                                            id="email"
+                                            value={data.email}
+                                            onChange={(e) => setData('email', e.target.value)}
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                                            placeholder="colleague@example.com"
+                                            required
+                                        />
+                                        {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+                                    </div>
+                                    <div className="mb-4">
+                                        <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">Company Role</label>
+                                        <select id="role" value={data.role} onChange={(e) => setData('role', e.target.value)} className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm">
+                                            {(tenant_roles || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                            {(!tenant_roles || tenant_roles.length === 0) && (
+                                                <>
+                                                    <option value="member">Member</option>
+                                                    <option value="admin">Admin</option>
+                                                </>
                                             )}
-                                        </div>
-                                        <div className="mb-4">
-                                            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
-                                                Company Role (optional - will default to first brand role)
-                                            </label>
-                                            <select
-                                                id="role"
-                                                value={data.role}
-                                                onChange={(e) => setData('role', e.target.value)}
-                                                className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            >
-                                                {tenant_roles && tenant_roles.length > 0 ? (
-                                                    tenant_roles.map((role) => (
-                                                        <option key={role.value} value={role.value}>
-                                                            {role.label}
-                                                        </option>
-                                                    ))
-                                                ) : (
-                                                    // Fallback to hardcoded list if backend doesn't provide roles
-                                                    // Note: 'owner' is NOT included - ownership must be transferred via ownership transfer process
-                                                    <>
-                                                        <option value="member">Member</option>
-                                                        <option value="admin">Admin</option>
-                                                    </>
-                                                )}
-                                            </select>
-                                            <p className="mt-1 text-xs text-gray-500">
-                                                Note: Owner role cannot be assigned during invitation. Use the ownership transfer process in Company Settings to transfer ownership.
-                                            </p>
-                                            {errors.role && (
-                                                <p className="mt-1 text-sm text-red-600">{errors.role}</p>
-                                            )}
-                                        </div>
-                                        <div className="mb-4">
-                                            <BrandRoleSelector
-                                                brands={brands}
-                                                selectedBrands={data.brands}
-                                                onChange={handleBrandAssignmentsChange}
-                                                errors={errors}
-                                                required={true}
-                                            />
-                                        </div>
-                                        {user_limit_reached && (
-                                            <div className="mb-4 rounded-md bg-yellow-50 p-4">
-                                                <div className="flex">
-                                                    <div className="flex-shrink-0">
-                                                        <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                                            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </div>
-                                                    <div className="ml-3">
-                                                        <h3 className="text-sm font-medium text-yellow-800">
-                                                            User Limit Reached
-                                                        </h3>
-                                                        <div className="mt-2 text-sm text-yellow-700">
-                                                            <p>You've reached your plan's user limit ({current_user_count} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? 'unlimited' : max_users}). Please upgrade your plan to invite more members.</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
+                                        </select>
+                                    </div>
+                                    <div className="mb-4">
+                                        <BrandRoleSelector brands={brands} selectedBrands={data.brands} onChange={handleBrandAssignmentsChange} errors={errors} required />
                                     </div>
                                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
-                                        <button
-                                            type="submit"
-                                            disabled={processing || user_limit_reached || !data.brands || data.brands.length === 0}
-                                            className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed sm:col-start-2"
-                                        >
+                                        <button type="submit" disabled={processing || user_limit_reached || !data.brands?.length} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 sm:col-start-2">
                                             {processing ? 'Sending...' : 'Send Invitation'}
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleCloseInviteModal}
-                                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
-                                        >
+                                        <button type="button" onClick={() => setShowInviteModal(false)} className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0">
                                             Cancel
                                         </button>
                                     </div>
@@ -622,191 +331,34 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                     </div>
                 )}
 
-                {/* Ownership Transfer Modal */}
+                {/* Ownership Transfer Modal (when assigning owner role) */}
                 {showOwnershipTransferModal && ownershipTransferTarget && (
-                    <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowOwnershipTransferModal(false)}></div>
-                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
-                                <div className="sm:flex sm:items-start">
-                                    <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-orange-100 sm:mx-0 sm:h-10 sm:w-10">
-                                        <svg className="h-6 w-6 text-orange-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                                        </svg>
-                                    </div>
-                                    <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
-                                        <h3 className="text-base font-semibold leading-6 text-gray-900" id="modal-title">
-                                            Ownership Transfer Required
-                                        </h3>
-                                        <div className="mt-2">
-                                            <p className="text-sm text-gray-500">
-                                                Please use the ownership transfer process in the{' '}
-                                                <Link 
-                                                    href={ownershipTransferSettingsLink || `/app/companies/settings#ownership-transfer`}
-                                                    className="text-indigo-600 hover:text-indigo-500 underline font-medium"
-                                                    onClick={() => setShowOwnershipTransferModal(false)}
-                                                >
-                                                    Company settings
-                                                </Link>
-                                                .
-                                            </p>
-                                        </div>
-                                        <div className="mt-4 rounded-md bg-blue-50 p-4">
-                                            <h4 className="text-sm font-medium text-blue-900 mb-2">What happens next:</h4>
-                                            <ol className="list-decimal list-inside space-y-1 text-sm text-blue-700">
-                                                <li>You'll receive a confirmation email</li>
-                                                <li>You must confirm the transfer via the email link</li>
-                                                <li>{ownershipTransferTarget.name} will receive an acceptance email</li>
-                                                <li>After they accept, ownership will be transferred</li>
-                                            </ol>
-                                        </div>
-                                        <div className="mt-4">
-                                            <p className="text-sm text-gray-600">
-                                                <strong>Transfer ownership to:</strong> {ownershipTransferTarget.name} {ownershipTransferTarget.email && `(${ownershipTransferTarget.email})`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse sm:gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={handleInitiateOwnershipTransfer}
-                                        className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:ml-3 sm:w-auto"
-                                    >
-                                        Initiate Ownership Transfer
-                                    </button>
-                                    <Link
-                                        href={ownershipTransferSettingsLink || `/app/companies/settings#ownership-transfer`}
-                                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
-                                        onClick={() => setShowOwnershipTransferModal(false)}
-                                    >
-                                        Go to Settings
-                                    </Link>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setShowOwnershipTransferModal(false)
-                                            setOwnershipTransferTarget(null)
-                                        }}
-                                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Add to Brand Modal (collection-only users) */}
-                {addToBrandModal.open && addToBrandModal.user && (
                     <div className="fixed inset-0 z-50 overflow-y-auto">
                         <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setAddToBrandModal(prev => ({ ...prev, open: false }))} />
-                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md sm:p-6">
-                                <h3 className="text-lg font-semibold leading-6 text-gray-900 mb-4">
-                                    Add to brand
-                                </h3>
-                                <p className="text-sm text-gray-500 mb-4">
-                                    Give {addToBrandModal.user.first_name} {addToBrandModal.user.last_name} access to a brand. Choose a brand and role below.
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowOwnershipTransferModal(false)} />
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                                <h3 className="text-base font-semibold leading-6 text-gray-900">Ownership Transfer Required</h3>
+                                <p className="mt-2 text-sm text-gray-500">
+                                    Please use the ownership transfer process in <Link href={ownershipTransferSettingsLink || '/app/companies/settings#ownership-transfer'} className="text-indigo-600 hover:text-indigo-500 underline">Company settings</Link>.
                                 </p>
-                                <form onSubmit={handleAddToBrandSubmit}>
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label htmlFor="add-to-brand-brand" className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                                            <select
-                                                id="add-to-brand-brand"
-                                                value={addToBrandModal.brandId}
-                                                onChange={(e) => setAddToBrandModal(prev => ({ ...prev, brandId: e.target.value }))}
-                                                className="block w-full rounded-md border-gray-300 py-2 px-3 text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                                                required
-                                            >
-                                                <option value="">Select a brand...</option>
-                                                {brands?.map((b) => (
-                                                    <option key={b.id} value={b.id}>{b.name}</option>
-                                                ))}
-                                            </select>
-                                            {addToBrandErrors.brand_id && (
-                                                <p className="mt-1 text-sm text-red-600">{addToBrandErrors.brand_id}</p>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <label htmlFor="add-to-brand-role" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                                            <select
-                                                id="add-to-brand-role"
-                                                value={addToBrandModal.role}
-                                                onChange={(e) => setAddToBrandModal(prev => ({ ...prev, role: e.target.value }))}
-                                                className="block w-full rounded-md border-gray-300 py-2 px-3 text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                                            >
-                                                <option value="viewer">Viewer</option>
-                                                <option value="contributor">Contributor</option>
-                                                <option value="brand_manager">Brand Manager</option>
-                                                <option value="admin">Admin</option>
-                                            </select>
-                                            {addToBrandErrors.role && (
-                                                <p className="mt-1 text-sm text-red-600">{addToBrandErrors.role}</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
-                                        <button
-                                            type="submit"
-                                            disabled={addToBrandSubmitting || !addToBrandModal.brandId}
-                                            className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed sm:col-start-2"
-                                        >
-                                            {addToBrandSubmitting ? 'Adding...' : 'Add to brand'}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setAddToBrandModal({ open: false, user: null, brandId: '', role: 'viewer' })}
-                                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </form>
+                                <div className="mt-4">
+                                    <button type="button" onClick={() => setShowOwnershipTransferModal(false)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+                                        OK
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
             </main>
             <AppFooter />
-            
-            {/* Remove Brand Assignment Confirmation Dialog */}
-            <ConfirmDialog
-                open={removeBrandConfirm.open}
-                onClose={() => setRemoveBrandConfirm({ open: false, userId: null, brandId: null, brandName: '' })}
-                onConfirm={confirmRemoveBrandAssignment}
-                title="Remove Brand Access"
-                message={(() => {
-                    const member = members.find(m => m.id === removeBrandConfirm.userId)
-                    const userName = member ? (member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email) : 'this user'
-                    return `Are you sure you want to remove ${userName}'s access to the "${removeBrandConfirm.brandName}" brand?`
-                })()}
-                confirmText="Remove Access"
-                cancelText="Cancel"
-                variant="danger"
-            />
-            
-            {/* Remove Team Member Confirmation Dialog */}
-            <ConfirmDialog
-                open={removeMemberConfirm.open}
-                onClose={() => setRemoveMemberConfirm({ open: false, userId: null, userName: '' })}
-                onConfirm={confirmRemoveMember}
-                title="Remove Team Member"
-                message={`Are you sure you want to remove ${removeMemberConfirm.userName || 'this team member'} from the account? This action cannot be undone.`}
-                confirmText="Remove Member"
-                cancelText="Cancel"
-                variant="danger"
-            />
 
-            {/* Delete from Company Confirmation Dialog — removes all relations (tenant, brand, collection) */}
             <ConfirmDialog
                 open={deleteFromCompanyConfirm.open}
                 onClose={() => setDeleteFromCompanyConfirm({ open: false, userId: null, userName: '' })}
                 onConfirm={confirmDeleteFromCompany}
                 title="Delete from company"
-                message={`This will remove ${deleteFromCompanyConfirm.userName || 'this user'} from the company and revoke all access (brand and collection) for ${tenant.name}. This cannot be undone.`}
+                message={`This will remove ${deleteFromCompanyConfirm.userName || 'this user'} from the company and revoke all access. This cannot be undone.`}
                 confirmText="Delete from company"
                 cancelText="Cancel"
                 variant="danger"

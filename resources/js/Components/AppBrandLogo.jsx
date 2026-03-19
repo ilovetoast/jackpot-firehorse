@@ -1,41 +1,21 @@
 import { useState } from 'react'
-import { Link, router, usePage } from '@inertiajs/react'
-import { getContrastTextColor } from '../utils/colorUtils'
+import { Link, usePage } from '@inertiajs/react'
 import JackpotLogo from './JackpotLogo'
+import { usePermission } from '../hooks/usePermission'
+import BrandIconUnified from './BrandIconUnified'
 
-export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
+export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchBrand, rootLinkHref }) {
     const { auth } = usePage().props
+    const { can } = usePermission()
     const tenant = auth?.activeCompany
     const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
+    const planLimitInfo = auth?.brand_plan_limit_info
+    const canAddBrand = can('brand_settings.manage')
+        && planLimitInfo
+        && !planLimitInfo.brand_limit_exceeded
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
-    const [logoError, setLogoError] = useState(false)
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
     const hasMultipleBrands = validBrands && validBrands.length > 1
-
-    const navDisplayMode = activeBrand?.settings?.nav_display_mode || 'logo'
-    const showLogoInNav = navDisplayMode === 'logo' && !!activeBrand?.logo_path && !logoError
-
-    const computeFilterStyle = (filter, primaryColor) => {
-        if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
-        if (filter === 'black') return { filter: 'brightness(0)' }
-        if (filter === 'primary' && primaryColor) {
-            const c = primaryColor.replace('#', '')
-            const r = parseInt(c.substr(0, 2), 16) / 255
-            const g = parseInt(c.substr(2, 2), 16) / 255
-            const b = parseInt(c.substr(4, 2), 16) / 255
-            const max = Math.max(r, g, b), min = Math.min(r, g, b)
-            let h = 0
-            if (max !== min) {
-                const d = max - min
-                if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
-                else if (max === g) h = (b - r) / d + 2
-                else h = (r - g) / d + 4
-                h *= 60
-            }
-            return { filter: `brightness(0) sepia(1) saturate(5) hue-rotate(${h - 30}deg)` }
-        }
-        return {}
-    }
 
     const handleSwitchBrand = (brandId, e) => {
         if (e) {
@@ -78,30 +58,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         // Try to get the first active brand from valid brands array
         const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
-            // Use the first brand as fallback
-            const fallbackBrandName = firstBrand.name || 'Brand'
-            const firstLetter = fallbackBrandName.charAt(0).toUpperCase()
             return (
                 <Link href="/app" className="flex items-center min-w-0">
-                    {firstBrand.logo_path ? (
-                        <img
-                            src={firstBrand.logo_path}
-                            alt={fallbackBrandName}
-                            className="h-12 w-auto max-w-72 object-contain"
-                            style={logoFilterStyle}
-                        />
-                    ) : (() => {
-                        const fallbackBrandColor = firstBrand.primary_color || '#4f46e5'
-                        const fallbackTextColor = getContrastTextColor(fallbackBrandColor)
-                        return (
-                            <div 
-                                className="h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0"
-                                style={{ backgroundColor: fallbackBrandColor }}
-                            >
-                                <span className="text-base font-medium" style={{ color: fallbackTextColor }}>{firstLetter}</span>
-                            </div>
-                        )
-                    })()}
+                    <BrandIconUnified brand={firstBrand} size="lg" />
                 </Link>
             )
         }
@@ -114,48 +73,29 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         )
     }
 
-    // Ensure we have a brand name to display
     const brandName = activeBrand.name || 'Brand'
-    const firstLetter = brandName.charAt(0).toUpperCase()
     const isOnCompanyOverview = route().current('app')
     const displayLabel = (isOnCompanyOverview && canViewCompanyOverview && tenant)
         ? tenant.name
         : brandName
-    // Get brand primary color, fallback to indigo-600 if not set
-    const brandColor = activeBrand.primary_color || '#4f46e5' // indigo-600 default
-    // Get appropriate text color based on background color
-    const textColorForBrand = getContrastTextColor(brandColor)
 
-    // If multiple brands, show brand name (clickable → company overview) + dropdown chevron (brand switcher)
-    // Part 3: Brand name click → /app (company overview) for discoverability; chevron opens brand switcher
+    // If multiple brands, show logo + name + chevron as single clickable area that opens dropdown
+    // Dropdown anchored to far left of logo; includes Company Portal link + brand switcher
     if (hasMultipleBrands) {
         return (
-            <div className="flex items-center">
-                <Link
-                    href="/app"
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 min-w-0 max-w-full"
+            <div className="relative flex items-center">
+                <button
+                    type="button"
+                    onClick={() => setBrandMenuOpen(!brandMenuOpen)}
+                    aria-expanded={brandMenuOpen}
+                    aria-haspopup="true"
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 min-w-0 max-w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                     style={{ color: textColor }}
-                    title="Go to company overview"
+                    title="Open menu"
                 >
-                    {!(isOnCompanyOverview && canViewCompanyOverview && tenant) && (
-                        showLogoInNav ? (
-                            <img
-                                src={activeBrand.logo_path}
-                                alt={brandName}
-                                className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
-                                style={logoFilterStyle}
-                                onError={() => setLogoError(true)}
-                            />
-                        ) : (
-                            <div 
-                                className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0"
-                                style={{ backgroundColor: brandColor }}
-                            >
-                                <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
-                            </div>
-                        )
-                    )}
-                    {(!showLogoInNav || (isOnCompanyOverview && canViewCompanyOverview && tenant)) && (
+                    {!(isOnCompanyOverview && canViewCompanyOverview && tenant) ? (
+                        <BrandIconUnified brand={activeBrand} size="lg" />
+                    ) : (
                         <span 
                             className="truncate min-w-0"
                             style={{ 
@@ -168,32 +108,22 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             {displayLabel}
                         </span>
                     )}
-                </Link>
-                <div className="relative">
-                    <button
-                        type="button"
-                        onClick={() => setBrandMenuOpen(!brandMenuOpen)}
-                        aria-expanded={brandMenuOpen}
-                        aria-haspopup="true"
-                        className="flex items-center justify-center rounded p-1 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        title="Switch brand"
+                    <svg
+                        className={`h-5 w-5 flex-shrink-0 transition-transform ${brandMenuOpen ? 'rotate-180' : ''}`}
+                        style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
                     >
-                        <svg
-                            className="h-5 w-5 flex-shrink-0"
-                            style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                            aria-hidden="true"
-                        >
-                            <path
-                                fillRule="evenodd"
-                                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                                clipRule="evenodd"
-                            />
-                        </svg>
-                    </button>
+                        <path
+                            fillRule="evenodd"
+                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                            clipRule="evenodd"
+                        />
+                    </svg>
+                </button>
 
-                    {brandMenuOpen && (
+                {brandMenuOpen && (
                     <>
                         <div
                             className="fixed inset-0 z-[100]"
@@ -215,9 +145,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                         }`}
                                         onClick={() => setBrandMenuOpen(false)}
                                     >
-                                        <span className="text-sm">
-                                            {tenant.name}
-                                        </span>
+                                        <span className="text-sm">{tenant?.name || 'Company Portal'}</span>
                                     </Link>
                                 </>
                             )}
@@ -229,8 +157,6 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                     brands.map((brandOption) => {
                                         const isDisabled = brandOption.is_disabled
                                         const isActive = brandOption.is_active
-                                        const optionFilter = computeFilterStyle(brandOption.logo_filter, brandOption.primary_color)
-                                        const optionImage = brandOption.icon_path || brandOption.logo_path
                                         
                                         return (
                                             <button
@@ -251,31 +177,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                                 }`}
                                                 title={isDisabled ? 'This brand is not accessible on your current plan. Upgrade to access it.' : undefined}
                                             >
-                                        {(() => {
-                                            if (optionImage) {
-                                                return (
-                                                    <img
-                                                        src={optionImage}
-                                                        alt={brandOption.name}
-                                                        className="h-8 w-8 flex-shrink-0 rounded-full object-contain"
-                                                        style={optionFilter}
-                                                    />
-                                                )
-                                            }
-                                            const optionBrandColor = brandOption.primary_color || '#4f46e5'
-                                            const optionTextColor = getContrastTextColor(optionBrandColor)
-                                            return (
-                                                <div 
-                                                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium"
-                                                    style={{ 
-                                                        backgroundColor: optionBrandColor,
-                                                        color: optionTextColor
-                                                    }}
-                                                >
-                                                    {brandOption.name.charAt(0).toUpperCase()}
-                                                </div>
-                                            )
-                                        })()}
+                                        <BrandIconUnified brand={brandOption} size="sm" />
                                                 <span className="flex-1 truncate">{brandOption.name}</span>
                                                 {isActive && !isDisabled && (
                                                     <svg
@@ -309,10 +211,23 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                     </div>
                                 )}
                             </div>
+                            {canAddBrand && (
+                                <div className="border-t border-gray-100 px-3 py-2">
+                                    <Link
+                                        href="/app/brands/create"
+                                        className="flex items-center justify-start gap-1.5 px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                                        onClick={() => setBrandMenuOpen(false)}
+                                    >
+                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Add Brand
+                                    </Link>
+                                </div>
+                            )}
                         </div>
                     </>
                 )}
-                </div>
             </div>
         )
     }
@@ -320,38 +235,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
     const singleBrandHref = rootLinkHref ?? '/app'
-    const effectiveTextColor = textColor || '#ffffff'
     return (
-        <Link href={singleBrandHref} className="flex items-center gap-2 min-w-0 max-w-full" style={{ color: effectiveTextColor }}>
-            {showLogoInNav ? (
-                <img
-                    src={activeBrand.logo_path}
-                    alt={brandName}
-                    className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
-                    style={logoFilterStyle}
-                    onError={() => setLogoError(true)}
-                />
-            ) : (
-                <>
-                    <div 
-                        className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0"
-                        style={{ backgroundColor: brandColor }}
-                    >
-                        <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
-                    </div>
-                    <span 
-                        className="truncate min-w-0"
-                        style={{ 
-                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                            maxWidth: '200px',
-                            color: effectiveTextColor,
-                        }}
-                        title={brandName}
-                    >
-                        {brandName}
-                    </span>
-                </>
-            )}
+        <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
+            <BrandIconUnified brand={activeBrand} size="lg" />
         </Link>
     )
 }

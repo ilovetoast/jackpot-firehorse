@@ -10,9 +10,9 @@ export default function BrandsCreate() {
         name: '',
         slug: '',
         show_in_selector: true,
-        primary_color: '',
-        secondary_color: '',
-        accent_color: '',
+        primary_color: '#6366f1',
+        secondary_color: '#374151',
+        accent_color: '#818cf8',
         nav_color: '',
         logo_filter: 'none',
         settings: {},
@@ -92,7 +92,7 @@ export default function BrandsCreate() {
                                 </div>
 
                                 <p className="text-sm text-gray-500">
-                                    Add your logo and icon after creating the brand via Brand Settings → Identity.
+                                    Add your logo and icon after creating the brand via Brand Portal → Identity.
                                 </p>
                             </div>
                         </div>
@@ -144,7 +144,7 @@ export default function BrandsCreate() {
                                         <input
                                             type="color"
                                             id="secondary_color_picker"
-                                            value={data.secondary_color || '#8b5cf6'}
+                                            value={data.secondary_color || '#374151'}
                                             onChange={(e) => setData('secondary_color', e.target.value)}
                                             className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
                                         />
@@ -155,7 +155,7 @@ export default function BrandsCreate() {
                                             value={data.secondary_color}
                                             onChange={(e) => setData('secondary_color', e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="#8b5cf6"
+                                            placeholder="#374151"
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
                                     </div>
@@ -170,7 +170,7 @@ export default function BrandsCreate() {
                                         <input
                                             type="color"
                                             id="accent_color_picker"
-                                            value={data.accent_color || '#ec4899'}
+                                            value={data.accent_color || '#818cf8'}
                                             onChange={(e) => setData('accent_color', e.target.value)}
                                             className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
                                         />
@@ -181,7 +181,7 @@ export default function BrandsCreate() {
                                             value={data.accent_color}
                                             onChange={(e) => setData('accent_color', e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="#ec4899"
+                                            placeholder="#818cf8"
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
                                     </div>

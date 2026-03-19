@@ -128,12 +128,12 @@ export default function Overview({
 
                         {/* Brand logo or initial */}
                         <div className="animate-fadeInUp-d1 mb-5">
-                            {theme.logo ? (
+                            {(theme.logo_dark || theme.logo) ? (
                                 <img
-                                    src={theme.logo}
+                                    src={theme.logo_dark || theme.logo}
                                     alt={theme.name || 'Brand'}
                                     className="h-16 md:h-20 w-auto max-w-[240px] object-contain"
-                                    style={heroLogoIsDark ? { filter: 'brightness(0) invert(1)' } : undefined}
+                                    style={!theme.logo_dark && heroLogoIsDark ? { filter: 'brightness(0) invert(1)' } : undefined}
                                 />
                             ) : (
                                 <div

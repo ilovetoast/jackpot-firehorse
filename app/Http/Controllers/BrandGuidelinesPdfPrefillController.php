@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\PdfTextExtraction;
-use App\Services\BrandDNA\BrandDnaDraftService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\GuidelinesPdfToBrandDnaMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +15,7 @@ class BrandGuidelinesPdfPrefillController extends Controller
     public const CONTEXT_GUIDELINES_PDF = 'guidelines_pdf';
 
     public function __construct(
-        private BrandDnaDraftService $draftService,
+        private BrandVersionService $draftService,
         private GuidelinesPdfToBrandDnaMapper $mapper
     ) {}
 

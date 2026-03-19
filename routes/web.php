@@ -205,6 +205,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         
         // Company slug availability checking
         Route::get('/api/companies/check-slug', [\App\Http\Controllers\CompanyController::class, 'checkSlugAvailability'])->name('companies.check-slug');
+
+        // Company team management API (paginated users, add brand access)
+        Route::get('/api/companies/users', [\App\Http\Controllers\CompanyTeamApiController::class, 'users'])->name('api.companies.users');
+        Route::post('/api/companies/users/{user}/brands', [\App\Http\Controllers\CompanyTeamApiController::class, 'addBrandAccess'])->name('api.companies.users.brands');
         
         // Role API endpoints (canonical role lists for frontend)
         Route::get('/api/roles/tenant', [\App\Http\Controllers\RoleController::class, 'tenantRoles'])->name('api.roles.tenant');
@@ -683,6 +687,16 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/dna/versions', [\App\Http\Controllers\BrandDNAController::class, 'createVersion'])->name('brands.dna.versions.store');
             Route::post('/brands/{brand}/dna/versions/{version}/activate', [\App\Http\Controllers\BrandDNAController::class, 'activateVersion'])->name('brands.dna.versions.activate');
             Route::post('/brands/{brand}/dna/visual-references', [\App\Http\Controllers\BrandDNAController::class, 'storeVisualReferences'])->name('brands.dna.visual_references.store');
+
+            // Brand Research (dedicated research page)
+            Route::get('/brands/{brand}/research', [\App\Http\Controllers\BrandResearchController::class, 'show'])->name('brands.research.show');
+            Route::post('/brands/{brand}/research/analyze', [\App\Http\Controllers\BrandResearchController::class, 'triggerAnalysis'])->name('brands.research.analyze');
+            Route::post('/brands/{brand}/research/rerun', [\App\Http\Controllers\BrandResearchController::class, 'rerun'])->name('brands.research.rerun');
+            Route::post('/brands/{brand}/research/advance-to-review', [\App\Http\Controllers\BrandResearchController::class, 'advanceToReview'])->name('brands.research.advance-to-review');
+
+            // Brand Review (AI output validation)
+            Route::get('/brands/{brand}/review', [\App\Http\Controllers\BrandReviewController::class, 'show'])->name('brands.review.show');
+            Route::post('/brands/{brand}/review/advance-to-build', [\App\Http\Controllers\BrandReviewController::class, 'advanceToBuild'])->name('brands.review.advance-to-build');
 
             // Brand Guidelines Builder v1 (wizard + API)
             Route::get('/brands/{brand}/brand-guidelines/builder', [\App\Http\Controllers\BrandDNABuilderController::class, 'show'])->name('brands.brand-guidelines.builder');

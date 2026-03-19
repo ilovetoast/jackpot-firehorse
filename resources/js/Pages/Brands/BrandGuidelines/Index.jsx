@@ -199,6 +199,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const rawPersonality = modelPayload?.personality ?? {}
     const rawVisual = modelPayload?.visual ?? {}
     const rawScoringRules = modelPayload?.scoring_rules ?? {}
+    const presentationStyle = modelPayload?.presentation?.style || 'clean'
 
     const identity = {
         mission: u(rawIdentity.mission),
@@ -292,7 +293,18 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
 
     const [activeSection, setActiveSection] = useState('sec-hero')
     const [sectionTheme, setSectionTheme] = useState('dark')
+    const [scrolledPastHero, setScrolledPastHero] = useState(false)
     const darkSections = new Set(['sec-hero', 'sec-archetype', 'sec-logo-standards'])
+
+    useEffect(() => {
+        if (showCallout) return
+        const onScroll = () => {
+            setScrolledPastHero(window.scrollY > window.innerHeight * 0.4)
+        }
+        window.addEventListener('scroll', onScroll, { passive: true })
+        onScroll()
+        return () => window.removeEventListener('scroll', onScroll)
+    }, [showCallout])
 
     useEffect(() => {
         const sectionIds = NAV_SECTIONS.map(s => s.id)
@@ -341,7 +353,11 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                     <AppNav brand={auth?.activeBrand} tenant={null} variant="transparent" />
                 </div>
             ) : (
-                <AppNav brand={auth?.activeBrand} tenant={null} />
+                <div
+                    className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolledPastHero ? '' : 'bg-transparent'}`}
+                >
+                    <AppNav brand={auth?.activeBrand} tenant={null} variant={scrolledPastHero ? undefined : 'transparent'} />
+                </div>
             )}
             {showProcessingBanner && (
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">
@@ -418,7 +434,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                             href={typeof route === 'function' ? route('brands.edit', { brand: brand.id }) : `/app/brands/${brand.id}/edit`}
                             className="absolute top-20 left-6 z-10 text-sm font-medium text-white/70 hover:text-white transition-colors"
                         >
-                            &larr; Back to Brand Settings
+                            &larr; Back to Brand Portal
                         </Link>
                         <div className="relative z-10 max-w-lg text-center space-y-6 animate-fadeInUp-d2">
                             <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
@@ -452,13 +468,14 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                 </div>
                                 <p className="text-sm text-white/50">{hasDraft ? 'Resume where you left off, or start fresh.' : 'You can import a PDF or start from scratch on the first step.'}</p>
                             </div>
-                            <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`} className="block text-sm text-white/50 hover:text-white/80 transition-colors">Or configure Brand DNA in Settings</Link>
+                            <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'strategy' }) : `/app/brands/${brand.id}/edit?tab=strategy`} className="block text-sm text-white/50 hover:text-white/80 transition-colors">Or configure Brand DNA in Settings</Link>
                         </div>
                     </div>
                 ) : (
                     <>
                         {/* ═══ 1. HERO ═══ */}
-                        <section id="sec-hero" className="relative w-full overflow-hidden" style={{ minHeight: '70vh' }}>
+                        <section id="sec-hero" className="relative w-full overflow-hidden" style={{ minHeight: '100vh' }}>
+                            {/* Cinematic background — matches Overview page treatment */}
                             <div
                                 className="absolute inset-0"
                                 style={{
@@ -469,14 +486,22 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     `,
                                 }}
                             />
-                            <div className="absolute inset-0 bg-black/30" />
-                            <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }} />
+                            <div
+                                className="absolute inset-0 pointer-events-none"
+                                style={{
+                                    background: `radial-gradient(circle at 30% 40%, ${hexToRgba(primaryColor, 0.12)}, transparent 50%)`,
+                                }}
+                            />
+                            <div className="absolute inset-0 bg-black/25" />
+                            <div className="absolute inset-0 bg-gradient-to-b from-black/15 via-transparent to-black/40" />
+                            <div
+                                className="absolute inset-0 opacity-[0.03] pointer-events-none"
+                                style={{
+                                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
+                                }}
+                            />
 
-                            <div className="absolute top-8 left-6 z-10">
-                                <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id }) : `/app/brands/${brand.id}/edit`} className="text-sm font-medium text-white/70 hover:text-white transition-colors">&larr; Brand Settings</Link>
-                            </div>
-
-                            <div className="relative flex flex-col items-center justify-center px-6 lg:px-8" style={{ minHeight: '70vh' }}>
+                            <div className="relative flex flex-col items-center justify-center px-6 lg:px-8" style={{ minHeight: '100vh' }}>
                                 {logoUrl && (
                                     <img src={logoUrl} alt={brand.name} className="h-20 md:h-28 w-auto object-contain mb-10 drop-shadow-2xl" />
                                 )}
