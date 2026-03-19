@@ -334,9 +334,15 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     }
 
     return (
-        <div className="min-h-full bg-white">
+        <div className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : 'min-h-full bg-white'}>
             <AppHead title={`Brand Guidelines — ${brand.name}`} />
-            <AppNav brand={auth?.activeBrand} tenant={null} />
+            {showCallout ? (
+                <div className="absolute top-0 left-0 right-0 z-50">
+                    <AppNav brand={auth?.activeBrand} tenant={null} variant="transparent" />
+                </div>
+            ) : (
+                <AppNav brand={auth?.activeBrand} tenant={null} />
+            )}
             {showProcessingBanner && (
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">
                     <p className="text-sm text-indigo-800">
@@ -362,7 +368,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                     </div>
                 </div>
             )}
-            <main className="relative">
+            <main className={showCallout ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'}>
                 {/* Floating Section Nav — desktop only */}
                 {!showCallout && (
                     <nav
@@ -397,16 +403,28 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                 )}
 
                 {showCallout ? (
-                    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16 bg-white">
+                    <div className="relative h-full overflow-hidden flex flex-col items-center justify-center px-4 py-16">
+                        {/* Cinematic background */}
+                        <div
+                            className="absolute inset-0 will-change-transform"
+                            style={{
+                                background: `radial-gradient(circle at 20% 20%, ${hexToRgba(primaryColor, 0.2)} 0%, transparent 50%), radial-gradient(circle at 80% 80%, ${hexToRgba(secondaryColor, 0.15)} 0%, transparent 50%), #0B0B0D`,
+                            }}
+                        />
+                        <div className="absolute inset-0 bg-black/30" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
+
                         <Link
                             href={typeof route === 'function' ? route('brands.edit', { brand: brand.id }) : `/app/brands/${brand.id}/edit`}
-                            className="absolute top-20 left-6 text-sm font-medium text-gray-500 hover:text-gray-700"
+                            className="absolute top-20 left-6 z-10 text-sm font-medium text-white/70 hover:text-white transition-colors"
                         >
                             &larr; Back to Brand Settings
                         </Link>
-                        <div className="max-w-lg text-center space-y-6">
-                            <h1 className="text-2xl font-bold text-gray-900">Brand Guidelines &mdash; {brand.name}</h1>
-                            <p className="text-gray-600">
+                        <div className="relative z-10 max-w-lg text-center space-y-6 animate-fadeInUp-d2">
+                            <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+                                Brand Guidelines &mdash; {brand.name}
+                            </h1>
+                            <p className="text-white/70">
                                 {hasActiveVersion ? 'Update your brand guidelines or run the builder again.' : 'Start the Brand Guidelines Builder to define your brand DNA.'}
                             </p>
                             <div className="flex flex-col items-center gap-3">
@@ -420,20 +438,21 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                                 router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
                                             }
                                         }}
-                                        className="inline-flex rounded-md bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+                                        className="inline-flex rounded-xl px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:scale-[1.03] hover:shadow-[0_0_30px_rgba(99,102,241,0.4)]"
+                                        style={{ backgroundColor: primaryColor }}
                                     >
                                         {hasDraft ? resumeLabel : 'Start Brand Guidelines'}
                                     </button>
                                     {hasDraft && (
                                         <>
-                                            <button type="button" onClick={() => setShowStartOverConfirm(true)} className="inline-flex rounded-md border border-gray-300 px-6 py-3 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Start over</button>
+                                            <button type="button" onClick={() => setShowStartOverConfirm(true)} className="inline-flex rounded-xl border border-white/20 px-6 py-3 text-sm font-medium text-white/90 hover:bg-white/10 transition-all duration-200 hover:scale-[1.02]">Start over</button>
                                             <ConfirmDialog open={showStartOverConfirm} onClose={() => setShowStartOverConfirm(false)} onConfirm={() => { setShowStartOverConfirm(false); router.post(route('brands.brand-dna.builder.start', { brand: brand.id })) }} title="Start over" message="Your current draft will be replaced with a fresh one. This cannot be undone." confirmText="Start over" cancelText="Cancel" variant="warning" />
                                         </>
                                     )}
                                 </div>
-                                <p className="text-sm text-gray-500">{hasDraft ? 'Resume where you left off, or start fresh.' : 'You can import a PDF or start from scratch on the first step.'}</p>
+                                <p className="text-sm text-white/50">{hasDraft ? 'Resume where you left off, or start fresh.' : 'You can import a PDF or start from scratch on the first step.'}</p>
                             </div>
-                            <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`} className="block text-sm text-gray-500 hover:text-gray-700">Or configure Brand DNA in Settings</Link>
+                            <Link href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'brand_model' }) : `/app/brands/${brand.id}/edit?tab=brand_model`} className="block text-sm text-white/50 hover:text-white/80 transition-colors">Or configure Brand DNA in Settings</Link>
                         </div>
                     </div>
                 ) : (

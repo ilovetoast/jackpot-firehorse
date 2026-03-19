@@ -84,6 +84,7 @@ class AppServiceProvider extends ServiceProvider
 
         // Register event listeners
         Event::listen(AssetUploaded::class, ProcessAssetOnUpload::class);
+        Event::listen(AssetUploaded::class, \App\Listeners\BustBrandInsightCache::class);
         Event::listen(AssetPendingApproval::class, SendAssetPendingApprovalNotification::class);
         
         // Phase AG-4: Agency partner reward attribution
@@ -94,6 +95,13 @@ class AppServiceProvider extends ServiceProvider
 
         // Unified Operations: Capture queue failures for asset-processing jobs
         Event::listen(JobFailed::class, QueueFailureListener::class);
+
+        // Brand insight cache: bust on download/share creation
+        \App\Models\Download::created(function ($download) {
+            if ($download->brand_id) {
+                app(\App\Services\BrandInsightLLM::class)->bustCache($download->brand);
+            }
+        });
 
         // Surface N+1 lazy loading in non-production (Sentry/local)
         if (! app()->isProduction()) {

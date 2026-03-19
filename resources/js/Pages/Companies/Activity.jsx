@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
@@ -166,6 +167,8 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Activity Log</h1>
                         <p className="mt-2 text-sm text-gray-700">A running history of important events in your company.</p>
                     </div>
+
+                    <CompanyTabs />
 
                     {/* Filters */}
                     <div className="mb-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-gray-200">

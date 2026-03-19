@@ -20,7 +20,11 @@ class Notification extends Model
     protected $fillable = [
         'user_id',
         'type',
+        'group_key',
+        'count',
+        'latest_at',
         'data',
+        'meta',
         'read_at',
     ];
 
@@ -33,7 +37,9 @@ class Notification extends Model
     {
         return [
             'data' => 'array',
+            'meta' => 'array',
             'read_at' => 'datetime',
+            'latest_at' => 'datetime',
         ];
     }
 

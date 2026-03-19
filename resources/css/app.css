@@ -102,6 +102,15 @@
     .animate-fadeInUp-d3 { animation: fadeInUp 0.7s ease-out 0.35s both; }
     .animate-fadeInUp-d4 { animation: fadeInUp 0.7s ease-out 0.5s both; }
 
+    /* Cinematic Overview: subtle pulse on high-priority signals (~6s) */
+    @keyframes pulse-subtle {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.85; }
+    }
+    .animate-pulse-subtle {
+        animation: pulse-subtle 6s ease-in-out infinite;
+    }
+
     /* Cinematic Dashboard: slow floating for collage items */
     @keyframes collageFloat {
         0%, 100% { transform: translateY(0); }

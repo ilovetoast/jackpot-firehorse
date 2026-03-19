@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Download;
-use App\Models\Notification;
 use App\Services\FeatureGate;
 use Illuminate\Support\Facades\Log;
 
@@ -44,21 +43,23 @@ class DownloadNotificationService
         $assetCount = (int) ($download->download_options['asset_count'] ?? $download->assets()->count() ?? 0);
         $brand = $download->brand;
 
-        Notification::create([
-            'user_id' => $creator->id,
-            'type' => 'download.ready',
-            'data' => [
-                'download_id' => $download->id,
-                'download_title' => $title,
-                'asset_count' => $assetCount,
-                'zip_size_bytes' => $download->zip_size_bytes,
-                'tenant_id' => $tenant->id,
-                'tenant_name' => $tenant->name,
-                'brand_id' => $brand?->id,
-                'brand_name' => $brand?->name ?? $tenant->name,
-                'created_at' => now()->toISOString(),
-            ],
-        ]);
+        $data = [
+            'download_id' => $download->id,
+            'download_title' => $title,
+            'asset_count' => $assetCount,
+            'zip_size_bytes' => $download->zip_size_bytes,
+            'tenant_id' => $tenant->id,
+            'tenant_name' => $tenant->name,
+            'brand_id' => $brand?->id,
+            'brand_name' => $brand?->name ?? $tenant->name,
+            'created_at' => now()->toISOString(),
+        ];
+
+        app(\App\Services\NotificationGroupService::class)->upsert(
+            $creator->id,
+            'download.ready',
+            $data
+        );
 
         Log::info('[DownloadNotificationService] Notified creator that download ZIP is ready', [
             'download_id' => $download->id,

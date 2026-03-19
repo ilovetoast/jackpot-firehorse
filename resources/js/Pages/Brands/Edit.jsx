@@ -1216,7 +1216,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         )}
                         {can('brand_settings.manage') && (
                             <Link
-                                href={typeof route === 'function' ? route('analytics.metadata') : '/app/analytics/metadata'}
+                                href={typeof route === 'function' ? route('insights.metadata') : '/app/insights/metadata'}
                                 className="text-sm font-medium text-gray-600 hover:text-gray-900"
                             >
                                 Analytics →

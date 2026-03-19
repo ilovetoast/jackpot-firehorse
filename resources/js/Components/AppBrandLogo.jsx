@@ -126,17 +126,16 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Get appropriate text color based on background color
     const textColorForBrand = getContrastTextColor(brandColor)
 
-    // If multiple brands, show clickable button with dropdown
+    // If multiple brands, show brand name (clickable → company overview) + dropdown chevron (brand switcher)
+    // Part 3: Brand name click → /app (company overview) for discoverability; chevron opens brand switcher
     if (hasMultipleBrands) {
         return (
-            <div className="relative">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 min-w-0 max-w-full"
-                    onClick={() => setBrandMenuOpen(!brandMenuOpen)}
-                    aria-expanded="false"
-                    aria-haspopup="true"
+            <div className="flex items-center">
+                <Link
+                    href="/app"
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 min-w-0 max-w-full"
                     style={{ color: textColor }}
+                    title="Go to company overview"
                 >
                     {!(isOnCompanyOverview && canViewCompanyOverview && tenant) && (
                         showLogoInNav ? (
@@ -169,29 +168,39 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             {displayLabel}
                         </span>
                     )}
-                    <svg
-                        className="h-5 w-5 flex-shrink-0"
-                        style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
+                </Link>
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setBrandMenuOpen(!brandMenuOpen)}
+                        aria-expanded={brandMenuOpen}
+                        aria-haspopup="true"
+                        className="flex items-center justify-center rounded p-1 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        title="Switch brand"
                     >
-                        <path
-                            fillRule="evenodd"
-                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                            clipRule="evenodd"
-                        />
-                    </svg>
-                </button>
+                        <svg
+                            className="h-5 w-5 flex-shrink-0"
+                            style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path
+                                fillRule="evenodd"
+                                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                                clipRule="evenodd"
+                            />
+                        </svg>
+                    </button>
 
-                {brandMenuOpen && (
+                    {brandMenuOpen && (
                     <>
                         <div
-                            className="fixed inset-0 z-10"
+                            className="fixed inset-0 z-[100]"
                             onClick={() => setBrandMenuOpen(false)}
                         />
                         <div 
-                            className="absolute left-0 z-20 mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                            className="absolute left-0 top-full z-[101] mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                         >
                             {canViewCompanyOverview && tenant && (
@@ -303,6 +312,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         </div>
                     </>
                 )}
+                </div>
             </div>
         )
     }

@@ -23,6 +23,7 @@ export default function AppNav({ brand, tenant, variant }) {
     const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
     const { post } = useForm()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
+    const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false)
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -30,6 +31,10 @@ export default function AppNav({ brand, tenant, variant }) {
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
+
+    useEffect(() => {
+        if (!userMenuOpen) setCompanyDropdownOpen(false)
+    }, [userMenuOpen])
 
     const handleLogout = () => {
         post('/app/logout')
@@ -125,7 +130,7 @@ export default function AppNav({ brand, tenant, variant }) {
     const hasActivityLogsAccess = can('activity_logs.view')
     const hasMultipleCompanies = auth.companies && auth.companies.length > 1
     // Only show Company section if user has at least one company AND has access to at least one menu item
-    const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess || hasTeamManageAccess || hasActivityLogsAccess || hasAdminOrOwnerRole)
+    const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess)
 
     // Check if user has access to any brand menu items
     const hasBrands = brands && brands.length > 0
@@ -807,103 +812,75 @@ export default function AppNav({ brand, tenant, variant }) {
                                             </Link>
                                         </div>
 
-                                        {/* Company Section */}
-                                        {hasAnyCompanyAccess && (
+                                        {/* Company + Brand Portals — Switch Company dropdown, then Company Portal + Brand Portal */}
+                                        {(hasAnyCompanyAccess || (activeBrand && hasAnyBrandAccess && !collectionOnly)) && (
                                         <div className="px-4 py-2 border-b border-gray-200">
-                                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Company</p>
-                                            
-                                            {/* Switch Company - only show if more than one */}
+                                            {/* Switch Company — collapsible dropdown, scrollable for many companies */}
                                             {hasMultipleCompanies && (
-                                                <div className="mb-1 rounded-md bg-gray-50 p-1.5 border-l-2 border-primary">
-                                                    <p className="text-xs font-medium text-gray-700 px-1 py-0.5 mb-1">Switch Company</p>
-                                                    <div className="space-y-0.5">
-                                                        {auth.companies.map((company) => (
-                                                            <button
-                                                                key={company.id}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    handleSwitchCompany(company.id)
-                                                                    setUserMenuOpen(false)
-                                                                }}
-                                                                className={`flex items-center w-full text-left px-2 py-1 text-xs rounded-md transition-colors ${
-                                                                    company.is_active
-                                                                        ? 'bg-primary text-white'
-                                                                        : 'text-gray-700 hover:bg-gray-100'
-                                                                }`}
-                                                                title={company.name}
-                                                            >
-                                                                <svg className={`h-3.5 w-3.5 mr-1.5 flex-shrink-0 ${company.is_active ? 'text-white' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
-                                                                </svg>
-                                                                <span className="flex-1 font-medium truncate" title={company.name}>{company.name}</span>
-                                                                {company.is_active && (
-                                                                    <svg className="h-3.5 w-3.5 text-white flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
-                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                <div className="mb-2">
+                                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">switch companies</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
+                                                        className="flex items-center w-full text-left rounded-md bg-gray-50 p-2 border-l-2 border-primary hover:bg-gray-100 transition-colors"
+                                                    >
+                                                        <svg className="h-4 w-4 mr-2 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
+                                                        </svg>
+                                                        <span className="flex-1 font-medium text-sm text-gray-700 truncate" title={activeCompany?.name}>
+                                                            {activeCompany?.name || 'Switch Company'}
+                                                        </span>
+                                                        <svg className={`h-4 w-4 text-gray-400 flex-shrink-0 transition-transform ${companyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                        </svg>
+                                                    </button>
+                                                    {companyDropdownOpen && (
+                                                        <div className="mt-1 max-h-[280px] overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+                                                            {auth.companies.map((company) => (
+                                                                <button
+                                                                    key={company.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        handleSwitchCompany(company.id)
+                                                                        setCompanyDropdownOpen(false)
+                                                                        setUserMenuOpen(false)
+                                                                    }}
+                                                                    className={`flex items-center w-full text-left px-3 py-2 text-sm transition-colors ${
+                                                                        company.is_active
+                                                                            ? 'bg-primary text-white'
+                                                                            : 'text-gray-700 hover:bg-gray-50'
+                                                                    }`}
+                                                                    title={company.name}
+                                                                >
+                                                                    <svg className={`h-4 w-4 mr-2 flex-shrink-0 ${company.is_active ? 'text-white' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
                                                                     </svg>
-                                                                )}
-                                                            </button>
-                                                        ))}
-                                                    </div>
+                                                                    <span className="flex-1 font-medium truncate">{company.name}</span>
+                                                                    {company.is_active && (
+                                                                        <svg className="h-4 w-4 text-white flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
+                                                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
-                                            
 
                                             <PermissionGate permission="company_settings.view">
                                                 <Link
-                                                    href="/app/companies/settings"
+                                                    href="/app"
                                                     className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
                                                     onClick={() => setUserMenuOpen(false)}
                                                 >
                                                     <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
                                                     </svg>
-                                                    Company Settings
+                                                    Company Portal
                                                 </Link>
                                             </PermissionGate>
-                                            <PermissionGate permission="team.manage">
-                                                <Link
-                                                    href="/app/companies/team"
-                                                    className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                    onClick={() => setUserMenuOpen(false)}
-                                                >
-                                                    <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                                                    </svg>
-                                                    Team Management
-                                                </Link>
-                                            </PermissionGate>
-                                            <PermissionGate permission="activity_logs.view">
-                                                <Link
-                                                    href="/app/companies/activity"
-                                                    className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                    onClick={() => setUserMenuOpen(false)}
-                                                >
-                                                    <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l8 0M3 6l8 0M3 20l8 0M13 13l8 0M13 6l8 0M13 20l8 0" />
-                                                    </svg>
-                                                    Activity Logs
-                                                </Link>
-                                            </PermissionGate>
-                                            {hasAdminOrOwnerRole && (
-                                                <Link
-                                                    href="/app/companies/permissions"
-                                                    className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                    onClick={() => setUserMenuOpen(false)}
-                                                >
-                                                    <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                                                    </svg>
-                                                    Permissions
-                                                </Link>
-                                            )}
-                                        </div>
-                                        )}
-
-                                        {/* Brands Section (C12: hidden when collection-only) */}
-                                        {activeBrand && hasAnyBrandAccess && !collectionOnly && (
-                                            <div className="px-4 py-2 border-b border-gray-200">
-                                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Brands</p>
+                                            {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                                 <PermissionGate permission="brand_settings.manage">
                                                     <Link
                                                         href={activeBrand ? (typeof route === 'function' ? route('brands.edit', { brand: activeBrand.id }) : `/app/brands/${activeBrand.id}/edit`) : '/app'}
@@ -914,22 +891,11 @@ export default function AppNav({ brand, tenant, variant }) {
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                         </svg>
-                                                        Brand Settings
+                                                        Brand Portal
                                                     </Link>
                                                 </PermissionGate>
-                                                <PermissionGate permission="brand_settings.manage">
-                                                    <Link
-                                                        href="/app/analytics"
-                                                        className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                        onClick={() => setUserMenuOpen(false)}
-                                                    >
-                                                        <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                                                        </svg>
-                                                        Analytics
-                                                    </Link>
-                                                </PermissionGate>
-                                            </div>
+                                            )}
+                                        </div>
                                         )}
 
                                         {/* Support */}
@@ -945,29 +911,6 @@ export default function AppNav({ brand, tenant, variant }) {
                                                 Support
                                             </Link>
                                         </div>
-
-                                        {/* Phase AG-7.1: Agency Section — show only when tenant is agency */}
-                                        {auth.activeCompany?.is_agency && (() => {
-                                            const tier = (auth.activeCompany?.agency_tier || 'silver').toLowerCase()
-                                            const tierBg = tier === 'gold' ? 'bg-amber-500' : tier === 'platinum' ? 'bg-slate-500' : 'bg-gray-400'
-                                            return (
-                                                <div className="px-4 py-2 border-b border-gray-200">
-                                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Agency</p>
-                                                    <Link
-                                                        href="/app/agency/dashboard"
-                                                        className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                        onClick={() => setUserMenuOpen(false)}
-                                                    >
-                                                        <span className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-full ${tierBg} text-white mr-2`}>
-                                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                                                            </svg>
-                                                        </span>
-                                                        <span>Agency Dashboard</span>
-                                                    </Link>
-                                                </div>
-                                            )
-                                        })()}
 
                                         {/* Admin Section */}
                                         {isSiteOwner && (

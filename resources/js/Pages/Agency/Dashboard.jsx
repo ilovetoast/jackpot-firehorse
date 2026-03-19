@@ -14,6 +14,7 @@ import {
 import AppFooter from '../../Components/AppFooter'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 
 /**
  * Agency Dashboard
@@ -64,6 +65,7 @@ export default function AgencyDashboard({ auth, tenant, agency, rewards = [], cl
             
             <div className="min-h-screen bg-gray-50 py-8">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <CompanyTabs />
                     {/* Header */}
                     <div className="mb-8">
                         <h1 className="text-3xl font-bold text-gray-900">Agency Partner Dashboard</h1>

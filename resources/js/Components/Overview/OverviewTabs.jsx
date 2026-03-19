@@ -9,7 +9,7 @@ export default function OverviewTabs({ children }) {
         { name: 'Categories & Filters', route: 'tenant.metadata.registry.index' },
         { name: 'Team', route: 'companies.team' },
         { name: 'Activity', route: 'companies.activity' },
-        { name: 'Analytics', route: 'analytics.metadata' },
+        { name: 'Insights', route: 'insights.metadata' },
         { name: 'Settings', route: 'brands.edit', params: (b) => (b ? { brand: b.id } : {}) },
     ]
 

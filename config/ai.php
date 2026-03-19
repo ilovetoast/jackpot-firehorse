@@ -402,6 +402,16 @@ PROMPT
                 // Tenant-scoped, system-triggered during brand pipeline
             ],
         ],
+        'brand_insights' => [
+            'name' => 'Brand Insights',
+            'description' => 'Generates 1–2 actionable insights from brand analytics metrics',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered on dashboard load
+            ],
+        ],
     ],
 
     /*

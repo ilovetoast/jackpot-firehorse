@@ -4,7 +4,6 @@ namespace App\Services\BrandDNA;
 
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
-use App\Models\Notification;
 use App\Services\FeatureGate;
 use Illuminate\Support\Facades\Log;
 
@@ -65,19 +64,21 @@ class BrandResearchNotificationService
 
         $actionUrl = route('brands.brand-guidelines.builder', ['brand' => $brand->id, 'step' => 'research-summary']);
 
-        Notification::create([
-            'user_id' => $user->id,
-            'type' => 'brand_research.ready',
-            'data' => [
-                'title' => 'Brand research is ready',
-                'body' => 'Your uploaded brand guidelines for ' . $brand->name . ' have finished processing.',
-                'action_url' => $actionUrl,
-                'brand_id' => $brand->id,
-                'brand_name' => $brand->name,
-                'draft_id' => $draft->id,
-                'created_at' => now()->toISOString(),
-            ],
-        ]);
+        $data = [
+            'title' => 'Brand research is ready',
+            'body' => 'Your uploaded brand guidelines for ' . $brand->name . ' have finished processing.',
+            'action_url' => $actionUrl,
+            'brand_id' => $brand->id,
+            'brand_name' => $brand->name,
+            'draft_id' => $draft->id,
+            'created_at' => now()->toISOString(),
+        ];
+
+        app(\App\Services\NotificationGroupService::class)->upsert(
+            $user->id,
+            'brand_research.ready',
+            $data
+        );
 
         $state->update(['research_ready_notified_at' => now()]);
 

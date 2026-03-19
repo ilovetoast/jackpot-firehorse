@@ -22,6 +22,10 @@ return new class extends Migration
                 ->where('metadata_field_id', $fieldId)
                 ->delete();
 
+            DB::table('metadata_field_visibility')
+                ->where('metadata_field_id', $fieldId)
+                ->delete();
+
             DB::table('metadata_fields')
                 ->where('key', 'dominant_color_bucket')
                 ->delete();

@@ -6,6 +6,7 @@ import AppFooter from '../../Components/AppFooter'
 import AppNav from '../../Components/AppNav'
 import BrandAvatar from '../../Components/BrandAvatar'
 import ConfirmDialog from '../../Components/ConfirmDialog'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 import {
     FolderIcon,
     CloudArrowDownIcon,
@@ -150,7 +151,7 @@ export default function CompanyOverview({
             <AppNav brand={activeBrand} tenant={tenant} />
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-2xl font-semibold text-gray-900">Company</h1>
                         <p className="text-sm text-gray-500 mt-1">{tenant?.name} Organization</p>
@@ -172,6 +173,8 @@ export default function CompanyOverview({
                         )}
                     </div>
                 </div>
+
+                <CompanyTabs />
 
                 {/* Company-wide metrics */}
                 <div className="mb-8">

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon, DocumentMagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { BellIcon, SparklesIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon, DocumentMagnifyingGlassIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 /**
@@ -15,6 +15,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
     const [unreadCount, setUnreadCount] = useState(0)
     const [isOpen, setIsOpen] = useState(false)
     const [loading, setLoading] = useState(true)
+    const [expandedIds, setExpandedIds] = useState(new Set())
     const { can } = usePermission()
     const canApprove = can('metadata.bypass_approval')
     const canViewSuggestions = can('metadata.suggestions.view')
@@ -90,12 +91,33 @@ export default function NotificationBell({ textColor = '#000000' }) {
         }
     }
 
-    const getNotificationMessage = (notification) => {
+    const getGroupTitle = (type, count = 1) => {
+        const suffix = count > 1 ? ` (${count})` : ''
+        switch (type) {
+            case 'asset.submitted':
+                return `Assets submitted for approval${suffix}`
+            case 'asset.approved':
+                return `Assets approved${suffix}`
+            case 'asset.rejected':
+                return `Assets rejected${suffix}`
+            case 'asset.resubmitted':
+                return `Assets resubmitted for approval${suffix}`
+            case 'download.ready':
+                return `Download${count > 1 ? 's' : ''} ready${suffix}`
+            case 'brand_research.ready':
+                return `Brand research completed${suffix}`
+            default:
+                return `Notification${suffix}`
+        }
+    }
+
+    const getNotificationMessage = (notification, item = null) => {
         const { type, data } = notification
-        const assetName = data?.asset_name || 'an asset'
-        const actorName = data?.actor_name || 'Someone'
-        const downloadTitle = data?.download_title || 'Your download'
-        const assetCount = data?.asset_count ?? 0
+        const d = item || data
+        const assetName = d?.asset_name || 'an asset'
+        const actorName = d?.actor_name || 'Someone'
+        const downloadTitle = d?.download_title || 'Your download'
+        const assetCount = d?.asset_count ?? 0
 
         switch (type) {
             case 'asset.submitted':
@@ -107,7 +129,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
             case 'asset.resubmitted':
                 return `${actorName} resubmitted "${assetName}" for approval`
             case 'download.ready':
-                if (isUuidFallbackTitle(downloadTitle, data?.download_id)) {
+                if (isUuidFallbackTitle(downloadTitle, d?.download_id)) {
                     return assetCount > 0 ? `${assetCount} asset${assetCount === 1 ? '' : 's'} ready to download` : 'Download ready'
                 }
                 return `"${downloadTitle}" is ready to download`
@@ -137,14 +159,14 @@ export default function NotificationBell({ textColor = '#000000' }) {
         return null
     }
 
-    const handleNotificationClick = async (notification) => {
+    const handleNotificationClick = async (notification, item = null) => {
         const activeTenantId = auth?.activeCompany?.id
         const activeBrandId = auth?.activeBrand?.id
-        const data = notification.data || {}
+        const data = item || notification.data || {}
         const notifTenantId = data.tenant_id
         const notifBrandId = data.brand_id
 
-        if (notification.is_unread) {
+        if (notification.is_unread && !item) {
             await handleMarkAsRead(notification.id)
         }
 
@@ -264,7 +286,10 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                     {canViewSuggestions && pending_items.ai_suggestions > 0 && (
                                         <button
                                             onClick={() => {
-                                                router.visit('/app')
+                                                const tagCount = pending_items.ai_tag_suggestions ?? 0
+                                                const catCount = pending_items.ai_category_suggestions ?? 0
+                                                const tab = tagCount >= catCount ? 'tags' : 'categories'
+                                                router.visit(`/app/insights/review?tab=${tab}`)
                                                 setIsOpen(false)
                                             }}
                                             className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 bg-blue-50"
@@ -277,7 +302,9 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                                             {pending_items.ai_suggestions} pending AI {pending_items.ai_suggestions === 1 ? 'suggestion' : 'suggestions'}
                                                         </p>
                                                         <p className="text-xs text-gray-500 mt-0.5">
-                                                            Review tags and metadata
+                                                            {(pending_items.ai_tag_suggestions ?? 0) > 0 && (pending_items.ai_category_suggestions ?? 0) > 0
+                                                                ? `${pending_items.ai_tag_suggestions} tags, ${pending_items.ai_category_suggestions} categories`
+                                                                : 'Review in Analytics'}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -337,7 +364,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                 </>
                             )}
                             
-                            {/* Regular Notifications */}
+                            {/* Regular Notifications — grouped, collapsed/expandable */}
                             {loading ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">Loading...</div>
                             ) : notifications.length === 0 && (!pending_items || ((!canViewSuggestions || pending_items.ai_suggestions === 0) && metadataApprovalsCount === 0)) ? (
@@ -346,87 +373,94 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                 notifications.map((notification) => {
                                     const isDownloadReady = notification.type === 'download.ready'
                                     const isBrandResearchReady = notification.type === 'brand_research.ready'
+                                    const Icon = isBrandResearchReady ? DocumentMagnifyingGlassIcon : isDownloadReady ? ArrowDownTrayIcon : null
+                                    const count = notification.count ?? 1
+                                    const brands = notification.brands || []
+                                    const brandsLabel = brands.map((b) => `${b.name} (${b.count})`).join(', ')
+                                    const latestAt = notification.latest_at || notification.created_at
+                                    const isExpanded = expandedIds.has(notification.id)
+                                    const items = notification.items || []
+                                    const expandable = notification.expandable && items.length > 1
+
                                     return (
-                                        <button
+                                        <div
                                             key={notification.id}
-                                            onClick={() => handleNotificationClick(notification)}
-                                            className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 ${
-                                                notification.is_unread ? 'bg-blue-50' : ''
-                                            }`}
+                                            className={`${notification.is_unread ? 'bg-blue-50' : ''} border-b border-gray-100 last:border-b-0`}
                                         >
-                                            <div className="flex items-start justify-between">
-                                                {isBrandResearchReady ? (
-                                                    <>
-                                                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                                                            <DocumentMagnifyingGlassIcon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-medium text-gray-900">
-                                                                    {getNotificationMessage(notification)}
-                                                                </p>
-                                                                {getContextLabel(notification) && (
-                                                                    <p className="text-xs text-indigo-600 mt-0.5 font-medium">
-                                                                        {getContextLabel(notification)}
-                                                                    </p>
-                                                                )}
-                                                                <p className="text-xs text-gray-500 mt-0.5">
-                                                                    {notification.data?.body || 'Review extracted insights'}
-                                                                </p>
-                                                                <p className="text-xs text-gray-400 mt-0.5">
-                                                                    {new Date(notification.created_at).toLocaleString()}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        {notification.is_unread && (
-                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
-                                                        )}
-                                                    </>
-                                                ) : isDownloadReady ? (
-                                                    <>
-                                                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                                                            <ArrowDownTrayIcon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-medium text-gray-900">
-                                                                    {getNotificationMessage(notification)}
-                                                                </p>
-                                                                {getContextLabel(notification) && (
-                                                                    <p className="text-xs text-indigo-600 mt-0.5 font-medium">
-                                                                        {getContextLabel(notification)}
-                                                                    </p>
-                                                                )}
-                                                                <p className="text-xs text-gray-500 mt-0.5">
-                                                                    Ready to download
-                                                                </p>
-                                                                <p className="text-xs text-gray-400 mt-0.5">
-                                                                    {new Date(notification.created_at).toLocaleString()}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        {notification.is_unread && (
-                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
-                                                        )}
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-sm text-gray-900">
-                                                                {getNotificationMessage(notification)}
+                                            <div className="flex items-start gap-2 px-4 py-3">
+                                                {Icon && <Icon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (expandable) {
+                                                                    if (!isExpanded) {
+                                                                        setExpandedIds((prev) => new Set(prev).add(notification.id))
+                                                                    } else {
+                                                                        const target = items[0] || notification.data
+                                                                        handleNotificationClick(notification, target)
+                                                                    }
+                                                                } else {
+                                                                    const target = items[0] || notification.data
+                                                                    handleNotificationClick(notification, target)
+                                                                }
+                                                            }}
+                                                            className="text-left flex-1 min-w-0"
+                                                        >
+                                                            <p className="text-sm font-medium text-gray-900">
+                                                                {getGroupTitle(notification.type, count)}
                                                             </p>
-                                                            {getContextLabel(notification) && (
-                                                                <p className="text-xs text-indigo-600 mt-0.5 font-medium">
-                                                                    {getContextLabel(notification)}
+                                                            {brandsLabel && (
+                                                                <p className="text-xs text-gray-600 mt-0.5 truncate">
+                                                                    {brandsLabel}
                                                                 </p>
                                                             )}
-                                                            <p className="text-xs text-gray-500 mt-1">
-                                                                {new Date(notification.created_at).toLocaleString()}
+                                                            <p className="text-xs text-gray-400 mt-0.5">
+                                                                Latest: {latestAt ? new Date(latestAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}
                                                             </p>
-                                                        </div>
-                                                        {notification.is_unread && (
-                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                                                        </button>
+                                                        {expandable && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation()
+                                                                    setExpandedIds((prev) => {
+                                                                        const next = new Set(prev)
+                                                                        if (next.has(notification.id)) next.delete(notification.id)
+                                                                        else next.add(notification.id)
+                                                                        return next
+                                                                    })
+                                                                }}
+                                                                className="p-1 rounded hover:bg-gray-200 text-gray-500"
+                                                                aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                                                            >
+                                                                {isExpanded ? (
+                                                                    <ChevronUpIcon className="h-4 w-4" />
+                                                                ) : (
+                                                                    <ChevronDownIcon className="h-4 w-4" />
+                                                                )}
+                                                            </button>
                                                         )}
-                                                    </>
-                                                )}
+                                                        {notification.is_unread && (
+                                                            <span className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1.5" />
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </button>
+                                            {isExpanded && expandable && items.length > 0 && (
+                                                <div className="px-4 pb-3 pl-11 space-y-1">
+                                                    {items.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            onClick={() => handleNotificationClick(notification, item)}
+                                                            className="w-full text-left text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded px-2 py-1.5 -mx-2"
+                                                        >
+                                                            {item.brand_name || 'Unknown'} • {item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     )
                                 })
                             )}

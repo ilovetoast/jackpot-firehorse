@@ -425,6 +425,9 @@ class AIService
         if (isset($options['sentry_issue_id'])) {
             return ['entity_type' => 'sentry_issue', 'entity_id' => (string) $options['sentry_issue_id']];
         }
+        if (isset($options['brand_id'])) {
+            return ['entity_type' => 'brand', 'entity_id' => (string) $options['brand_id']];
+        }
 
         return ['entity_type' => 'job', 'entity_id' => null];
     }

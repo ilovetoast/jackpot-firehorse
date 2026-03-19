@@ -2,6 +2,7 @@ import { Link, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import React from 'react'
 import AppNav from '../../Components/AppNav'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
@@ -132,12 +133,14 @@ export default function CompanyPermissions({
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
-                    <div className="mb-8">
+                    <div className="mb-6">
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Permissions</h1>
                         <p className="mt-2 text-sm text-gray-700">
                             View which permissions each role has for {tenant.name}. Owners and admins can view all restricted categories.
                         </p>
                     </div>
+
+                    <CompanyTabs />
 
                     {/* Info Boxes */}
                     <div className="mb-8 space-y-4">

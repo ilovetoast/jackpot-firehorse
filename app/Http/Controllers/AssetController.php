@@ -363,6 +363,60 @@ class AssetController extends Controller
         // Must NOT include request metadata filters so empty filters are hidden by value presence, not by current selection
         $baseQueryForFilterVisibility = (clone $assetsQuery);
 
+        // Special filter: missing_metadata=1 — assets with no approved metadata (from "What Needs Attention" signal)
+        if ($request->boolean('missing_metadata')) {
+            $assetsQuery->whereNotExists(function ($query) {
+                $query->select(\DB::raw(1))
+                    ->from('asset_metadata')
+                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
+                    ->whereNotNull('asset_metadata.approved_at');
+            });
+            $baseQueryForFilterVisibility->whereNotExists(function ($query) {
+                $query->select(\DB::raw(1))
+                    ->from('asset_metadata')
+                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
+                    ->whereNotNull('asset_metadata.approved_at');
+            });
+        }
+
+        // Special filter: pending_suggestions=1 — assets with pending AI metadata or tag suggestions
+        if ($request->boolean('pending_suggestions')) {
+            $assetsQuery->where(function ($query) {
+                $query->whereExists(function ($q) {
+                    $q->select(\DB::raw(1))
+                        ->from('asset_metadata_candidates')
+                        ->whereColumn('asset_metadata_candidates.asset_id', 'assets.id')
+                        ->whereNull('asset_metadata_candidates.resolved_at')
+                        ->whereNull('asset_metadata_candidates.dismissed_at')
+                        ->where('asset_metadata_candidates.producer', 'ai');
+                })->orWhereExists(function ($q) {
+                    $q->select(\DB::raw(1))
+                        ->from('asset_tag_candidates')
+                        ->whereColumn('asset_tag_candidates.asset_id', 'assets.id')
+                        ->whereNull('asset_tag_candidates.resolved_at')
+                        ->whereNull('asset_tag_candidates.dismissed_at')
+                        ->where('asset_tag_candidates.producer', 'ai');
+                });
+            });
+            $baseQueryForFilterVisibility->where(function ($query) {
+                $query->whereExists(function ($q) {
+                    $q->select(\DB::raw(1))
+                        ->from('asset_metadata_candidates')
+                        ->whereColumn('asset_metadata_candidates.asset_id', 'assets.id')
+                        ->whereNull('asset_metadata_candidates.resolved_at')
+                        ->whereNull('asset_metadata_candidates.dismissed_at')
+                        ->where('asset_metadata_candidates.producer', 'ai');
+                })->orWhereExists(function ($q) {
+                    $q->select(\DB::raw(1))
+                        ->from('asset_tag_candidates')
+                        ->whereColumn('asset_tag_candidates.asset_id', 'assets.id')
+                        ->whereNull('asset_tag_candidates.resolved_at')
+                        ->whereNull('asset_tag_candidates.dismissed_at')
+                        ->where('asset_tag_candidates.producer', 'ai');
+                });
+            });
+        }
+
         // Apply metadata filters from request (JSON 'filters' or readable flat params)
         $filters = $request->input('filters', []);
         if (is_string($filters)) {

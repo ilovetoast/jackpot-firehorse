@@ -21,9 +21,9 @@ class MetadataAnalyticsController extends Controller
     }
 
     /**
-     * Display the metadata analytics dashboard.
+     * Display the metadata insights dashboard.
      *
-     * GET /app/analytics/metadata
+     * GET /app/insights/metadata
      */
     public function index(Request $request): Response
     {
@@ -36,7 +36,7 @@ class MetadataAnalyticsController extends Controller
 
         $user = Auth::user();
         if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
-            abort(403, 'You do not have permission to view analytics.');
+            abort(403, 'You do not have permission to view insights.');
         }
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
@@ -69,7 +69,7 @@ class MetadataAnalyticsController extends Controller
             $includeInternal
         );
 
-        return Inertia::render('Analytics/Metadata', [
+        return Inertia::render('Insights/Metadata', [
             'analytics' => $analytics,
             'filters' => [
                 'brand_id' => $brandId,
@@ -85,7 +85,7 @@ class MetadataAnalyticsController extends Controller
     /**
      * Get analytics data as JSON (for AJAX updates).
      *
-     * GET /app/analytics/metadata/data
+     * GET /app/insights/metadata/data
      */
     public function data(Request $request)
     {
@@ -98,7 +98,7 @@ class MetadataAnalyticsController extends Controller
 
         $user = Auth::user();
         if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
-            return response()->json(['error' => 'You do not have permission to view analytics.'], 403);
+            return response()->json(['error' => 'You do not have permission to view insights.'], 403);
         }
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);

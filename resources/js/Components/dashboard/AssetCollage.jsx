@@ -104,7 +104,9 @@ export default function AssetCollage({ assets = [] }) {
                 className={`absolute bottom-0 right-0 flex gap-3 items-end ${isFew ? 'pr-12' : 'left-0 px-2'}`}
                 style={parallaxStyle}
             >
-                {columns.map((col, ci) => (
+                {columns.map((col, ci) => {
+                    const isFarRight = ci >= columns.length - 2
+                    return (
                     <div
                         key={ci}
                         className="flex flex-col gap-3 shrink-0"
@@ -112,7 +114,7 @@ export default function AssetCollage({ assets = [] }) {
                             width: col.w,
                             marginBottom: col.bottom,
                             transition: `opacity 0.8s ease ${200 + ci * 120}ms, transform 0.8s ease ${200 + ci * 120}ms`,
-                            opacity: visible ? 1 : 0,
+                            opacity: visible ? (isFarRight ? 0.9 : 1) : 0,
                             transform: visible ? 'translate3d(0,0,0)' : 'translate3d(0,30px,0)',
                             willChange: visible ? 'auto' : 'transform',
                             backfaceVisibility: 'hidden',
@@ -139,7 +141,8 @@ export default function AssetCollage({ assets = [] }) {
                             </div>
                         ))}
                     </div>
-                ))}
+                    )
+                })}
             </div>
         </div>
     )

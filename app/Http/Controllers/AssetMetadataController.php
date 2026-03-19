@@ -3442,6 +3442,8 @@ class AssetMetadataController extends Controller
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
         $this->triggerAiSuggestionsIfReady($asset);
 
+        app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
+
         return response()->json([
             'message' => 'Candidate approved and created as manual override',
         ]);
@@ -3855,11 +3857,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        // TODO (Optional Enhancement): Soft audit trail
-        // If you want to track "who accepted what" for analytics:
-        // - Log event: 'ai.suggestion.accepted' with context (user_id, asset_id, field_key, value, confidence)
-        // - Could enable metrics like "AI suggestion adoption rate"
-        // - No schema change required if using existing events/log system
+        app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
 
         return response()->json(['message' => 'Suggestion accepted']);
     }
@@ -3948,6 +3946,8 @@ class AssetMetadataController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+
+        app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
 
         return response()->json(['message' => 'Suggestion dismissed']);
     }
@@ -4100,6 +4100,8 @@ class AssetMetadataController extends Controller
             'canonical_tag' => $canonicalTag,
             'user_id' => $user->id,
         ]);
+
+        app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
 
         return response()->json([
             'message' => 'Tag accepted',

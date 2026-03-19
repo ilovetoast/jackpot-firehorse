@@ -6,8 +6,8 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { XMarkIcon, CheckIcon, SparklesIcon } from '@heroicons/react/24/outline'
-import { usePage, router } from '@inertiajs/react'
+import { XMarkIcon, CheckIcon, SparklesIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
+import { usePage, router, Link } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { usePermission } from '../hooks/usePermission'
 
@@ -335,8 +335,18 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                             <div className="flex-1 min-w-0 space-y-3">
                                                 <div>
                                                     <div className="text-xs text-gray-500 mb-1">Asset</div>
-                                                    <div className="text-sm font-medium text-gray-900 truncate">
-                                                        {currentItem.asset_title || currentItem.asset_filename || `Asset #${currentItem.asset_id?.substring(0, 8)}`}
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm font-medium text-gray-900 truncate">
+                                                            {currentItem.asset_title || currentItem.asset_filename || `Asset #${currentItem.asset_id?.substring(0, 8)}`}
+                                                        </span>
+                                                        <Link
+                                                            href={`/app/assets?pending_suggestions=1&asset=${currentItem.asset_id}`}
+                                                            className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 shrink-0"
+                                                            onClick={() => onClose()}
+                                                        >
+                                                            Open in grid
+                                                            <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                                                        </Link>
                                                     </div>
                                                 </div>
                                                 {currentItem.asset_category != null && currentItem.asset_category !== '' && (

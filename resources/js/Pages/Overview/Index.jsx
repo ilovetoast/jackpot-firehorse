@@ -1,10 +1,13 @@
 import { usePage, Link } from '@inertiajs/react'
+import { motion } from 'framer-motion'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import useLogoBrightness from '../../utils/useLogoBrightness'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
 import AssetCollage from '../../Components/dashboard/AssetCollage'
-import { ChartBarSquareIcon } from '@heroicons/react/24/outline'
+import ActiveSignals from '../../Components/Brand/ActiveSignals'
+import AIInsights from '../../Components/Brand/AIInsights'
+import RecentMomentum from '../../Components/Brand/RecentMomentum'
 
 function formatStorage(mb) {
     if (!mb || mb === 0) return '0 MB'
@@ -28,10 +31,14 @@ export default function Overview({
     ai_usage = null,
     pending_ai_suggestions = null,
     pending_metadata_approvals_count = 0,
+    brand_signals = [],
+    momentum_data = {},
+    ai_insights = [],
 }) {
     const { auth: authFromPage } = usePage().props
     const activeBrand = brand ?? authFromPage?.activeBrand ?? auth?.activeBrand
     const heroLogoIsDark = useLogoBrightness(theme.logo || null)
+    const brandColor = theme.colors?.primary || '#6366f1'
 
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
     const collageAssets = collage_assets?.length
@@ -78,6 +85,13 @@ export default function Overview({
                         transform: 'scale(1)',
                     }}
                 />
+                {/* Left column radial accent (brand-driven) */}
+                <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                        background: `radial-gradient(circle at 30% 40%, ${brandColor}14, transparent 60%)`,
+                    }}
+                />
 
                 {/* Depth overlays */}
                 <div className="absolute inset-0 pointer-events-none">
@@ -90,8 +104,13 @@ export default function Overview({
 
                 {/* Main content — left column on desktop */}
                 <div className="relative z-10 h-full max-w-7xl mx-auto px-6 lg:px-12 flex flex-col justify-center">
-                    {/* Hero + Actions */}
-                    <div className="lg:max-w-[50%]">
+                    {/* Hero + Actions — space-y-6 layout */}
+                    <motion.div
+                        className="lg:max-w-[50%] space-y-6"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4 }}
+                    >
                         {/* Plan badge */}
                         {plan?.show_badge && plan?.name && (
                             <div className="animate-fadeInUp">
@@ -142,7 +161,7 @@ export default function Overview({
                             </p>
                         )}
 
-                        {/* Inline metrics */}
+                        {/* Inline metrics — lightweight stat line */}
                         {metrics.length > 0 && (
                             <div className="animate-fadeInUp-d3 flex flex-wrap items-center gap-x-5 gap-y-2 mt-6 text-xs">
                                 {metrics.map((m, i) => (
@@ -150,34 +169,51 @@ export default function Overview({
                                         <span className="text-white/80 font-medium">{m.value}</span>
                                         {m.label}
                                         {i < metrics.length - 1 && (
-                                            <span className="ml-3 text-white/10 select-none" aria-hidden>|</span>
+                                            <span className="ml-3 text-white/10 select-none" aria-hidden>•</span>
                                         )}
                                     </span>
                                 ))}
                             </div>
                         )}
 
-                        {/* Dashboard link */}
-                        {is_manager && (
-                            <div className="animate-fadeInUp-d4 mt-5">
-                                <Link
-                                    href="/app/dashboard"
-                                    className="inline-flex items-center gap-1.5 text-xs font-medium text-white/40 hover:text-white/70 transition-colors"
-                                >
-                                    <ChartBarSquareIcon className="w-3.5 h-3.5" />
-                                    View full brand dashboard
-                                </Link>
-                            </div>
+                        {/* Active signals — What Needs Attention (permission-filtered, no empty block) */}
+                        {brand_signals?.length > 0 && (
+                            <ActiveSignals
+                                signals={brand_signals}
+                                insights={ai_insights}
+                                brandColor={brandColor}
+                                permissions={permissions}
+                            />
                         )}
 
-                        {/* Primary action tiles */}
-                        <div className="mt-6">
-                            <PrimaryActions
-                                permissions={permissions}
-                                brand={activeBrand}
-                            />
-                        </div>
-                    </div>
+                        {/* AI Insights — only show orphans (insights that don't match any signal) */}
+                        {ai_insights?.length > 0 && brand_signals?.length > 0 && (() => {
+                            const signalTypes = new Set(
+                                brand_signals
+                                    .map((s) => {
+                                        const c = s?.context?.category
+                                        if (c === 'ai_suggestions') return 'suggestions'
+                                        return c
+                                    })
+                                    .filter(Boolean)
+                            )
+                            const orphans = ai_insights.filter((ins) => !ins.type || !signalTypes.has(ins.type))
+                            return orphans.length > 0 ? <AIInsights insights={orphans} /> : null
+                        })()}
+                        {ai_insights?.length > 0 && (!brand_signals || brand_signals.length === 0) && (
+                            <AIInsights insights={ai_insights} />
+                        )}
+
+                        {/* Recent Momentum — aggregated, meaningful */}
+                        <RecentMomentum data={momentum_data} />
+
+                        {/* Primary action tiles — Brand Portal, Team, Analytics always */}
+                        <PrimaryActions
+                            permissions={permissions}
+                            brand={activeBrand}
+                            brandColor={brandColor}
+                        />
+                    </motion.div>
 
                     {/* Powered by footer (default theme only) */}
                     {theme.mode === 'default' && (

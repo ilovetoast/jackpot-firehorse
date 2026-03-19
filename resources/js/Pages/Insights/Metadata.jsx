@@ -1,10 +1,7 @@
 import { usePage, router } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
-import AppNav from '../../Components/AppNav'
-import AppHead from '../../Components/AppHead'
-import AppFooter from '../../Components/AppFooter'
+import InsightsLayout from '../../layouts/InsightsLayout'
 import {
-    ChartBarIcon,
     CheckCircleIcon,
     ExclamationTriangleIcon,
     InformationCircleIcon,
@@ -67,7 +64,7 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
         const { start_date, end_date } = getPresetDates(preset)
         const newFilters = { ...localFilters, start_date, end_date }
         setLocalFilters(newFilters)
-        router.get('/app/analytics/metadata', newFilters, {
+        router.get('/app/insights/metadata', newFilters, {
             preserveState: true,
             preserveScroll: true,
         })
@@ -76,40 +73,21 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
     const handleFilterChange = (key, value) => {
         const newFilters = { ...localFilters, [key]: value }
         setLocalFilters(newFilters)
-        router.get('/app/analytics/metadata', newFilters, {
+        router.get('/app/insights/metadata', newFilters, {
             preserveState: true,
             preserveScroll: true,
         })
     }
 
-    const overview = analytics?.overview || {}
     const coverage = analytics?.coverage || {}
-    const requiredCompliance = analytics?.required_compliance || {}
     const aiEffectiveness = analytics?.ai_effectiveness || {}
     const freshness = analytics?.freshness || {}
     const rightsRisk = analytics?.rights_risk || {}
     const governanceGaps = analytics?.governance_gaps || {}
 
     return (
-        <div className="min-h-full">
-            <AppHead title="Metadata Analytics" />
-            <AppNav brand={auth?.activeBrand} tenant={tenant} />
-
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                {/* Header */}
-                <div className="mb-8">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h2 className="text-3xl font-bold tracking-tight text-gray-900">
-                                Metadata Analytics
-                            </h2>
-                            <p className="mt-2 text-sm text-gray-700">
-                                Insights into metadata quality, coverage, and usage
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
+        <InsightsLayout title="Metadata" activeSection="metadata">
+            <div className="space-y-8">
                 {/* Filters */}
                 <div className="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
                     <div className="flex flex-wrap items-center gap-4">
@@ -152,36 +130,6 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                 </label>
                             </div>
                         )}
-                    </div>
-                </div>
-
-                {/* Overview KPIs */}
-                <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <ChartBarIcon className="h-5 w-5 mr-2 text-gray-400" />
-                        Overview
-                    </h3>
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                        <MetricCard
-                            label="Total Assets"
-                            value={overview.total_assets?.toLocaleString() || '0'}
-                            tooltip="Total number of visible assets in the selected scope"
-                        />
-                        <MetricCard
-                            label="Assets with Metadata"
-                            value={overview.assets_with_metadata?.toLocaleString() || '0'}
-                            tooltip="Number of assets that have at least one approved metadata value"
-                        />
-                        <MetricCard
-                            label="Completeness"
-                            value={`${overview.completeness_percentage?.toFixed(1) || '0'}%`}
-                            tooltip="Percentage of assets that have at least one metadata value"
-                        />
-                        <MetricCard
-                            label="Avg Metadata per Asset"
-                            value={overview.avg_metadata_per_asset?.toFixed(1) || '0'}
-                            tooltip="Average number of metadata values per asset"
-                        />
                     </div>
                 </div>
 
@@ -401,10 +349,8 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                         </div>
                     </div>
                 )}
-            </main>
-
-            <AppFooter />
-        </div>
+            </div>
+        </InsightsLayout>
     )
 }
 

@@ -13,7 +13,7 @@ function pageToLabel(path) {
   if (p.startsWith('/app/downloads')) return 'Downloads'
   if (p.startsWith('/app/companies')) return 'Company'
   if (p.startsWith('/app/brands')) return 'Brands'
-  if (p.startsWith('/app/analytics')) return 'Analytics'
+  if (p.startsWith('/app/insights')) return 'Insights'
   if (p.startsWith('/app/generative')) return 'Generative'
   if (p.startsWith('/app/billing')) return 'Billing'
   if (p.startsWith('/app/profile')) return 'Profile'

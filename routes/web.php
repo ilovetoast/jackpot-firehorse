@@ -451,17 +451,27 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
-            Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'dashboard'])->name('dashboard');
+            Route::get('/dashboard', fn () => redirect()->route('insights.overview'))->name('dashboard'); // Deprecated: redirect to Insights
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
             Route::get('/assets/staged', [\App\Http\Controllers\AssetController::class, 'staged'])->name('assets.staged');
             Route::get('/assets/processing', [\App\Http\Controllers\AssetController::class, 'activeProcessingJobs'])->name('assets.processing');
             
-            // Metadata Analytics (Phase 7) — redirect /analytics to the actual page
-            Route::get('/analytics', fn () => redirect()->route('analytics.metadata'))->name('analytics');
-            Route::get('/analytics/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('analytics.metadata');
-            Route::get('/analytics/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('analytics.metadata.data');
+            // Insights (Analytics renamed) — /insights → Overview; Metadata, Usage, Review as sub-pages
+            Route::get('/insights', fn () => redirect()->route('insights.overview'))->name('insights');
+            Route::get('/insights/overview', [\App\Http\Controllers\AnalyticsOverviewController::class, 'index'])->name('insights.overview');
+            Route::get('/insights/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('insights.metadata');
+            Route::get('/insights/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('insights.metadata.data');
+            Route::get('/insights/usage', [\App\Http\Controllers\AnalyticsOverviewController::class, 'usage'])->name('insights.usage');
+            Route::get('/insights/review', [\App\Http\Controllers\AiReviewController::class, 'index'])->name('insights.review');
+            // Backward compatibility: redirect /analytics to /insights
+            Route::redirect('/analytics', '/insights', 301);
+            Route::redirect('/analytics/overview', '/insights/overview', 301);
+            Route::redirect('/analytics/metadata', '/insights/metadata', 301);
+            Route::redirect('/analytics/metadata/data', '/insights/metadata/data', 301);
+            Route::redirect('/analytics/usage', '/insights/usage', 301);
+            Route::redirect('/analytics/review', '/insights/review', 301);
             Route::get('/assets/thumbnail-status/batch', [\App\Http\Controllers\AssetController::class, 'batchThumbnailStatus'])->name('assets.thumbnail-status.batch');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
@@ -510,6 +520,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             
             // Pending AI Suggestions API (dashboard tile)
             Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');
+            // AI Review Workspace (split tags / categories)
+            Route::get('/api/ai/review', [\App\Http\Controllers\AiReviewController::class, 'data'])->name('api.ai.review');
             
             // TASK 2: Pending metadata approvals endpoint (UI-only, does not alter approval logic)
             Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');

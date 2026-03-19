@@ -527,6 +527,19 @@ class CompanyController extends Controller
         // Order by most recent first
         $query->orderBy('created_at', 'desc');
 
+        // Only include events with valid subject_type to avoid MorphTo "Class not found" (e.g. subject_type = 'unknown')
+        $validSubjectTypes = [
+            \App\Models\Asset::class,
+            \App\Models\User::class,
+            \App\Models\Tenant::class,
+            \App\Models\Brand::class,
+            \App\Models\Category::class,
+            \App\Models\Collection::class,
+        ];
+        $query->where(function ($q) use ($validSubjectTypes) {
+            $q->whereIn('subject_type', $validSubjectTypes)->orWhereNull('subject_type');
+        });
+
         // Paginate results
         $perPage = (int) $request->get('per_page', 50);
         // Don't eager load actor to avoid errors with string types (system, api, guest)

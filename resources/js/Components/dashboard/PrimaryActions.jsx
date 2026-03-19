@@ -1,52 +1,33 @@
-import { useState, useEffect } from 'react'
 import { Link } from '@inertiajs/react'
+import { motion } from 'framer-motion'
 import {
     GlobeAltIcon,
-    UsersIcon,
     ChartBarIcon,
 } from '@heroicons/react/24/outline'
 
 const ICON_MAP = {
     portal: GlobeAltIcon,
-    team: UsersIcon,
-    analytics: ChartBarIcon,
+    insights: ChartBarIcon,
 }
 
 const ALL_ACTIONS = [
     {
         key: 'portal',
         title: 'Brand Portal',
-        description: 'Manage public experience',
+        description: 'All brand settings',
         hrefFn: (brand) => brand ? `/app/brands/${brand.id}/edit#brand-portal` : null,
         permission: 'canManageBrand',
     },
     {
-        key: 'team',
-        title: 'Team',
-        description: 'Manage users and permissions',
-        href: '/app/companies/team',
-        permission: 'canManageTeam',
-    },
-    {
-        key: 'analytics',
-        title: 'Analytics',
+        key: 'insights',
+        title: 'Insights',
         description: 'Track usage and engagement',
-        href: '/app/analytics',
+        href: '/app/insights/overview',
         permission: 'canViewAnalytics',
     },
 ]
 
-export default function PrimaryActions({ permissions = {}, brand = null }) {
-    const [compact, setCompact] = useState(() =>
-        typeof window !== 'undefined' ? window.innerHeight < 820 : false
-    )
-
-    useEffect(() => {
-        const check = () => setCompact(window.innerHeight < 820)
-        window.addEventListener('resize', check, { passive: true })
-        return () => window.removeEventListener('resize', check)
-    }, [])
-
+export default function PrimaryActions({ permissions = {}, brand = null, brandColor = '#6366f1' }) {
     const actions = ALL_ACTIONS.filter((action) => {
         if (action.always) return true
         if (action.permission) return permissions[action.permission] === true
@@ -65,48 +46,55 @@ export default function PrimaryActions({ permissions = {}, brand = null }) {
     }
 
     return (
-        <div className={compact ? 'grid grid-cols-2 gap-2' : 'space-y-3'}>
+        <div className="grid grid-cols-2 gap-4 w-full">
             {actions.map((a, i) => {
                 const Icon = ICON_MAP[a.key]
                 return (
-                    <Link
+                    <motion.div
                         key={a.key}
-                        href={a.href}
-                        className={`
-                            group flex items-center
-                            w-full
-                            bg-white/[0.04] backdrop-blur-sm
-                            ring-1 ring-white/[0.08]
-                            transition-all duration-300 ease-out
-                            hover:bg-white/[0.09]
-                            hover:ring-white/[0.16]
-                            hover:shadow-[0_10px_40px_rgba(0,0,0,0.4)]
-                            animate-fadeInUp-d${compact ? Math.min(Math.floor(i / 2) + 1, 4) : Math.min(i + 1, 4)}
-                            ${compact
-                                ? 'gap-3 rounded-xl px-4 py-3'
-                                : 'gap-5 rounded-2xl px-6 py-4'
-                            }
-                        `}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.06, duration: 0.4 }}
                     >
-                        {Icon && (
-                            <div className={`shrink-0 rounded-xl flex items-center justify-center bg-white/10 group-hover:bg-white/[0.18] transition-colors duration-300 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`}>
-                                <Icon className={`text-white/70 group-hover:text-white transition-colors duration-300 ${compact ? 'h-4 w-4' : 'h-5 w-5'}`} />
-                            </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                            <h3 className={`font-semibold text-white ${compact ? 'text-xs' : 'text-sm'}`}>
-                                {a.title}
-                            </h3>
-                            {!compact && (
+                        <Link
+                            href={a.href}
+                            className={`
+                                group flex items-center gap-4 min-h-[80px]
+                                w-full rounded-xl px-5 py-4
+                                bg-gradient-to-br from-white/[0.06] to-white/[0.02]
+                                backdrop-blur-sm
+                                ring-1 ring-white/[0.08]
+                                transition-all duration-200 ease-out
+                                hover:scale-[1.02]
+                            `}
+                            style={{
+                                boxShadow: '0 0 0 1px rgba(255,255,255,0.05)',
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.boxShadow = `0 0 20px ${brandColor}26`
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.05)'
+                            }}
+                        >
+                            {Icon && (
+                                <div className="shrink-0 rounded-xl flex items-center justify-center bg-white/10 group-hover:bg-white/[0.18] transition-colors duration-200 w-10 h-10">
+                                    <Icon className="h-5 w-5 text-white/70 group-hover:text-white transition-colors duration-200" />
+                                </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                                <h3 className="font-semibold text-white text-sm">
+                                    {a.title}
+                                </h3>
                                 <p className="text-xs text-white/45 leading-relaxed mt-0.5">
                                     {a.description}
                                 </p>
-                            )}
-                        </div>
-                        <svg className={`text-white/20 group-hover:text-white/50 transition-colors shrink-0 ${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                        </svg>
-                    </Link>
+                            </div>
+                            <svg className="text-white/20 group-hover:text-white/50 transition-colors shrink-0 w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                            </svg>
+                        </Link>
+                    </motion.div>
                 )
             })}
         </div>

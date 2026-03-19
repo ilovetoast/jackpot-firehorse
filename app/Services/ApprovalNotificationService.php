@@ -4,10 +4,8 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\Brand;
-use App\Models\Notification;
 use App\Models\User;
 use App\Support\Roles\PermissionMap;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -310,23 +308,13 @@ class ApprovalNotificationService
     }
 
     /**
-     * Create notifications for recipients.
+     * Create notifications for recipients (grouped by type + brand + date).
      */
     protected function createNotifications(\Illuminate\Support\Collection $recipients, string $type, array $data): void
     {
-        $notifications = $recipients->map(function (User $user) use ($type, $data) {
-            return [
-                'user_id' => $user->id,
-                'type' => $type,
-                'data' => json_encode($data),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-        })->toArray();
-
-        // Batch insert for efficiency
-        if (!empty($notifications)) {
-            DB::table('notifications')->insert($notifications);
+        $groupService = app(NotificationGroupService::class);
+        foreach ($recipients as $user) {
+            $groupService->upsert($user->id, $type, $data);
         }
     }
 }

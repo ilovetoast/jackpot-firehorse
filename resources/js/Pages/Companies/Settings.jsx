@@ -3,6 +3,7 @@ import AppHead from '../../Components/AppHead'
 import { useState, useEffect, useCallback } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
 import TagQuality from '../../Components/Companies/TagQuality'
@@ -319,10 +320,12 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
-                    <div className="mb-8">
+                    <div className="mb-6">
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Settings</h1>
                         <p className="mt-2 text-sm text-gray-700">Manage your company's settings and preferences</p>
                     </div>
+
+                    <CompanyTabs />
 
                     {/* Two-column layout: left sidebar nav + main content */}
                     <div className="flex flex-col lg:flex-row gap-8">

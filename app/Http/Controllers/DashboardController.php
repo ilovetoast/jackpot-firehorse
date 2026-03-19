@@ -20,6 +20,7 @@ use App\Enums\MetricType;
 use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
+use App\Services\BrandInsightEngine;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -625,11 +626,17 @@ class DashboardController extends Controller
             
             // Do not eager load 'actor': actor_type can be 'system'/'api'/'guest' (no model class).
             // Use getActorModel() in the map for user actors to avoid MorphTo "Class system not found".
-            $activityEvents = ActivityEvent::where('tenant_id', $tenant->id)
-                ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT) // Exclude system-level AI insights
+            $activityQuery = ActivityEvent::where('tenant_id', $tenant->id)
+                ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT)
                 ->whereNotNull('subject_type')
-                ->whereIn('subject_type', $validSubjectTypes)
-                ->orderBy('created_at', 'desc')
+                ->whereIn('subject_type', $validSubjectTypes);
+            // Brand overview: prefer brand-scoped activity
+            if ($brand) {
+                $activityQuery->where(function ($q) use ($brand) {
+                    $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
+                });
+            }
+            $activityEvents = $activityQuery->orderBy('created_at', 'desc')
                 ->limit(5)
                 ->with(['brand', 'subject'])
                 ->get();
@@ -840,6 +847,16 @@ class DashboardController extends Controller
 
         $theme = app(BrandThemeBuilder::class)->build($tenant, $brand);
 
+        // Brand insight signals (What Needs Attention) — cached 5 min
+        $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
+
+        // Momentum data (aggregated, last 7 days)
+        $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
+
+        // AI insights (LLM-generated, cached 30 min; fallback to rule-based on failure)
+        // Pass full signals so LLM can reinforce (not duplicate) and insights inherit correct hrefs
+        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals);
+
         // Collage assets: best visual quality first (compliance score), then most viewed
         $collageAssets = Asset::where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
@@ -935,6 +952,9 @@ class DashboardController extends Controller
             // Phase J.3: Contributor-specific counts (informational only)
             'contributor_pending_count' => $contributorPendingCount, // Contributor's own pending assets
             'contributor_rejected_count' => $contributorRejectedCount, // Contributor's own rejected assets
+            'brand_signals' => $brandSignals, // Cinematic Overview: What Needs Attention (permission-filtered)
+            'momentum_data' => $momentumData, // Recent Momentum (aggregated counts)
+            'ai_insights' => $aiInsights, // LLM insights (cached 30 min; fallback to rule-based)
         ]);
     }
 

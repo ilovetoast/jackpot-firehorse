@@ -3,6 +3,7 @@ import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
+import CompanyTabs from '../../Components/Company/CompanyTabs'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
@@ -225,12 +226,14 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
             <AppNav />
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 {/* Header */}
-                <div className="mb-8">
+                <div className="mb-6">
                     <h1 className="text-3xl font-bold text-gray-900">Team Members</h1>
                     <p className="mt-2 text-sm text-gray-600">
                         Manage members and invitations for {tenant.name} ({current_user_count} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users} users)
                     </p>
                 </div>
+
+                <CompanyTabs />
 
                 {/* Invite Button */}
                 <div className="mb-6 flex justify-end">

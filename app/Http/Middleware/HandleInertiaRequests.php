@@ -492,7 +492,7 @@ class HandleInertiaRequests extends Middleware
                     ->count();
                     
                 $totalPendingAiSuggestions = $pendingMetadataCount + $pendingTagCount;
-                
+
                 // Pending metadata approvals: Always compute user's own pending fields
                 // Only compute global pending (for approvers) if user can approve
                 $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
@@ -531,6 +531,9 @@ class HandleInertiaRequests extends Middleware
                 
                 $shared['pending_items'] = [
                     'ai_suggestions' => $totalPendingAiSuggestions,
+                    'ai_tag_suggestions' => $pendingTagCount,
+                    'ai_category_suggestions' => $pendingMetadataCount,
+                    'ai_suggestions_asset_id' => null, // deprecated: now link to analytics/review
                     'metadata_approvals' => $pendingMetadataApprovalsCount, // null if not approver
                     'my_pending_metadata_approvals' => $myPendingMetadataApprovalsCount, // always computed
                 ];
@@ -538,6 +541,8 @@ class HandleInertiaRequests extends Middleware
                 // If there's an error, just set to zero
                 $shared['pending_items'] = [
                     'ai_suggestions' => 0,
+                    'ai_tag_suggestions' => 0,
+                    'ai_category_suggestions' => 0,
                     'metadata_approvals' => null,
                     'my_pending_metadata_approvals' => 0,
                 ];
@@ -545,6 +550,8 @@ class HandleInertiaRequests extends Middleware
         } else {
             $shared['pending_items'] = [
                 'ai_suggestions' => 0,
+                'ai_tag_suggestions' => 0,
+                'ai_category_suggestions' => 0,
                 'metadata_approvals' => null,
                 'my_pending_metadata_approvals' => 0,
             ];

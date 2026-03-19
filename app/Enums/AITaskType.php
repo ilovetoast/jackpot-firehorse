@@ -63,6 +63,9 @@ class AITaskType
     // Brand PDF extraction: single-pass Claude analysis of brand guidelines PDF
     public const BRAND_PDF_EXTRACTION = 'brand_pdf_extraction';
 
+    // Brand insights: LLM-generated actionable insights from analytics metrics
+    public const BRAND_INSIGHTS = 'brand_insights';
+
     /**
      * Get all task types as an array.
      *
@@ -91,6 +94,7 @@ class AITaskType
             self::SENTRY_ERROR_ANALYSIS,
             self::PDF_DOCUMENT_STRUCTURE,
             self::BRAND_PDF_EXTRACTION,
+            self::BRAND_INSIGHTS,
         ];
     }
     
