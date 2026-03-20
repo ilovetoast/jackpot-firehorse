@@ -411,8 +411,8 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </button>
                             </div>
                         )}
-                        {/* Brand Logo Component (C12: show collection name when collection-only) */}
-                        <div className="flex flex-shrink-0 items-center">
+                        {/* Brand Logo Component — max width keeps main nav from overlapping wide wordmarks */}
+                        <div className="flex min-w-0 max-w-[200px] sm:max-w-[220px] md:max-w-[240px] shrink-0 items-center">
                             {isAppPage ? (isCollectionOnlyNav && effectiveCollection?.brand ? (
                                 <AppBrandLogo
                                     activeBrand={effectiveCollection.brand}
@@ -446,7 +446,7 @@ export default function AppNav({ brand, tenant, variant }) {
 
                         {/* Main menu: Overview, Assets, Executions, Collections, Generative (C12: flag + .app-nav-main-links for CSS) */}
                         {isAppPage ? (isCollectionOnlyNav ? (
-                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center left-64 xl:left-[18rem]" data-collection-only="true">
+                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
                                     <span
                                         key={label}
@@ -524,7 +524,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </span>
                             </div>
                         ) : (
-                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute left-64 xl:left-[18rem]">
+                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto">
                                 <Link
                                     href="/app/overview"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
@@ -602,7 +602,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                             </div>
                         )) : (
-                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 sm:ml-6">
+                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:ml-6 overflow-x-auto">
                                 <Link
                                     href="/app/overview"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"

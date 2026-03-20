@@ -474,15 +474,18 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     style={{ color: 'rgba(0,0,0,0.75)', lineHeight: '1.8' }}
                                 >
                                     <span className="flex items-center gap-2">
-                                        <span
-                                            className="inline-block rounded-full transition-all duration-300"
-                                            style={{
-                                                width: isActive ? 12 : 4,
-                                                height: 4,
-                                                backgroundColor: isActive ? secondaryColor : 'rgba(0,0,0,0.15)',
-                                            }}
-                                        />
-                                        {sec.label}
+                                        {/* Fixed-width rail so active pill vs dot doesn’t shift label text */}
+                                        <span className="inline-flex h-4 w-3 flex-shrink-0 items-center justify-center" aria-hidden>
+                                            <span
+                                                className="block rounded-full transition-all duration-300"
+                                                style={{
+                                                    width: isActive ? 12 : 4,
+                                                    height: 4,
+                                                    backgroundColor: isActive ? secondaryColor : 'rgba(0,0,0,0.15)',
+                                                }}
+                                            />
+                                        </span>
+                                        <span className="min-w-0">{sec.label}</span>
                                     </span>
                                 </button>
                             )
@@ -585,7 +588,13 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
 
                             <div className="relative flex flex-col items-center justify-center px-6 lg:px-8" style={{ minHeight: '100vh' }}>
                                 {heroLogoUrl && (
-                                    <img src={heroLogoUrl} alt={brand.name} className={`h-20 md:h-28 w-auto object-contain mb-10 drop-shadow-2xl ${isTextured ? 'brightness-110' : ''}`} />
+                                    <div className="mb-10 flex w-full max-w-[min(92vw,28rem)] justify-center px-2 sm:px-4">
+                                        <img
+                                            src={heroLogoUrl}
+                                            alt={brand.name}
+                                            className={`max-h-20 sm:max-h-24 md:max-h-28 w-auto max-w-full object-contain object-center drop-shadow-2xl ${isTextured ? 'brightness-110' : ''}`}
+                                        />
+                                    </div>
                                 )}
                                 {isBold ? (
                                     <div className="px-8 py-4" style={{ backgroundColor: hexToRgba(secondaryColor, 0.9) }}>
@@ -1190,7 +1199,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                                 className={`relative p-12 md:p-16 flex items-center justify-center min-h-[320px] md:min-h-[400px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`}
                                                 style={{ backgroundColor: primaryColor }}
                                             >
-                                                <img src={logoUrl} alt={`${brand.name} — Primary Brandmark`} className="max-h-32 md:max-h-44 w-auto object-contain drop-shadow-lg" />
+                                                <img src={logoUrl} alt={`${brand.name} — Primary Brandmark`} className="max-h-32 md:max-h-44 w-auto max-w-[min(100%,26rem)] object-contain object-center drop-shadow-lg" />
                                                 <span className={`absolute bottom-4 left-5 text-[10px] font-semibold uppercase text-white/40 ${isTextured ? 'tracking-[0.2em]' : isBold ? 'tracking-widest font-black' : 'tracking-[0.15em]'}`}>Primary Brandmark</span>
                                             </div>
                                         </div>

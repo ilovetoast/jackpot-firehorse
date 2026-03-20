@@ -60,9 +60,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
             return (
-                <Link href="/app" className="flex items-center min-w-0">
+                <Link href="/app" className="flex min-w-0 max-w-full items-center">
                     {firstBrand.logo_path ? (
-                        <img src={firstBrand.logo_path} alt={firstBrand.name || 'Brand'} className="h-12 w-auto max-w-72 object-contain" style={logoFilterStyle} />
+                        <img src={firstBrand.logo_path} alt={firstBrand.name || 'Brand'} className="h-12 w-auto max-w-full object-contain object-left" style={logoFilterStyle} />
                     ) : (
                         <>
                             <BrandIconUnified brand={firstBrand} size="lg" />
@@ -96,13 +96,13 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Dropdown anchored to far left of logo; includes Company Portal link + brand switcher
     if (hasMultipleBrands) {
         return (
-            <div className="relative flex items-center">
+            <div className="relative flex min-w-0 max-w-full items-center">
                 <button
                     type="button"
                     onClick={() => setBrandMenuOpen(!brandMenuOpen)}
                     aria-expanded={brandMenuOpen}
                     aria-haspopup="true"
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 min-w-0 max-w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                    className="flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:px-3"
                     style={{ color: textColor }}
                     title="Open menu"
                 >
@@ -111,7 +111,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             <img
                                 src={activeBrand.logo_path}
                                 alt={brandName}
-                                className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
+                                className="h-12 w-auto max-w-full object-contain object-left"
                                 style={logoFilterStyle}
                                 onError={() => setLogoError(true)}
                             />
@@ -274,12 +274,12 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
     const singleBrandHref = rootLinkHref ?? '/app'
     return (
-        <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
+        <Link href={singleBrandHref} className="flex min-w-0 max-w-full items-center">
             {activeBrand.logo_path && !logoError ? (
                 <img
                     src={activeBrand.logo_path}
                     alt={brandName}
-                    className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
+                    className="h-12 w-auto max-w-full object-contain object-left"
                     style={logoFilterStyle}
                     onError={() => setLogoError(true)}
                 />
