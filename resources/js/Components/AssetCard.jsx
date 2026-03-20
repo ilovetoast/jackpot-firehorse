@@ -20,7 +20,25 @@ import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default', cardStyle = 'default', selectionAssetType = 'asset' }) {
+export default function AssetCard({
+    asset,
+    onClick = null,
+    /** Double-click / double-tap: e.g. open fullscreen zoom without relying on single-click timing */
+    onDoubleClick = null,
+    showInfo = true,
+    isSelected = false,
+    primaryColor = '#6366f1',
+    isBulkSelected = false,
+    onBulkSelect = null,
+    isInBucket = false,
+    onBucketToggle = null,
+    isPendingApprovalMode = false,
+    isPendingPublicationFilter = false,
+    onAssetApproved = null,
+    cardVariant = 'default',
+    cardStyle = 'default',
+    selectionAssetType = 'asset',
+}) {
     const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
@@ -102,6 +120,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const touchHandledRef = useRef(false)
     const lastTapRef = useRef(0)
     const lastTapAssetIdRef = useRef(null)
+    /** When onDoubleClick is set, single click is delayed so dblclick can cancel the drawer open */
+    const cardClickDelayRef = useRef(null)
     
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures memoized components re-render when thumbnail availability changes
@@ -214,9 +234,13 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         lastTapRef.current = now
         lastTapAssetIdRef.current = asset.id
 
-        if (isDoubleTap && onClick) {
+        if (isDoubleTap) {
             touchHandledRef.current = true
-            onClick(asset, e)
+            if (onDoubleClick) {
+                onDoubleClick(asset, e)
+            } else if (onClick) {
+                onClick(asset, e)
+            }
             return
         }
 
@@ -248,10 +272,32 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             e.stopPropagation()
             return
         }
-        if (onClick) {
-            onClick(asset, e)
+        if (!onClick) return
+        if (onDoubleClick) {
+            if (cardClickDelayRef.current) clearTimeout(cardClickDelayRef.current)
+            cardClickDelayRef.current = setTimeout(() => {
+                cardClickDelayRef.current = null
+                onClick(asset, e)
+            }, 280)
+            return
         }
+        onClick(asset, e)
     }
+
+    const handleDoubleClick = (e) => {
+        if (!onDoubleClick) return
+        if (cardClickDelayRef.current) {
+            clearTimeout(cardClickDelayRef.current)
+            cardClickDelayRef.current = null
+        }
+        onDoubleClick(asset, e)
+    }
+
+    useEffect(() => () => {
+        if (cardClickDelayRef.current) {
+            clearTimeout(cardClickDelayRef.current)
+        }
+    }, [])
     const handleContextMenu = (e) => {
         if (isMobile) e.preventDefault()
     }
@@ -309,6 +355,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     return (
         <div
             onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchCancel={handleTouchCancel}

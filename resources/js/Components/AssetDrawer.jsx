@@ -71,13 +71,29 @@ import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 import { useSelectionOptional } from '../contexts/SelectionContext'
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null, primaryColor, selectionAssetType = 'asset' }) {
+export default function AssetDrawer({
+    asset,
+    onClose,
+    assets = [],
+    currentAssetIndex = null,
+    onAssetUpdate = null,
+    collectionContext = null,
+    bucketAssetIds = [],
+    onBucketToggle = null,
+    primaryColor,
+    selectionAssetType = 'asset',
+    /** When true (e.g. grid double-click), open the fullscreen zoom modal once the drawer mounts */
+    initialZoomOpen = false,
+    onInitialZoomConsumed = null,
+}) {
     const pageProps = usePage().props
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
     const categories = pageProps.categories ?? []
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
+    /** One-shot: grid double-click initial zoom per drawer mount */
+    const initialZoomAppliedRef = useRef(false)
     const [showZoomModal, setShowZoomModal] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
@@ -916,6 +932,24 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const isPdfAsset = Boolean(displayAsset?.is_pdf)
         || displayAsset.mime_type === 'application/pdf'
         || fileExtension.toUpperCase() === 'PDF'
+
+    // Grid double-click: jump straight to fullscreen zoom (same modal as "Click to zoom" in drawer)
+    useEffect(() => {
+        if (!initialZoomOpen || !displayAsset?.id) return
+        if (initialZoomAppliedRef.current) return
+        if (!(hasThumbnailSupport || isVideo)) {
+            initialZoomAppliedRef.current = true
+            onInitialZoomConsumed?.()
+            return
+        }
+        initialZoomAppliedRef.current = true
+        const idx = imageAssets.findIndex((a) => a?.id === displayAsset.id)
+        if (idx >= 0) {
+            setCarouselIndex(idx)
+        }
+        setShowZoomModal(true)
+        onInitialZoomConsumed?.()
+    }, [initialZoomOpen, displayAsset?.id, hasThumbnailSupport, isVideo, imageAssets, onInitialZoomConsumed])
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates

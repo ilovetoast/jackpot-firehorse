@@ -6,6 +6,7 @@ import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
 import ImageCropModal from '../../Components/ImageCropModal'
+import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 // Common countries list
 const countries = [
@@ -138,7 +139,10 @@ function CompaniesSection({ companies = [] }) {
                                                 <form method="POST" action={`/app/companies/${company.id}/switch`}>
                                                     <button
                                                         type="button"
-                                                        onClick={() => router.post(`/app/companies/${company.id}/switch`)}
+                                                        onClick={() => {
+                                                            showWorkspaceSwitchingOverlay('company')
+                                                            router.post(`/app/companies/${company.id}/switch`)
+                                                        }}
                                                         className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
                                                     >
                                                         Switch

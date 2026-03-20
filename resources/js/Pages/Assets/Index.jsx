@@ -136,6 +136,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    /** Grid double-click opens AssetDrawer with fullscreen zoom already open */
+    const [openDrawerWithZoom, setOpenDrawerWithZoom] = useState(false)
     // Prevent URL/search effect from re-opening drawer after user explicitly closes it
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
@@ -150,9 +152,17 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false)
     const [addExistingCategoryOpen, setAddExistingCategoryOpen] = useState(false)
 
-    // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext.
+    // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext. Double-click opens zoom overlay.
     const handleAssetClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(false)
         setActiveAssetId(asset?.id || null)
+    }, [])
+    const handleAssetDoubleClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(true)
+        setActiveAssetId(asset?.id || null)
+    }, [])
+    const handleInitialZoomConsumed = useCallback(() => {
+        setOpenDrawerWithZoom(false)
     }, [])
 
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
@@ -180,6 +190,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
     useEffect(() => {
         setActiveAssetId(null)
+        setOpenDrawerWithZoom(false)
         userClosedDrawerRef.current = false
         lastOpenedFromUrlRef.current = null
         
@@ -1079,6 +1090,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 <AssetGrid 
                                     assets={safeAssetsList} 
                                     onAssetClick={handleAssetClick}
+                                    onAssetDoubleClick={handleAssetDoubleClick}
                                     cardSize={cardSize}
                                     cardStyle={cardStyle}
                                     showInfo={showInfo}
@@ -1156,12 +1168,15 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 onClose={() => {
                                     userClosedDrawerRef.current = true
                                     setActiveAssetId(null)
+                                    setOpenDrawerWithZoom(false)
                                 }}
                                 assets={assetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 selectionAssetType="asset"
                                 primaryColor={workspaceAccentColor}
+                                initialZoomOpen={openDrawerWithZoom}
+                                onInitialZoomConsumed={handleInitialZoomConsumed}
                             />
                         </div>
                     )}
@@ -1180,11 +1195,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             onClose={() => {
                                 userClosedDrawerRef.current = true
                                 setActiveAssetId(null)
+                                setOpenDrawerWithZoom(false)
                             }}
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             primaryColor={workspaceAccentColor}
+                            initialZoomOpen={openDrawerWithZoom}
+                            onInitialZoomConsumed={handleInitialZoomConsumed}
                         />
                     </div>
                 )}

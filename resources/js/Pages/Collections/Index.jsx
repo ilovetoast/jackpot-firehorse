@@ -112,6 +112,7 @@ export default function CollectionsIndex({
     const mobileTouchStartRef = useRef(null)
     const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     const [activeAssetId, setActiveAssetId] = useState(null)
+    const [openDrawerWithZoom, setOpenDrawerWithZoom] = useState(false)
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
     const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
@@ -140,6 +141,7 @@ export default function CollectionsIndex({
 
     useEffect(() => {
         setActiveAssetId(null)
+        setOpenDrawerWithZoom(false)
     }, [selectedCollectionId])
 
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
@@ -153,6 +155,18 @@ export default function CollectionsIndex({
             bucket.bucketAdd(assetId)
         }
     }, [bucket, bucketAssetIds])
+
+    const handleAssetGridClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(false)
+        setActiveAssetId(asset?.id ?? null)
+    }, [])
+    const handleAssetDoubleClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(true)
+        setActiveAssetId(asset?.id ?? null)
+    }, [])
+    const handleInitialZoomConsumed = useCallback(() => {
+        setOpenDrawerWithZoom(false)
+    }, [])
 
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
@@ -561,7 +575,8 @@ export default function CollectionsIndex({
                                         <>
                                         <AssetGrid
                                             assets={safeAssetsList}
-                                            onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
+                                            onAssetClick={handleAssetGridClick}
+                                            onAssetDoubleClick={handleAssetDoubleClick}
                                             cardSize={cardSize}
                                             cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                             showInfo={showInfo}
@@ -606,11 +621,16 @@ export default function CollectionsIndex({
                             <AssetDrawer
                                 key={activeAssetId}
                                 asset={activeAsset}
-                                onClose={() => setActiveAssetId(null)}
+                                onClose={() => {
+                                    setActiveAssetId(null)
+                                    setOpenDrawerWithZoom(false)
+                                }}
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 selectionAssetType="asset"
+                                initialZoomOpen={openDrawerWithZoom}
+                                onInitialZoomConsumed={handleInitialZoomConsumed}
                                 collectionContext={{
                                     show: true,
                                     selectedCollectionId,
@@ -634,16 +654,21 @@ export default function CollectionsIndex({
             {/* Asset Drawer - Mobile */}
             {activeAssetId && (
                 <div className="md:hidden fixed inset-0 z-50">
-                    <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
+                    <div className="absolute inset-0 bg-black/50" onClick={() => { setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                     <AssetDrawer
                         key={activeAssetId}
                         asset={activeAsset}
-                        onClose={() => setActiveAssetId(null)}
+                        onClose={() => {
+                            setActiveAssetId(null)
+                            setOpenDrawerWithZoom(false)
+                        }}
                         assets={safeAssetsList}
                         currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                         onAssetUpdate={handleLifecycleUpdate}
                         bucketAssetIds={bucketAssetIds}
                         onBucketToggle={handleBucketToggle}
+                        initialZoomOpen={openDrawerWithZoom}
+                        onInitialZoomConsumed={handleInitialZoomConsumed}
                         collectionContext={{
                             show: true,
                             selectedCollectionId,

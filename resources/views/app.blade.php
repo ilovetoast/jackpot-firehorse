@@ -37,6 +37,27 @@
     @routes
   </head>
   <body class="font-sans antialiased">
+    {{-- Immediate overlay after full-page workspace/brand switch (sessionStorage set before navigation) --}}
+    <script>
+        (function () {
+            try {
+                var kind = sessionStorage.getItem('jackpot_workspace_switching');
+                if (!kind) return;
+                var label = kind === 'brand' ? 'Switching brand…' : 'Switching workspace…';
+                var el = document.createElement('div');
+                el.id = 'jackpot-workspace-switch-overlay';
+                el.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:rgba(11,11,13,0.94);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.25rem;font-family:ui-sans-serif,system-ui,sans-serif;');
+                el.innerHTML = '<div style="width:2.5rem;height:2.5rem;border:3px solid rgba(255,255,255,0.15);border-top-color:rgba(255,255,255,0.95);border-radius:50%;animation:jackpot-ws-spin 0.75s linear infinite"></div>' +
+                    '<p style="color:rgba(255,255,255,0.88);font-size:0.95rem;margin:0;font-weight:500;letter-spacing:0.02em">' + label + '</p>' +
+                    '<p style="color:rgba(255,255,255,0.45);font-size:0.75rem;margin:0">Just a moment</p>';
+                document.body.appendChild(el);
+                var st = document.createElement('style');
+                st.id = 'jackpot-ws-spin-style';
+                st.textContent = '@keyframes jackpot-ws-spin{to{transform:rotate(360deg)}}';
+                document.head.appendChild(st);
+            } catch (e) {}
+        })();
+    </script>
     @inertia
     
   </body>

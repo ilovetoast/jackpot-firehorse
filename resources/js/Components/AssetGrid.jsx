@@ -15,6 +15,7 @@
  * @param {Object} props
  * @param {Array} props.assets - Array of asset objects to display
  * @param {Function} props.onAssetClick - Optional click handler when an asset is clicked
+ * @param {Function} props.onAssetDoubleClick - Optional double-click / double-tap (e.g. fullscreen zoom)
  * @param {number} props.cardSize - Card size in pixels (160-360, default 220)
  * @param {boolean} props.showInfo - Whether to show asset info (title, file type)
  * @param {number|null} props.selectedAssetId - ID of currently selected asset
@@ -27,6 +28,7 @@ import AssetGridContainer from './AssetGridContainer'
 export default function AssetGrid({ 
     assets = [], 
     onAssetClick = null,
+    onAssetDoubleClick = null,
     cardSize = 220,
     showInfo = true,
     selectedAssetId = null,
@@ -114,6 +116,7 @@ export default function AssetGrid({
                 <AssetCard
                     asset={asset}
                     onClick={onAssetClick}
+                    onDoubleClick={onAssetDoubleClick}
                     showInfo={showInfo}
                     isSelected={selectedAssetId === asset.id}
                     primaryColor={primaryColor}

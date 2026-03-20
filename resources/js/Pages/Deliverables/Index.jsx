@@ -107,6 +107,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    const [openDrawerWithZoom, setOpenDrawerWithZoom] = useState(false)
     const [showBulkActionsModal, setShowBulkActionsModal] = useState(false)
     const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false)
     const [bulkMetadataInitialOp, setBulkMetadataInitialOp] = useState(null)
@@ -146,6 +147,18 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             bucket.bucketAdd(assetId)
         }
     }, [bucket, bucketAssetIds])
+
+    const handleAssetGridClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(false)
+        setActiveAssetId(asset?.id || null)
+    }, [])
+    const handleAssetDoubleClick = useCallback((asset) => {
+        setOpenDrawerWithZoom(true)
+        setActiveAssetId(asset?.id || null)
+    }, [])
+    const handleInitialZoomConsumed = useCallback(() => {
+        setOpenDrawerWithZoom(false)
+    }, [])
 
     // Category switches should reset the drawer selection
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -835,7 +848,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             <>
                             <AssetGrid 
                                 assets={safeAssetsList} 
-                                onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
+                                onAssetClick={handleAssetGridClick}
+                                onAssetDoubleClick={handleAssetDoubleClick}
                                 cardSize={cardSize}
                                 cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                 showInfo={showInfo}
@@ -893,6 +907,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onClose={() => {
                                     userClosedDrawerRef.current = true
                                     setActiveAssetId(null)
+                                    setOpenDrawerWithZoom(false)
                                 }}
                                 assets={safeAssetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
@@ -901,6 +916,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onBucketToggle={handleBucketToggle}
                                 primaryColor={workspaceAccentColor}
                                 selectionAssetType="execution"
+                                initialZoomOpen={openDrawerWithZoom}
+                                onInitialZoomConsumed={handleInitialZoomConsumed}
                             />
                         </div>
                     )}
@@ -914,19 +931,22 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
                     <div className="md:hidden fixed inset-0 z-50">
-                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null) }} aria-hidden="true" />
+                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                             asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => {
                                 userClosedDrawerRef.current = true
                                 setActiveAssetId(null)
+                                setOpenDrawerWithZoom(false)
                             }}
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}
+                            initialZoomOpen={openDrawerWithZoom}
+                            onInitialZoomConsumed={handleInitialZoomConsumed}
                             primaryColor={workspaceAccentColor}
                             selectionAssetType="execution"
                         />

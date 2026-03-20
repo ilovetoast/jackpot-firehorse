@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/react'
 import JackpotLogo from './JackpotLogo'
 import { usePermission } from '../hooks/usePermission'
 import BrandIconUnified from './BrandIconUnified'
+import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
     const { auth } = usePage().props
@@ -29,6 +30,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         if (onSwitchBrand) {
             onSwitchBrand(brandId)
         } else {
+            showWorkspaceSwitchingOverlay('brand')
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
             fetch(`/app/brands/${brandId}/switch`, {
                 method: 'POST',
@@ -60,14 +62,14 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
             return (
-                <Link href="/app" className="flex min-w-0 max-w-full items-center">
+                <Link href="/app" className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
                     {firstBrand.logo_path ? (
                         <img src={firstBrand.logo_path} alt={firstBrand.name || 'Brand'} className="h-12 w-auto max-w-full object-contain object-left" style={logoFilterStyle} />
                     ) : (
                         <>
                             <BrandIconUnified brand={firstBrand} size="lg" />
                             <span
-                                className="ml-2.5 font-semibold truncate min-w-0"
+                                className="font-semibold leading-none truncate min-w-0"
                                 style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                             >
                                 {firstBrand.name || 'Brand'}
@@ -80,7 +82,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         
         // No brands available — show Jackpot logo (e.g. on no-company / errors page)
         return (
-            <Link href="/" className="flex items-center hover:opacity-90">
+            <Link href="/" className="flex items-center py-2 hover:opacity-90">
                 <JackpotLogo className="h-12 w-auto" />
             </Link>
         )
@@ -119,7 +121,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             <>
                                 <BrandIconUnified brand={activeBrand} size="lg" />
                                 <span
-                                    className="font-semibold truncate min-w-0"
+                                    className="font-semibold leading-none truncate min-w-0"
                                     style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                                 >
                                     {brandName}
@@ -274,7 +276,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
     const singleBrandHref = rootLinkHref ?? '/app'
     return (
-        <Link href={singleBrandHref} className="flex min-w-0 max-w-full items-center">
+        <Link href={singleBrandHref} className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
             {activeBrand.logo_path && !logoError ? (
                 <img
                     src={activeBrand.logo_path}
@@ -287,7 +289,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 <>
                     <BrandIconUnified brand={activeBrand} size="lg" />
                     <span
-                        className="ml-2.5 font-semibold truncate min-w-0"
+                        className="font-semibold leading-none truncate min-w-0"
                         style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                     >
                         {brandName}

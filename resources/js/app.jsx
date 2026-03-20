@@ -5,6 +5,7 @@ import { initPerformanceTracking } from './utils/performanceTracking'
 initPerformanceTracking()
 
 import { createInertiaApp, router } from '@inertiajs/react'
+import { removeWorkspaceSwitchingOverlay } from './utils/workspaceSwitchOverlay'
 
 // Grid timing: record visit start for navigation-to-render diagnostic
 router.on('start', () => {
@@ -12,6 +13,24 @@ router.on('start', () => {
         window.__inertiaVisitStart = performance.now()
     }
 })
+
+// Company/brand switches use full page navigation; overlay is shown via sessionStorage + blade (see app.blade.php)
+router.on('finish', () => {
+    removeWorkspaceSwitchingOverlay()
+})
+
+// Full page reload: `finish` may not run on first paint — hide overlay after shell is interactive (fallback if still visible)
+if (typeof document !== 'undefined') {
+    document.addEventListener(
+        'DOMContentLoaded',
+        () => {
+            if (document.getElementById('jackpot-workspace-switch-overlay')) {
+                setTimeout(() => removeWorkspaceSwitchingOverlay(), 450)
+            }
+        },
+        { once: true }
+    )
+}
 import { createRoot } from 'react-dom/client'
 import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'

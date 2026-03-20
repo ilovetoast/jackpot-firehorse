@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { BellIcon, SparklesIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon, DocumentMagnifyingGlassIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
+import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 
 /**
  * Phase AF-3: Notification Bell Component
@@ -181,6 +182,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
         if (notification.type === 'download.ready' && data.download_id) {
             setIsOpen(false)
             if (needsCompanySwitch) {
+                showWorkspaceSwitchingOverlay('company')
                 const form = document.createElement('form')
                 form.method = 'POST'
                 form.action = `/app/companies/${notifTenantId}/switch`
@@ -205,6 +207,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
         }
         if (data.asset_id) {
             if (needsCompanySwitch && notifTenantId) {
+                showWorkspaceSwitchingOverlay('company')
                 const form = document.createElement('form')
                 form.method = 'POST'
                 form.action = `/app/companies/${notifTenantId}/switch`

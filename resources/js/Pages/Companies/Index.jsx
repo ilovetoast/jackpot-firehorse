@@ -1,5 +1,6 @@
 import { router } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
+import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -9,6 +10,7 @@ export default function CompaniesIndex({ companies }) {
     const { auth } = usePage().props
 
     const handleSwitch = (companyId) => {
+        showWorkspaceSwitchingOverlay('company')
         router.post(`/app/companies/${companyId}/switch`, {}, {
             preserveState: true,
             preserveScroll: true,
