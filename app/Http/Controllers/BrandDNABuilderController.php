@@ -16,14 +16,15 @@ use App\Models\BrandPipelineSnapshot;
 use App\Models\PdfTextExtraction;
 use App\Services\BrandDNA\BrandAlignmentEngine;
 use App\Services\BrandDNA\BrandCoherenceScoringService;
-use App\Services\BrandDNA\BrandResearchNotificationService;
-use App\Services\BrandDNA\PipelineFinalizationService;
-use App\Services\BrandDNA\BrandVersionService;
-use App\Services\BrandDNA\CoherenceDeltaService;
-use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\BrandGuidelinesPublishValidator;
 use App\Services\BrandDNA\BrandModelService;
+use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\BrandResearchReportBuilder;
+use App\Services\BrandDNA\BrandVersionService;
+use App\Services\BrandDNA\CoherenceDeltaService;
+use App\Services\BrandDNA\PipelineDurationEstimateService;
+use App\Services\BrandDNA\PipelineFinalizationService;
+use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
@@ -265,13 +266,14 @@ class BrandDNABuilderController extends Controller
             }
         }
 
-        $buildLogoVariantProp = function (string $context) use ($draft, $brand): ?array {
+        $buildLogoVariantProp = function (string $context) use ($draft): ?array {
             $asset = $draft->assetsForContext($context)->first();
             if (! $asset) {
                 return null;
             }
             $thumbUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null;
             $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+
             return [
                 'id' => $asset->id,
                 'thumbnail_url' => $thumbUrl,
@@ -398,7 +400,7 @@ class BrandDNABuilderController extends Controller
 
         $stepKeys = BrandGuidelinesBuilderSteps::stepKeys();
         $validated = $request->validate([
-            'step_key' => ['required', 'string', 'in:' . implode(',', $stepKeys)],
+            'step_key' => ['required', 'string', 'in:'.implode(',', $stepKeys)],
             'payload' => 'required|array',
         ]);
 
@@ -670,6 +672,7 @@ class BrandDNABuilderController extends Controller
             $brand->update(['logo_horizontal_id' => null, 'logo_horizontal_path' => null]);
         }
         $count = $draft->assetsForContext($context)->count();
+
         return response()->json(['detached' => true, 'count' => $count]);
     }
 
@@ -788,6 +791,7 @@ PROMPT;
             if (! is_array($field)) {
                 return $field ? [strval($field)] : [];
             }
+
             return array_map(fn ($item) => $u($item), $field);
         };
 
@@ -808,7 +812,7 @@ PROMPT;
         ]);
 
         $contextBlock = collect($brandContext)
-            ->map(fn ($v, $k) => ucfirst(str_replace('_', ' ', $k)) . ': ' . $v)
+            ->map(fn ($v, $k) => ucfirst(str_replace('_', ' ', $k)).': '.$v)
             ->implode("\n");
 
         // Pull research snapshot data if available for richer context
@@ -822,16 +826,16 @@ PROMPT;
         if ($latestSnapshot) {
             $snap = $latestSnapshot->snapshot ?? [];
             $researchParts = array_filter([
-                !empty($snap['mission']) ? 'Extracted mission: ' . (is_string($snap['mission']) ? $snap['mission'] : json_encode($snap['mission'])) : null,
-                !empty($snap['tone']) ? 'Extracted tone: ' . (is_array($snap['tone']) ? implode(', ', $snap['tone']) : $snap['tone']) : null,
-                !empty($snap['colors']) ? 'Extracted colors: ' . (is_array($snap['colors']) ? implode(', ', $snap['colors']) : $snap['colors']) : null,
-                !empty($snap['fonts']) ? 'Extracted fonts: ' . (is_array($snap['fonts']) ? implode(', ', $snap['fonts']) : $snap['fonts']) : null,
-                !empty($snap['positioning']) ? 'Extracted positioning: ' . (is_string($snap['positioning']) ? $snap['positioning'] : json_encode($snap['positioning'])) : null,
-                !empty($snap['voice']) ? 'Extracted voice: ' . (is_string($snap['voice']) ? $snap['voice'] : json_encode($snap['voice'])) : null,
-                !empty($snap['values']) ? 'Extracted values: ' . (is_array($snap['values']) ? implode(', ', $snap['values']) : $snap['values']) : null,
+                ! empty($snap['mission']) ? 'Extracted mission: '.(is_string($snap['mission']) ? $snap['mission'] : json_encode($snap['mission'])) : null,
+                ! empty($snap['tone']) ? 'Extracted tone: '.(is_array($snap['tone']) ? implode(', ', $snap['tone']) : $snap['tone']) : null,
+                ! empty($snap['colors']) ? 'Extracted colors: '.(is_array($snap['colors']) ? implode(', ', $snap['colors']) : $snap['colors']) : null,
+                ! empty($snap['fonts']) ? 'Extracted fonts: '.(is_array($snap['fonts']) ? implode(', ', $snap['fonts']) : $snap['fonts']) : null,
+                ! empty($snap['positioning']) ? 'Extracted positioning: '.(is_string($snap['positioning']) ? $snap['positioning'] : json_encode($snap['positioning'])) : null,
+                ! empty($snap['voice']) ? 'Extracted voice: '.(is_string($snap['voice']) ? $snap['voice'] : json_encode($snap['voice'])) : null,
+                ! empty($snap['values']) ? 'Extracted values: '.(is_array($snap['values']) ? implode(', ', $snap['values']) : $snap['values']) : null,
             ]);
             if ($researchParts) {
-                $researchBlock = "\n\nRESEARCH DATA (from website/PDF analysis):\n" . implode("\n", $researchParts);
+                $researchBlock = "\n\nRESEARCH DATA (from website/PDF analysis):\n".implode("\n", $researchParts);
             }
         }
 
@@ -858,8 +862,8 @@ PROMPT;
 
         $isArray = $fieldDef['type'] === 'array';
         $formatInstruction = $isArray
-            ? 'Return ONLY a JSON array of 3-5 short strings. Example: ' . $fieldDef['example']
-            : 'Return ONLY a single string value, no JSON wrapping, no quotes. Example: ' . $fieldDef['example'];
+            ? 'Return ONLY a JSON array of 3-5 short strings. Example: '.$fieldDef['example']
+            : 'Return ONLY a single string value, no JSON wrapping, no quotes. Example: '.$fieldDef['example'];
 
         $prompt = <<<PROMPT
 You are a senior brand strategist advising a client. Based on everything you know about this brand, recommend a {$fieldDef['label']}.
@@ -920,6 +924,7 @@ PROMPT;
     {
         if (is_array($val) && array_key_exists('value', $val) && isset($val['source'])) {
             $inner = $val['value'] ?? '';
+
             return is_array($inner) ? json_encode($inner) : (string) $inner;
         }
 
@@ -1193,8 +1198,30 @@ PROMPT;
 
         [$pipelineError, $pipelineErrorKind, $canRetry] = $this->detectPipelineError($latestRunForDraft);
 
+        $pdfByteSizeForEstimate = null;
+        if ($guidelinesPdfAsset && $guidelinesPdfAsset->size_bytes) {
+            $pdfByteSizeForEstimate = (int) $guidelinesPdfAsset->size_bytes;
+        } elseif ($latestRunForDraft?->source_size_bytes) {
+            $pdfByteSizeForEstimate = (int) $latestRunForDraft->source_size_bytes;
+        }
+        $modeForEstimate = $pdfScopedRun?->extraction_mode
+            ?? $latestRunForDraft?->extraction_mode
+            ?? BrandPipelineRun::EXTRACTION_MODE_TEXT;
+        $pipelineDurationEstimate = app(PipelineDurationEstimateService::class)->estimate(
+            $tenant->id,
+            $pdfByteSizeForEstimate,
+            $modeForEstimate
+        );
+        $pipelineTiming = app(PipelineDurationEstimateService::class)->computeActiveRunTiming(
+            $latestRunForDraft,
+            $pipelineDurationEstimate,
+            $modeForEstimate
+        );
+
         return response()->json([
             'processing_progress' => $processingProgress,
+            'pipeline_duration_estimate' => $pipelineDurationEstimate,
+            'pipeline_timing' => $pipelineTiming,
             'pipeline_error' => $pipelineError,
             'pipeline_error_kind' => $pipelineErrorKind,
             'can_retry' => $canRetry,
@@ -1648,6 +1675,7 @@ PROMPT;
         $url = $validated['url'];
         $draft = $this->draftService->getWorkingVersion($brand);
         RunBrandResearchJob::dispatch($brand->id, $draft->id, $url);
+
         return response()->json(['triggered' => true]);
     }
 
@@ -1707,6 +1735,7 @@ PROMPT;
         }
         $extractionMode = BrandPipelineRun::EXTRACTION_MODE_TEXT;
         $pageCount = null;
+        $pdfAsset = null;
         if ($pdfAssetId) {
             $pdfAsset = Asset::find($pdfAssetId);
             if ($pdfAsset && str_contains(strtolower($pdfAsset->mime_type ?? ''), 'pdf')) {
@@ -1723,6 +1752,7 @@ PROMPT;
             'brand_id' => $brand->id,
             'brand_model_version_id' => $draft->id,
             'asset_id' => $pdfAssetId,
+            'source_size_bytes' => BrandPipelineRun::sourceSizeBytesFromAsset($pdfAsset ?? null),
             'stage' => BrandPipelineRun::STAGE_INIT,
             'extraction_mode' => $extractionMode,
             'status' => BrandPipelineRun::STATUS_PENDING,

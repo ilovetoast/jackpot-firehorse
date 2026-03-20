@@ -48,6 +48,7 @@ class ExtractPdfTextJob implements ShouldQueue
         $asset = Asset::with(['storageBucket', 'tenant', 'currentVersion'])->find($this->assetId);
         if (! $asset) {
             Log::warning('[ExtractPdfTextJob] Asset not found', ['asset_id' => $this->assetId]);
+
             return;
         }
 
@@ -59,12 +60,14 @@ class ExtractPdfTextJob implements ShouldQueue
         $mime = strtolower((string) ($asset->mime_type ?? ''));
         if (! str_contains($mime, 'pdf')) {
             Log::warning('[ExtractPdfTextJob] Asset is not a PDF', ['asset_id' => $asset->id]);
+
             return;
         }
 
         $extraction = PdfTextExtraction::where('asset_id', $asset->id)->find($this->extractionId);
         if (! $extraction) {
             Log::warning('[ExtractPdfTextJob] Extraction record not found', ['extraction_id' => $this->extractionId, 'asset_id' => $asset->id]);
+
             return;
         }
 
@@ -75,6 +78,7 @@ class ExtractPdfTextJob implements ShouldQueue
                 'error_message' => 'pdftotext is not installed. Install poppler-utils (e.g. apt-get install poppler-utils) on the queue worker.',
             ]);
             Log::error('[ExtractPdfTextJob] pdftotext not available on this system', ['asset_id' => $asset->id, 'extraction_id' => $extraction->id]);
+
             return;
         }
 
@@ -107,6 +111,7 @@ class ExtractPdfTextJob implements ShouldQueue
                     'asset_id' => $asset->id,
                 ]);
                 $this->startBrandPipeline($asset, BrandPipelineRun::EXTRACTION_MODE_VISION);
+
                 return;
             }
 
@@ -201,6 +206,7 @@ class ExtractPdfTextJob implements ShouldQueue
             'brand_id' => $draft->brandModel->brand_id,
             'brand_model_version_id' => $draft->id,
             'asset_id' => $asset->id,
+            'source_size_bytes' => BrandPipelineRun::sourceSizeBytesFromAsset($asset),
             'stage' => BrandPipelineRun::STAGE_INIT,
             'extraction_mode' => $extractionMode,
             'status' => BrandPipelineRun::STATUS_PENDING,

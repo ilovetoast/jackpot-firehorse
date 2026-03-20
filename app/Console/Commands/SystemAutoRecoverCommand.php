@@ -22,6 +22,7 @@ class SystemAutoRecoverCommand extends Command
     protected $description = 'Auto-recover unresolved system incidents (reconcile, retry, create tickets)';
 
     protected const MAX_INCIDENTS_PER_RUN = 200;
+
     protected const MAX_RECOVERIES_PER_RUN = 50;
 
     public function handle(ReliabilityEngine $reliabilityEngine): int
@@ -53,6 +54,7 @@ class SystemAutoRecoverCommand extends Command
             if ($result['resolved']) {
                 $resolved++;
                 $processed++;
+
                 continue;
             }
 
@@ -69,14 +71,13 @@ class SystemAutoRecoverCommand extends Command
 
             // SLA: create ticket per EscalationPolicy (critical→immediate, error→1 attempt, warning→3 attempts, age>15min escalates)
             $ticket = $reliabilityEngine->escalate($incident);
-                if ($ticket) {
-                    $ticketsCreated++;
-                }
+            if ($ticket) {
+                $ticketsCreated++;
             }
 
             // Retry dispatched by repair strategies during attemptRecovery
             $incident->refresh();
-            if (($incident->metadata['retried'] ?? false) && !($metadata['retried'] ?? false)) {
+            if (($incident->metadata['retried'] ?? false) && ! ($metadata['retried'] ?? false)) {
                 $retriesDispatched++;
             }
 

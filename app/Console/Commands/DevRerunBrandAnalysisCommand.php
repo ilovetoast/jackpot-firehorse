@@ -22,6 +22,7 @@ class DevRerunBrandAnalysisCommand extends Command
     {
         if (! app()->environment('local', 'testing')) {
             $this->error('This command is only available in local/testing environments.');
+
             return 1;
         }
 
@@ -37,12 +38,14 @@ class DevRerunBrandAnalysisCommand extends Command
 
         if (! $draft) {
             $this->error("No draft version found for brand '{$brand->name}'.");
+
             return 1;
         }
 
         $pdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
         if (! $pdfAsset) {
             $this->error("No guidelines PDF attached to draft #{$draft->id}.");
+
             return 1;
         }
 
@@ -68,6 +71,7 @@ class DevRerunBrandAnalysisCommand extends Command
 
             if ($brands->isEmpty()) {
                 $this->error('No brands with draft versions found.');
+
                 return null;
             }
 
@@ -88,6 +92,7 @@ class DevRerunBrandAnalysisCommand extends Command
             'brand_id' => $brand->id,
             'brand_model_version_id' => $draft->id,
             'asset_id' => $pdfAsset->id,
+            'source_size_bytes' => BrandPipelineRun::sourceSizeBytesFromAsset($pdfAsset),
             'stage' => BrandPipelineRun::STAGE_INIT,
             'extraction_mode' => BrandPipelineRun::resolveExtractionMode($pdfAsset),
             'status' => BrandPipelineRun::STATUS_PENDING,
@@ -126,6 +131,7 @@ class DevRerunBrandAnalysisCommand extends Command
 
         if (! $latestRun || empty($latestRun->raw_api_response_json)) {
             $this->error('No previous run with raw_api_response_json found. Run without --from-raw first.');
+
             return 1;
         }
 
@@ -135,6 +141,7 @@ class DevRerunBrandAnalysisCommand extends Command
         $extraction = $latestRun->merged_extraction_json;
         if (empty($extraction)) {
             $this->error('No merged_extraction_json in the source run.');
+
             return 1;
         }
 

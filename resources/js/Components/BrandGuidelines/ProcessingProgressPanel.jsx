@@ -13,6 +13,15 @@ const STAGE_TO_MESSAGES = {
     finalizing: ['Compiling brand intelligence report', 'Generating suggestions and insights'],
 }
 
+function formatTypicalDurationSeconds(sec) {
+    if (sec == null || sec < 1) return null
+    const s = Math.round(sec)
+    if (s < 60) return `~${s}s`
+    const m = Math.floor(s / 60)
+    const r = s % 60
+    return r > 0 ? `~${m}m ${r}s` : `~${m}m`
+}
+
 export default function ProcessingProgressPanel({
     processingProgress = {},
     accentColor = '#06b6d4',
@@ -20,6 +29,9 @@ export default function ProcessingProgressPanel({
     researchFinalized = false,
     ingestionProcessing = false,
     pipelineError = null,
+    durationEstimate = null,
+    /** From GET research-insights: elapsed vs expected (median or default baseline) */
+    pipelineTiming = null,
 }) {
     let {
         overall_percent = 0,
@@ -58,7 +70,9 @@ export default function ProcessingProgressPanel({
               ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
               : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`
 
-    const showSlowNotice = elapsedSec >= 120 && !researchFinalized && !hasFailed
+    const showSlowNotice =
+        (pipelineTiming?.slower_than_expected === true)
+        || (pipelineTiming == null && elapsedSec >= 120 && !researchFinalized && !hasFailed)
 
     // Time-based progress simulation for stages that are "processing" with no real intermediate updates.
     // Logarithmic curve: fast early progress, slows down, asymptotes at ~92%.
@@ -152,13 +166,71 @@ export default function ProcessingProgressPanel({
                         <span className="text-white/35">·</span>
                         <span>You can leave this page — we&apos;ll notify you when it&apos;s ready.</span>
                     </p>
+                    {(pipelineTiming
+                        || (durationEstimate?.median_seconds != null && durationEstimate.sample_count >= 2)) && (
+                        <p className="text-white/50 text-xs mb-4 leading-relaxed">
+                            {pipelineTiming ? (
+                                <>
+                                    Expected duration (
+                                    {pipelineTiming.expectation_source === 'median'
+                                        ? (durationEstimate?.match === 'similar_size'
+                                            ? 'similar PDF size in your workspace'
+                                            : 'same extraction mode in your workspace')
+                                        : 'default for this extraction mode until enough runs finish in your workspace'}
+                                    ):{' '}
+                                    <span className="text-cyan-200/90 font-medium">
+                                        {formatTypicalDurationSeconds(pipelineTiming.expected_seconds)}
+                                    </span>
+                                    {pipelineTiming.expectation_source === 'median' && durationEstimate?.sample_count >= 2 && (
+                                        <>
+                                            {' · '}
+                                            median of {durationEstimate.sample_count} completed runs
+                                        </>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    Typical time (
+                                    {durationEstimate.match === 'similar_size'
+                                        ? 'similar PDF size in your workspace'
+                                        : 'same extraction mode in your workspace'}
+                                    ):{' '}
+                                    <span className="text-cyan-200/90 font-medium">
+                                        {formatTypicalDurationSeconds(durationEstimate.median_seconds)}
+                                    </span>
+                                    {' · '}
+                                    median of {durationEstimate.sample_count} completed runs
+                                </>
+                            )}
+                        </p>
+                    )}
                 </>
             )}
             {showSlowNotice && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 mb-6">
-                    <p className="text-sm font-medium text-amber-100">Still working…</p>
-                    <p className="text-xs text-amber-200/80 mt-1">
-                        This is taking longer than usual. On staging, AI queues can be slow. You don&apos;t need to stay on this screen — check back in a few minutes or use Browse assets below.
+                    <p className="text-sm font-medium text-amber-100">
+                        {pipelineTiming?.slower_than_expected ? 'Taking longer than expected' : 'Still working…'}
+                    </p>
+                    <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                        {pipelineTiming?.slower_than_expected ? (
+                            <>
+                                This run is past the usual window
+                                {pipelineTiming.expected_seconds != null && (
+                                    <>
+                                        {' '}
+                                        (~
+                                        {formatTypicalDurationSeconds(pipelineTiming.expected_seconds)}
+                                        {pipelineTiming.expectation_source === 'median' ? ' typical' : ' baseline'}
+                                        )
+                                    </>
+                                )}
+                                . Large PDFs or queue load can add time — you don&apos;t need to stay on this screen.
+                            </>
+                        ) : (
+                            <>
+                                This is taking longer than usual. On staging, AI queues can be slow. You don&apos;t need to stay on this screen — check back in a few minutes or use Browse assets below.
+                            </>
+                        )}
                     </p>
                 </div>
             )}

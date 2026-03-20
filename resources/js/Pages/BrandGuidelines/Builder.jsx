@@ -44,6 +44,16 @@ function unwrapValue(field) {
     return field
 }
 
+/** Human duration for pipeline timing (no leading ~) — used in “past usual window (~3m typical)” copy */
+function formatDurationSecondsPlain(sec) {
+    if (sec == null || sec < 1) return null
+    const s = Math.round(sec)
+    if (s < 60) return `${s}s`
+    const m = Math.floor(s / 60)
+    const r = s % 60
+    return r > 0 ? `${m}m ${r}s` : `${m}m`
+}
+
 function isAiPopulated(field) {
     return field && typeof field === 'object' && field.source === 'ai'
 }
@@ -799,7 +809,10 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
             : elapsedSec < 3600
               ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
               : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`
-    const showSlowNotice = elapsedSec >= 90 && !hasError
+    const pipelineTiming = polledResearch?.pipeline_timing
+    const showSlowNotice =
+        (pipelineTiming?.slower_than_expected === true)
+        || (pipelineTiming == null && elapsedSec >= 90 && !hasError)
 
     const handleRetry = async () => {
         if (!brandId || retrying) return
@@ -885,9 +898,29 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
                     </p>
                     {showSlowNotice && (
                         <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 mb-6">
-                            <p className="text-sm font-medium text-amber-100">Taking longer than expected?</p>
-                            <p className="text-xs text-amber-200/75 mt-1">
-                                That&apos;s normal for large PDFs or when the AI service is busy. No need to refresh repeatedly — check back in a few minutes or use Start over below if you need to change inputs.
+                            <p className="text-sm font-medium text-amber-100">
+                                {pipelineTiming?.slower_than_expected ? 'Taking longer than expected' : 'Taking longer than expected?'}
+                            </p>
+                            <p className="text-xs text-amber-200/75 mt-1 leading-relaxed">
+                                {pipelineTiming?.slower_than_expected ? (
+                                    <>
+                                        This run is past the usual window
+                                        {pipelineTiming.expected_seconds != null && (
+                                            <>
+                                                {' '}
+                                                (~
+                                                {formatDurationSecondsPlain(pipelineTiming.expected_seconds)}
+                                                {pipelineTiming.expectation_source === 'median' ? ' typical' : ' baseline'}
+                                                )
+                                            </>
+                                        )}
+                                        . Large PDFs or queue load can add time — no need to refresh repeatedly.
+                                    </>
+                                ) : (
+                                    <>
+                                        That&apos;s normal for large PDFs or when the AI service is busy. No need to refresh repeatedly — check back in a few minutes or use Start over below if you need to change inputs.
+                                    </>
+                                )}
                             </p>
                         </div>
                     )}
@@ -3555,6 +3588,8 @@ export default function BrandGuidelinesBuilder({
                                                 researchFinalized={effectiveResearchFinalized === true}
                                                 ingestionProcessing={polledResearch?.ingestionProcessing ?? ingestionProcessing ?? ingestionPolling}
                                                 pipelineError={polledResearch?.pipeline_error ?? null}
+                                                durationEstimate={polledResearch?.pipeline_duration_estimate ?? null}
+                                                pipelineTiming={polledResearch?.pipeline_timing ?? null}
                                             />
                                         ) : (
                                             <ProcessingView

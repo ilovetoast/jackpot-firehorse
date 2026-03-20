@@ -47,6 +47,15 @@ function StatusBadge({ status, elapsed }) {
     )
 }
 
+function formatTypicalDurationSeconds(sec) {
+    if (sec == null || sec < 1) return null
+    const s = Math.round(sec)
+    if (s < 60) return `~${s}s`
+    const m = Math.floor(s / 60)
+    const r = s % 60
+    return r > 0 ? `~${m}m ${r}s` : `~${m}m`
+}
+
 function formatElapsed(seconds) {
     if (!seconds || seconds < 0) return null
     if (seconds < 60) return `${seconds}s`
@@ -193,6 +202,8 @@ export default function Research({
         }))
         setPipelineLive({
             processing_progress: data.processing_progress,
+            pipeline_duration_estimate: data.pipeline_duration_estimate,
+            pipeline_timing: data.pipeline_timing ?? null,
             pdf: data.pdf,
             runningSnapshotLite: data.runningSnapshotLite,
             crawlerRunning: data.crawlerRunning,
@@ -849,6 +860,31 @@ export default function Research({
                                     )
                                 })()}
 
+                                {/* Expected window (when live pipeline UI is still idle — all stages pending) */}
+                                {!isFinalized && pipelineLive?.pipeline_timing
+                                    && !(pipelineLive?.processing_progress?.stages?.length > 0
+                                        && pipelineLive.processing_progress.stages.some((s) => s.status !== 'pending')) && (
+                                    <p className="text-[11px] text-white/40 mt-2 pt-2 border-t border-white/5 leading-relaxed">
+                                        Expected duration (
+                                        {pipelineLive.pipeline_timing.expectation_source === 'median'
+                                            ? (pipelineLive.pipeline_duration_estimate?.match === 'similar_size'
+                                                ? 'similar PDF size in your workspace'
+                                                : 'same extraction mode in your workspace')
+                                            : 'default for this extraction mode until enough runs finish in your workspace'}
+                                        ):{' '}
+                                        <span className="text-cyan-200/80">
+                                            {formatTypicalDurationSeconds(pipelineLive.pipeline_timing.expected_seconds)}
+                                        </span>
+                                        {pipelineLive.pipeline_timing.expectation_source === 'median'
+                                            && pipelineLive.pipeline_duration_estimate?.sample_count >= 2 && (
+                                            <>
+                                                {' · '}
+                                                median of {pipelineLive.pipeline_duration_estimate.sample_count} completed runs
+                                            </>
+                                        )}
+                                    </p>
+                                )}
+
                                 {/* Live pipeline — hide when all stages still pending (idle / after Start over) */}
                                 {!isFinalized && pipelineLive?.processing_progress?.stages?.length > 0
                                     && pipelineLive.processing_progress.stages.some((s) => s.status !== 'pending') && (
@@ -890,6 +926,69 @@ export default function Research({
                                                 {formatEnrichmentPhase(pipelineLive.pipelineStatus)}
                                             </p>
                                         )}
+                                        {(pipelineLive.pipeline_timing
+                                            || (pipelineLive.pipeline_duration_estimate?.median_seconds != null
+                                                && pipelineLive.pipeline_duration_estimate.sample_count >= 2)) && (
+                                            <p className="text-[11px] text-white/40 pt-2 border-t border-white/5 leading-relaxed">
+                                                {pipelineLive.pipeline_timing ? (
+                                                    <>
+                                                        Expected duration (
+                                                        {pipelineLive.pipeline_timing.expectation_source === 'median'
+                                                            ? (pipelineLive.pipeline_duration_estimate?.match === 'similar_size'
+                                                                ? 'similar PDF size in your workspace'
+                                                                : 'same extraction mode in your workspace')
+                                                            : 'default for this extraction mode until enough runs finish in your workspace'}
+                                                        ):{' '}
+                                                        <span className="text-cyan-200/80">
+                                                            {formatTypicalDurationSeconds(
+                                                                pipelineLive.pipeline_timing.expected_seconds
+                                                            )}
+                                                        </span>
+                                                        {pipelineLive.pipeline_timing.expectation_source === 'median'
+                                                            && pipelineLive.pipeline_duration_estimate?.sample_count >= 2 && (
+                                                            <>
+                                                                {' · '}
+                                                                median of {pipelineLive.pipeline_duration_estimate.sample_count} completed runs
+                                                            </>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        Typical time (
+                                                        {pipelineLive.pipeline_duration_estimate.match === 'similar_size'
+                                                            ? 'similar PDF size in your workspace'
+                                                            : 'same extraction mode in your workspace'}
+                                                        ):{' '}
+                                                        <span className="text-cyan-200/80">
+                                                            {formatTypicalDurationSeconds(
+                                                                pipelineLive.pipeline_duration_estimate.median_seconds
+                                                            )}
+                                                        </span>
+                                                        {' · '}
+                                                        median of {pipelineLive.pipeline_duration_estimate.sample_count} completed runs
+                                                    </>
+                                                )}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {!isFinalized && !isStuckOrFailed && pipelineLive?.pipeline_timing?.slower_than_expected && (
+                                    <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 mt-3">
+                                        <p className="text-sm font-medium text-amber-100">Taking longer than expected</p>
+                                        <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                                            This run is past the usual window
+                                            {pipelineLive.pipeline_timing?.expected_seconds != null && (
+                                                <>
+                                                    {' '}
+                                                    (~
+                                                    {formatTypicalDurationSeconds(pipelineLive.pipeline_timing.expected_seconds)}
+                                                    {pipelineLive.pipeline_timing.expectation_source === 'median' ? ' typical' : ' baseline'}
+                                                    )
+                                                </>
+                                            )}
+                                            . Large PDFs, website crawl, or queue load can add time — you can leave this page. If nothing changes for a long time, try Retry.
+                                        </p>
                                     </div>
                                 )}
 

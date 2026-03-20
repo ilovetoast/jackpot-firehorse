@@ -49,10 +49,24 @@ class BrandPipelineRun extends Model
         }
     }
 
+    /**
+     * Snapshot PDF byte size for duration analytics (aligned with Asset.size_bytes).
+     */
+    public static function sourceSizeBytesFromAsset(?Asset $asset): ?int
+    {
+        if (! $asset) {
+            return null;
+        }
+        $n = (int) ($asset->size_bytes ?? 0);
+
+        return $n > 0 ? $n : null;
+    }
+
     protected $fillable = [
         'brand_id',
         'brand_model_version_id',
         'asset_id',
+        'source_size_bytes',
         'stage',
         'pages_total',
         'pages_processed',

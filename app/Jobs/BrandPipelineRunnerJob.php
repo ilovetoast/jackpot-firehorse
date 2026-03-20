@@ -7,14 +7,14 @@ use App\Models\Brand;
 use App\Models\BrandModelVersion;
 use App\Models\BrandPipelineRun;
 use App\Models\PdfTextExtraction;
+use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\BrandSnapshotService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\BrandWebsiteCrawlerService;
 use App\Services\BrandDNA\ClaudePdfExtractionService;
+use App\Services\BrandDNA\Extraction\BrandMaterialProcessor;
 use App\Services\BrandDNA\Extraction\SectionAwareBrandGuidelinesProcessor;
 use App\Services\BrandDNA\Extraction\WebsiteExtractionProcessor;
-use App\Services\BrandDNA\Extraction\BrandMaterialProcessor;
-use App\Services\BrandDNA\BrandResearchNotificationService;
-use App\Services\BrandDNA\BrandVersionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -61,6 +61,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
                 'stage' => BrandPipelineRun::STAGE_FAILED,
                 'error_message' => 'Brand or draft not found',
             ]);
+
             return;
         }
 
@@ -105,7 +106,13 @@ class BrandPipelineRunnerJob implements ShouldQueue
         if ($asset) {
             $extraction = $asset->getLatestPdfTextExtractionForVersion($asset->currentVersion?->id);
             if (! $extraction || ! $extraction->isComplete()) {
+                // Must enqueue ExtractPdfTextJob on first pass; otherwise we poll forever with no work.
+                $this->ensureTextExtractionStarted($asset);
+                if ($run->status === BrandPipelineRun::STATUS_PENDING) {
+                    $run->update(['status' => BrandPipelineRun::STATUS_PROCESSING]);
+                }
                 self::dispatch($run->id)->delay(now()->addSeconds(5));
+
                 return;
             }
             $text = trim($extraction->extracted_text ?? '');
@@ -115,6 +122,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
                     'stage' => BrandPipelineRun::STAGE_FAILED,
                     'error_message' => 'No text in extraction',
                 ]);
+
                 return;
             }
             $processor = app(SectionAwareBrandGuidelinesProcessor::class);
@@ -140,6 +148,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
                 'stage' => BrandPipelineRun::STAGE_FAILED,
                 'error_message' => 'No sources to process',
             ]);
+
             return;
         }
 
@@ -186,6 +195,7 @@ class BrandPipelineRunnerJob implements ShouldQueue
                 'stage' => BrandPipelineRun::STAGE_FAILED,
                 'error_message' => 'Asset not found for Claude extraction',
             ]);
+
             return;
         }
 

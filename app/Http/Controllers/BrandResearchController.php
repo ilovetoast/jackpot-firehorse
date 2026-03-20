@@ -7,7 +7,6 @@ use App\Jobs\ExtractPdfTextJob;
 use App\Jobs\RunBrandResearchJob;
 use App\Models\Asset;
 use App\Models\Brand;
-use App\Models\BrandModelVersion;
 use App\Models\BrandPipelineRun;
 use App\Models\BrandPipelineSnapshot;
 use App\Models\PdfTextExtraction;
@@ -257,10 +256,12 @@ class BrandResearchController extends Controller
                 }
             }
 
+            $pdfAssetForSize = $pdfAssetId ? Asset::find($pdfAssetId) : null;
             $run = BrandPipelineRun::create([
                 'brand_id' => $brand->id,
                 'brand_model_version_id' => $version->id,
                 'asset_id' => $pdfAssetId,
+                'source_size_bytes' => BrandPipelineRun::sourceSizeBytesFromAsset($pdfAssetForSize),
                 'stage' => BrandPipelineRun::STAGE_INIT,
                 'extraction_mode' => $extractionMode,
                 'status' => BrandPipelineRun::STATUS_PENDING,
@@ -338,6 +339,7 @@ class BrandResearchController extends Controller
                 'brand_id' => $brand->id,
                 'brand_model_version_id' => $version->id,
                 'asset_id' => $guidelinesPdfAsset->id,
+                'source_size_bytes' => BrandPipelineRun::sourceSizeBytesFromAsset($guidelinesPdfAsset),
                 'stage' => BrandPipelineRun::STAGE_INIT,
                 'extraction_mode' => $extractionMode,
                 'status' => BrandPipelineRun::STATUS_PENDING,
