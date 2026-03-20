@@ -1030,30 +1030,40 @@ export default function AppNav({ brand, tenant, variant }) {
             )}
 
             {/* Mobile PWA bottom app navigation */}
-            {isAppPage && !isCollectionOnlyNav && !isAdminPage && (
-                <div className="fixed inset-x-0 bottom-0 z-[95] border-t border-gray-200 bg-white/95 backdrop-blur sm:hidden safe-area-pb">
-                    <nav className="grid grid-cols-5 gap-0 min-w-0 px-0.5 py-1.5" aria-label="App navigation">
-                        {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
-                            const active = isActive(currentUrl)
-                            return (
-                                <Link
-                                    key={href}
-                                    href={href}
-                                    className={`flex flex-col items-center justify-center gap-0.5 min-w-0 rounded-md py-1 px-0.5 text-[10px] font-medium transition-colors ${
-                                        active ? 'text-indigo-700 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'
-                                    }`}
-                                    aria-label={label}
-                                    aria-current={active ? 'page' : undefined}
-                                    style={active ? { color: activeBrand?.primary_color || '#4338ca' } : undefined}
-                                >
-                                    <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                                    <span className="leading-none truncate w-full text-center">{shortLabel}</span>
-                                </Link>
-                            )
-                        })}
-                    </nav>
-                </div>
-            )}
+            {isAppPage && !isCollectionOnlyNav && !isAdminPage && (() => {
+                const isOnOverview = currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
+                const isDarkNav = isOnOverview
+                return (
+                    <div className={`fixed inset-x-0 bottom-0 z-[95] sm:hidden safe-area-pb ${
+                        isDarkNav
+                            ? 'border-t border-white/10 bg-[#0B0B0D]/90 backdrop-blur'
+                            : 'border-t border-gray-200 bg-white/95 backdrop-blur'
+                    }`}>
+                        <nav className="grid grid-cols-5 gap-0 min-w-0 px-1 py-2.5" aria-label="App navigation">
+                            {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
+                                const active = isActive(currentUrl)
+                                return (
+                                    <Link
+                                        key={href}
+                                        href={href}
+                                        className={`flex flex-col items-center justify-center gap-1 min-w-0 flex-1 rounded-lg py-2 px-1 text-xs font-medium transition-colors ${
+                                            isDarkNav
+                                                ? (active ? 'text-white bg-white/15' : 'text-white/60 hover:bg-white/10 hover:text-white/80')
+                                                : (active ? 'text-indigo-700 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50')
+                                        }`}
+                                        aria-label={label}
+                                        aria-current={active ? 'page' : undefined}
+                                        style={active && !isDarkNav ? { color: activeBrand?.primary_color || '#4338ca' } : undefined}
+                                    >
+                                        <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                                        <span className="leading-none truncate w-full text-center">{shortLabel}</span>
+                                    </Link>
+                                )
+                            })}
+                        </nav>
+                    </div>
+                )
+            })()}
             </nav>
         </div>
     )
