@@ -15,6 +15,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { normalizeWebsiteUrl } from '../../utils/websiteUrl'
 import { Link, router, usePage } from '@inertiajs/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
@@ -22,6 +23,7 @@ import AppHead from '../../Components/AppHead'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import FontListbox from '../../Components/BrandGuidelines/FontListbox'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
+import HeadlineAppearancePicker from '../../Components/BrandGuidelines/HeadlineAppearancePicker'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
 import ResearchSummary, { canProceedFromResearchSummary } from '../../Components/BrandGuidelines/ResearchSummary'
 import ProcessingProgressPanel from '../../Components/BrandGuidelines/ProcessingProgressPanel'
@@ -683,6 +685,8 @@ function FieldCard({ title, children, className = '' }) {
 // Full-page processing status. Only shown when step=processing (intentional checkpoint).
 // Only shows items for sources that are actually applicable (hasPdf, hasWebsite, etc.).
 function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename, hasPdf = false, hasWebsite = false, hasMaterials = false, brandId, onRetry, onStartOver }) {
+    const [pipelineOpen, setPipelineOpen] = useState(false)
+    const [elapsedSec, setElapsedSec] = useState(0)
     const hasIngestion = ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)
     const effectiveCrawler = crawlerRunning || (polledResearch?.crawlerRunning ?? false)
     const records = polledResearch?.ingestionRecords ?? ingestionRecords ?? []
@@ -780,6 +784,23 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
     const hasError = !!pipelineError
     const [retrying, setRetrying] = useState(false)
 
+    useEffect(() => {
+        if (hasError) return
+        const t0 = Date.now()
+        const id = setInterval(() => {
+            setElapsedSec(Math.floor((Date.now() - t0) / 1000))
+        }, 1000)
+        return () => clearInterval(id)
+    }, [hasError])
+
+    const elapsedLabel =
+        elapsedSec < 60
+            ? `${elapsedSec}s`
+            : elapsedSec < 3600
+              ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
+              : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`
+    const showSlowNotice = elapsedSec >= 90 && !hasError
+
     const handleRetry = async () => {
         if (!brandId || retrying) return
         setRetrying(true)
@@ -856,11 +877,41 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
                     <p className="text-white/60 text-sm mb-2">
                         We&apos;re extracting data from your uploads to fill and suggest content for the next steps.
                     </p>
-                    <p className="text-white/50 text-sm mb-6">
+                    <p className="text-white/50 text-sm mb-2">
                         This may take a few minutes — we&apos;re using AI to extract text and analyze images. You can leave and return; progress is saved.
                     </p>
+                    <p className="text-white/40 text-xs mb-4">
+                        Elapsed: {elapsedLabel}. On staging or under load, steps may sit on the same status while work continues in the queue.
+                    </p>
+                    {showSlowNotice && (
+                        <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 mb-6">
+                            <p className="text-sm font-medium text-amber-100">Taking longer than expected?</p>
+                            <p className="text-xs text-amber-200/75 mt-1">
+                                That&apos;s normal for large PDFs or when the AI service is busy. No need to refresh repeatedly — check back in a few minutes or use Start over below if you need to change inputs.
+                            </p>
+                        </div>
+                    )}
                 </>
             )}
+            <div className="mb-4">
+                <button
+                    type="button"
+                    onClick={() => setPipelineOpen((o) => !o)}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/15 bg-white/[0.04] px-4 py-3 text-left text-sm font-medium text-white/80 hover:bg-white/[0.07] transition-colors"
+                >
+                    <span>Pipeline details</span>
+                    <svg
+                        className={`h-5 w-5 text-white/50 transition-transform ${pipelineOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                </button>
+            </div>
+            {pipelineOpen && (
             <div className="space-y-5">
                 {sourceItems.map((item) => (
                     <div key={item.key} className="flex items-center gap-4">
@@ -913,10 +964,25 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
                     </div>
                 ))}
             </div>
+            )}
             {!hasError && (
                 <p className="mt-8 text-sm text-white/50">
                     You cannot proceed to the next step until processing is complete.
                 </p>
+            )}
+            {!hasError && typeof onStartOver === 'function' && (
+                <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3 border-t border-white/10 pt-6">
+                    <button
+                        type="button"
+                        onClick={onStartOver}
+                        className="inline-flex items-center justify-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium text-white/90 hover:bg-white/10 transition-colors"
+                    >
+                        Start over
+                    </button>
+                    <span className="text-xs text-white/45">
+                        Begins a fresh draft (same as Brand DNA settings). Use if you chose the wrong file or inputs.
+                    </span>
+                </div>
             )}
         </div>
     )
@@ -2442,7 +2508,7 @@ export default function BrandGuidelinesBuilder({
     isLocal = false,
     brandResearchGate = null,
 }) {
-    const { auth } = usePage().props
+    const { auth, headlineAppearanceCatalog = [] } = usePage().props
 
     // Sync active brand to match the brand being edited — avoids confusion when nav shows a different brand
     useEffect(() => {
@@ -2566,7 +2632,7 @@ export default function BrandGuidelinesBuilder({
         try {
             await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
                 pdf_asset_id: opts.pdf_asset_id || null,
-                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
+                website_url: normalizeWebsiteUrl(opts.website_url ?? (payload.sources?.website_url || '')),
                 material_asset_ids: opts.material_asset_ids || undefined,
             })
             setIngestionPolling(true)
@@ -2932,13 +2998,17 @@ export default function BrandGuidelinesBuilder({
     const effectiveOverallStatus = polledResearch?.overall_status ?? initialOverallStatus
 
     const handleAnalyzeAll = useCallback(async () => {
-        const websiteUrl = (payload.sources?.website_url || '').trim()
+        const raw = (payload.sources?.website_url || '').trim()
+        const websiteUrl = normalizeWebsiteUrl(raw)
         if (!websiteUrl) return
+        if (websiteUrl !== raw) {
+            updatePayload('sources', 'website_url', websiteUrl)
+        }
         try {
             await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url: websiteUrl })
             setResearchPolling(true)
         } catch {}
-    }, [payload.sources?.website_url, brand.id])
+    }, [payload.sources?.website_url, brand.id, updatePayload])
 
     const handleBrandMaterialUploadComplete = useCallback(async (assetId, meta) => {
         if (!assetId) return
@@ -3346,9 +3416,10 @@ export default function BrandGuidelinesBuilder({
                                         router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step }))
                                     }}
                                     onTriggerWebsiteResearch={async (url) => {
-                                        updatePayload('sources', 'website_url', url)
+                                        const normalized = normalizeWebsiteUrl(url) || url?.trim() || ''
+                                        updatePayload('sources', 'website_url', normalized)
                                         try {
-                                            await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url })
+                                            await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url: normalized })
                                             setResearchPolling(true)
                                         } catch (e) { /* gate errors handled elsewhere */ }
                                     }}
@@ -3497,6 +3568,7 @@ export default function BrandGuidelinesBuilder({
                                                 hasWebsite={!!(unwrapValue(sources.website_url) || '').trim()}
                                                 hasMaterials={brandMaterialCount > 0}
                                                 brandId={brand?.id}
+                                                onStartOver={() => setShowStartOverConfirm(true)}
                                             />
                                         )
                                     )}
@@ -3552,13 +3624,24 @@ export default function BrandGuidelinesBuilder({
                                                     <div>
                                                         <label className="block text-sm font-medium text-white/80 mb-2">Website URL</label>
                                                         <input
-                                                            type="url"
+                                                            type="text"
+                                                            inputMode="url"
+                                                            autoComplete="url"
                                                             value={unwrapValue(sources.website_url) || ''}
                                                             onChange={(e) => updatePayload('sources', 'website_url', e.target.value)}
-                                                            placeholder="https://yoursite.com"
+                                                            onBlur={(e) => {
+                                                                const n = normalizeWebsiteUrl(e.target.value)
+                                                                if (n && n !== e.target.value) {
+                                                                    updatePayload('sources', 'website_url', n)
+                                                                }
+                                                            }}
+                                                            placeholder="yoursite.com or https://yoursite.com"
                                                             disabled={effectiveCrawlerRunning}
                                                             className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:border-white/30 disabled:opacity-60 disabled:cursor-not-allowed"
                                                         />
+                                                        <p className="text-xs text-white/40 mt-2">
+                                                            Omitting https:// is fine — we add it automatically for crawling.
+                                                        </p>
                                                     </div>
                                                     <div className="pt-2">
                                                         <button
@@ -4303,6 +4386,32 @@ export default function BrandGuidelinesBuilder({
                                                         placeholder="https://fonts.googleapis.com/… and press Enter"
                                                     />
                                                     <p className="mt-1 text-xs text-white/40">Google Fonts or self-hosted font CSS URLs. HTTPS only.</p>
+                                                </div>
+                                                <div className="mt-4 pt-4 border-t border-white/10 space-y-4">
+                                                    <div>
+                                                        <label className="block text-xs text-white/60 mb-1">Headline appearance</label>
+                                                        <p className="text-[11px] text-white/40 mb-2">
+                                                            Toggle patterns that match your PDF or brand rules. Options are defined in{' '}
+                                                            <code className="text-white/50">config/headline_appearance.php</code>.
+                                                        </p>
+                                                        <HeadlineAppearancePicker
+                                                            catalog={headlineAppearanceCatalog}
+                                                            variant="dark"
+                                                            value={unwrapValue(typography.headline_appearance_features) || []}
+                                                            onChange={(ids) => updatePayload('typography', 'headline_appearance_features', ids)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-white/60 mb-1">Headline treatment notes</label>
+                                                        <p className="text-[11px] text-white/40 mb-2">Extra detail, exceptions, or do / don&apos;ts not covered by the tags.</p>
+                                                        <textarea
+                                                            rows={4}
+                                                            className="w-full rounded-xl bg-white/[0.06] border border-white/10 px-3 py-2.5 text-sm text-white/90 placeholder-white/25 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                                            placeholder="e.g. Leading em dash; display type in ALL CAPS; optional pill container on dark backgrounds…"
+                                                            value={unwrapValue(typography.headline_treatment) ?? ''}
+                                                            onChange={(e) => updatePayload('typography', 'headline_treatment', e.target.value.trim() ? e.target.value : null)}
+                                                        />
+                                                    </div>
                                                 </div>
                                             </FieldCard>
                                             <FieldCard title="Allowed Color Palette">

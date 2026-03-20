@@ -27,6 +27,7 @@ use App\Services\BrandDNA\BrandResearchReportBuilder;
 use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\WebsiteUrlNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -352,6 +353,33 @@ class BrandDNABuilderController extends Controller
         return redirect()->route('brands.research.show', [
             'brand' => $brand->id,
         ]);
+    }
+
+    /**
+     * POST /brands/{brand}/brand-dna/builder/discard-draft
+     * Deletes all in-progress (draft) brand guideline versions. Published/active versions are unchanged.
+     */
+    public function discardDraft(Request $request, Brand $brand): RedirectResponse
+    {
+        $this->authorize('update', $brand);
+
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $removed = $this->draftService->discardAllDrafts($brand);
+
+        $redirect = redirect()->route('brands.edit', [
+            'brand' => $brand->id,
+            'tab' => 'strategy',
+        ]);
+
+        if ($removed > 0) {
+            return $redirect->with('success', 'In-progress brand guidelines were removed.');
+        }
+
+        return $redirect->with('info', 'There was no in-progress draft to remove.');
     }
 
     /**
@@ -1051,6 +1079,12 @@ PROMPT;
                 $pdfState = [
                     'status' => $latestRun->status,
                     'run_id' => $latestRun->id,
+                    'stage' => $latestRun->stage,
+                    'extraction_mode' => $latestRun->extraction_mode,
+                    'pages_processed' => (int) ($latestRun->pages_processed ?? 0),
+                    'pages_total' => (int) ($latestRun->pages_total ?? 0),
+                    'progress_percent' => $latestRun->progress_percent,
+                    'error_message' => $latestRun->error_message,
                 ];
             } else {
                 $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
@@ -1605,6 +1639,9 @@ PROMPT;
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
         }
+        $request->merge([
+            'url' => WebsiteUrlNormalizer::normalize($request->input('url')) ?? '',
+        ]);
         $validated = $request->validate(['url' => 'required|string|url']);
         $url = $validated['url'];
         $draft = $this->draftService->getWorkingVersion($brand);
@@ -1646,6 +1683,9 @@ PROMPT;
             ], 429);
         }
 
+        $request->merge([
+            'website_url' => WebsiteUrlNormalizer::normalize($request->input('website_url')),
+        ]);
         $validated = $request->validate([
             'pdf_asset_id' => 'nullable|string|exists:assets,id',
             'website_url' => 'nullable|string|url',

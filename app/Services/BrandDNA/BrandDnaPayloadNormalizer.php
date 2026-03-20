@@ -71,6 +71,8 @@ class BrandDnaPayloadNormalizer
                 'secondary_font_style' => null,
                 'font_mood' => null,
                 'heading_style' => null,
+                'headline_treatment' => null,
+                'headline_appearance_features' => [],
                 'body_style' => null,
                 'external_font_links' => [],
                 'fonts' => [],

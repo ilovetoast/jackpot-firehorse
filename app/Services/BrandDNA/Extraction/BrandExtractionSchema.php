@@ -9,7 +9,7 @@ class BrandExtractionSchema
         'identity.target_audience', 'identity.tagline',
         'personality.primary_archetype', 'personality.voice_description', 'personality.brand_look',
         'visual.logo_description', 'visual.photography_style', 'visual.visual_style',
-        'typography.primary_font', 'typography.secondary_font', 'typography.heading_style', 'typography.body_style',
+        'typography.primary_font', 'typography.secondary_font', 'typography.heading_style', 'typography.headline_treatment', 'typography.body_style',
     ];
 
     public static function empty(): array
@@ -46,6 +46,8 @@ class BrandExtractionSchema
                 'primary_font' => null,
                 'secondary_font' => null,
                 'heading_style' => null,
+                'headline_treatment' => null,
+                'headline_appearance_features' => [],
                 'body_style' => null,
                 'font_details' => [],
             ],

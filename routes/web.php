@@ -712,6 +712,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Brand Guidelines Builder v1 (wizard + API)
             Route::get('/brands/{brand}/brand-guidelines/builder', [\App\Http\Controllers\BrandDNABuilderController::class, 'show'])->name('brands.brand-guidelines.builder');
             Route::post('/brands/{brand}/brand-dna/builder/start', [\App\Http\Controllers\BrandDNABuilderController::class, 'start'])->name('brands.brand-dna.builder.start');
+            Route::post('/brands/{brand}/brand-dna/builder/discard-draft', [\App\Http\Controllers\BrandDNABuilderController::class, 'discardDraft'])->name('brands.brand-dna.builder.discard-draft');
             Route::post('/brands/{brand}/brand-dna/builder/patch', [\App\Http\Controllers\BrandDNABuilderController::class, 'patch'])->name('brands.brand-dna.builder.patch');
             Route::post('/brands/{brand}/brand-dna/builder/prefill-from-guidelines-pdf', [\App\Http\Controllers\BrandGuidelinesPdfPrefillController::class, 'store'])->name('brands.brand-dna.builder.prefill-from-guidelines-pdf');
             Route::get('/brands/{brand}/brand-dna/builder/research-insights', [\App\Http\Controllers\BrandDNABuilderController::class, 'researchInsights'])->name('brands.brand-dna.builder.research-insights');

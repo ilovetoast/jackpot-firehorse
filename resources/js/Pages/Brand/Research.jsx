@@ -9,6 +9,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
+import ConfirmDialog from '../../Components/ConfirmDialog'
+import { normalizeWebsiteUrl } from '../../utils/websiteUrl'
 import axios from 'axios'
 
 function StatusBadge({ status, elapsed }) {
@@ -63,6 +65,46 @@ function timeAgo(isoString) {
     return formatElapsed(seconds) + ' ago'
 }
 
+/** Subtitle for PDF row from /research-insights `pdf` payload */
+function formatPdfPipelineDetail(pdf) {
+    if (!pdf || typeof pdf !== 'object') return null
+    if (pdf.status === 'completed' || pdf.status === 'failed') return null
+    const mode =
+        pdf.extraction_mode === 'vision'
+            ? 'Vision (page-by-page)'
+            : pdf.extraction_mode === 'text'
+              ? 'Text extraction'
+              : 'PDF pipeline'
+    if (pdf.pages_total > 0) {
+        return `${mode} · page ${pdf.pages_processed ?? 0} of ${pdf.pages_total}`
+    }
+    if (pdf.stage && pdf.stage !== 'completed') {
+        return `${mode} · ${pdf.stage}`
+    }
+    if (pdf.status === 'processing' || pdf.status === 'pending') {
+        const pct = pdf.progress_percent != null ? ` · ~${pdf.progress_percent}%` : ' · running…'
+        return `${mode}${pct}`
+    }
+    return null
+}
+
+/** What the system is doing after the snapshot exists but before research is fully finalized */
+function formatEnrichmentPhase(pipelineStatus) {
+    if (!pipelineStatus?.snapshot_persisted || pipelineStatus.research_finalized) return null
+    if (!pipelineStatus.suggestions_ready) return 'Generating suggestions…'
+    if (!pipelineStatus.coherence_ready) return 'Coherence scoring…'
+    if (!pipelineStatus.alignment_ready) return 'Alignment scoring…'
+    return 'Finalizing research…'
+}
+
+/** ResearchProgressService uses `complete`; StatusBadge prefers `completed` for labels */
+function mapStageStatusForBadge(status) {
+    if (status === 'complete') return 'completed'
+    if (status === 'failed') return 'failed'
+    if (status === 'processing') return 'processing'
+    return 'pending'
+}
+
 function SectionCard({ title, children, className = '' }) {
     return (
         <div className={`rounded-2xl bg-white/[0.04] border border-white/[0.06] p-6 ${className}`}>
@@ -105,6 +147,7 @@ export default function Research({
     modelPayload,
     brandResearchGate,
 }) {
+    const { headlineAppearanceCatalog = [] } = usePage().props
     const [websiteUrl, setWebsiteUrl] = useState(inputs.website_url || '')
     const [analyzing, setAnalyzing] = useState(false)
 
@@ -117,6 +160,11 @@ export default function Research({
     const [health, setHealth] = useState(initialPipelineHealth || { state: 'idle', error: null, can_retry: false })
     const [inputsDirty, setInputsDirty] = useState(false)
     const [showPdfModal, setShowPdfModal] = useState(false)
+    const [showStartOverConfirm, setShowStartOverConfirm] = useState(false)
+    /** After user clicks combined CTA, auto-advance to Review when research_finalized */
+    const [pendingAdvanceAfterRun, setPendingAdvanceAfterRun] = useState(false)
+    /** Rich status from GET research-insights (stages, PDF pages, snapshot/crawl) */
+    const [pipelineLive, setPipelineLive] = useState(null)
     const [pdfAsset, setPdfAsset] = useState(inputs.pdf)
     const [pdfDragOver, setPdfDragOver] = useState(false)
     const [pdfUploading, setPdfUploading] = useState(false)
@@ -133,10 +181,68 @@ export default function Research({
     const isFinalized = effectiveStatus.research_finalized
     const isStuckOrFailed = health.state === 'stuck' || health.state === 'failed'
 
+    const applyResearchInsights = useCallback((data) => {
+        setPolledStatus((prev) => ({
+            pdf_complete: data.pipelineStatus?.text_extraction_complete ?? prev.pdf_complete,
+            snapshot_ready: data.pipelineStatus?.snapshot_persisted ?? prev.snapshot_ready,
+            suggestions_ready: data.pipelineStatus?.suggestions_ready ?? prev.suggestions_ready,
+            research_finalized: data.researchFinalized ?? prev.research_finalized,
+        }))
+        setPipelineLive({
+            processing_progress: data.processing_progress,
+            pdf: data.pdf,
+            runningSnapshotLite: data.runningSnapshotLite,
+            crawlerRunning: data.crawlerRunning,
+            pipelineStatus: data.pipelineStatus,
+        })
+        if (data.latestSnapshot) {
+            setPolledResults({
+                snapshot: data.latestSnapshot,
+                suggestions: data.latestSuggestions ?? [],
+                coherence: data.latestCoherence,
+                alignment: data.latestAlignment,
+            })
+        }
+
+        if (data.pipeline_error_kind === 'stuck' || data.pipeline_error_kind === 'failed') {
+            setHealth({
+                state: data.pipeline_error_kind,
+                error: data.pipeline_error,
+                can_retry: data.can_retry ?? true,
+            })
+            setPolling(false)
+            return
+        }
+
+        if (data.researchFinalized) {
+            setHealth({ state: 'completed', error: null, can_retry: false })
+            setPolling(false)
+        }
+    }, [])
+
     useEffect(() => {
         document.documentElement.classList.add('scrollbar-cinematic')
         return () => document.documentElement.classList.remove('scrollbar-cinematic')
     }, [])
+
+    // Hydrate detailed pipeline as soon as the page loads (even before polling interval)
+    useEffect(() => {
+        if (!brand?.id || status.research_finalized) return
+        axios
+            .get(route('brands.brand-dna.builder.research-insights', { brand: brand.id }))
+            .then(({ data }) => {
+                applyResearchInsights(data)
+                const err = data.pipeline_error_kind
+                const busy =
+                    data.ingestionProcessing ||
+                    data.crawlerRunning ||
+                    data.pdf?.status === 'processing'
+                if (!data.researchFinalized && err !== 'stuck' && err !== 'failed' && busy) {
+                    setPolling(true)
+                }
+            })
+            .catch(() => {})
+    }, [brand.id, status.research_finalized, applyResearchInsights])
 
     // Polling
     useEffect(() => {
@@ -145,49 +251,21 @@ export default function Research({
             return
         }
         const poll = () => {
-            axios.get(route('brands.brand-dna.builder.research-insights', { brand: brand.id }))
-                .then(({ data }) => {
-                    setPolledStatus({
-                        pdf_complete: data.pipelineStatus?.text_extraction_complete ?? effectiveStatus.pdf_complete,
-                        snapshot_ready: data.pipelineStatus?.snapshot_persisted ?? false,
-                        suggestions_ready: data.pipelineStatus?.suggestions_ready ?? false,
-                        research_finalized: data.researchFinalized ?? false,
-                    })
-                    if (data.latestSnapshot) {
-                        setPolledResults({
-                            snapshot: data.latestSnapshot,
-                            suggestions: data.latestSuggestions ?? [],
-                            coherence: data.latestCoherence,
-                            alignment: data.latestAlignment,
-                        })
-                    }
-
-                    if (data.pipeline_error_kind === 'stuck' || data.pipeline_error_kind === 'failed') {
-                        setHealth({
-                            state: data.pipeline_error_kind,
-                            error: data.pipeline_error,
-                            can_retry: data.can_retry ?? true,
-                        })
-                        setPolling(false)
-                        return
-                    }
-
-                    if (data.researchFinalized) {
-                        setHealth({ state: 'completed', error: null, can_retry: false })
-                        setPolling(false)
-                    }
-                })
+            axios
+                .get(route('brands.brand-dna.builder.research-insights', { brand: brand.id }))
+                .then(({ data }) => applyResearchInsights(data))
                 .catch(() => {})
         }
         poll()
         pollRef.current = setInterval(poll, 4000)
         return () => { if (pollRef.current) clearInterval(pollRef.current) }
-    }, [polling, brand.id])
+    }, [polling, brand.id, applyResearchInsights])
 
     const handleAnalyze = useCallback(async () => {
         if (!brandResearchGate?.allowed) return
 
         setAnalyzing(true)
+        setPipelineLive(null)
         setInputsDirty(false)
         setHealth({ state: 'processing', error: null, can_retry: false })
         setPolledStatus(prev => ({
@@ -198,16 +276,21 @@ export default function Research({
             research_finalized: false,
         }))
         try {
+            const normalizedUrl = normalizeWebsiteUrl(websiteUrl)
             await axios.post(route('brands.research.analyze', { brand: brand.id }), {
                 pdf_asset_id: pdfAsset?.id ?? null,
-                website_url: websiteUrl.trim() || null,
+                website_url: normalizedUrl,
                 social_urls: [],
                 material_asset_ids: [],
             })
+            if (normalizedUrl && normalizedUrl !== websiteUrl) {
+                setWebsiteUrl(normalizedUrl)
+            }
             setPolling(true)
         } catch (err) {
             console.error('Analysis trigger failed', err)
             setHealth({ state: 'failed', error: err?.response?.data?.message || 'Analysis request failed.', can_retry: true })
+            setPendingAdvanceAfterRun(false)
         } finally {
             setAnalyzing(false)
         }
@@ -215,6 +298,7 @@ export default function Research({
 
     const handleRerun = useCallback(async () => {
         setAnalyzing(true)
+        setPipelineLive(null)
         setHealth({ state: 'processing', error: null, can_retry: false })
         setPolledStatus(prev => ({
             ...prev,
@@ -229,6 +313,7 @@ export default function Research({
         } catch (err) {
             console.error('Re-run failed', err)
             setHealth({ state: 'failed', error: err?.response?.data?.message || 'Re-run request failed.', can_retry: true })
+            setPendingAdvanceAfterRun(false)
         } finally {
             setAnalyzing(false)
         }
@@ -236,6 +321,7 @@ export default function Research({
 
     const handleRetry = useCallback(async () => {
         setAnalyzing(true)
+        setPipelineLive(null)
         setHealth({ state: 'processing', error: null, can_retry: false })
         setPolledStatus(prev => ({
             ...prev,
@@ -250,6 +336,7 @@ export default function Research({
         } catch (err) {
             console.error('Retry failed', err)
             setHealth({ state: 'failed', error: 'Retry request failed. Please try again.', can_retry: true })
+            setPendingAdvanceAfterRun(false)
         } finally {
             setAnalyzing(false)
         }
@@ -299,15 +386,6 @@ export default function Research({
         }
     }, [brand.id])
 
-    const handleAdvanceToReview = useCallback(async () => {
-        try {
-            await axios.post(route('brands.research.advance-to-review', { brand: brand.id }))
-            router.visit(route('brands.review.show', { brand: brand.id }))
-        } catch (err) {
-            console.error('Advance to review failed', err)
-        }
-    }, [brand.id])
-
     const handleUrlChange = useCallback((setter) => (e) => {
         setter(e.target.value)
         setInputsDirty(true)
@@ -334,12 +412,116 @@ export default function Research({
         secondary_colors: snapshot.secondary_colors || snapshot.visual?.secondary_colors || [],
         primary_font: typography.primary_font,
         secondary_font: typography.secondary_font,
+        headline_treatment: typography.headline_treatment,
+        headline_appearance_features: Array.isArray(typography.headline_appearance_features) ? typography.headline_appearance_features : [],
+        heading_style: typography.heading_style,
     }
     const hasExtractedData = Object.values(extracted).some(v => v && (!Array.isArray(v) || v.length > 0))
 
     const inputsChangedAfterAnalysis = inputsDirty && isFinalized
     const canContinue = isFinalized && !inputsChangedAfterAnalysis && !isStuckOrFailed
     const isProcessing = (polling || analyzing) && !isStuckOrFailed
+    const hasResearchInputs = Boolean(pdfAsset || normalizeWebsiteUrl(websiteUrl))
+
+    const handleAdvanceToReview = useCallback(async () => {
+        try {
+            await axios.post(route('brands.research.advance-to-review', { brand: brand.id }))
+            router.visit(route('brands.review.show', { brand: brand.id }))
+        } catch (err) {
+            console.error('Advance to review failed', err)
+        }
+    }, [brand.id])
+
+    // When combined flow finishes research, go to Review automatically
+    useEffect(() => {
+        if (!pendingAdvanceAfterRun) return
+        if (isStuckOrFailed) return
+        if (!canContinue) return
+        setPendingAdvanceAfterRun(false)
+        handleAdvanceToReview()
+    }, [pendingAdvanceAfterRun, canContinue, isStuckOrFailed, handleAdvanceToReview])
+
+    useEffect(() => {
+        if (isStuckOrFailed && pendingAdvanceAfterRun) {
+            setPendingAdvanceAfterRun(false)
+        }
+    }, [isStuckOrFailed, pendingAdvanceAfterRun])
+
+    const handleAnalyzeAndContinue = useCallback(async () => {
+        if (canContinue) {
+            await handleAdvanceToReview()
+            return
+        }
+        if (isStuckOrFailed) return
+        if (!brandResearchGate?.allowed) return
+        if (!hasResearchInputs) return
+
+        setPendingAdvanceAfterRun(true)
+        if (isFinalized && inputsChangedAfterAnalysis) {
+            setAnalyzing(true)
+            setPipelineLive(null)
+            setHealth({ state: 'processing', error: null, can_retry: false })
+            setPolledStatus((prev) => ({
+                ...prev,
+                pdf_complete: false,
+                snapshot_ready: false,
+                suggestions_ready: false,
+                research_finalized: false,
+            }))
+            try {
+                await axios.post(route('brands.research.rerun', { brand: brand.id }))
+                setPolling(true)
+            } catch (err) {
+                console.error('Re-run failed', err)
+                setHealth({ state: 'failed', error: err?.response?.data?.message || 'Re-run request failed.', can_retry: true })
+                setPendingAdvanceAfterRun(false)
+            } finally {
+                setAnalyzing(false)
+            }
+            return
+        }
+        await handleAnalyze()
+        // handleAnalyze clears analyzing; on axios failure it sets health — pending cleared by stuck/failed effect
+    }, [
+        canContinue,
+        isStuckOrFailed,
+        brandResearchGate?.allowed,
+        hasResearchInputs,
+        isFinalized,
+        inputsChangedAfterAnalysis,
+        brand.id,
+        handleAdvanceToReview,
+        handleAnalyze,
+    ])
+
+    const combinedPrimaryDisabled =
+        isStuckOrFailed
+            ? true
+            : canContinue
+              ? false
+              : !brandResearchGate?.allowed || !hasResearchInputs || isProcessing || pendingAdvanceAfterRun
+
+    const combinedPrimaryLabel = (() => {
+        if (isStuckOrFailed && health.can_retry) {
+            return 'Use Retry analysis above'
+        }
+        if (canContinue && !pendingAdvanceAfterRun) {
+            return 'Continue to Review →'
+        }
+        if (pendingAdvanceAfterRun && (polling || analyzing)) {
+            return analyzing ? 'Starting… then continuing to Review' : 'Analyzing… then continuing to Review'
+        }
+        if (isProcessing && !pendingAdvanceAfterRun) {
+            return 'Analysis running…'
+        }
+        if (!hasResearchInputs) {
+            return 'Add inputs to begin'
+        }
+        if (isFinalized && inputsChangedAfterAnalysis) {
+            return 'Re-run analysis & continue to Review →'
+        }
+        return 'Run analysis & continue to Review →'
+    })()
 
     return (
         <>
@@ -400,6 +582,21 @@ export default function Research({
                         {/* Section 1 — Inputs */}
                         <SectionCard title="Research Inputs">
                             <div className="space-y-6">
+                                {(isProcessing || pendingAdvanceAfterRun) && (
+                                    <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+                                        <p className="text-sm text-cyan-100/90">
+                                            <span className="font-medium text-white">While a run is active,</span>{' '}
+                                            the jobs below use the PDF and website as they were when analysis started. Changing the fields here does not
+                                            reroute the current run — wait for it to finish, then use <span className="text-white/90">Re-run</span> with
+                                            new inputs, or <span className="text-white/90">Start over</span> for a clean draft.
+                                        </p>
+                                        <p className="text-xs text-white/45 mt-2 leading-relaxed">
+                                            Status rows update as each stage completes (PDF pipeline → research snapshot &amp; enrichment). They are not a
+                                            single “all done” flip at the end. A floating “Processing thumbnails…” toast is usually the asset preview
+                                            pipeline for your PDF, separate from this checklist.
+                                        </p>
+                                    </div>
+                                )}
                                 {/* PDF Upload with drag-and-drop */}
                                 <div>
                                     <label className="block text-sm font-medium text-white/70 mb-2">
@@ -504,12 +701,21 @@ export default function Research({
                                         Website URL
                                     </label>
                                     <input
-                                        type="url"
+                                        type="text"
+                                        inputMode="url"
+                                        autoComplete="url"
                                         value={websiteUrl}
                                         onChange={handleUrlChange(setWebsiteUrl)}
-                                        placeholder="https://yourbrand.com"
+                                        onBlur={() => {
+                                            const n = normalizeWebsiteUrl(websiteUrl)
+                                            if (n && n !== websiteUrl) setWebsiteUrl(n)
+                                        }}
+                                        placeholder="yourbrand.com or https://yourbrand.com"
                                         className="w-full px-4 py-2.5 rounded-lg bg-white/[0.04] border border-white/10 text-white/90 placeholder-white/30 text-sm focus:outline-none focus:border-white/20"
                                     />
+                                    <p className="mt-1.5 text-[11px] text-white/35">
+                                        If you omit https://, we&apos;ll add it so the crawl can run.
+                                    </p>
                                 </div>
 
                             </div>
@@ -523,7 +729,7 @@ export default function Research({
                                     const snapDone = effectiveStatus.snapshot_ready
                                     const sugDone = effectiveStatus.suggestions_ready
                                     const hasPdf = !!pdfAsset
-                                    const hasUrls = !!websiteUrl.trim()
+                                    const hasUrls = !!normalizeWebsiteUrl(websiteUrl)
                                     const hasAnyInput = hasPdf || hasUrls
 
                                     const pdfStatus = !hasPdf ? null
@@ -548,6 +754,17 @@ export default function Research({
                                         : isStuckOrFailed ? health.state
                                         : isProcessing ? 'processing' : 'pending'
 
+                                    const pdfDetail = formatPdfPipelineDetail(pipelineLive?.pdf)
+                                    const pdfFailMessage =
+                                        pipelineLive?.pdf?.status === 'failed'
+                                            ? (pipelineLive.pdf.error_message || 'PDF processing failed')
+                                            : null
+                                    const crawlDetail = pipelineLive?.crawlerRunning
+                                        ? (pipelineLive.runningSnapshotLite?.source_url
+                                            ? `Snapshot in progress · ${pipelineLive.runningSnapshotLite.source_url}`
+                                            : 'Snapshot / crawl in progress…')
+                                        : null
+
                                     if (!hasAnyInput && !isFinalized) {
                                         return (
                                             <div className="py-4 text-center">
@@ -559,24 +776,35 @@ export default function Research({
                                     return (
                                         <>
                                             {pdfStatus && (
-                                                <div className="flex items-center justify-between py-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-sm text-white/70">PDF Extraction</span>
-                                                        <span className="text-xs text-white/30 truncate max-w-[200px]">{pdfAsset?.filename}</span>
+                                                <div className="flex items-start justify-between gap-3 py-2">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="text-sm text-white/70">PDF Extraction</span>
+                                                            <span className="text-xs text-white/30 truncate max-w-[200px]">{pdfAsset?.filename}</span>
+                                                        </div>
+                                                        {pdfDetail && (
+                                                            <p className="text-[11px] text-cyan-200/70 mt-1">{pdfDetail}</p>
+                                                        )}
+                                                        {pdfFailMessage && (
+                                                            <p className="text-[11px] text-red-400/90 mt-1">{pdfFailMessage}</p>
+                                                        )}
                                                     </div>
                                                     <StatusBadge status={pdfStatus} />
                                                 </div>
                                             )}
-                                            {urlStatus && websiteUrl.trim().startsWith('http') && (
-                                                <div className="flex items-center justify-between py-2 gap-3">
+                                            {urlStatus && hasUrls && (
+                                                <div className="flex items-start justify-between py-2 gap-3">
                                                     <div className="min-w-0">
                                                         <span className="text-sm text-white/70">Website crawl</span>
-                                                        <p className="text-[11px] text-white/35 truncate max-w-[280px]">{websiteUrl.trim()}</p>
+                                                        <p className="text-[11px] text-white/35 truncate max-w-[280px]">{normalizeWebsiteUrl(websiteUrl) || websiteUrl.trim()}</p>
+                                                        {crawlDetail && (
+                                                            <p className="text-[11px] text-cyan-200/70 mt-1 break-all">{crawlDetail}</p>
+                                                        )}
                                                     </div>
                                                     <StatusBadge status={urlStatus} />
                                                 </div>
                                             )}
-                                            {hasUrls && websiteUrl.trim().startsWith('http') && (
+                                            {hasUrls && (
                                                 <p className="text-[11px] text-white/30 pt-1">
                                                     Website crawl runs as part of analysis. Some sites block automated access — results may vary.
                                                 </p>
@@ -596,6 +824,49 @@ export default function Research({
                                         </>
                                     )
                                 })()}
+
+                                {/* Live pipeline (stages + enrichment) from research-insights */}
+                                {!isFinalized && pipelineLive?.processing_progress?.stages?.length > 0 && (
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-xs font-medium text-white/50 uppercase tracking-wider">Live pipeline</p>
+                                            {typeof pipelineLive.processing_progress.overall_percent === 'number' && (
+                                                <span className="text-[11px] text-white/40 tabular-nums">
+                                                    {Math.round(pipelineLive.processing_progress.overall_percent)}% overall
+                                                </span>
+                                            )}
+                                        </div>
+                                        <ul className="space-y-1.5">
+                                            {pipelineLive.processing_progress.stages.map((s) => (
+                                                <li key={s.key} className="flex items-start justify-between gap-2 text-xs">
+                                                    <span className={`min-w-0 ${s.status === 'complete' ? 'text-white/75' : 'text-white/45'}`}>
+                                                        {s.label}
+                                                        {s.percent != null && s.status === 'processing' && (
+                                                            <span className="text-white/30 ml-1">(~{s.percent}%)</span>
+                                                        )}
+                                                    </span>
+                                                    <StatusBadge status={mapStageStatusForBadge(s.status)} />
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        {pipelineLive.processing_progress.stages.some((s) => s.error) && (
+                                            <div className="pt-1 space-y-0.5 border-t border-white/5">
+                                                {pipelineLive.processing_progress.stages
+                                                    .filter((s) => s.error)
+                                                    .map((s) => (
+                                                        <p key={`${s.key}-err`} className="text-[11px] text-red-400/85">
+                                                            {s.label}: {s.error}
+                                                        </p>
+                                                    ))}
+                                            </div>
+                                        )}
+                                        {formatEnrichmentPhase(pipelineLive.pipelineStatus) && (
+                                            <p className="text-[11px] text-white/45 pt-1 border-t border-white/5">
+                                                {formatEnrichmentPhase(pipelineLive.pipelineStatus)}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Elapsed time */}
                                 {health.started_at && (health.state === 'processing' || isStuckOrFailed) && (
@@ -652,10 +923,16 @@ export default function Research({
                                                 style={{ backgroundColor: primaryColor }}
                                                 initial={{ width: '5%' }}
                                                 animate={{
-                                                    width: effectiveStatus.suggestions_ready ? '100%'
-                                                        : effectiveStatus.snapshot_ready ? '75%'
-                                                        : effectiveStatus.pdf_complete ? '40%'
-                                                        : '15%'
+                                                    width: (() => {
+                                                        const p = pipelineLive?.processing_progress?.overall_percent
+                                                        if (typeof p === 'number' && !Number.isNaN(p)) {
+                                                            return `${Math.min(100, Math.max(3, p))}%`
+                                                        }
+                                                        return effectiveStatus.suggestions_ready ? '100%'
+                                                            : effectiveStatus.snapshot_ready ? '75%'
+                                                            : effectiveStatus.pdf_complete ? '40%'
+                                                            : '15%'
+                                                    })(),
                                                 }}
                                                 transition={{ duration: 0.8, ease: 'easeOut' }}
                                             />
@@ -678,6 +955,23 @@ export default function Research({
                                     <ResultField label="Voice" value={extracted.voice_description} />
                                     <ResultField label="Visual Style" value={extracted.visual_style} />
                                     <ResultField label="Photography" value={extracted.photography_style} />
+                                    {extracted.headline_appearance_features?.length > 0 && (
+                                        <div className="flex flex-col gap-1 py-2 md:col-span-2">
+                                            <span className="text-xs font-medium text-white/50 uppercase tracking-wider">Headline appearance</span>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {extracted.headline_appearance_features.map((id) => {
+                                                    const label = headlineAppearanceCatalog.find((o) => o.id === id)?.label || id
+                                                    return (
+                                                        <span key={id} className="px-2 py-0.5 rounded-md bg-cyan-500/15 text-xs text-cyan-200/90 border border-cyan-500/20">
+                                                            {label}
+                                                        </span>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <ResultField label="Headline treatment notes" value={extracted.headline_treatment} />
+                                    <ResultField label="Heading style" value={extracted.heading_style} />
                                     {extracted.tone_keywords && (
                                         <div className="flex flex-col gap-1 py-2">
                                             <span className="text-xs font-medium text-white/50 uppercase tracking-wider">Tone</span>
@@ -814,64 +1108,87 @@ export default function Research({
 
                 {/* Sticky Footer */}
                 <div className="fixed bottom-0 inset-x-0 z-20 bg-[#0B0B0D]/80 backdrop-blur-xl border-t border-white/[0.06]">
-                    <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-                        <button
-                            onClick={() => router.visit(route('brands.guidelines.index', { brand: brand.id }))}
-                            className="px-4 py-2 text-sm text-white/50 hover:text-white/70 transition"
-                        >
-                            Back to Guidelines
-                        </button>
+                    <div className="max-w-5xl mx-auto px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                onClick={() => router.visit(route('brands.guidelines.index', { brand: brand.id }))}
+                                className="px-4 py-2 text-sm text-white/50 hover:text-white/70 transition"
+                            >
+                                Back to Guidelines
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowStartOverConfirm(true)}
+                                className="px-4 py-2 text-sm text-white/40 hover:text-white/65 transition"
+                            >
+                                Start over
+                            </button>
+                        </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center justify-end gap-3">
                             {isFinalized && !isStuckOrFailed && (
                                 <button
-                                    onClick={handleRerun}
-                                    disabled={analyzing || polling}
+                                    type="button"
+                                    onClick={() => {
+                                        setPendingAdvanceAfterRun(false)
+                                        handleRerun()
+                                    }}
+                                    disabled={analyzing || polling || pendingAdvanceAfterRun}
                                     className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/80 border border-white/10 hover:border-white/20 transition disabled:opacity-50"
                                 >
-                                    {(analyzing || polling) ? 'Processing…' : 'Re-run Analysis'}
+                                    {(analyzing || polling) ? 'Re-running…' : 'Re-run only (stay here)'}
                                 </button>
                             )}
 
                             {isStuckOrFailed && health.can_retry && (
                                 <button
-                                    onClick={handleRetry}
+                                    type="button"
+                                    onClick={() => {
+                                        setPendingAdvanceAfterRun(true)
+                                        handleRetry()
+                                    }}
                                     disabled={analyzing || polling}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
                                     style={{ backgroundColor: primaryColor }}
                                 >
-                                    {(analyzing || polling) ? 'Retrying…' : 'Retry Analysis'}
+                                    {(analyzing || polling) ? 'Retrying…' : 'Retry & continue to Review'}
                                 </button>
                             )}
 
-                            {!isFinalized && !isStuckOrFailed && (
+                            {!(isStuckOrFailed && health.can_retry) && (
                                 <button
                                     type="button"
-                                    onClick={handleAnalyze}
-                                    disabled={analyzing || polling || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim())}
-                                    className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
-                                    style={{ backgroundColor: primaryColor }}
-                                    aria-busy={analyzing || polling}
+                                    onClick={handleAnalyzeAndContinue}
+                                    disabled={combinedPrimaryDisabled}
+                                    className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-40 min-w-[14rem] sm:min-w-0"
+                                    style={{
+                                        backgroundColor:
+                                            combinedPrimaryDisabled && !canContinue
+                                                ? undefined
+                                                : primaryColor,
+                                    }}
+                                    aria-busy={Boolean(pendingAdvanceAfterRun && (polling || analyzing))}
                                 >
-                                    {analyzing ? 'Starting…' : polling ? 'Processing…' : 'Run Analysis'}
+                                    {combinedPrimaryLabel}
                                 </button>
                             )}
-
-                            <button
-                                onClick={handleAdvanceToReview}
-                                disabled={!canContinue}
-                                className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-30"
-                                style={{ backgroundColor: canContinue ? primaryColor : undefined }}
-                            >
-                                {isStuckOrFailed ? 'Pipeline Error — Retry Above'
-                                    : isProcessing ? 'Processing…'
-                                    : inputsChangedAfterAnalysis ? 'Re-run Analysis to Continue'
-                                    : !isFinalized && !pdfAsset && !websiteUrl.trim() ? 'Add Inputs to Begin'
-                                    : 'Continue to Review →'}
-                            </button>
                         </div>
                     </div>
                 </div>
+
+                <ConfirmDialog
+                    open={showStartOverConfirm}
+                    onClose={() => setShowStartOverConfirm(false)}
+                    onConfirm={() => {
+                        setShowStartOverConfirm(false)
+                        router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
+                    }}
+                    title="Start over?"
+                    message="Your current draft will be replaced with a fresh one and you’ll return to research. This cannot be undone."
+                    confirmText="Start over"
+                    cancelText="Cancel"
+                    variant="warning"
+                />
             </div>
 
             <BuilderAssetSelectorModal

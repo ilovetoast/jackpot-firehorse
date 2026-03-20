@@ -7,6 +7,7 @@ use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Services\AI\Providers\AnthropicProvider;
 use App\Services\BrandDNA\Extraction\BrandExtractionSchema;
+use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use App\Services\PdfPageRenderingService;
 use Illuminate\Support\Facades\Log;
 
@@ -173,7 +174,7 @@ class ClaudePdfExtractionService
 
     protected function buildPrompt(): string
     {
-        return <<<'PROMPT'
+        $prompt = <<<'PROMPT'
 You are a brand strategist analyzing a brand guidelines PDF. Your job is to extract both EXPLICIT declarations and IMPLICIT signals about the brand's identity.
 
 Brand guidelines documents rarely use our exact field names. You must interpret the document through a brand strategy lens.
@@ -293,7 +294,9 @@ TYPOGRAPHY
 
 primary_font: Heading/display font family name (exact name as written, even if commercial/proprietary).
 secondary_font: Body text font family name (exact name as written, even if commercial/proprietary).
-heading_style: Describe heading treatment (e.g. "ALL CAPS, heavy weight, tight tracking").
+heading_style: Short one-line summary of heading treatment if stated (e.g. "ALL CAPS, heavy weight, tight tracking").
+headline_treatment: Longer narrative describing how headlines must look and behave when the guidelines specify it. Include: leading accent marks or dashes, ALL CAPS / title case / sentence case, headline font vs body, containers or shapes behind headlines, borders or rules, spacing, and any "do / don't" for headlines. Use null if not discussed.
+headline_appearance_features: Array of zero or more headline appearance tags. ONLY use these exact string IDs (scan the entire PDF for evidence): {{HEADLINE_APPEARANCE_IDS}}. Include an ID when the document clearly shows or states that pattern for headlines (e.g. leading dash, all caps, boxed headlines, rules, tracking). Use [] if none are evidenced — do not invent.
 body_style: Describe body text treatment (e.g. "Regular weight, 16px/1.5 line height").
 font_details: Array of font objects for ALL fonts referenced in the document. For each font, extract:
   - name: Exact font family name as written (e.g. "RBNo3.1", "Gotham", "Montserrat")
@@ -350,6 +353,8 @@ EXTRACTION RULES
     "primary_font": "string or null",
     "secondary_font": "string or null",
     "heading_style": "string or null",
+    "headline_treatment": "string or null",
+    "headline_appearance_features": ["string"],
     "body_style": "string or null",
     "font_details": [{"name": "string", "role": "primary|secondary|accent|display|body|other", "styles": ["string"], "heading_use": "string or null", "body_use": "string or null", "usage_notes": "string or null"}]
   },
@@ -362,6 +367,11 @@ EXTRACTION RULES
   "_extraction_notes": ["string"]
 }
 PROMPT;
+        return str_replace(
+            '{{HEADLINE_APPEARANCE_IDS}}',
+            HeadlineAppearanceCatalog::idsForPrompt(),
+            $prompt
+        );
     }
 
     protected function parseResponse(string $text): array
@@ -422,6 +432,10 @@ PROMPT;
             'primary_font' => $this->string($typo['primary_font'] ?? null),
             'secondary_font' => $this->string($typo['secondary_font'] ?? null),
             'heading_style' => $this->string($typo['heading_style'] ?? null),
+            'headline_treatment' => $this->string($typo['headline_treatment'] ?? null),
+            'headline_appearance_features' => HeadlineAppearanceCatalog::normalizeFeatures(
+                is_array($typo['headline_appearance_features'] ?? null) ? $typo['headline_appearance_features'] : []
+            ),
             'body_style' => $this->string($typo['body_style'] ?? null),
         ];
 

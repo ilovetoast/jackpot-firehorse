@@ -44,6 +44,7 @@ class GuidelinesPdfToBrandDnaMapper
                 'primary_font' => $this->extractFont($text, 'primary'),
                 'secondary_font' => $this->extractFont($text, 'secondary'),
                 'heading_style' => $this->extractSection($lines, ['Heading', 'Headings', 'Heading Style']),
+                'headline_treatment' => $this->extractSection($lines, ['Headline Treatment', 'Title Treatment', 'Display Type']),
                 'body_style' => $this->extractSection($lines, ['Body', 'Body Text', 'Body Style']),
             ],
             'scoring_rules' => [

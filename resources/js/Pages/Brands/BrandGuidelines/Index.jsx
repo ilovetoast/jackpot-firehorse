@@ -4,6 +4,7 @@ import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
 import useLogoWhiteBgPreview from '../../../utils/useLogoWhiteBgPreview'
+import HeadlineAppearanceShowcase from '../../../Components/BrandGuidelines/HeadlineAppearanceShowcase'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -230,7 +231,7 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
 }
 
 export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null }) {
-    const { auth } = usePage().props
+    const { auth, headlineAppearanceCatalog = [] } = usePage().props
 
     useEffect(() => {
         if (brand?.id && auth?.activeBrand?.id && brand.id !== auth.activeBrand.id) {
@@ -277,6 +278,10 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
         primary_font: u(rawTypography.primary_font),
         secondary_font: u(rawTypography.secondary_font),
         heading_style: u(rawTypography.heading_style),
+        headline_treatment: u(rawTypography.headline_treatment),
+        headline_appearance_features: Array.isArray(rawTypography.headline_appearance_features)
+            ? rawTypography.headline_appearance_features.filter((x) => typeof x === 'string')
+            : [],
         body_style: u(rawTypography.body_style),
         fonts: (u(rawTypography.fonts) || []).map(f => typeof f === 'object' ? { ...f, name: u(f?.name), role: u(f?.role) } : f),
     }
@@ -335,6 +340,13 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const toneKeywords = personality.tone_keywords.length > 0 ? personality.tone_keywords : scoringRules.tone_keywords
     const hasLogoGuidelines = Object.values(visual.logo_usage_guidelines).some(v => v)
     const hasFonts = typography.fonts.length > 0 || typography.primary_font || typography.secondary_font
+    const hasTypographyStyles = !!(
+        typography.headline_treatment
+        || (typography.headline_appearance_features && typography.headline_appearance_features.length > 0)
+        || typography.heading_style
+        || typography.body_style
+    )
+    const hasTypographySection = hasFonts || hasTypographyStyles
     const photographyRefs = visualReferences?.photography || []
     const graphicsRefs = visualReferences?.graphics || []
     const hasVisualRefs = photographyRefs.length > 0 || graphicsRefs.length > 0
@@ -358,7 +370,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
         { id: 'sec-visual', label: 'Visual Style', show: !!(visual.photography_style || visual.visual_style || visual.composition_style || scoringRules.photography_attributes.length > 0) },
         { id: 'sec-photography', label: 'Visual References', show: hasVisualRefs },
         { id: 'sec-colors', label: 'Color System', parent: true },
-        { id: 'sec-typography', label: 'Typography', show: hasFonts },
+        { id: 'sec-typography', label: 'Typography', show: hasTypographySection },
         { id: 'sec-logo', label: 'Brand Identity', parent: true, show: !!logoUrl },
         { id: 'sec-logo-standards', label: 'Logo Standards', show: hasLogoGuidelines },
     ].filter(s => s.show !== false)
@@ -1086,7 +1098,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         </section>
 
                         {/* ═══ 8. TYPOGRAPHY (Builder Step 6: Standards) ═══ */}
-                        {hasFonts && (
+                        {hasTypographySection && (
                             <section id="sec-typography" className="py-24 md:py-32 relative overflow-hidden" style={{ background: isTextured
                                 ? `linear-gradient(180deg, ${darkenHex(secondaryColor, 0.55)} 0%, ${primaryDeep} 100%)`
                                 : isBold
@@ -1102,7 +1114,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                 <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
                                     <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Typography</SectionLabel>
 
-                                    {typography.fonts.length > 0 ? (
+                                    {hasFonts && typography.fonts.length > 0 ? (
                                         <div className="space-y-16 mt-4">
                                             {typography.fonts.map((font, i) => {
                                                 const name = typeof font === 'string' ? font : (font?.name || 'Unknown')
@@ -1129,7 +1141,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                                 )
                                             })}
                                         </div>
-                                    ) : (
+                                    ) : hasFonts ? (
                                         <div className="space-y-12 mt-4">
                                             {typography.primary_font && (
                                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -1158,9 +1170,31 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                                 </div>
                                             )}
                                         </div>
+                                    ) : null}
+                                    {(typography.headline_appearance_features?.length > 0 || typography.headline_treatment) && (
+                                        <div className={`${hasFonts ? `mt-16 pt-10 ${isTextured ? 'border-t border-white/10' : 'border-t border-gray-200/60'}` : 'mt-4'}`}>
+                                            <span className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : 'text-gray-400'}`}>Headline appearance</span>
+                                            <p className={`mt-2 text-sm ${isTextured ? 'text-white/45' : 'text-gray-500'}`}>
+                                                How display headlines should look — part of your typographic system.
+                                            </p>
+                                            {typography.headline_appearance_features?.length > 0 && (
+                                                <HeadlineAppearanceShowcase
+                                                    featureIds={typography.headline_appearance_features}
+                                                    catalog={headlineAppearanceCatalog}
+                                                    primaryColor={primaryColor}
+                                                    isTextured={isTextured}
+                                                />
+                                            )}
+                                            {typography.headline_treatment && (
+                                                <div className={typography.headline_appearance_features?.length > 0 ? 'mt-8' : 'mt-4'}>
+                                                    <span className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : 'text-gray-400'}`}>Notes</span>
+                                                    <p className={`mt-2 text-base leading-relaxed whitespace-pre-wrap ${isTextured ? 'text-white/75' : 'text-gray-700'}`}>{typography.headline_treatment}</p>
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
                                     {(typography.heading_style || typography.body_style) && (
-                                        <div className={`mt-16 pt-10 grid grid-cols-1 md:grid-cols-2 gap-8 ${isTextured ? 'border-t border-white/10' : 'border-t border-gray-200/60'}`}>
+                                        <div className={`mt-10 pt-10 grid grid-cols-1 md:grid-cols-2 gap-8 ${isTextured ? 'border-t border-white/10' : 'border-t border-gray-200/60'}`}>
                                             {typography.heading_style && (
                                                 <div>
                                                     <span className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : 'text-gray-400'}`}>Heading Style</span>

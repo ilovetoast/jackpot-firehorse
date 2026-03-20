@@ -6,6 +6,7 @@ use App\BrandDNA\Builder\BrandGuidelinesBuilderSteps;
 use App\Models\Brand;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
+use App\Support\WebsiteUrlNormalizer;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -65,14 +66,49 @@ class BrandVersionService
     }
 
     /**
+     * Remove all draft versions for this brand (in-progress guidelines only).
+     * Published/active/archived versions are untouched.
+     *
+     * @return int Number of draft rows deleted
+     */
+    public function discardAllDrafts(Brand $brand): int
+    {
+        $brandModel = $brand->brandModel;
+        if (! $brandModel) {
+            return 0;
+        }
+
+        return DB::transaction(function () use ($brandModel) {
+            return $this->deleteDraftVersionsForModel($brandModel);
+        });
+    }
+
+    /**
+     * Delete every draft version row for a brand model (cascades version assets, insight state, etc.).
+     */
+    protected function deleteDraftVersionsForModel(BrandModel $brandModel): int
+    {
+        $drafts = $brandModel->versions()->where('status', 'draft')->get();
+        $count = 0;
+        foreach ($drafts as $draft) {
+            $draft->delete();
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
      * Create a NEW draft version (e.g. "Start Over" / "Run Builder Again").
-     * Seeds from active version. Does not reuse existing draft.
+     * Seeds from active version. Any existing draft rows are removed first so only one draft exists.
      */
     public function createNewVersion(Brand $brand): BrandModelVersion
     {
         $brandModel = $this->ensureBrandModel($brand);
 
         return DB::transaction(function () use ($brandModel) {
+            $this->deleteDraftVersionsForModel($brandModel);
+
             $activeVersion = $brandModel->activeVersion;
             $basePayload = $activeVersion
                 ? ($activeVersion->model_payload ?? [])
@@ -184,6 +220,13 @@ class BrandVersionService
         foreach ($allowedPaths as $path) {
             if (array_key_exists($path, $payload)) {
                 $filteredPatch[$path] = $payload[$path];
+            }
+        }
+
+        if (isset($filteredPatch['sources']) && is_array($filteredPatch['sources']) && array_key_exists('website_url', $filteredPatch['sources'])) {
+            $wu = $filteredPatch['sources']['website_url'];
+            if (is_string($wu) && trim($wu) !== '') {
+                $filteredPatch['sources']['website_url'] = WebsiteUrlNormalizer::normalize($wu) ?? '';
             }
         }
 

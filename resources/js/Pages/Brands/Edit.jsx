@@ -15,7 +15,9 @@ import { getContrastTextColor } from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandIconUnified from '../../Components/BrandIconUnified'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
+import HeadlineAppearancePicker from '../../Components/BrandGuidelines/HeadlineAppearancePicker'
 import VersionPanel from '../../Components/BrandGuidelines/VersionPanel'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
 import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
 import AssetImagePickerFieldMulti from '../../Components/media/AssetImagePickerFieldMulti'
@@ -1072,6 +1074,8 @@ function modelPayloadToForm(payload) {
             primary_font: typography.primary_font || null,
             secondary_font: typography.secondary_font || null,
             heading_style: typography.heading_style || null,
+            headline_treatment: typography.headline_treatment || null,
+            headline_appearance_features: Array.isArray(typography.headline_appearance_features) ? typography.headline_appearance_features : [],
             body_style: typography.body_style || null,
             fonts: Array.isArray(typography.fonts) ? typography.fonts : [],
             external_font_links: Array.isArray(typography.external_font_links) ? typography.external_font_links : [],
@@ -1133,6 +1137,12 @@ function formToModelPayload(form, existingPayload) {
     typography.primary_font = form.standards?.primary_font ?? typography.primary_font
     typography.secondary_font = form.standards?.secondary_font ?? typography.secondary_font
     typography.heading_style = form.standards?.heading_style ?? typography.heading_style
+    typography.headline_treatment = form.standards?.headline_treatment ?? typography.headline_treatment
+    if (form.standards?.headline_appearance_features !== undefined) {
+        typography.headline_appearance_features = Array.isArray(form.standards.headline_appearance_features)
+            ? form.standards.headline_appearance_features
+            : []
+    }
     typography.body_style = form.standards?.body_style ?? typography.body_style
     if (form.standards?.fonts !== undefined) typography.fonts = form.standards.fonts
     if (form.standards?.external_font_links !== undefined) typography.external_font_links = form.standards.external_font_links
@@ -1316,7 +1326,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
 }
 
 export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
-    const { auth } = usePage().props
+    const { auth, headlineAppearanceCatalog = [] } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
     const isFreePlan = current_plan === 'free'
     const can = (p) => effectivePermissions.includes(p)
@@ -1350,6 +1360,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const [newColorInput, setNewColorInput] = useState('')
     const [selectedVersionId, setSelectedVersionId] = useState(null)
     const [executionAlignmentOpen, setExecutionAlignmentOpen] = useState(false)
+    const [showDiscardDraftConfirm, setShowDiscardDraftConfirm] = useState(false)
     
     // Category creation form
     const { data: categoryFormData, setData: setCategoryFormData, post: postCategory, processing: creatingCategory, reset: resetCategoryForm } = useForm({
@@ -1857,6 +1868,40 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         )}
                                     </div>
                                 )}
+
+                                {draftVersion && !isFreePlan && can('brand_settings.manage') && (
+                                    <div className="mt-4 pt-4 border-t border-red-100">
+                                        <p className="text-sm text-gray-600 mb-2">
+                                            Remove the current in-progress draft (research and builder). Published guidelines are not affected.
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowDiscardDraftConfirm(true)}
+                                            className="text-sm font-medium text-red-600 hover:text-red-700 underline underline-offset-2"
+                                        >
+                                            Delete in-progress guidelines
+                                        </button>
+                                        <ConfirmDialog
+                                            open={showDiscardDraftConfirm}
+                                            onClose={() => setShowDiscardDraftConfirm(false)}
+                                            onConfirm={() => {
+                                                setShowDiscardDraftConfirm(false)
+                                                router.post(
+                                                    typeof route === 'function'
+                                                        ? route('brands.brand-dna.builder.discard-draft', { brand: brand.id })
+                                                        : `/app/brands/${brand.id}/brand-dna/builder/discard-draft`,
+                                                    {},
+                                                    { preserveScroll: true }
+                                                )
+                                            }}
+                                            title="Delete in-progress guidelines?"
+                                            message="This removes the draft version and any unsaved research/builder progress. Your published brand guidelines (if any) stay on the site."
+                                            confirmText="Delete draft"
+                                            cancelText="Cancel"
+                                            variant="danger"
+                                        />
+                                    </div>
+                                )}
                             </div>
                         )
                     })()}
@@ -2205,6 +2250,34 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
                                         <p className="text-xs text-gray-500 mb-1.5">How body text should appear (e.g. "Regular 16px/1.6", "Light 14px").</p>
                                         <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" placeholder="e.g. Regular, 16px / 1.6 line height" />
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 space-y-3">
+                                    <div>
+                                        <span className="block text-sm font-medium text-gray-900">Headline appearance</span>
+                                        <p className="text-xs text-gray-500 mb-2 mt-0.5">
+                                            Select patterns that match your guidelines. Add more anytime in{' '}
+                                            <code className="text-[11px] bg-gray-100 px-1 rounded">config/headline_appearance.php</code>.
+                                        </p>
+                                        <HeadlineAppearancePicker
+                                            catalog={headlineAppearanceCatalog}
+                                            variant="light"
+                                            value={modelPayload.standards?.headline_appearance_features ?? []}
+                                            onChange={(ids) => setModelPayloadField('standards.headline_appearance_features', ids)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="headline_treatment" className="block text-sm font-medium text-gray-900">Headline treatment notes</label>
+                                        <p className="text-xs text-gray-500 mb-1.5">Free-form detail: spacing, do / don&apos;ts, exceptions, or anything not covered by the tags above.</p>
+                                        <textarea
+                                            id="headline_treatment"
+                                            rows={4}
+                                            value={modelPayload.standards?.headline_treatment ?? ''}
+                                            onChange={(e) => setModelPayloadField('standards.headline_treatment', e.target.value.trim() || null)}
+                                            className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed"
+                                            placeholder="e.g. Leading em dash or accent bar; display type in ALL CAPS; optional pill container on dark backgrounds; hairline rule below…"
+                                        />
                                     </div>
                                 </div>
 

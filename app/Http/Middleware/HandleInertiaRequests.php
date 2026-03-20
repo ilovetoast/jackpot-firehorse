@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\AuthPermissionService;
+use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
@@ -466,6 +467,8 @@ class HandleInertiaRequests extends Middleware
             'download_features' => $tenant ? app(PlanService::class)->getDownloadManagementFeatures($tenant) : [],
             // D11/D12: Enterprise download policy — disable single-asset download button in quick view/drawer
             'download_policy_disable_single_asset' => $tenant ? app(\App\Services\EnterpriseDownloadPolicy::class)->disableSingleAssetDownloads($tenant) : false,
+            // Brand DNA: headline appearance tags (config/headline_appearance.php) for Builder / Brand Settings / guidelines
+            'headlineAppearanceCatalog' => HeadlineAppearanceCatalog::forFrontend(),
         ];
         
         // Add pending items counts for notification bell (simple, lightweight)

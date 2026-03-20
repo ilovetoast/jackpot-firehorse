@@ -17,6 +17,7 @@ use App\Services\BrandDNA\ResearchProgressService;
 use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\WebsiteUrlNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -186,6 +187,25 @@ class BrandResearchController extends Controller
 
         $version = $this->versionService->getWorkingVersion($brand);
 
+        $request->merge([
+            'website_url' => WebsiteUrlNormalizer::normalize($request->input('website_url')),
+        ]);
+        $socialRaw = $request->input('social_urls');
+        if (is_array($socialRaw)) {
+            $request->merge([
+                'social_urls' => array_values(array_filter(array_map(
+                    static function ($u) {
+                        if (! is_string($u) || trim($u) === '') {
+                            return null;
+                        }
+
+                        return WebsiteUrlNormalizer::normalize($u) ?? $u;
+                    },
+                    $socialRaw
+                ))),
+            ]);
+        }
+
         $validated = $request->validate([
             'pdf_asset_id' => 'nullable|string|exists:assets,id',
             'website_url' => 'nullable|string|url',
@@ -290,8 +310,25 @@ class BrandResearchController extends Controller
 
         $guidelinesPdfAsset = $version->assetsForContext('guidelines_pdf')->first();
         $sources = $version->model_payload['sources'] ?? [];
-        $websiteUrl = trim((string) ($sources['website_url'] ?? ''));
-        $socialUrls = array_filter($sources['social_urls'] ?? [], fn ($u) => is_string($u) && trim($u) !== '');
+        $websiteRaw = trim((string) ($sources['website_url'] ?? ''));
+        $websiteUrl = $websiteRaw === '' ? '' : (WebsiteUrlNormalizer::normalize($websiteRaw) ?? '');
+        $socialUrls = array_values(array_filter(array_map(
+            static function ($u) {
+                if (! is_string($u) || trim($u) === '') {
+                    return null;
+                }
+
+                return WebsiteUrlNormalizer::normalize($u) ?? $u;
+            },
+            $sources['social_urls'] ?? []
+        )));
+
+        if ($websiteRaw !== '' && $websiteUrl !== '' && strcasecmp($websiteRaw, $websiteUrl) !== 0) {
+            $pl = $version->model_payload ?? [];
+            $pl['sources'] = array_merge($pl['sources'] ?? [], ['website_url' => $websiteUrl]);
+            $version->update(['model_payload' => $pl]);
+            $version->refresh();
+        }
 
         $triggered = [];
 

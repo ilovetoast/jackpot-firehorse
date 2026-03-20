@@ -34,6 +34,9 @@ export interface BrandDNA {
     primary_font: string | null
     secondary_font: string | null
     heading_style: string | null
+    headline_treatment: string | null
+    /** Stable IDs from config/headline_appearance.php */
+    headline_appearance_features: string[]
     body_style: string | null
     allowed_colors: string[]
     banned_colors: string[]

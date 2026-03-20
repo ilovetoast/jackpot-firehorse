@@ -37,8 +37,28 @@ export default function ProcessingProgressPanel({
     const failedStage = stages.find((s) => s.status === 'failed')
 
     const [activityIndex, setActivityIndex] = useState(0)
+    const [pipelineOpen, setPipelineOpen] = useState(false)
+    const [elapsedSec, setElapsedSec] = useState(0)
     const stageMessages = STAGE_TO_MESSAGES[current_stage] || STAGE_TO_MESSAGES.analyzing
     const messages = stageMessages.length > 0 ? stageMessages : STAGE_TO_MESSAGES.analyzing
+
+    useEffect(() => {
+        if (researchFinalized || hasFailed) return
+        const t0 = Date.now()
+        const id = setInterval(() => {
+            setElapsedSec(Math.floor((Date.now() - t0) / 1000))
+        }, 1000)
+        return () => clearInterval(id)
+    }, [researchFinalized, hasFailed])
+
+    const elapsedLabel =
+        elapsedSec < 60
+            ? `${elapsedSec}s`
+            : elapsedSec < 3600
+              ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
+              : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`
+
+    const showSlowNotice = elapsedSec >= 120 && !researchFinalized && !hasFailed
 
     // Time-based progress simulation for stages that are "processing" with no real intermediate updates.
     // Logarithmic curve: fast early progress, slows down, asymptotes at ~92%.
@@ -117,15 +137,30 @@ export default function ProcessingProgressPanel({
             )}
 
             <h3 className="text-lg font-semibold text-white mb-1">Processing your Brand Guidelines</h3>
-            <p className="text-white/50 text-sm mb-4">
+            <p className="text-white/50 text-sm mb-2">
                 {hasFailed
                     ? 'Processing encountered an error.'
                     : 'Your brand research is processing in the background.'}
             </p>
             {!hasFailed && (
-                <p className="text-white/70 text-sm mb-6">
-                    You can leave this page and continue using the platform — we&apos;ll notify you when it&apos;s ready.
-                </p>
+                <>
+                    <p className="text-white/70 text-sm mb-2">
+                        Large PDFs or busy servers can take several minutes. Status updates every few seconds — if the step doesn&apos;t change for a while, it may still be working (especially vision passes on image-heavy pages).
+                    </p>
+                    <p className="text-white/55 text-xs mb-4 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>Elapsed: {elapsedLabel}</span>
+                        <span className="text-white/35">·</span>
+                        <span>You can leave this page — we&apos;ll notify you when it&apos;s ready.</span>
+                    </p>
+                </>
+            )}
+            {showSlowNotice && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 mb-6">
+                    <p className="text-sm font-medium text-amber-100">Still working…</p>
+                    <p className="text-xs text-amber-200/80 mt-1">
+                        This is taking longer than usual. On staging, AI queues can be slow. You don&apos;t need to stay on this screen — check back in a few minutes or use Browse assets below.
+                    </p>
+                </div>
             )}
 
             {/* Overall progress bar */}
@@ -164,8 +199,26 @@ export default function ProcessingProgressPanel({
                 </p>
             )}
 
-            {/* Stage list */}
-            <div className="space-y-4 mb-6">
+            {/* Stage list — collapsed by default (technical detail) */}
+            <div className="mb-6">
+                <button
+                    type="button"
+                    onClick={() => setPipelineOpen((o) => !o)}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/15 bg-white/[0.04] px-4 py-3 text-left text-sm font-medium text-white/80 hover:bg-white/[0.07] transition-colors"
+                >
+                    <span>Pipeline details</span>
+                    <svg
+                        className={`h-5 w-5 text-white/50 transition-transform ${pipelineOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                </button>
+                {pipelineOpen && (
+            <div className="space-y-4 mt-4 pl-1">
                 {enhancedStages.map((stage) => (
                     <div key={stage.key} className="flex items-center gap-4">
                         <div
@@ -245,6 +298,8 @@ export default function ProcessingProgressPanel({
                         </div>
                     </div>
                 ))}
+            </div>
+                )}
             </div>
 
             {/* Finalizing state message */}

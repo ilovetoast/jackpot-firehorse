@@ -2,6 +2,8 @@
 
 namespace App\Services\BrandDNA\Extraction;
 
+use App\Support\BrandDNA\HeadlineAppearanceCatalog;
+
 use App\Services\BrandDNA\SuggestionConfidenceTier;
 
 /**
@@ -419,7 +421,7 @@ class ExtractionSuggestionService
             ], $sectionSources, $extraction);
         }
 
-        foreach (['heading_style', 'body_style'] as $key) {
+        foreach (['heading_style', 'headline_treatment', 'body_style'] as $key) {
             $val = $typo[$key] ?? null;
             if (! empty($val) && is_string($val)) {
                 $suggestions[] = $this->normalizeSuggestion([
@@ -430,6 +432,24 @@ class ExtractionSuggestionService
                     'reason' => 'Typography style extracted from Brand Guidelines.',
                     'confidence' => 0.75,
                     'weight' => 0.7,
+                    'source' => $pdfSources,
+                    'evidence' => ['Brand guidelines PDF'],
+                ], $sectionSources, $extraction);
+            }
+        }
+
+        $headlineFeatures = $typo['headline_appearance_features'] ?? null;
+        if (is_array($headlineFeatures) && count($headlineFeatures) > 0) {
+            $normalized = HeadlineAppearanceCatalog::normalizeFeatures($headlineFeatures);
+            if (count($normalized) > 0) {
+                $suggestions[] = $this->normalizeSuggestion([
+                    'key' => 'SUG:typography.headline_appearance_features',
+                    'path' => 'typography.headline_appearance_features',
+                    'type' => 'update',
+                    'value' => $normalized,
+                    'reason' => 'Headline appearance patterns extracted from Brand Guidelines.',
+                    'confidence' => 0.72,
+                    'weight' => 0.65,
                     'source' => $pdfSources,
                     'evidence' => ['Brand guidelines PDF'],
                 ], $sectionSources, $extraction);

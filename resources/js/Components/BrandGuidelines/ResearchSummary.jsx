@@ -36,6 +36,8 @@ const PATH_LABELS = {
     'typography.primary_font': 'Heading font',
     'typography.secondary_font': 'Body font',
     'typography.heading_style': 'Heading style',
+    'typography.headline_treatment': 'Headline treatment',
+    'typography.headline_appearance_features': 'Headline appearance',
     'typography.body_style': 'Body style',
     'visual.photography_style': 'Photography',
     'visual.visual_style': 'Visual style',
