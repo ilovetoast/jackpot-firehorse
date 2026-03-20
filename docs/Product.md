@@ -4,7 +4,7 @@ Product and deployment notes for DAM features. Use this for production considera
 
 ---
 
-## Public Collections
+## Public Collections s
 
 Public collections allow shareable, read-only views of a collection via a URL. No auth required; access is limited to assets that are in the collection and visible under existing visibility rules.
 
