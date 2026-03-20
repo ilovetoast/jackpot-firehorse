@@ -134,6 +134,48 @@ class CompanyController extends Controller
     }
 
     /**
+     * Create a new company for the authenticated user (becomes owner).
+     * Mirrors the signup flow but for existing users adding another company.
+     */
+    public function store(Request $request)
+    {
+        $user = Auth::user();
+
+        $validated = $request->validate([
+            'company_name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $baseSlug = \Illuminate\Support\Str::slug($validated['company_name']);
+        $slug = $baseSlug;
+        $counter = 1;
+        while (Tenant::where('slug', $slug)->exists()) {
+            $slug = $baseSlug . '-' . $counter;
+            $counter++;
+        }
+
+        $tenant = Tenant::create([
+            'name' => $validated['company_name'],
+            'slug' => $slug,
+        ]);
+
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
+
+        $defaultBrand = $tenant->defaultBrand;
+        if ($defaultBrand) {
+            $defaultBrand->users()->syncWithoutDetaching([
+                $user->id => ['role' => 'admin'],
+            ]);
+        }
+
+        session([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $defaultBrand?->id,
+        ]);
+
+        return redirect()->route('overview')->with('success', 'Company created successfully.');
+    }
+
+    /**
      * Show the company settings page.
      */
     public function settings()

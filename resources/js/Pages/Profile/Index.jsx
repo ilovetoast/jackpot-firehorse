@@ -1,5 +1,6 @@
-import { useForm, usePage, router } from '@inertiajs/react'
+import { useForm, usePage, router, Link } from '@inertiajs/react'
 import { useState, useRef, useEffect } from 'react'
+import axios from 'axios'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -85,6 +86,131 @@ const timezones = [
     'Pacific/Auckland',
 ]
 
+function CompaniesSection({ companies = [] }) {
+    const [showCreateForm, setShowCreateForm] = useState(false)
+    const { data, setData, post, processing, errors, reset } = useForm({
+        company_name: '',
+    })
+
+    const handleCreate = (e) => {
+        e.preventDefault()
+        post('/app/companies/create', {
+            preserveScroll: true,
+            onSuccess: () => {
+                reset()
+                setShowCreateForm(false)
+            },
+        })
+    }
+
+    return (
+        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                    <h2 className="text-lg font-semibold text-gray-900">Companies</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                        Manage your companies or create a new one. You'll become the owner of any company you create.
+                    </p>
+                </div>
+                <div className="lg:col-span-2 px-6 py-6">
+                    {companies.length > 0 && (
+                        <div className="mb-6">
+                            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Your Companies</h3>
+                            <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                                {companies.map((company) => (
+                                    <li key={company.id} className="flex items-center justify-between px-4 py-3">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm font-bold">
+                                                {company.name?.charAt(0)?.toUpperCase() || '?'}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate">{company.name}</p>
+                                                <p className="text-xs text-gray-500 truncate">{company.slug}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {company.is_active && (
+                                                <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                                                    Active
+                                                </span>
+                                            )}
+                                            {!company.is_active && (
+                                                <form method="POST" action={`/app/companies/${company.id}/switch`}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => router.post(`/app/companies/${company.id}/switch`)}
+                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                    >
+                                                        Switch
+                                                    </button>
+                                                </form>
+                                            )}
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {!showCreateForm ? (
+                        <button
+                            type="button"
+                            onClick={() => setShowCreateForm(true)}
+                            className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                        >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                            </svg>
+                            Create New Company
+                        </button>
+                    ) : (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-1">Create a new company</h3>
+                            <p className="text-xs text-gray-500 mb-4">
+                                You'll be the owner with full access. A default brand will be created automatically.
+                            </p>
+                            <form onSubmit={handleCreate}>
+                                <div className="flex items-start gap-3">
+                                    <div className="flex-1">
+                                        <label htmlFor="company_name" className="sr-only">Company name</label>
+                                        <input
+                                            type="text"
+                                            id="company_name"
+                                            placeholder="Company name"
+                                            required
+                                            value={data.company_name}
+                                            onChange={(e) => setData('company_name', e.target.value)}
+                                            className="block w-full rounded-md border-0 py-2 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                                            autoFocus
+                                        />
+                                        {errors.company_name && (
+                                            <p className="mt-1 text-sm text-red-600">{errors.company_name}</p>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={processing || !data.company_name.trim()}
+                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                                    >
+                                        {processing ? 'Creating...' : 'Create'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowCreateForm(false); reset() }}
+                                        className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 export default function ProfileIndex({ user: userData }) {
     const { auth } = usePage().props
     // Use userData from props if available, otherwise fall back to auth.user
@@ -93,11 +219,15 @@ export default function ProfileIndex({ user: userData }) {
     const [imageToCrop, setImageToCrop] = useState(null)
     const fileInputRef = useRef(null)
     
+    const [avatarUploading, setAvatarUploading] = useState(false)
+    const [avatarError, setAvatarError] = useState(null)
+
     const { data, setData, put, processing, errors, reset } = useForm({
         first_name: user?.first_name || '',
         last_name: user?.last_name || '',
         email: user?.email || '',
         avatar: null,
+        avatar_s3_key: null,
         avatar_preview: user?.avatar_url || '',
         country: user?.country || '',
         timezone: user?.timezone || '',
@@ -162,11 +292,9 @@ export default function ProfileIndex({ user: userData }) {
             forceFormData: true,
             preserveScroll: true,
             onSuccess: (page) => {
-                // Cleanup preview URL if it was a blob
                 if (data.avatar_preview && data.avatar_preview.startsWith('blob:')) {
                     URL.revokeObjectURL(data.avatar_preview)
                 }
-                // Update avatar_preview with the new URL from server response
                 if (page.props.user?.avatar_url) {
                     setData('avatar_preview', page.props.user.avatar_url)
                 }
@@ -186,12 +314,41 @@ export default function ProfileIndex({ user: userData }) {
         }
     }
 
-    const handleCropComplete = (croppedImageBlob) => {
+    const handleCropComplete = async (croppedImageBlob) => {
         const previewUrl = URL.createObjectURL(croppedImageBlob)
-        setData('avatar', croppedImageBlob)
         setData('avatar_preview', previewUrl)
         setCropModalOpen(false)
         setImageToCrop(null)
+        setAvatarError(null)
+        setAvatarUploading(true)
+
+        const ext = croppedImageBlob.type === 'image/png' ? 'png'
+            : croppedImageBlob.type === 'image/gif' ? 'gif'
+            : croppedImageBlob.type === 'image/webp' ? 'webp'
+            : 'jpg'
+
+        try {
+            const { data: presign } = await axios.post('/app/profile/avatar/presign', {
+                content_type: croppedImageBlob.type || 'image/jpeg',
+                extension: ext,
+            })
+
+            await fetch(presign.upload_url, {
+                method: 'PUT',
+                headers: { 'Content-Type': croppedImageBlob.type || 'image/jpeg' },
+                body: croppedImageBlob,
+            })
+
+            setData('avatar_s3_key', presign.key)
+            setData('avatar', null)
+        } catch (err) {
+            console.error('[Avatar S3 upload failed]', err)
+            setAvatarError(err?.response?.data?.error || 'Upload failed. Please try again.')
+            setData('avatar', croppedImageBlob)
+            setData('avatar_s3_key', null)
+        } finally {
+            setAvatarUploading(false)
+        }
     }
 
     const handleRemoveAvatar = () => {
@@ -294,6 +451,17 @@ export default function ProfileIndex({ user: userData }) {
                             </button>
                             <button
                                 type="button"
+                                onClick={() => handleSectionClick('companies')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'companies'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Companies
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => handleSectionClick('danger-zone')}
                                 className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
                                     activeSection === 'danger-zone'
@@ -359,6 +527,8 @@ export default function ProfileIndex({ user: userData }) {
                                             <p className="mt-2 text-xs text-gray-500">
                                                 JPG, PNG, GIF or WEBP. Max size 2MB. Square images work best.
                                             </p>
+                                            {avatarUploading && <p className="mt-2 text-sm text-indigo-600">Uploading photo…</p>}
+                                            {avatarError && <p className="mt-2 text-sm text-red-600">{avatarError}</p>}
                                             {errors.avatar && <p className="mt-2 text-sm text-red-600">{errors.avatar}</p>}
                                         </div>
                                     </div>
@@ -561,10 +731,10 @@ export default function ProfileIndex({ user: userData }) {
                                             <div className="flex justify-end">
                                                 <button
                                                     type="submit"
-                                                    disabled={processing}
+                                                    disabled={processing || avatarUploading}
                                                     className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
                                                 >
-                                                    Save
+                                                    {avatarUploading ? 'Uploading photo…' : 'Save'}
                                                 </button>
                                             </div>
                                         </div>
@@ -673,6 +843,11 @@ export default function ProfileIndex({ user: userData }) {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Companies */}
+                    <div id="companies" className="mb-12 scroll-mt-8">
+                        <CompaniesSection companies={auth.companies} />
                     </div>
 
                     {/* Delete Account */}

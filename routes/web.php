@@ -141,6 +141,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // Company management (no tenant middleware - can access when no tenant selected)
     // These routes should be accessible even if user is disabled for current tenant
     Route::get('/companies', [\App\Http\Controllers\CompanyController::class, 'index'])->name('companies.index');
+    Route::post('/companies/create', [\App\Http\Controllers\CompanyController::class, 'store'])->name('companies.store');
     Route::post('/companies/reset-session', [\App\Http\Controllers\CompanyController::class, 'resetSession'])->name('companies.reset-session');
     Route::post('/companies/{tenant}/switch', [\App\Http\Controllers\CompanyController::class, 'switch'])->name('companies.switch');
     
@@ -275,6 +276,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // Profile routes
     Route::get('/profile', [\App\Http\Controllers\ProfileController::class, 'index'])->name('profile.index');
     Route::put('/profile', [\App\Http\Controllers\ProfileController::class, 'update'])->name('profile.update');
+    Route::post('/profile/avatar/presign', [\App\Http\Controllers\ProfileController::class, 'presignAvatarUpload'])->name('profile.avatar.presign');
     Route::delete('/profile/avatar', [\App\Http\Controllers\ProfileController::class, 'removeAvatar'])->name('profile.avatar.remove');
     Route::put('/profile/password', [\App\Http\Controllers\ProfileController::class, 'updatePassword'])->name('profile.password.update');
     Route::delete('/profile', [\App\Http\Controllers\ProfileController::class, 'destroy'])->name('profile.destroy');
