@@ -150,6 +150,11 @@ class AnalyticsOverviewController extends Controller
                 $query->where('metadata->preview_generated', true)
                     ->orWhereNull('metadata->preview_generated');
             })
-            ->whereNull('deleted_at');
+            ->whereNull('deleted_at')
+            ->whereNotNull('published_at')
+            ->whereNull('archived_at')
+            ->normalIntakeOnly()
+            ->excludeBuilderStaged()
+            ->where('type', AssetType::ASSET);
     }
 }

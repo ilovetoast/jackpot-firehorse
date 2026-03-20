@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ApprovalStatus;
+use App\Enums\AssetType;
 use App\Enums\AssetStatus;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
@@ -213,6 +214,15 @@ class DashboardController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->where('assets.status', AssetStatus::VISIBLE)
             ->whereNull('assets.deleted_at')
+            ->whereNotNull('assets.published_at')
+            ->whereNull('assets.archived_at')
+            ->where(function ($q) {
+                $q->where('assets.builder_staged', false)->orWhereNull('assets.builder_staged');
+            })
+            ->where(function ($q) {
+                $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
+            })
+            ->where('assets.type', AssetType::ASSET->value)
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as view_count'))
             ->groupBy('assets.id')
             ->orderByDesc('view_count')
@@ -311,6 +321,15 @@ class DashboardController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->where('assets.status', AssetStatus::VISIBLE)
             ->whereNull('assets.deleted_at')
+            ->whereNotNull('assets.published_at')
+            ->whereNull('assets.archived_at')
+            ->where(function ($q) {
+                $q->where('assets.builder_staged', false)->orWhereNull('assets.builder_staged');
+            })
+            ->where(function ($q) {
+                $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
+            })
+            ->where('assets.type', AssetType::ASSET->value)
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as download_count'))
             ->groupBy('assets.id')
             ->orderByDesc('download_count')
@@ -420,6 +439,15 @@ class DashboardController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->where('assets.status', AssetStatus::VISIBLE)
             ->whereNull('assets.deleted_at')
+            ->whereNotNull('assets.published_at')
+            ->whereNull('assets.archived_at')
+            ->where(function ($q) {
+                $q->where('assets.builder_staged', false)->orWhereNull('assets.builder_staged');
+            })
+            ->where(function ($q) {
+                $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
+            })
+            ->where('assets.type', AssetType::ASSET->value)
             ->select('assets.id', 'am_trending.trending_score')
             ->orderByDesc('am_trending.trending_score')
             ->limit(25)
@@ -858,12 +886,22 @@ class DashboardController extends Controller
         // Pass full signals so LLM can reinforce (not duplicate) and insights inherit correct hrefs
         $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals);
 
-        // Collage assets: best visual quality first (compliance score), then most viewed
+        // Collage assets: best visual quality first (compliance score), then most viewed.
+        // Match main Assets library: published, non-archived, normal intake, not builder-staged, type=asset (excludes reference/research materials).
         $collageAssets = Asset::where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('assets.status', AssetStatus::VISIBLE)
             ->where('assets.thumbnail_status', ThumbnailStatus::COMPLETED)
             ->whereNull('assets.deleted_at')
+            ->whereNotNull('assets.published_at')
+            ->whereNull('assets.archived_at')
+            ->where(function ($q) {
+                $q->where('assets.builder_staged', false)->orWhereNull('assets.builder_staged');
+            })
+            ->where(function ($q) {
+                $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
+            })
+            ->where('assets.type', AssetType::ASSET->value)
             ->leftJoin('brand_compliance_scores', function ($join) {
                 $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
                     ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
@@ -973,6 +1011,7 @@ class DashboardController extends Controller
      */
     protected function getCompletedAssetsQuery(int $tenantId, int $brandId)
     {
+        // Align with main /app/assets grid: library assets only (not staged, unpublished, archived, reference/research, or soft-deleted).
         return Asset::where('tenant_id', $tenantId)
             ->where('brand_id', $brandId)
             ->where('status', AssetStatus::VISIBLE) // Only visible assets
@@ -984,7 +1023,12 @@ class DashboardController extends Controller
                 $query->where('metadata->preview_generated', true)
                       ->orWhereNull('metadata->preview_generated');
             })
-            ->whereNull('deleted_at');
+            ->whereNull('deleted_at')
+            ->whereNotNull('published_at')
+            ->whereNull('archived_at')
+            ->normalIntakeOnly()
+            ->excludeBuilderStaged()
+            ->where('type', AssetType::ASSET);
     }
     
     /**

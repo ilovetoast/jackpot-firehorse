@@ -39,6 +39,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { trackImageLoad } from '../utils/performanceTracking'
+import { analyzeLogoLightOnWhiteRisk } from '../utils/imageUtils'
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
 
@@ -196,6 +197,27 @@ export default function ThumbnailPreview({
     const isFailed = thumbnailStatus === 'FAILED' || thumbnailStatus === 'failed' || state === 'FAILED'
     const hasThumbnailError = !!asset?.thumbnail_error
 
+    const catSlug = asset?.category?.slug
+    const isLogoOrGraphicCategory = catSlug === 'logos' || catSlug === 'graphics'
+    const [needsContrastBackdrop, setNeedsContrastBackdrop] = useState(false)
+
+    // Canvas check: light-on-white / low-contrast rasters (categories without checkerboard use flat gray).
+    // Logos + graphics use checkerboard on AssetCard; skip duplicate analysis.
+    useEffect(() => {
+        setNeedsContrastBackdrop(false)
+        if (!lockedUrl || isLogoOrGraphicCategory || isSvg || urlKnownFailed) return
+        let cancelled = false
+        analyzeLogoLightOnWhiteRisk(lockedUrl).then((r) => {
+            if (cancelled) return
+            if (!r.skipped && r.ok === false) setNeedsContrastBackdrop(true)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [lockedUrl, isLogoOrGraphicCategory, isSvg, urlKnownFailed])
+
+    const contrastBackdropClass = needsContrastBackdrop ? 'bg-neutral-200' : ''
+
     /* ------------------------------------------------------------
        Animation trigger (only for meaningful transitions)
     ------------------------------------------------------------ */
@@ -284,7 +306,7 @@ export default function ThumbnailPreview({
         }
         
         return (
-            <div className={`relative ${className}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`}>
                 {/* Background placeholder - only show if image not loaded and not animating */}
                 {!imageLoaded && !isAnimating && (
                     <div className="absolute inset-0 bg-gray-100" />
@@ -338,7 +360,7 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`}>
                 {/* Preview image always renders when preview_thumbnail_url exists */}
                 {/* imageLoaded only affects opacity, not DOM presence */}
                 <img
@@ -430,7 +452,7 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`}>
                 {/* Background placeholder - show while image loads */}
                 {!imageLoaded && (
                     <div className="absolute inset-0 bg-gray-100" />

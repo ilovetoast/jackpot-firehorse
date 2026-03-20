@@ -292,6 +292,20 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
 
+    /** Light checkerboard so white/light marks stay visible (logos + graphics; CSS-only). */
+    /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
+    const slug = asset?.category?.slug
+    const isLogoOrGraphicCategory = slug === 'logos' || slug === 'graphics'
+    const checkerboardThumbnailStyle =
+        isLogoOrGraphicCategory && !isCinematic
+            ? {
+                  backgroundColor: '#f3f4f6',
+                  backgroundImage:
+                      'repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%)',
+                  backgroundSize: '12px 12px',
+              }
+            : undefined
+
     return (
         <div
             onClick={handleClick}
@@ -312,8 +326,11 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) or elongated (5:3) for guidelines */}
             {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
-                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? 'bg-white shadow-none group-hover:shadow-lg' : isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
-                style={(!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}}
+                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
+                style={{
+                    ...((!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}),
+                    ...checkerboardThumbnailStyle,
+                }}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
