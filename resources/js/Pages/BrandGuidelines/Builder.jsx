@@ -682,7 +682,7 @@ function FieldCard({ title, children, className = '' }) {
 // ——— ProcessingView ———
 // Full-page processing status. Only shown when step=processing (intentional checkpoint).
 // Only shows items for sources that are actually applicable (hasPdf, hasWebsite, etc.).
-function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename, hasPdf = false, hasWebsite = false, hasSocial = false, hasMaterials = false, brandId, onRetry, onStartOver }) {
+function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRecords, crawlerRunning, polledResearch, guidelinesPdfFilename, hasPdf = false, hasWebsite = false, hasMaterials = false, brandId, onRetry, onStartOver }) {
     const hasIngestion = ingestionProcessing || (polledResearch?.ingestionProcessing ?? false)
     const effectiveCrawler = crawlerRunning || (polledResearch?.crawlerRunning ?? false)
     const records = polledResearch?.ingestionRecords ?? ingestionRecords ?? []
@@ -690,7 +690,6 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
 
     const pdf = polledResearch?.pdf ?? {}
     const website = polledResearch?.website ?? {}
-    const social = polledResearch?.social ?? {}
     const materials = polledResearch?.materials ?? {}
 
     const pdfStatus = pdf.status || (pdfExtractionPolling ? 'processing' : 'pending')
@@ -745,12 +744,6 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
             status: materialsStatus === 'completed' ? 'complete' : materialsStatus === 'processing' ? 'processing' : 'pending',
             detail: materialsStatus === 'completed' ? 'Complete' : materialsProgress ? `Processing ${materialsProgress}` : (materialsStatus === 'processing' ? 'Processing…' : 'Pending'),
             progress: materials.assets_total > 0 ? stableMaterialsProgress : null,
-        },
-        hasSocial && {
-            key: 'social',
-            label: 'Social',
-            status: social.status === 'completed' ? 'complete' : social.status === 'processing' ? 'processing' : 'pending',
-            detail: social.status === 'completed' ? 'Complete' : social.status === 'processing' ? 'Analyzing…' : 'Pending',
         },
     ]
 
@@ -992,7 +985,7 @@ function ProcessingStatusPanel({ pdfExtractionPolling, ingestionProcessing, inge
                 {showCrawlerInPanel && (
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-sm">
-                            <span className="text-amber-200">Analyzing website & social links</span>
+                            <span className="text-amber-200">Analyzing website</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                             <motion.div
@@ -2174,7 +2167,7 @@ function ReviewPanel({ payload, brand, logoRef, onStyleChange, onGoToStep, brand
     }
 
     const items = [
-        { label: 'Website & Social', value: unwrapValue(sources.website_url) ? `Website: ${unwrapValue(sources.website_url)}` : `Social URLs: ${(unwrapValue(sources.social_urls) || []).length}`, missing: !hasWebsite },
+        { label: 'Website', value: unwrapValue(sources.website_url) ? unwrapValue(sources.website_url) : '—', missing: !hasWebsite },
         { label: 'Logo', value: logoRef?.original_filename ? `✓ ${logoRef.original_filename}` : '—', missing: !hasLogo },
         { label: 'Archetype', value: unwrapValue(personality.primary_archetype) || (unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c)).filter(Boolean).join(', ') || '—' },
         { label: 'Why', value: truncate(unwrapValue(identity.mission)) },
@@ -2940,16 +2933,12 @@ export default function BrandGuidelinesBuilder({
 
     const handleAnalyzeAll = useCallback(async () => {
         const websiteUrl = (payload.sources?.website_url || '').trim()
-        const socialUrls = (payload.sources?.social_urls || []).filter((u) => typeof u === 'string' && u.trim().startsWith('http'))
-        const urls = [...(websiteUrl ? [websiteUrl] : []), ...socialUrls]
-        if (urls.length === 0) return
+        if (!websiteUrl) return
         try {
-            for (const url of urls) {
-                await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url })
-            }
+            await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url: websiteUrl })
             setResearchPolling(true)
         } catch {}
-    }, [payload.sources?.website_url, payload.sources?.social_urls, brand.id])
+    }, [payload.sources?.website_url, brand.id])
 
     const handleBrandMaterialUploadComplete = useCallback(async (assetId, meta) => {
         if (!assetId) return
@@ -3506,7 +3495,6 @@ export default function BrandGuidelinesBuilder({
                                                 guidelinesPdfFilename={guidelinesPdfFilename}
                                                 hasPdf={!!(guidelinesPdfAssetId || guidelinesPdfFilename)}
                                                 hasWebsite={!!(unwrapValue(sources.website_url) || '').trim()}
-                                                hasSocial={!!(sources?.social_urls?.length)}
                                                 hasMaterials={brandMaterialCount > 0}
                                                 brandId={brand?.id}
                                             />
@@ -3558,8 +3546,8 @@ export default function BrandGuidelinesBuilder({
                                                 initialPdfFilename={guidelinesPdfFilename}
                                             />
 
-                                            {/* 2. Website & Social */}
-                                            <FieldCard title="Website & Social">
+                                            {/* 2. Website */}
+                                            <FieldCard title="Website">
                                                 <div className="space-y-4">
                                                     <div>
                                                         <label className="block text-sm font-medium text-white/80 mb-2">Website URL</label>
@@ -3572,19 +3560,10 @@ export default function BrandGuidelinesBuilder({
                                                             className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:border-white/30 disabled:opacity-60 disabled:cursor-not-allowed"
                                                         />
                                                     </div>
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-white/80 mb-2">Social URLs</label>
-                                                        <ChipInput
-                                                            value={(unwrapValue(sources.social_urls) || []).map((u) => typeof u === 'string' ? u : (u?.value ?? String(u)))}
-                                                            onChange={(v) => updatePayload('sources', 'social_urls', v)}
-                                                            placeholder="Paste URL and press Enter"
-                                                            disabled={effectiveCrawlerRunning}
-                                                        />
-                                                    </div>
                                                     <div className="pt-2">
                                                         <button
                                                             type="button"
-                                                            disabled={effectiveCrawlerRunning || (!(unwrapValue(sources.website_url) || '').trim() && (unwrapValue(sources.social_urls) || []).length === 0)}
+                                                            disabled={effectiveCrawlerRunning || !(unwrapValue(sources.website_url) || '').trim()}
                                                             onClick={handleAnalyzeAll}
                                                             className="w-full sm:w-auto px-6 py-3 rounded-xl font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                             style={{ backgroundColor: effectiveCrawlerRunning ? 'rgba(99, 102, 241, 0.5)' : (displayAccent || '#6366f1') }}
@@ -3595,7 +3574,7 @@ export default function BrandGuidelinesBuilder({
                                                             <>
                                                                 <div className="mt-3 space-y-1.5">
                                                                     <div className="flex items-center justify-between text-sm">
-                                                                        <span className="text-amber-200">Analyzing website & social links</span>
+                                                                        <span className="text-amber-200">Analyzing website</span>
                                                                     </div>
                                                                     <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                                                                         <motion.div
@@ -3607,7 +3586,7 @@ export default function BrandGuidelinesBuilder({
                                                                     </div>
                                                                 </div>
                                                                 <p className="mt-2 text-sm text-indigo-300">
-                                                                    Crawling website and social links… Results will appear in Research Insights when you continue to the next step.
+                                                                    Crawling website… Results will appear in Research Insights when you continue to the next step.
                                                                 </p>
                                                                 {(polledResearch?.runningSnapshotLite?.source_url || polledResearch?.latestSnapshotLite?.source_url) && (
                                                                     <p className="mt-1 text-sm text-white/70">

@@ -106,7 +106,6 @@ export default function Research({
     brandResearchGate,
 }) {
     const [websiteUrl, setWebsiteUrl] = useState(inputs.website_url || '')
-    const [socialUrls, setSocialUrls] = useState(inputs.social_urls?.length ? inputs.social_urls : [''])
     const [analyzing, setAnalyzing] = useState(false)
 
     const initialHealthState = initialPipelineHealth?.state || 'idle'
@@ -188,11 +187,6 @@ export default function Research({
     const handleAnalyze = useCallback(async () => {
         if (!brandResearchGate?.allowed) return
 
-        const urls = [
-            websiteUrl.trim(),
-            ...socialUrls.filter(u => u.trim().startsWith('http')),
-        ].filter(Boolean)
-
         setAnalyzing(true)
         setInputsDirty(false)
         setHealth({ state: 'processing', error: null, can_retry: false })
@@ -207,7 +201,7 @@ export default function Research({
             await axios.post(route('brands.research.analyze', { brand: brand.id }), {
                 pdf_asset_id: pdfAsset?.id ?? null,
                 website_url: websiteUrl.trim() || null,
-                social_urls: socialUrls.filter(u => u.trim().startsWith('http')),
+                social_urls: [],
                 material_asset_ids: [],
             })
             setPolling(true)
@@ -217,7 +211,7 @@ export default function Research({
         } finally {
             setAnalyzing(false)
         }
-    }, [brand.id, websiteUrl, socialUrls, pdfAsset, brandResearchGate])
+    }, [brand.id, websiteUrl, pdfAsset, brandResearchGate])
 
     const handleRerun = useCallback(async () => {
         setAnalyzing(true)
@@ -317,23 +311,6 @@ export default function Research({
     const handleUrlChange = useCallback((setter) => (e) => {
         setter(e.target.value)
         setInputsDirty(true)
-    }, [])
-
-    const handleSocialUrlChange = useCallback((idx, value) => {
-        setSocialUrls(prev => {
-            const next = [...prev]
-            next[idx] = value
-            return next
-        })
-        setInputsDirty(true)
-    }, [])
-
-    const addSocialUrl = useCallback(() => {
-        setSocialUrls(prev => [...prev, ''])
-    }, [])
-
-    const removeSocialUrl = useCallback((idx) => {
-        setSocialUrls(prev => prev.filter((_, i) => i !== idx))
     }, [])
 
     const snapshot = effectiveResults?.snapshot ?? {}
@@ -535,39 +512,6 @@ export default function Research({
                                     />
                                 </div>
 
-                                {/* Social URLs */}
-                                <div>
-                                    <label className="block text-sm font-medium text-white/70 mb-2">
-                                        Social Media URLs
-                                    </label>
-                                    <div className="space-y-2">
-                                        {socialUrls.map((url, idx) => (
-                                            <div key={idx} className="flex gap-2">
-                                                <input
-                                                    type="url"
-                                                    value={url}
-                                                    onChange={(e) => handleSocialUrlChange(idx, e.target.value)}
-                                                    placeholder="https://instagram.com/yourbrand"
-                                                    className="flex-1 px-4 py-2.5 rounded-lg bg-white/[0.04] border border-white/10 text-white/90 placeholder-white/30 text-sm focus:outline-none focus:border-white/20"
-                                                />
-                                                {socialUrls.length > 1 && (
-                                                    <button
-                                                        onClick={() => removeSocialUrl(idx)}
-                                                        className="px-2 text-white/30 hover:text-red-400 transition"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
-                                        <button
-                                            onClick={addSocialUrl}
-                                            className="text-xs text-white/40 hover:text-white/60 transition"
-                                        >
-                                            + Add social URL
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
                         </SectionCard>
 
@@ -579,7 +523,7 @@ export default function Research({
                                     const snapDone = effectiveStatus.snapshot_ready
                                     const sugDone = effectiveStatus.suggestions_ready
                                     const hasPdf = !!pdfAsset
-                                    const hasUrls = !!(websiteUrl.trim() || socialUrls.some(u => u.trim().startsWith('http')))
+                                    const hasUrls = !!websiteUrl.trim()
                                     const hasAnyInput = hasPdf || hasUrls
 
                                     const pdfStatus = !hasPdf ? null
@@ -632,18 +576,9 @@ export default function Research({
                                                     <StatusBadge status={urlStatus} />
                                                 </div>
                                             )}
-                                            {urlStatus && socialUrls.filter((u) => u.trim().startsWith('http')).map((u, i) => (
-                                                <div key={`soc-${i}`} className="flex items-center justify-between py-2 gap-3">
-                                                    <div className="min-w-0">
-                                                        <span className="text-sm text-white/70">Social crawl</span>
-                                                        <p className="text-[11px] text-white/35 truncate max-w-[280px]">{u.trim()}</p>
-                                                    </div>
-                                                    <StatusBadge status={urlStatus} />
-                                                </div>
-                                            ))}
-                                            {hasUrls && (websiteUrl.trim().startsWith('http') || socialUrls.some((u) => u.trim().startsWith('http'))) && (
+                                            {hasUrls && websiteUrl.trim().startsWith('http') && (
                                                 <p className="text-[11px] text-white/30 pt-1">
-                                                    Each URL runs its own crawl job (website + every social link you add). Some networks block automated access — results may vary.
+                                                    Website crawl runs as part of analysis. Some sites block automated access — results may vary.
                                                 </p>
                                             )}
                                             {snapStatus && (
@@ -913,7 +848,7 @@ export default function Research({
                                 <button
                                     type="button"
                                     onClick={handleAnalyze}
-                                    disabled={analyzing || polling || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')))}
+                                    disabled={analyzing || polling || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim())}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
                                     style={{ backgroundColor: primaryColor }}
                                     aria-busy={analyzing || polling}
@@ -931,7 +866,7 @@ export default function Research({
                                 {isStuckOrFailed ? 'Pipeline Error — Retry Above'
                                     : isProcessing ? 'Processing…'
                                     : inputsChangedAfterAnalysis ? 'Re-run Analysis to Continue'
-                                    : !isFinalized && !pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')) ? 'Add Inputs to Begin'
+                                    : !isFinalized && !pdfAsset && !websiteUrl.trim() ? 'Add Inputs to Begin'
                                     : 'Continue to Review →'}
                             </button>
                         </div>
