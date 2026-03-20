@@ -17,7 +17,9 @@ use Illuminate\Support\Facades\Log;
 class BrandInsightLLM
 {
     public const CACHE_TTL_MINUTES = 30;
+
     public const CACHE_KEY_PREFIX = 'brand:';
+
     public const CACHE_KEY_SUFFIX = ':ai-insights-v2';
 
     public const VALID_TYPES = ['suggestions', 'metadata', 'activity', 'sharing', 'rights', 'ai_tags', 'ai_categories'];
@@ -25,26 +27,26 @@ class BrandInsightLLM
     public function __construct(
         protected AIService $aiService,
         protected BrandInsightAI $brandInsightAI
-    ) {
-    }
+    ) {}
 
     /**
      * Get cached insights for a brand.
      * Falls back to rule-based insights if LLM fails.
      *
-     * @param array $signals Full signal objects from BrandInsightEngine (type, label, priority, href, context)
+     * @param  array  $signals  Full signal objects from BrandInsightEngine (type, label, priority, href, context)
      * @return array<array{text: string, priority: string, type?: string, href?: string}>
      */
     public function getInsightsForBrand(Brand $brand, array $signals = []): array
     {
-        $cacheKey = self::CACHE_KEY_PREFIX . $brand->id . self::CACHE_KEY_SUFFIX;
+        $cacheKey = self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX;
 
         return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL_MINUTES), function () use ($brand, $signals) {
             $metrics = $this->brandInsightAI->getMetricsForBrand($brand);
             try {
                 $insights = $this->generateInsights($brand, $metrics, $signals);
-                if (!empty($insights)) {
+                if (! empty($insights)) {
                     $insights = $this->postProcessInsights($insights, $signals);
+
                     return $this->applyConfidenceFiltering($insights, $metrics);
                 }
             } catch (\Throwable $e) {
@@ -62,8 +64,8 @@ class BrandInsightLLM
     /**
      * Generate 1–2 LLM insights from metrics.
      *
-     * @param array<string, mixed> $metrics
-     * @param array<string> $signals
+     * @param  array<string, mixed>  $metrics
+     * @param  array<string>  $signals
      * @return array<array{text: string, priority: string, type?: string}>
      */
     public function generateInsights(Brand $brand, array $metrics, array $signals = []): array
@@ -72,7 +74,7 @@ class BrandInsightLLM
         $prompt = $this->buildPrompt($payload, $signals);
 
         $tenant = $brand->tenant;
-        if (!$tenant) {
+        if (! $tenant) {
             return $this->fallbackToRuleBased($brand, $metrics);
         }
 
@@ -109,15 +111,11 @@ class BrandInsightLLM
 
     /**
      * Resolve href for an insight: prefer matching signal's href (has asset_id when available).
-     *
-     * @param array $insight
-     * @param array $signals
-     * @return string|null
      */
     protected function resolveInsightHref(array $insight, array $signals): ?string
     {
         $type = $insight['type'] ?? null;
-        if (!$type) {
+        if (! $type) {
             return null;
         }
         $categoryToType = [
@@ -134,18 +132,20 @@ class BrandInsightLLM
                 return $s['href'] ?? $this->mapInsightTypeToHref($type);
             }
         }
+
         return $this->mapInsightTypeToHref($type);
     }
 
     /**
      * Build normalized payload for the prompt.
      *
-     * @param array<string, mixed> $metrics
+     * @param  array<string, mixed>  $metrics
      * @return array<string, mixed>
      */
     protected function buildInsightPayload(array $metrics): array
     {
         return [
+            'total_assets' => (int) ($metrics['total_assets'] ?? 0),
             'uploads_last_7_days' => (int) ($metrics['uploads_last_7_days'] ?? 0),
             'uploads_last_30_days' => (int) ($metrics['uploads_last_30_days'] ?? 0),
             'shares_last_7_days' => (int) ($metrics['shares_last_7_days'] ?? 0),
@@ -161,8 +161,8 @@ class BrandInsightLLM
     /**
      * Build the prompt for the LLM.
      *
-     * @param array<string, mixed> $data
-     * @param array $signals Full signal objects
+     * @param  array<string, mixed>  $data
+     * @param  array  $signals  Full signal objects
      */
     protected function buildPrompt(array $data, array $signals = []): string
     {
@@ -214,6 +214,7 @@ PROMPT;
     protected function signalCategoryToType(array $signal): string
     {
         $cat = $signal['context']['category'] ?? null;
+
         return match ($cat) {
             'ai_suggestions' => 'suggestions',
             'ai_tags', 'ai_categories', 'metadata', 'activity', 'rights' => $cat,
@@ -224,7 +225,7 @@ PROMPT;
     /**
      * Parse and validate LLM response. Map type → href server-side (prefer signal href when matching).
      *
-     * @param array $signals Full signal objects for href resolution
+     * @param  array  $signals  Full signal objects for href resolution
      * @return array<array{text: string, priority: string, type?: string, href?: string}>
      */
     protected function parseResponse(string $raw, array $signals = []): array
@@ -239,17 +240,17 @@ PROMPT;
         }
 
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
         $insights = [];
         foreach ($decoded as $item) {
-            if (!is_array($item) || empty($item['text'])) {
+            if (! is_array($item) || empty($item['text'])) {
                 continue;
             }
             $priority = $item['priority'] ?? 'medium';
-            if (!in_array($priority, ['high', 'medium', 'low'], true)) {
+            if (! in_array($priority, ['high', 'medium', 'low'], true)) {
                 $priority = 'medium';
             }
             $type = $item['type'] ?? null;
@@ -269,14 +270,10 @@ PROMPT;
 
     /**
      * Post-process: filter duplicates, boost priority from signals, limit to 2.
-     *
-     * @param array $insights
-     * @param array $signals
-     * @return array
      */
     protected function postProcessInsights(array $insights, array $signals): array
     {
-        $hasHighPrioritySignal = !empty(array_filter($signals, fn ($s) => ($s['priority'] ?? '') === 'high'));
+        $hasHighPrioritySignal = ! empty(array_filter($signals, fn ($s) => ($s['priority'] ?? '') === 'high'));
 
         $filtered = [];
         foreach ($insights as $insight) {
@@ -306,8 +303,8 @@ PROMPT;
     /**
      * Reorder insights by confidence (boost based on metrics). Keep top 2.
      *
-     * @param array<array{text: string, priority: string, type?: string, href?: string}> $insights
-     * @param array<string, mixed> $metrics
+     * @param  array<array{text: string, priority: string, type?: string, href?: string}>  $insights
+     * @param  array<string, mixed>  $metrics
      * @return array<array{text: string, priority: string, href?: string}>
      */
     protected function applyConfidenceFiltering(array $insights, array $metrics): array
@@ -318,7 +315,7 @@ PROMPT;
             $boosts['ai_tags'] = 10;
             $boosts['ai_categories'] = 10;
         }
-        if (($metrics['uploads_last_7_days'] ?? 0) === 0) {
+        if (($metrics['total_assets'] ?? 0) > 0 && ($metrics['uploads_last_7_days'] ?? 0) === 0) {
             $boosts['activity'] = 8;
         }
         if (($metrics['metadata_completeness'] ?? 1) < 0.5) {
@@ -333,17 +330,19 @@ PROMPT;
             $typeB = $b['type'] ?? null;
             $scoreA = ($boosts[$typeA] ?? 0) + (['high' => 3, 'medium' => 2, 'low' => 1][$a['priority']] ?? 0);
             $scoreB = ($boosts[$typeB] ?? 0) + (['high' => 3, 'medium' => 2, 'low' => 1][$b['priority']] ?? 0);
+
             return $scoreB <=> $scoreA;
         });
 
         $top = array_slice($insights, 0, 2);
+
         return array_values($top);
     }
 
     /**
      * Fallback to rule-based insights (plain strings).
      *
-     * @param array<string, mixed> $metrics
+     * @param  array<string, mixed>  $metrics
      * @return array<array{text: string, priority: string}>
      */
     protected function fallbackToRuleBased(Brand $brand, array $metrics): array
@@ -356,6 +355,7 @@ PROMPT;
                 'priority' => 'medium',
             ];
         }
+
         return $result;
     }
 
@@ -364,6 +364,10 @@ PROMPT;
      */
     public function bustCache(Brand $brand): void
     {
-        Cache::forget(self::CACHE_KEY_PREFIX . $brand->id . self::CACHE_KEY_SUFFIX);
+        Cache::forget(self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX);
+        // Heuristic signals (What Needs Attention) — must clear when uploads/metrics change
+        Cache::forget('brand:'.$brand->id.':insights');
+        // Legacy rule-based cache (defensive; same metrics as LLM fallback)
+        Cache::forget('brand:'.$brand->id.':ai-insights');
     }
 }

@@ -94,11 +94,12 @@ export default function ImageCropModal({
                 pixelCrop = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
             }
             const croppedImage = await getCroppedImg(imageSrc, pixelCrop)
-            onCropComplete(croppedImage)
+            // Parent may upload + attach; wait so we only close after success (or show error without closing).
+            await Promise.resolve(onCropComplete(croppedImage))
             onClose()
         } catch (error) {
             console.error('Error cropping image:', error)
-            alert('Error cropping image. Please try again.')
+            alert(error?.message || 'Could not finish crop or save. Please try again.')
         } finally {
             setProcessing(false)
         }

@@ -25,6 +25,7 @@ class WebsiteExtractionProcessor
             'logo_url' => $crawlResult['logo_url'] ?? null,
             'logo_svg' => ! empty($crawlResult['logo_svg']),
             'logo_candidates' => $crawlResult['logo_candidates'] ?? [],
+            'logo_candidate_entries' => $crawlResult['logo_candidate_entries'] ?? [],
             'favicon' => $crawlResult['favicon'] ?? null,
         ];
 

@@ -14,14 +14,14 @@ class BrandInsightAI
     /**
      * Generate 1–2 human-readable insights from metrics.
      *
-     * @param array $metrics
      * @return array<string>
      */
     public function generateInsights(array $metrics): array
     {
         $insights = [];
 
-        if (($metrics['uploads_last_7_days'] ?? 0) === 0) {
+        // Skip "stagnant" copy for brand-new libraries (0 assets) — not the same as an established brand going quiet
+        if (($metrics['total_assets'] ?? 0) > 0 && ($metrics['uploads_last_7_days'] ?? 0) === 0) {
             $insights[] = 'No new content added this week — consider uploading fresh assets.';
         }
 
@@ -67,6 +67,7 @@ class BrandInsightAI
 
         return Cache::remember($cacheKey, 600, function () use ($brand) {
             $metrics = $this->gatherMetrics($brand);
+
             return $this->generateInsights($metrics);
         });
     }
@@ -74,17 +75,19 @@ class BrandInsightAI
     protected function gatherMetrics(Brand $brand): array
     {
         $tenant = $brand->tenant;
-        if (!$tenant) {
+        if (! $tenant) {
             return [];
         }
 
         $cutoff = now()->subDays(7);
 
+        $uploadEventTypes = [\App\Enums\EventType::ASSET_UPLOADED, \App\Enums\EventType::ASSET_UPLOAD_FINALIZED];
+
         $uploadsLast7Days = \App\Models\ActivityEvent::where('tenant_id', $tenant->id)
             ->where(function ($q) use ($brand) {
                 $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
             })
-            ->where('event_type', \App\Enums\EventType::ASSET_UPLOADED)
+            ->whereIn('event_type', $uploadEventTypes)
             ->where('created_at', '>=', $cutoff)
             ->count();
 
@@ -104,7 +107,7 @@ class BrandInsightAI
         $overview = $analytics['overview'] ?? [];
         $totalAssets = $overview['total_assets'] ?? 0;
         $assetsWithMetadata = $overview['assets_with_metadata'] ?? 0;
-        $metadataCompleteness = $totalAssets > 0 ?  $assetsWithMetadata / $totalAssets : 1;
+        $metadataCompleteness = $totalAssets > 0 ? $assetsWithMetadata / $totalAssets : 1;
 
         $aiTagPending = (int) \Illuminate\Support\Facades\DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
@@ -147,7 +150,7 @@ class BrandInsightAI
             ->where(function ($q) use ($brand) {
                 $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
             })
-            ->where('event_type', \App\Enums\EventType::ASSET_UPLOADED)
+            ->whereIn('event_type', $uploadEventTypes)
             ->where('created_at', '>=', now()->subDays(30))
             ->count();
 
@@ -160,10 +163,11 @@ class BrandInsightAI
             : null;
 
         return [
+            'total_assets' => $totalAssets,
             'uploads_last_7_days' => $uploadsLast7Days,
             'uploads_last_30_days' => $uploadsLast30Days,
             'shares_last_7_days' => $sharesLast7Days,
-            'shares_trend' => $sharesTrend !== null ? (($sharesTrend >= 0 ? '+' : '') . round($sharesTrend, 1) . '%') : null,
+            'shares_trend' => $sharesTrend !== null ? (($sharesTrend >= 0 ? '+' : '').round($sharesTrend, 1).'%') : null,
             'metadata_completeness' => round($metadataCompleteness, 2),
             'ai_suggestions_pending' => $aiSuggestionsPending,
             'ai_tags_pending' => $aiTagPending,

@@ -266,6 +266,15 @@ class BrandPipelineRunnerJob implements ShouldQueue
             $crawler->downloadLogoAsAsset($crawlData, $brand, $draft);
         }
 
+        $variantCount = $crawler->downloadCrawledLogoVariants($crawlData, $brand, $draft);
+        if ($variantCount > 0) {
+            Log::channel('pipeline')->info('[BrandPipelineRunnerJob] Website crawl saved additional logo variants', [
+                'brand_id' => $brand->id,
+                'draft_id' => $draft->id,
+                'variant_count' => $variantCount,
+            ]);
+        }
+
         return $crawlData;
     }
 

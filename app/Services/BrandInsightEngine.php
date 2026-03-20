@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AssetStatus;
 use App\Enums\EventType;
 use App\Models\ActivityEvent;
 use App\Models\Brand;
@@ -19,8 +20,7 @@ class BrandInsightEngine
 {
     public function __construct(
         protected MetadataAnalyticsService $metadataAnalytics
-    ) {
-    }
+    ) {}
 
     /**
      * Get "What Needs Attention" signals for a brand.
@@ -36,7 +36,7 @@ class BrandInsightEngine
             $signals = [];
 
             $tenant = $brand->tenant;
-            if (!$tenant) {
+            if (! $tenant) {
                 return [];
             }
 
@@ -79,7 +79,7 @@ class BrandInsightEngine
             if ($assetsMissingMetadata > 0) {
                 $firstAssetId = $this->getFirstAssetMissingMetadataId($brand);
                 $href = $firstAssetId
-                    ? '/app/assets?missing_metadata=1&asset=' . $firstAssetId
+                    ? '/app/assets?missing_metadata=1&asset='.$firstAssetId
                     : '/app/assets?missing_metadata=1';
                 $signals[] = [
                     'type' => 'action',
@@ -112,7 +112,7 @@ class BrandInsightEngine
                 ];
             }
 
-            // 4. Low Activity (low)
+            // 4. Low Activity (low) — only when the brand already has assets (empty brand ≠ "stagnant")
             if ($this->hasLowActivity($brand)) {
                 $signals[] = [
                     'type' => 'info',
@@ -137,12 +137,18 @@ class BrandInsightEngine
 
         // Filter by user permission on the fly (cache is shared)
         $tenant = $brand->tenant;
+
         return array_values(array_filter($signals, function ($s) use ($user, $tenant) {
-            if (empty($s['permission'])) return true;
-            if (!$tenant) return false;
+            if (empty($s['permission'])) {
+                return true;
+            }
+            if (! $tenant) {
+                return false;
+            }
             if ($s['permission'] === 'canViewAnalytics') {
                 return $user->hasPermissionForTenant($tenant, 'activity_logs.view');
             }
+
             return true;
         }));
     }
@@ -184,6 +190,7 @@ class BrandInsightEngine
         $overview = $analytics['overview'] ?? [];
         $totalAssets = $overview['total_assets'] ?? 0;
         $assetsWithMetadata = $overview['assets_with_metadata'] ?? 0;
+
         return max(0, $totalAssets - $assetsWithMetadata);
     }
 
@@ -193,7 +200,7 @@ class BrandInsightEngine
     protected function getFirstAssetMissingMetadataId(Brand $brand): ?string
     {
         $tenant = $brand->tenant;
-        if (!$tenant) {
+        if (! $tenant) {
             return null;
         }
 
@@ -230,6 +237,7 @@ class BrandInsightEngine
         $expiring60 = $rightsRisk['expiring_60_days'] ?? 0;
         $expiring90 = $rightsRisk['expiring_90_days'] ?? 0;
         $expired = $rightsRisk['expired_count'] ?? 0;
+
         return (int) ($expired + $expiring30 + $expiring60 + $expiring90);
     }
 
@@ -241,7 +249,7 @@ class BrandInsightEngine
     public function getMomentumData(Brand $brand): array
     {
         $tenant = $brand->tenant;
-        if (!$tenant) {
+        if (! $tenant) {
             return ['sharedCount' => 0, 'uploadCount' => 0, 'aiCompleted' => 0, 'teamChanges' => 0];
         }
 
@@ -251,7 +259,7 @@ class BrandInsightEngine
             ->where(function ($q) use ($brand) {
                 $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
             })
-            ->where('event_type', EventType::ASSET_UPLOADED)
+            ->whereIn('event_type', $this->uploadActivityEventTypes())
             ->where('created_at', '>=', $cutoff)
             ->count();
 
@@ -297,17 +305,41 @@ class BrandInsightEngine
         ];
     }
 
+    /**
+     * Upload completion logs {@see EventType::ASSET_UPLOAD_FINALIZED}; legacy paths may log {@see EventType::ASSET_UPLOADED}.
+     *
+     * @return list<string>
+     */
+    protected function uploadActivityEventTypes(): array
+    {
+        return [EventType::ASSET_UPLOADED, EventType::ASSET_UPLOAD_FINALIZED];
+    }
+
+    protected function getTotalVisibleAssetsCount(Brand $brand): int
+    {
+        return (int) DB::table('assets')
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->whereNull('deleted_at')
+            ->where('status', AssetStatus::VISIBLE)
+            ->count();
+    }
+
     protected function hasLowActivity(Brand $brand): bool
     {
+        if ($this->getTotalVisibleAssetsCount($brand) === 0) {
+            return false;
+        }
+
         $cutoff = now()->subDays(7);
         $hasUpload = ActivityEvent::where('tenant_id', $brand->tenant_id)
             ->where(function ($q) use ($brand) {
                 $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
             })
-            ->where('event_type', EventType::ASSET_UPLOADED)
+            ->whereIn('event_type', $this->uploadActivityEventTypes())
             ->where('created_at', '>=', $cutoff)
             ->exists();
 
-        return !$hasUpload;
+        return ! $hasUpload;
     }
 }

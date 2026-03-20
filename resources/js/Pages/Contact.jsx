@@ -25,12 +25,12 @@ export default function Contact({ plan }) {
                                 </Link>
                             ) : (
                                 <>
-                                    <Link href="/login" className="text-sm font-semibold text-gray-900 hover:text-gray-700">
+                                    <Link href="/gateway" className="text-sm font-semibold text-gray-900 hover:text-gray-700">
                                         Login
                                     </Link>
                                     {signup_enabled !== false && (
                                         <Link
-                                            href="/signup"
+                                            href="/gateway?mode=register"
                                             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                         >
                                             Sign up

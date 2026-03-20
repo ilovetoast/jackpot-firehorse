@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Metadata Analytics Service
@@ -21,12 +20,11 @@ class MetadataAnalyticsService
     /**
      * Get comprehensive analytics for a tenant.
      *
-     * @param int $tenantId
-     * @param int|null $brandId Optional brand filter
-     * @param int|null $categoryId Optional category filter
-     * @param string|null $startDate Optional date range start (Y-m-d)
-     * @param string|null $endDate Optional date range end (Y-m-d)
-     * @param bool $includeInternal Whether to include internal-only fields (admin only)
+     * @param  int|null  $brandId  Optional brand filter
+     * @param  int|null  $categoryId  Optional category filter
+     * @param  string|null  $startDate  Optional date range start (Y-m-d)
+     * @param  string|null  $endDate  Optional date range end (Y-m-d)
+     * @param  bool  $includeInternal  Whether to include internal-only fields (admin only)
      * @return array Analytics data
      */
     public function getAnalytics(
@@ -50,13 +48,6 @@ class MetadataAnalyticsService
 
     /**
      * Get overview KPIs.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getOverview(
         int $tenantId,
@@ -84,7 +75,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $assetQuery->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $totalAssets = $assetQuery->count();
@@ -117,7 +108,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $totalMetadataValues->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $totalMetadataValues->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $totalMetadataValues = $totalMetadataValues->count();
@@ -143,14 +134,6 @@ class MetadataAnalyticsService
 
     /**
      * Get metadata coverage metrics.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param bool $includeInternal
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getCoverage(
         int $tenantId,
@@ -179,7 +162,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $assetQuery->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $totalAssets = $assetQuery->count();
@@ -197,42 +180,50 @@ class MetadataAnalyticsService
             ->where('scope', 'system')
             ->whereNull('deprecated_at');
 
-        if (!$includeInternal) {
+        if (! $includeInternal) {
             $fieldQuery->where('is_internal_only', false);
         }
 
         $fields = $fieldQuery->get(['id', 'key', 'system_label', 'type']);
 
-        $fieldCoverage = [];
-        $lowestCoverage = [];
-
-        foreach ($fields as $field) {
-            // Count assets with approved values for this field
-            $assetsWithField = DB::table('asset_metadata')
+        $fieldIds = $fields->pluck('id')->all();
+        $countsByFieldId = collect();
+        if ($fieldIds !== []) {
+            $aggregated = DB::table('asset_metadata')
                 ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
                 ->where('assets.tenant_id', $tenantId)
                 ->whereNull('assets.deleted_at')
                 ->where('assets.status', 'visible')
-                ->where('asset_metadata.metadata_field_id', $field->id)
-                ->whereNotNull('asset_metadata.approved_at');
+                ->whereNotNull('asset_metadata.approved_at')
+                ->whereIn('asset_metadata.metadata_field_id', $fieldIds);
 
             if ($brandId) {
-                $assetsWithField->where('assets.brand_id', $brandId);
+                $aggregated->where('assets.brand_id', $brandId);
             }
 
             if ($categoryId) {
-                $assetsWithField->whereJsonContains('assets.metadata->category_id', $categoryId);
+                $aggregated->whereJsonContains('assets.metadata->category_id', $categoryId);
             }
 
             if ($startDate) {
-                $assetsWithField->where('assets.created_at', '>=', $startDate);
+                $aggregated->where('assets.created_at', '>=', $startDate);
             }
 
             if ($endDate) {
-                $assetsWithField->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+                $aggregated->where('assets.created_at', '<=', $endDate.' 23:59:59');
             }
 
-            $count = $assetsWithField->distinct('assets.id')->count('assets.id');
+            $countsByFieldId = $aggregated
+                ->groupBy('asset_metadata.metadata_field_id')
+                ->selectRaw('asset_metadata.metadata_field_id, COUNT(DISTINCT assets.id) as asset_count')
+                ->pluck('asset_count', 'metadata_field_id');
+        }
+
+        $fieldCoverage = [];
+        $lowestCoverage = [];
+
+        foreach ($fields as $field) {
+            $count = (int) ($countsByFieldId[$field->id] ?? 0);
             $percentage = round(($count / $totalAssets) * 100, 2);
 
             $fieldCoverage[] = [
@@ -252,7 +243,7 @@ class MetadataAnalyticsService
         }
 
         // Sort by coverage percentage (ascending)
-        usort($lowestCoverage, fn($a, $b) => $a['coverage_percentage'] <=> $b['coverage_percentage']);
+        usort($lowestCoverage, fn ($a, $b) => $a['coverage_percentage'] <=> $b['coverage_percentage']);
         $lowestCoverage = array_slice($lowestCoverage, 0, 10); // Top 10 lowest
 
         return [
@@ -264,13 +255,6 @@ class MetadataAnalyticsService
 
     /**
      * Get required field compliance metrics.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getRequiredCompliance(
         int $tenantId,
@@ -301,7 +285,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $assetQuery->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $totalAssets = $assetQuery->count();
@@ -318,13 +302,6 @@ class MetadataAnalyticsService
 
     /**
      * Get AI suggestion effectiveness metrics.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getAiEffectiveness(
         int $tenantId,
@@ -354,7 +331,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $aiQuery->where('asset_metadata.created_at', '<=', $endDate . ' 23:59:59');
+            $aiQuery->where('asset_metadata.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $totalSuggestions = (clone $aiQuery)->count();
@@ -387,7 +364,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $rejectedSuggestions->where('asset_metadata_history.created_at', '<=', $endDate . ' 23:59:59');
+            $rejectedSuggestions->where('asset_metadata_history.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $rejectedCount = $rejectedSuggestions->count();
@@ -426,13 +403,6 @@ class MetadataAnalyticsService
 
     /**
      * Get metadata freshness metrics.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getFreshness(
         int $tenantId,
@@ -463,7 +433,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $lastUpdated->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $lastUpdated->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $lastUpdated = $lastUpdated
@@ -487,7 +457,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $staleAssetsQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $staleAssetsQuery->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         $staleAssets = $staleAssetsQuery
@@ -526,13 +496,6 @@ class MetadataAnalyticsService
 
     /**
      * Get rights and risk indicators.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @param string|null $startDate
-     * @param string|null $endDate
-     * @return array
      */
     protected function getRightsRisk(
         int $tenantId,
@@ -547,7 +510,7 @@ class MetadataAnalyticsService
             ->where('scope', 'system')
             ->first();
 
-        if (!$expirationField) {
+        if (! $expirationField) {
             return [
                 'expired_count' => 0,
                 'expiring_30_days' => 0,
@@ -575,7 +538,7 @@ class MetadataAnalyticsService
         }
 
         if ($endDate) {
-            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            $assetQuery->where('assets.created_at', '<=', $endDate.' 23:59:59');
         }
 
         // Assets with expired expiration_date
@@ -650,7 +613,7 @@ class MetadataAnalyticsService
             }
 
             if ($endDate) {
-                $distribution->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+                $distribution->where('assets.created_at', '<=', $endDate.' 23:59:59');
             }
 
             $distribution = $distribution
@@ -677,11 +640,6 @@ class MetadataAnalyticsService
 
     /**
      * Get governance and permission gaps.
-     *
-     * @param int $tenantId
-     * @param int|null $brandId
-     * @param int|null $categoryId
-     * @return array
      */
     protected function getGovernanceGaps(
         int $tenantId,

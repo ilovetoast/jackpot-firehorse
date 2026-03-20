@@ -7,44 +7,44 @@
  *
  * Schema is controlled by migrations and must be assumed valid.
  */
+
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
 use App\Enums\TicketCategory;
 use App\Enums\TicketStatus;
 use App\Enums\TicketType;
-use App\Enums\ThumbnailStatus;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
 use App\Jobs\ScoreAssetComplianceJob;
-use App\Models\SupportTicket;
-use App\Models\Ticket;
-use App\Models\TicketMessage;
-use App\Models\SystemIncident;
 use App\Models\ActivityEvent;
+use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\BrandComplianceScore;
-use Illuminate\Support\Facades\Bus;
-use App\Models\Asset;
 use App\Models\Category;
+use App\Models\SupportTicket;
+use App\Models\SystemIncident;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
 use App\Services\BulkMetadataService;
+use App\Services\MetadataApprovalResolver;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
-use App\Services\MetadataApprovalResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
 
 /**
  * Asset Metadata Controller
@@ -62,16 +62,12 @@ class AssetMetadataController extends Controller
         protected AiMetadataConfidenceService $confidenceService,
         protected AiMetadataSuggestionService $suggestionService,
         protected PlanService $planService
-    ) {
-    }
+    ) {}
 
     /**
      * Get AI metadata suggestions for an asset.
      *
      * GET /assets/{asset}/metadata/ai-suggestions
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getAiSuggestions(Asset $asset): JsonResponse
     {
@@ -85,7 +81,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission - viewers cannot see AI suggestions
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -98,7 +94,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['suggestions' => []]);
         }
 
@@ -139,16 +135,16 @@ class AssetMetadataController extends Controller
         $groupedSuggestions = [];
         foreach ($aiSuggestions as $suggestion) {
             $fieldId = $suggestion->metadata_field_id;
-            if (!isset($groupedSuggestions[$fieldId])) {
+            if (! isset($groupedSuggestions[$fieldId])) {
                 $fieldDef = $fieldMap[$fieldId] ?? null;
-                if (!$fieldDef) {
+                if (! $fieldDef) {
                     continue; // Skip if field not in resolved schema
                 }
 
                 // Phase 4: Check edit permission for this field
                 $user = Auth::user();
                 $userRole = $user ? ($user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member') : 'member';
-                
+
                 $canEdit = $this->permissionResolver->canEdit(
                     $fieldId,
                     $userRole,
@@ -185,10 +181,6 @@ class AssetMetadataController extends Controller
      * Approve an AI suggestion (accept as-is).
      *
      * POST /assets/{asset}/metadata/ai-suggestions/{suggestionId}/approve
-     *
-     * @param Asset $asset
-     * @param int $suggestionId
-     * @return JsonResponse
      */
     public function approveSuggestion(Asset $asset, int $suggestionId): JsonResponse
     {
@@ -209,12 +201,12 @@ class AssetMetadataController extends Controller
             ->whereNull('approved_at')
             ->first();
 
-        if (!$suggestion) {
+        if (! $suggestion) {
             return response()->json(['message' => 'Suggestion not found'], 404);
         }
 
         // Check permission - only users with metadata.suggestions.apply can approve
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
             return response()->json([
                 'message' => 'You do not have permission to approve suggestions.',
             ], 403);
@@ -280,11 +272,6 @@ class AssetMetadataController extends Controller
      * Edit and accept an AI suggestion.
      *
      * POST /assets/{asset}/metadata/ai-suggestions/{suggestionId}/edit-accept
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @param int $suggestionId
-     * @return JsonResponse
      */
     public function editAndAcceptSuggestion(Request $request, Asset $asset, int $suggestionId): JsonResponse
     {
@@ -305,7 +292,7 @@ class AssetMetadataController extends Controller
             ->whereNull('approved_at')
             ->first();
 
-        if (!$suggestion) {
+        if (! $suggestion) {
             return response()->json(['message' => 'Suggestion not found'], 404);
         }
 
@@ -321,19 +308,19 @@ class AssetMetadataController extends Controller
             ->where('id', $suggestion->metadata_field_id)
             ->first();
 
-        if (!$field) {
+        if (! $field) {
             return response()->json(['message' => 'Field not found'], 404);
         }
 
         // Phase 8: Check if user can approve (permission-based)
-        if (!$this->approvalResolver->canApprove($user, $tenant)) {
+        if (! $this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
         }
 
         // Validate value based on field type
-        if (!$this->validateValue($field, $editedValue)) {
+        if (! $this->validateValue($field, $editedValue)) {
             return response()->json([
                 'message' => 'Invalid value for field type',
             ], 422);
@@ -403,7 +390,7 @@ class AssetMetadataController extends Controller
         });
 
         // Sync sort-relevant fields to assets.metadata so grid sort sees them
-        if (in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValue)) {
+        if (in_array($fieldKey, ['starred', 'quality_rating'], true) && ! empty($normalizedValue)) {
             $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValue[0]);
         }
 
@@ -422,10 +409,6 @@ class AssetMetadataController extends Controller
      * Reject an AI suggestion.
      *
      * POST /assets/{asset}/metadata/ai-suggestions/{suggestionId}/reject
-     *
-     * @param Asset $asset
-     * @param int $suggestionId
-     * @return JsonResponse
      */
     public function rejectSuggestion(Asset $asset, int $suggestionId): JsonResponse
     {
@@ -446,12 +429,12 @@ class AssetMetadataController extends Controller
             ->whereNull('approved_at')
             ->first();
 
-        if (!$suggestion) {
+        if (! $suggestion) {
             return response()->json(['message' => 'Suggestion not found'], 404);
         }
 
         // Check permission - only users with metadata.suggestions.dismiss can reject
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
             return response()->json([
                 'message' => 'You do not have permission to reject suggestions.',
             ], 403);
@@ -534,19 +517,15 @@ class AssetMetadataController extends Controller
 
     /**
      * Determine asset type for schema resolution.
-     *
-     * @param Asset $asset
-     * @return string
      */
     /**
      * Determine file type for metadata schema resolution.
-     * 
+     *
      * Note: asset->type is organizational (asset/deliverable/ai_generated),
      * but MetadataSchemaResolver expects file type (image/video/document).
-     * 
+     *
      * This method infers file type from asset's mime_type and filename.
      *
-     * @param Asset $asset
      * @return string One of: 'image', 'video', 'document'
      */
     protected function determineAssetType(Asset $asset): string
@@ -554,12 +533,12 @@ class AssetMetadataController extends Controller
         $mimeType = $asset->mime_type ?? '';
         $filename = $asset->original_filename ?? '';
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        
+
         // Video types
         if (str_starts_with($mimeType, 'video/') || in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm'])) {
             return 'video';
         }
-        
+
         // Document types (PDF, office docs)
         if ($mimeType === 'application/pdf' || $extension === 'pdf' ||
             in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']) ||
@@ -569,13 +548,13 @@ class AssetMetadataController extends Controller
             str_starts_with($mimeType, 'application/vnd.openxmlformats')) {
             return 'document';
         }
-        
+
         // Image types (default)
         // Includes: jpg, jpeg, png, gif, webp, bmp, svg, psd, ai, etc.
         if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff'])) {
             return 'image';
         }
-        
+
         // Default to 'image' if type cannot be determined
         // Most assets in DAM systems are images
         return 'image';
@@ -584,16 +563,14 @@ class AssetMetadataController extends Controller
     /**
      * Validate value against field type.
      *
-     * @param object $field
-     * @param mixed $value
-     * @return bool
+     * @param  mixed  $value
      */
     protected function validateValue(object $field, $value): bool
     {
         $fieldType = $field->type ?? 'text';
 
         if ($fieldType === 'multiselect') {
-            return is_array($value) && !empty($value);
+            return is_array($value) && ! empty($value);
         }
 
         switch ($fieldType) {
@@ -615,17 +592,17 @@ class AssetMetadataController extends Controller
     /**
      * Check if value is a valid date.
      *
-     * @param mixed $value
-     * @return bool
+     * @param  mixed  $value
      */
     protected function isValidDate($value): bool
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return false;
         }
 
         try {
             new \DateTime($value);
+
             return true;
         } catch (\Exception $e) {
             return false;
@@ -635,19 +612,18 @@ class AssetMetadataController extends Controller
     /**
      * Normalize value based on field type.
      *
-     * @param object $field
-     * @param mixed $value
-     * @return array
+     * @param  mixed  $value
      */
     protected function normalizeValue(object $field, $value): array
     {
         $fieldType = $field->type ?? 'text';
 
         if ($fieldType === 'multiselect') {
-            if (!is_array($value)) {
+            if (! is_array($value)) {
                 return [];
             }
-            return array_map(fn($v) => $v, array_unique($value, SORT_REGULAR));
+
+            return array_map(fn ($v) => $v, array_unique($value, SORT_REGULAR));
         }
 
         return [$value];
@@ -659,9 +635,6 @@ class AssetMetadataController extends Controller
      * GET /assets/{asset}/metadata/editable
      *
      * Phase 2 – Step 6: Returns metadata fields that can be edited.
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getEditableMetadata(Asset $asset): JsonResponse
     {
@@ -694,7 +667,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['fields' => []]);
         }
 
@@ -713,16 +686,16 @@ class AssetMetadataController extends Controller
         // This provides a single source of truth for metadata state resolution
         $resolver = app(\App\Services\Metadata\AssetMetadataStateResolver::class);
         $resolvedState = $resolver->resolve($asset);
-        
+
         // Check if user can approve (to show pending metadata)
         $canApprove = $this->approvalResolver->canApprove($user, $tenant);
-        
+
         // IMPORTANT:
         // Drawer metadata visibility for contributors/viewers
         // must depend ONLY on approved_at.
         // Source (user/system/ai) is irrelevant once approved.
         // Do not add source-based filtering here.
-        
+
         // Get automatic field IDs (fields with population_mode = 'automatic')
         // Automatic fields are always shown regardless of approval status
         $automaticFieldIds = DB::table('metadata_fields')
@@ -744,7 +717,7 @@ class AssetMetadataController extends Controller
             ->all();
 
         $metadataFieldsById = collect();
-        if (!empty($allFieldIds)) {
+        if (! empty($allFieldIds)) {
             $metadataFieldsById = DB::table('metadata_fields')
                 ->whereIn('id', $allFieldIds)
                 ->get()
@@ -755,26 +728,26 @@ class AssetMetadataController extends Controller
         // Suppress low-confidence AI metadata values at read time
         $fieldValues = [];
         $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
-        
+
         foreach ($resolvedState as $fieldId => $state) {
             // Get field info for type and population mode (from eager-loaded map)
             $fieldInfo = $metadataFieldsById[$fieldId] ?? null;
 
-            if (!$fieldInfo) {
+            if (! $fieldInfo) {
                 continue;
             }
-            
+
             $fieldKey = $fieldInfo->key ?? null;
             $fieldType = $fieldInfo->type ?? 'text';
             $populationMode = $fieldInfo->population_mode ?? 'manual';
             $isAutomaticField = in_array($fieldId, $automaticFieldIds) || $populationMode === 'automatic';
-            
+
             // Determine which row to use based on resolver state and permissions
             // Contributors: only approved (or automatic fields)
             // Approvers: approved, or pending if no approved exists
             $effectiveRow = null;
             $isPending = false;
-            
+
             if ($state['approved']) {
                 // Use approved row
                 $effectiveRow = $state['approved'];
@@ -791,15 +764,15 @@ class AssetMetadataController extends Controller
                 // No value to show
                 continue;
             }
-            
-            if (!$effectiveRow) {
+
+            if (! $effectiveRow) {
                 continue;
             }
-            
+
             $source = $effectiveRow->source ?? null;
             $confidence = $effectiveRow->confidence !== null ? (float) $effectiveRow->confidence : null;
             $isAiField = $populationMode === 'ai';
-            
+
             // CRITICAL: Confidence suppression applies ONLY to AI fields
             // Automatic/system fields are never suppressed (they are authoritative)
             if ($fieldKey && $isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
@@ -837,19 +810,19 @@ class AssetMetadataController extends Controller
         // Automatic/system fields never require approval and must be excluded
         $pendingFieldIds = [];
         $pendingMetadataByField = [];
-        
+
         foreach ($resolvedState as $fieldId => $state) {
-            if (!$state['has_pending']) {
+            if (! $state['has_pending']) {
                 continue;
             }
-            
+
             // Check if field is automatic (exclude from pending approvals) - use eager-loaded map
             $fieldInfo = $metadataFieldsById[$fieldId] ?? null;
 
             if ($fieldInfo && $fieldInfo->population_mode === 'automatic') {
                 continue; // Exclude automatic fields
             }
-            
+
             // Only include user and AI sources (exclude automatic/system/manual_override from pending)
             $pendingRow = $state['pending'];
             if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
@@ -857,12 +830,12 @@ class AssetMetadataController extends Controller
                 $pendingMetadataByField[$fieldId] = [$pendingRow->id];
             }
         }
-        
+
         $pendingFieldIds = array_unique($pendingFieldIds);
 
         // Phase C2/C4: Get visibility resolver for category suppression and tenant override filtering
         $visibilityResolver = app(\App\Services\MetadataVisibilityResolver::class);
-        
+
         // Get tenant for tenant-level overrides
         $tenant = $asset->tenant;
 
@@ -890,7 +863,7 @@ class AssetMetadataController extends Controller
         // Phase 4: Batch-load edit permissions to avoid N+1 (MetadataPermissionResolver::canEdit queries metadata_fields per field)
         $visibleFieldIds = collect($visibleFields)->pluck('field_id')->filter()->unique()->values()->all();
         $canEditByFieldId = [];
-        if (!empty($visibleFieldIds)) {
+        if (! empty($visibleFieldIds)) {
             $canEditByFieldId = $this->permissionResolver->canEditMultiple(
                 $visibleFieldIds,
                 $userRole,
@@ -908,7 +881,7 @@ class AssetMetadataController extends Controller
             // Load field definition from eager-loaded map
             $fieldDef = $metadataFieldsById[$field['field_id']] ?? null;
 
-            if (!$fieldDef) {
+            if (! $fieldDef) {
                 continue;
             }
 
@@ -919,16 +892,16 @@ class AssetMetadataController extends Controller
             $populationMode = $field['population_mode'] ?? 'manual';
             $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
             $isUserEditable = $fieldDef->is_user_editable ?? true;
-            
+
             // Skip fields if show_on_edit is false (applies to both regular and automatic fields)
             // Users can toggle show_on_edit for automatic fields via the metadata management UI
-            if (!$showOnEdit) {
+            if (! $showOnEdit) {
                 continue; // Hidden from edit/drawer UI
             }
 
             // For non-readonly fields, they must be user-editable
             // For readonly/automatic fields, we allow them to show (read-only display) even if not user-editable
-            if (!$isReadonly && !$isUserEditable) {
+            if (! $isReadonly && ! $isUserEditable) {
                 continue; // Non-readonly fields must be user-editable
             }
 
@@ -936,25 +909,25 @@ class AssetMetadataController extends Controller
             // For readonly/automatic fields, we still want to show them (read-only display)
             // So we only check permission for non-readonly fields
             $canEdit = true; // Default for readonly/automatic fields (they're shown read-only)
-            
+
             // ISSUE FIX: Approved metadata visibility for contributors/viewers
             // Previously, fields were filtered out if user lacked edit permission, even when approved metadata existed.
             // This caused approved metadata (e.g., photo_type, scene_classification) to be invisible to contributors/viewers.
             // Fix: Check if field has approved metadata - if so, show it read-only even without edit permission.
             // Only skip fields if user cannot edit AND there's no approved value.
             // See docs/PHASE_C_METADATA_GOVERNANCE.md for details.
-            $hasApprovedValue = isset($fieldValues[$field['field_id']]) && 
+            $hasApprovedValue = isset($fieldValues[$field['field_id']]) &&
                                 isset($fieldOverrideState[$field['field_id']]) &&
-                                !($fieldOverrideState[$field['field_id']]['is_pending'] ?? true);
-            
-            if (!$isReadonly) {
+                                ! ($fieldOverrideState[$field['field_id']]['is_pending'] ?? true);
+
+            if (! $isReadonly) {
                 $canEdit = $canEditByFieldId[$field['field_id']] ?? false;
 
                 // For rating fields, show them even if user can't edit (so they can see the rating)
                 // For approved metadata, show it read-only even if user cannot edit
                 // Only skip if user cannot edit AND there's no approved value
                 $isRating = ($field['type'] ?? 'text') === 'rating' || ($field['key'] ?? null) === 'quality_rating';
-                if (!$canEdit && !$isRating && !$hasApprovedValue) {
+                if (! $canEdit && ! $isRating && ! $hasApprovedValue) {
                     continue; // Skip fields user cannot edit that have no approved value (except rating fields)
                 }
             }
@@ -970,13 +943,13 @@ class AssetMetadataController extends Controller
             $isValuePending = $fieldOverrideInfo['is_pending'] ?? false;
 
             // Resolve display label: prefer display_label from schema, fall back to system_label from DB, then key
-            $displayLabel = $field['display_label'] 
-                ?? $fieldDef->system_label 
+            $displayLabel = $field['display_label']
+                ?? $fieldDef->system_label
                 ?? $field['key'];
 
             // Get pending metadata IDs for this field
             $pendingMetadataIds = $pendingMetadataByField[$field['field_id']] ?? [];
-            
+
             $editableFields[] = [
                 'metadata_field_id' => $field['field_id'],
                 'field_key' => $field['key'],
@@ -984,8 +957,8 @@ class AssetMetadataController extends Controller
                 'display_label' => $displayLabel,
                 'type' => $field['type'],
                 'options' => $field['options'] ?? [],
-                'is_user_editable' => !$isReadonly && $canEdit, // Only editable if not readonly AND has permission
-                'can_edit' => !$isReadonly && $canEdit, // Reflect actual permission check result
+                'is_user_editable' => ! $isReadonly && $canEdit, // Only editable if not readonly AND has permission
+                'can_edit' => ! $isReadonly && $canEdit, // Reflect actual permission check result
                 'current_value' => $currentValue,
                 'has_pending' => in_array($field['field_id'], $pendingFieldIds), // Phase 8
                 'pending_metadata_ids' => $pendingMetadataIds, // IDs of pending metadata records for this field
@@ -1003,7 +976,7 @@ class AssetMetadataController extends Controller
         $systemFieldKeysToFetch = array_diff($systemFieldKeys, $existingKeys);
 
         $systemFieldsByKey = collect();
-        if (!empty($systemFieldKeysToFetch)) {
+        if (! empty($systemFieldKeysToFetch)) {
             $systemFieldsByKey = DB::table('metadata_fields')
                 ->whereIn('key', $systemFieldKeysToFetch)
                 ->get()
@@ -1015,7 +988,7 @@ class AssetMetadataController extends Controller
                 continue;
             }
             $fieldDef = $systemFieldsByKey[$systemKey] ?? null;
-            if (!$fieldDef) {
+            if (! $fieldDef) {
                 continue;
             }
             $currentValue = $fieldValues[$fieldDef->id] ?? null;
@@ -1247,7 +1220,7 @@ class AssetMetadataController extends Controller
         // Skip when timeline=1 (Reliability Timeline shows full history)
         $timeline = $request->boolean('timeline');
         $status = $asset->analysis_status ?? 'uploading';
-        if (!$timeline && $status === 'complete') {
+        if (! $timeline && $status === 'complete') {
             app(SystemIncidentService::class)->resolveBySource('asset', $asset->id);
             app(SystemIncidentService::class)->resolveBySource('job', $asset->id);
         }
@@ -1258,7 +1231,7 @@ class AssetMetadataController extends Controller
                     $q2->where('source_type', 'job')->where('source_id', $asset->id);
                 });
         });
-        if (!$timeline) {
+        if (! $timeline) {
             $query->whereNull('resolved_at');
         }
         $incidents = $query
@@ -1300,6 +1273,7 @@ class AssetMetadataController extends Controller
         // Phase 5: Promotion failed is terminal — retry promotion only, not full pipeline
         if (($asset->analysis_status ?? '') === 'promotion_failed') {
             PromoteAssetJob::dispatch($asset->id);
+
             return response()->json(['status' => 'queued']);
         }
 
@@ -1313,7 +1287,7 @@ class AssetMetadataController extends Controller
             ->where('retryable', true)
             ->exists();
 
-        if (!$hasRetryableIncident) {
+        if (! $hasRetryableIncident) {
             return response()->json(['message' => 'No retryable incident for this asset'], 422);
         }
 
@@ -1423,7 +1397,7 @@ class AssetMetadataController extends Controller
             ->toArray();
 
         $failedJob = DB::table('failed_jobs')
-            ->where('payload', 'like', '%' . $asset->id . '%')
+            ->where('payload', 'like', '%'.$asset->id.'%')
             ->orderByDesc('failed_at')
             ->first();
 
@@ -1478,6 +1452,7 @@ class AssetMetadataController extends Controller
             ]);
 
             $tenantTicket = $this->findOrCreateTenantTicketForAssetSafe($asset, $existing, $payload);
+
             return response()->json([
                 'ticket' => $existing->fresh(),
                 'tenant_ticket' => $tenantTicket ? [
@@ -1485,7 +1460,7 @@ class AssetMetadataController extends Controller
                     'ticket_number' => $tenantTicket->ticket_number,
                     'url' => \Illuminate\Support\Facades\Route::has('support.tickets.show')
                         ? route('support.tickets.show', $tenantTicket)
-                        : url('/app/support/tickets/' . $tenantTicket->id),
+                        : url('/app/support/tickets/'.$tenantTicket->id),
                 ] : null,
                 'incidents' => $recentIncidents,
                 'last_failed_job' => $lastFailedJob,
@@ -1518,7 +1493,7 @@ class AssetMetadataController extends Controller
                 'ticket_number' => $tenantTicket->ticket_number,
                 'url' => \Illuminate\Support\Facades\Route::has('support.tickets.show')
                     ? route('support.tickets.show', $tenantTicket)
-                    : url('/app/support/tickets/' . $tenantTicket->id),
+                    : url('/app/support/tickets/'.$tenantTicket->id),
             ] : null,
             'incidents' => $recentIncidents,
             'last_failed_job' => $lastFailedJob,
@@ -1537,6 +1512,7 @@ class AssetMetadataController extends Controller
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
@@ -1553,6 +1529,7 @@ class AssetMetadataController extends Controller
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
@@ -1592,17 +1569,18 @@ class AssetMetadataController extends Controller
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
             ]);
+
             return null;
         }
 
-        $assetLabel = $asset->title ?? $asset->original_filename ?? 'Asset ' . substr($asset->id, 0, 8);
-        $subject = "Asset processing issue: " . $assetLabel;
+        $assetLabel = $asset->title ?? $asset->original_filename ?? 'Asset '.substr($asset->id, 0, 8);
+        $subject = 'Asset processing issue: '.$assetLabel;
         $description = "User-submitted support ticket for asset processing issues.\n\n"
-            . "Asset: {$assetLabel}\n"
-            . "Asset ID: {$asset->id}\n"
-            . "Status: " . ($asset->analysis_status ?? 'unknown') . "\n"
-            . "Thumbnails: " . (isset($asset->metadata['thumbnails']) ? 'Yes' : 'No') . "\n\n"
-            . "Diagnostic payload attached for support team.";
+            ."Asset: {$assetLabel}\n"
+            ."Asset ID: {$asset->id}\n"
+            .'Status: '.($asset->analysis_status ?? 'unknown')."\n"
+            .'Thumbnails: '.(isset($asset->metadata['thumbnails']) ? 'Yes' : 'No')."\n\n"
+            .'Diagnostic payload attached for support team.';
 
         return DB::transaction(function () use ($asset, $supportTicket, $payload, $user, $tenant, $subject, $description) {
             $ticket = Ticket::create([
@@ -1644,9 +1622,6 @@ class AssetMetadataController extends Controller
      * Used for testing/verification purposes.
      *
      * GET /assets/{asset}/metadata/all
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getAllMetadata(Asset $asset): JsonResponse
     {
@@ -1658,7 +1633,7 @@ class AssetMetadataController extends Controller
         if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
-        
+
         // Check if user can approve (to show pending metadata)
         $canApprove = $this->approvalResolver->canApprove($user, $tenant);
 
@@ -1671,7 +1646,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json([
                 'category' => null,
                 'fields' => [],
@@ -1685,7 +1660,7 @@ class AssetMetadataController extends Controller
         // Only respects category enablement (big blue toggle), not show_on_edit checkbox
         // We need to bypass the schema resolver's is_visible filter (which includes Quick View)
         // and only check category-level enablement
-        
+
         // Load fields directly and resolve manually, checking only category enablement
         $fields = DB::table('metadata_fields')
             ->where(function ($query) use ($assetType) {
@@ -1698,11 +1673,11 @@ class AssetMetadataController extends Controller
                     $q->where('scope', 'system')
                         ->whereNull('tenant_id');
                 })
-                ->orWhere(function ($q) use ($asset) {
-                    $q->where('scope', 'tenant')
-                        ->where('tenant_id', $asset->tenant_id)
-                        ->where('is_active', true);
-                });
+                    ->orWhere(function ($q) use ($asset) {
+                        $q->where('scope', 'tenant')
+                            ->where('tenant_id', $asset->tenant_id)
+                            ->where('is_active', true);
+                    });
             })
             ->select(array_merge(
                 [
@@ -1722,17 +1697,17 @@ class AssetMetadataController extends Controller
                     'deprecated_at',
                     'replacement_field_id',
                     DB::raw("COALESCE(population_mode, 'manual') as population_mode"),
-                    DB::raw("COALESCE(show_on_upload, true) as show_on_upload"),
-                    DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
-                    DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
-                    DB::raw("COALESCE(readonly, false) as readonly"),
-                    DB::raw("COALESCE(is_primary, false) as is_primary"),
+                    DB::raw('COALESCE(show_on_upload, true) as show_on_upload'),
+                    DB::raw('COALESCE(show_on_edit, true) as show_on_edit'),
+                    DB::raw('COALESCE(show_in_filters, true) as show_in_filters'),
+                    DB::raw('COALESCE(readonly, false) as readonly'),
+                    DB::raw('COALESCE(is_primary, false) as is_primary'),
                 ],
                 ['display_widget']
             ))
             ->get()
             ->keyBy('id');
-        
+
         // Check category enablement only (big blue toggle)
         $systemVisibilityService = app(\App\Services\SystemMetadataVisibilityService::class);
         $systemCategoryId = $category->system_category_id;
@@ -1745,7 +1720,7 @@ class AssetMetadataController extends Controller
             ->whereIn('metadata_field_id', $fields->keys()->toArray())
             ->pluck('is_edit_hidden', 'metadata_field_id')
             ->toArray();
-        
+
         // Load option visibility for select/multiselect fields
         $optionVisibility = [];
         $optionRows = DB::table('metadata_option_visibility')
@@ -1766,13 +1741,13 @@ class AssetMetadataController extends Controller
                 }
             })
             ->get();
-        
+
         foreach ($optionRows as $row) {
-            if (!isset($optionVisibility[$row->metadata_option_id])) {
+            if (! isset($optionVisibility[$row->metadata_option_id])) {
                 $optionVisibility[$row->metadata_option_id] = (bool) $row->is_hidden;
             }
         }
-        
+
         // Resolve fields, checking only category enablement (not Quick View)
         // Check category-level visibility overrides directly (big blue toggle)
         // This bypasses tenant-level Quick View settings
@@ -1783,7 +1758,7 @@ class AssetMetadataController extends Controller
             ->whereIn('metadata_field_id', $fields->keys()->toArray())
             ->pluck('is_hidden', 'metadata_field_id')
             ->toArray();
-        
+
         $schemaFields = [];
         foreach ($fields as $fieldId => $field) {
             // Check if field is enabled for this category (big blue toggle)
@@ -1800,8 +1775,8 @@ class AssetMetadataController extends Controller
                         $fieldId,
                         $systemCategoryId
                     );
-                    
-                    if (!$isCategoryEnabled) {
+
+                    if (! $isCategoryEnabled) {
                         continue; // Field disabled for this category (big blue toggle OFF)
                     }
                 }
@@ -1812,10 +1787,10 @@ class AssetMetadataController extends Controller
             if (isset($editVisibilityOverrides[$fieldId]) && $editVisibilityOverrides[$fieldId]) {
                 $effectiveShowOnEdit = false; // Category override: is_edit_hidden=true
             }
-            if (!$effectiveShowOnEdit) {
+            if (! $effectiveShowOnEdit) {
                 continue; // Never in Quick View
             }
-            
+
             // Resolve field options
             $options = [];
             if (in_array($field->type, ['select', 'multiselect'], true)) {
@@ -1823,29 +1798,29 @@ class AssetMetadataController extends Controller
                     ->where('metadata_field_id', $fieldId)
                     ->orderBy('system_label')
                     ->get();
-                
+
                 foreach ($optionRows as $option) {
                     $isHidden = $optionVisibility[$option->id] ?? false;
-                    if (!$isHidden) {
+                    if (! $isHidden) {
                         $opt = [
                             'value' => $option->value,
                             'display_label' => $option->system_label ?? $option->value,
                             'label' => $option->system_label ?? $option->value,
                         ];
-                        if (!empty($option->color)) {
+                        if (! empty($option->color)) {
                             $opt['color'] = $option->color;
                         }
-                        if (!empty($option->icon)) {
+                        if (! empty($option->icon)) {
                             $opt['icon'] = $option->icon;
                         }
                         $options[] = $opt;
                     }
                 }
             }
-            
+
             // Resolve display label
             $displayLabel = $field->system_label ?? $field->key;
-            
+
             // Include field in modal (regardless of Quick View setting)
             $schemaFields[] = [
                 'field_id' => $fieldId,
@@ -1868,20 +1843,20 @@ class AssetMetadataController extends Controller
                 'options' => $options,
             ];
         }
-        
+
         $schema = ['fields' => $schemaFields];
 
         // Load all current metadata values from asset_metadata table
         // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
         // They are authoritative the moment they exist and should always be included if present
         // Only AI fields require approved_at
-        
+
         // Get automatic field IDs (fields with population_mode = 'automatic')
         $automaticFieldIds = DB::table('metadata_fields')
             ->where('population_mode', 'automatic')
             ->pluck('id')
             ->toArray();
-        
+
         // Build query: Include automatic fields regardless of approved_at, require approved_at for others
         // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
         // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
@@ -1898,31 +1873,31 @@ class AssetMetadataController extends Controller
             $metadataQuery->where('asset_metadata.asset_id', $asset->id);
         }
         $currentMetadataRows = $metadataQuery
-            ->where(function($query) use ($automaticFieldIds, $canApprove) {
+            ->where(function ($query) use ($automaticFieldIds, $canApprove) {
                 // Automatic fields: include if value exists (no approval required)
-                if (!empty($automaticFieldIds)) {
+                if (! empty($automaticFieldIds)) {
                     $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                          ->orWhere(function($q) use ($automaticFieldIds, $canApprove) {
-                              // Non-automatic fields: require approval OR show pending if user can approve
-                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds);
-                              if ($canApprove) {
-                                  // Approvers can see both approved and pending metadata
-                                  $q->where(function($subQ) {
-                                      $subQ->whereNotNull('asset_metadata.approved_at')
-                                           ->orWhereNull('asset_metadata.approved_at');
-                                  });
-                              } else {
-                                  // Non-approvers only see approved metadata
-                                  $q->whereNotNull('asset_metadata.approved_at');
-                              }
-                          });
+                        ->orWhere(function ($q) use ($automaticFieldIds, $canApprove) {
+                            // Non-automatic fields: require approval OR show pending if user can approve
+                            $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds);
+                            if ($canApprove) {
+                                // Approvers can see both approved and pending metadata
+                                $q->where(function ($subQ) {
+                                    $subQ->whereNotNull('asset_metadata.approved_at')
+                                        ->orWhereNull('asset_metadata.approved_at');
+                                });
+                            } else {
+                                // Non-approvers only see approved metadata
+                                $q->whereNotNull('asset_metadata.approved_at');
+                            }
+                        });
                 } else {
                     // No automatic fields
                     if ($canApprove) {
                         // Approvers can see both approved and pending metadata
-                        $query->where(function($q) {
+                        $query->where(function ($q) {
                             $q->whereNotNull('asset_metadata.approved_at')
-                              ->orWhereNull('asset_metadata.approved_at');
+                                ->orWhereNull('asset_metadata.approved_at');
                         });
                     } else {
                         // Non-approvers only see approved metadata
@@ -1944,12 +1919,12 @@ class AssetMetadataController extends Controller
                 'asset_metadata.approved_at',
                 'asset_metadata.approved_by'
             )
-            ->orderByRaw("
+            ->orderByRaw('
                 CASE 
                     WHEN asset_metadata.approved_at IS NOT NULL THEN 1
                     ELSE 2
                 END
-            ")
+            ')
             ->orderByRaw("
                 CASE 
                     WHEN asset_metadata.source = 'manual_override' THEN 1
@@ -1960,12 +1935,12 @@ class AssetMetadataController extends Controller
                     ELSE 6
                 END
             ")
-            ->orderByRaw("
+            ->orderByRaw('
                 CASE 
                     WHEN asset_metadata.approved_at IS NOT NULL THEN asset_metadata.approved_at
                     ELSE asset_metadata.created_at
                 END DESC
-            ")
+            ')
             ->get()
             ->groupBy('metadata_field_id');
 
@@ -1987,7 +1962,7 @@ class AssetMetadataController extends Controller
             ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
             ->select('asset_metadata.metadata_field_id', 'asset_metadata.id as pending_metadata_id')
             ->get();
-        
+
         $pendingFieldIds = $pendingMetadata->pluck('metadata_field_id')->unique()->toArray();
         $pendingMetadataByField = $pendingMetadata->groupBy('metadata_field_id')->map(function ($items) {
             return $items->pluck('pending_metadata_id')->toArray();
@@ -2051,7 +2026,7 @@ class AssetMetadataController extends Controller
             // Get pending metadata IDs for this field
             $pendingMetadataIds = $pendingMetadataByField[$fieldId] ?? [];
             $isValuePending = $metadata && ($metadata['is_pending'] ?? false);
-            
+
             $allFields[] = [
                 'metadata_field_id' => $fieldId,
                 'field_key' => $field['key'],
@@ -2087,10 +2062,6 @@ class AssetMetadataController extends Controller
      * POST /assets/{asset}/metadata/edit
      *
      * Phase 2 – Step 6: Creates new metadata row for manual edit.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function editMetadata(Request $request, Asset $asset): JsonResponse
     {
@@ -2113,7 +2084,7 @@ class AssetMetadataController extends Controller
 
         // Phase 4: Check edit permission
         $userRole = $user ? ($user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member') : 'member';
-        
+
         // Load category for permission check
         $category = null;
         if ($asset->metadata && isset($asset->metadata['category_id'])) {
@@ -2131,7 +2102,7 @@ class AssetMetadataController extends Controller
             $category?->id
         );
 
-        if (!$canEdit) {
+        if (! $canEdit) {
             return response()->json([
                 'message' => 'You do not have permission to edit this metadata field.',
             ], 403);
@@ -2147,7 +2118,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['message' => 'Category not found'], 404);
         }
 
@@ -2171,7 +2142,7 @@ class AssetMetadataController extends Controller
             }
         }
 
-        if (!$fieldDef) {
+        if (! $fieldDef) {
             return response()->json(['message' => 'Field not found in schema'], 404);
         }
 
@@ -2180,7 +2151,7 @@ class AssetMetadataController extends Controller
             ->where('id', $fieldId)
             ->first();
 
-        if (!$field || !($field->is_user_editable ?? true)) {
+        if (! $field || ! ($field->is_user_editable ?? true)) {
             return response()->json(['message' => 'Field is not editable'], 422);
         }
 
@@ -2193,17 +2164,17 @@ class AssetMetadataController extends Controller
         // Phase B2: Check if field is readonly (automatic or explicitly readonly)
         $populationMode = $fieldDef['population_mode'] ?? 'manual';
         $isReadonly = ($fieldDef['readonly'] ?? false) || ($populationMode === 'automatic');
-        
+
         // Phase B5: For hybrid fields, require explicit override intent
         $isHybrid = $populationMode === 'hybrid';
-        $requiresOverride = $isHybrid && !$request->has('override_intent') && !$request->boolean('override_intent');
-        
+        $requiresOverride = $isHybrid && ! $request->has('override_intent') && ! $request->boolean('override_intent');
+
         if ($isReadonly) {
             return response()->json([
                 'message' => 'This field is automatically populated and cannot be edited.',
             ], 422);
         }
-        
+
         if ($requiresOverride) {
             return response()->json([
                 'message' => 'This field requires explicit override intent. Use the override action to enable editing.',
@@ -2212,7 +2183,7 @@ class AssetMetadataController extends Controller
         }
 
         // Validate value
-        if (!$this->validateValue($field, $newValue)) {
+        if (! $this->validateValue($field, $newValue)) {
             return response()->json([
                 'message' => 'Invalid value for field type',
             ], 422);
@@ -2282,7 +2253,7 @@ class AssetMetadataController extends Controller
         });
 
         // Sync sort-relevant fields to assets.metadata so grid sort sees them (display uses asset_metadata)
-        if (!$requiresApproval && in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValues)) {
+        if (! $requiresApproval && in_array($fieldKey, ['starred', 'quality_rating'], true) && ! empty($normalizedValues)) {
             $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
         }
 
@@ -2303,10 +2274,6 @@ class AssetMetadataController extends Controller
      * POST /assets/{asset}/metadata/override
      *
      * Phase B5: Explicitly marks a hybrid field as overridden, enabling editing.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function overrideHybridField(Request $request, Asset $asset): JsonResponse
     {
@@ -2335,7 +2302,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['message' => 'Category not found'], 404);
         }
 
@@ -2359,7 +2326,7 @@ class AssetMetadataController extends Controller
             }
         }
 
-        if (!$fieldDef) {
+        if (! $fieldDef) {
             return response()->json(['message' => 'Field not found in schema'], 404);
         }
 
@@ -2396,7 +2363,7 @@ class AssetMetadataController extends Controller
             ->orderBy('approved_at', 'desc')
             ->first();
 
-        if (!$currentAutomatic) {
+        if (! $currentAutomatic) {
             return response()->json([
                 'message' => 'No automatic value found for this field.',
             ], 404);
@@ -2438,10 +2405,6 @@ class AssetMetadataController extends Controller
      * POST /assets/{asset}/metadata/revert
      *
      * Phase B5: Removes manual override, reverting to automatic value.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function revertToAutomatic(Request $request, Asset $asset): JsonResponse
     {
@@ -2469,7 +2432,7 @@ class AssetMetadataController extends Controller
             ->whereNotNull('approved_at')
             ->first();
 
-        if (!$existingOverride) {
+        if (! $existingOverride) {
             return response()->json([
                 'message' => 'No override found for this field.',
             ], 404);
@@ -2484,7 +2447,7 @@ class AssetMetadataController extends Controller
             ->orderBy('approved_at', 'desc')
             ->first();
 
-        if (!$automaticValue) {
+        if (! $automaticValue) {
             return response()->json([
                 'message' => 'No automatic value found to revert to.',
             ], 404);
@@ -2525,9 +2488,6 @@ class AssetMetadataController extends Controller
      * POST /assets/metadata/bulk/preview
      *
      * Phase 2 – Step 7: Previews bulk metadata changes without writing.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function previewBulk(Request $request): JsonResponse
     {
@@ -2535,7 +2495,7 @@ class AssetMetadataController extends Controller
         $brand = app('brand');
         $user = Auth::user();
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             return response()->json(['message' => 'Tenant or brand not found'], 404);
         }
 
@@ -2561,10 +2521,10 @@ class AssetMetadataController extends Controller
             );
 
             // Generate preview token (simple hash for now)
-            $previewToken = hash('sha256', json_encode($validated) . $user->id . now()->timestamp);
+            $previewToken = hash('sha256', json_encode($validated).$user->id.now()->timestamp);
 
             // Store preview token in session (simple approach)
-            session(['bulk_metadata_preview_' . $previewToken => [
+            session(['bulk_metadata_preview_'.$previewToken => [
                 'asset_ids' => $validated['asset_ids'],
                 'operation_type' => $validated['operation_type'],
                 'metadata' => $validated['metadata'],
@@ -2582,7 +2542,7 @@ class AssetMetadataController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Preview failed: ' . $e->getMessage(),
+                'message' => 'Preview failed: '.$e->getMessage(),
             ], 422);
         }
     }
@@ -2593,9 +2553,6 @@ class AssetMetadataController extends Controller
      * POST /assets/metadata/bulk/execute
      *
      * Phase 2 – Step 7: Executes bulk metadata changes.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function executeBulk(Request $request): JsonResponse
     {
@@ -2603,7 +2560,7 @@ class AssetMetadataController extends Controller
         $brand = app('brand');
         $user = Auth::user();
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             return response()->json(['message' => 'Tenant or brand not found'], 404);
         }
 
@@ -2613,15 +2570,16 @@ class AssetMetadataController extends Controller
         ]);
 
         $previewToken = $validated['preview_token'];
-        $previewData = session('bulk_metadata_preview_' . $previewToken);
+        $previewData = session('bulk_metadata_preview_'.$previewToken);
 
-        if (!$previewData) {
+        if (! $previewData) {
             return response()->json(['message' => 'Preview token not found or expired'], 404);
         }
 
         // Check expiration
         if (now()->greaterThan($previewData['expires_at'])) {
-            session()->forget('bulk_metadata_preview_' . $previewToken);
+            session()->forget('bulk_metadata_preview_'.$previewToken);
+
             return response()->json(['message' => 'Preview token expired'], 410);
         }
 
@@ -2641,7 +2599,7 @@ class AssetMetadataController extends Controller
             );
 
             // Clear preview token
-            session()->forget('bulk_metadata_preview_' . $previewToken);
+            session()->forget('bulk_metadata_preview_'.$previewToken);
 
             Log::info('[AssetMetadataController] Bulk metadata executed', [
                 'total_assets' => $results['total_assets'],
@@ -2660,7 +2618,7 @@ class AssetMetadataController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Execution failed: ' . $e->getMessage(),
+                'message' => 'Execution failed: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -2671,22 +2629,19 @@ class AssetMetadataController extends Controller
      * GET /assets/metadata/filterable-schema
      *
      * Phase 2 – Step 8: Returns filterable fields for current context.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function getFilterableSchema(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             return response()->json(['fields' => []]);
         }
 
         // Get category from request
         $categoryId = $request->get('category_id');
-        if (!$categoryId) {
+        if (! $categoryId) {
             return response()->json(['fields' => []]);
         }
 
@@ -2694,7 +2649,7 @@ class AssetMetadataController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['fields' => []]);
         }
 
@@ -2729,16 +2684,13 @@ class AssetMetadataController extends Controller
      * GET /assets/metadata/saved-views
      *
      * Phase 2 – Step 8: Returns saved filter views.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function getSavedViews(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['views' => []]);
         }
 
@@ -2781,16 +2733,13 @@ class AssetMetadataController extends Controller
      * POST /assets/metadata/saved-views
      *
      * Phase 2 – Step 8: Saves current filter configuration.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function saveView(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant || !$user) {
+        if (! $tenant || ! $user) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
@@ -2827,16 +2776,13 @@ class AssetMetadataController extends Controller
      * DELETE /assets/metadata/saved-views/{viewId}
      *
      * Phase 2 – Step 8: Deletes a saved filter view.
-     *
-     * @param int $viewId
-     * @return JsonResponse
      */
     public function deleteView(int $viewId): JsonResponse
     {
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant || !$user) {
+        if (! $tenant || ! $user) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
@@ -2846,16 +2792,16 @@ class AssetMetadataController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$view) {
+        if (! $view) {
             return response()->json(['message' => 'View not found'], 404);
         }
 
         // Check permissions
-        if ($view->is_global && !$user->can('manage categories')) {
+        if ($view->is_global && ! $user->can('manage categories')) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if (!$view->is_global && $view->user_id !== $user->id) {
+        if (! $view->is_global && $view->user_id !== $user->id) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -2868,9 +2814,6 @@ class AssetMetadataController extends Controller
      * Get pending metadata for an asset (Phase 8).
      *
      * GET /assets/{asset}/metadata/pending
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getPendingMetadata(Asset $asset): JsonResponse
     {
@@ -2892,7 +2835,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['pending' => []]);
         }
 
@@ -2925,12 +2868,12 @@ class AssetMetadataController extends Controller
 
         foreach ($resolvedState as $fieldId => $state) {
             // Only include fields with pending metadata
-            if (!$state['has_pending']) {
+            if (! $state['has_pending']) {
                 continue;
             }
 
             $fieldDef = $fieldMap[$fieldId] ?? null;
-            if (!$fieldDef) {
+            if (! $fieldDef) {
                 continue; // Skip if field not in resolved schema
             }
 
@@ -2938,19 +2881,19 @@ class AssetMetadataController extends Controller
             $fieldInfo = DB::table('metadata_fields')
                 ->where('id', $fieldId)
                 ->first();
-            
+
             if ($fieldInfo && $fieldInfo->population_mode === 'automatic') {
                 continue; // Exclude automatic fields
             }
 
             // Get pending row from resolved state
             $pendingRow = $state['pending'];
-            if (!$pendingRow) {
+            if (! $pendingRow) {
                 continue;
             }
 
             // Only include user and AI sources (exclude automatic/system/manual_override from pending)
-            if (!in_array($pendingRow->source, ['ai', 'user'])) {
+            if (! in_array($pendingRow->source, ['ai', 'user'])) {
                 continue;
             }
 
@@ -2982,9 +2925,6 @@ class AssetMetadataController extends Controller
      * Approve a pending metadata value (Phase 8).
      *
      * POST /metadata/{metadataId}/approve
-     *
-     * @param int $metadataId
-     * @return JsonResponse
      */
     public function approveMetadata(int $metadataId): JsonResponse
     {
@@ -2997,13 +2937,13 @@ class AssetMetadataController extends Controller
             ->where('id', $metadataId)
             ->first();
 
-        if (!$metadata) {
+        if (! $metadata) {
             return response()->json(['message' => 'Metadata not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($metadata->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3013,7 +2953,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve
-        if (!$this->approvalResolver->canApprove($user, $tenant)) {
+        if (! $this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
@@ -3084,10 +3024,6 @@ class AssetMetadataController extends Controller
      * Edit and approve a pending metadata value (Phase 8).
      *
      * POST /metadata/{metadataId}/edit-approve
-     *
-     * @param Request $request
-     * @param int $metadataId
-     * @return JsonResponse
      */
     public function editAndApproveMetadata(Request $request, int $metadataId): JsonResponse
     {
@@ -3105,13 +3041,13 @@ class AssetMetadataController extends Controller
             ->where('id', $metadataId)
             ->first();
 
-        if (!$metadata) {
+        if (! $metadata) {
             return response()->json(['message' => 'Metadata not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($metadata->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3121,7 +3057,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve
-        if (!$this->approvalResolver->canApprove($user, $tenant)) {
+        if (! $this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
@@ -3132,14 +3068,14 @@ class AssetMetadataController extends Controller
             ->where('id', $metadata->metadata_field_id)
             ->first();
 
-        if (!$field) {
+        if (! $field) {
             return response()->json(['message' => 'Field not found'], 404);
         }
 
         $editedValue = $validated['value'];
 
         // Validate value
-        if (!$this->validateValue($field, $editedValue)) {
+        if (! $this->validateValue($field, $editedValue)) {
             return response()->json([
                 'message' => 'Invalid value for field type',
             ], 422);
@@ -3179,7 +3115,7 @@ class AssetMetadataController extends Controller
 
         // Sync sort-relevant fields to assets.metadata so grid sort sees them
         $fieldKey = $field->key ?? null;
-        if ($fieldKey && in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValues)) {
+        if ($fieldKey && in_array($fieldKey, ['starred', 'quality_rating'], true) && ! empty($normalizedValues)) {
             $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
         }
 
@@ -3193,9 +3129,6 @@ class AssetMetadataController extends Controller
      * Reject a pending metadata value (Phase 8).
      *
      * POST /metadata/{metadataId}/reject
-     *
-     * @param int $metadataId
-     * @return JsonResponse
      */
     public function rejectMetadata(int $metadataId): JsonResponse
     {
@@ -3208,13 +3141,13 @@ class AssetMetadataController extends Controller
             ->where('id', $metadataId)
             ->first();
 
-        if (!$metadata) {
+        if (! $metadata) {
             return response()->json(['message' => 'Metadata not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($metadata->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3224,7 +3157,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve (rejection requires same permission)
-        if (!$this->approvalResolver->canApprove($user, $tenant)) {
+        if (! $this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to reject metadata',
             ], 403);
@@ -3291,9 +3224,6 @@ class AssetMetadataController extends Controller
      * GET /assets/{asset}/metadata/review
      *
      * Phase B9: Returns reviewable candidates that need human review.
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getReview(Asset $asset): JsonResponse
     {
@@ -3307,7 +3237,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can view metadata suggestions
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3329,9 +3259,6 @@ class AssetMetadataController extends Controller
      * Phase B9: Accepts an AI suggestion by preserving original AI attribution.
      * Maintains source = 'ai', original confidence, producer = 'ai'.
      * This is NOT a manual override - it's accepting an AI recommendation.
-     *
-     * @param int $candidateId
-     * @return JsonResponse
      */
     public function approveCandidate(int $candidateId): JsonResponse
     {
@@ -3344,13 +3271,13 @@ class AssetMetadataController extends Controller
             ->where('id', $candidateId)
             ->first();
 
-        if (!$candidate) {
+        if (! $candidate) {
             return response()->json(['message' => 'Candidate not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($candidate->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3381,7 +3308,7 @@ class AssetMetadataController extends Controller
         $fieldLabel = $field->system_label ?? $fieldKey;
 
         DB::transaction(function () use ($asset, $candidate, $user, $candidateId, $fieldKey, $fieldLabel, $tenant, $brand) {
-            // Accept AI suggestion by preserving AI attribution 
+            // Accept AI suggestion by preserving AI attribution
             // This is NOT a manual override - it's accepting an AI recommendation
             DB::table('asset_metadata')->insert([
                 'asset_id' => $asset->id,
@@ -3389,7 +3316,7 @@ class AssetMetadataController extends Controller
                 'value_json' => $candidate->value_json,
                 'source' => $candidate->source, // Preserve original source (typically 'ai')
                 'confidence' => $candidate->confidence, // Preserve original AI confidence
-                'producer' => $candidate->producer, // Preserve original producer (typically 'ai') 
+                'producer' => $candidate->producer, // Preserve original producer (typically 'ai')
                 'approved_at' => now(),
                 'approved_by' => $user->id,
                 'overridden_at' => null, // Not an override - it's an acceptance of AI suggestion
@@ -3456,9 +3383,6 @@ class AssetMetadataController extends Controller
      *
      * Phase B9: Rejects a candidate by marking it as dismissed.
      * Preserves candidate for audit history but excludes it from future resolution.
-     *
-     * @param int $candidateId
-     * @return JsonResponse
      */
     public function rejectCandidate(int $candidateId): JsonResponse
     {
@@ -3471,13 +3395,13 @@ class AssetMetadataController extends Controller
             ->where('id', $candidateId)
             ->first();
 
-        if (!$candidate) {
+        if (! $candidate) {
             return response()->json(['message' => 'Candidate not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($candidate->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3547,9 +3471,6 @@ class AssetMetadataController extends Controller
      *
      * Phase B9: Defers review of a candidate without making any changes.
      * This is a no-op action for tracking purposes only.
-     *
-     * @param int $candidateId
-     * @return JsonResponse
      */
     public function deferCandidate(int $candidateId): JsonResponse
     {
@@ -3562,13 +3483,13 @@ class AssetMetadataController extends Controller
             ->where('id', $candidateId)
             ->first();
 
-        if (!$candidate) {
+        if (! $candidate) {
             return response()->json(['message' => 'Candidate not found'], 404);
         }
 
         // Load asset to verify tenant/brand
         $asset = Asset::find($candidate->asset_id);
-        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+        if (! $asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
@@ -3591,9 +3512,6 @@ class AssetMetadataController extends Controller
      * GET /assets/{asset}/metadata/suggestions
      *
      * Returns suggestions stored in the new ephemeral format.
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getSuggestions(Asset $asset): JsonResponse
     {
@@ -3607,7 +3525,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3627,7 +3545,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['suggestions' => []]);
         }
 
@@ -3657,7 +3575,7 @@ class AssetMetadataController extends Controller
         $formattedSuggestions = [];
         foreach ($suggestions as $fieldKey => $suggestion) {
             $fieldDef = $fieldMap[$fieldKey] ?? null;
-            if (!$fieldDef) {
+            if (! $fieldDef) {
                 continue; // Skip if field not in schema
             }
 
@@ -3700,10 +3618,6 @@ class AssetMetadataController extends Controller
      * Accept an AI metadata suggestion (write to metadata).
      *
      * POST /assets/{asset}/metadata/suggestions/{fieldKey}/accept
-     *
-     * @param Asset $asset
-     * @param string $fieldKey
-     * @return JsonResponse
      */
     public function acceptSuggestion(Asset $asset, string $fieldKey): JsonResponse
     {
@@ -3717,13 +3631,13 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
         // Get suggestions
         $suggestions = $this->suggestionService->getSuggestions($asset);
-        if (!isset($suggestions[$fieldKey])) {
+        if (! isset($suggestions[$fieldKey])) {
             return response()->json(['message' => 'Suggestion not found'], 404);
         }
 
@@ -3735,7 +3649,7 @@ class AssetMetadataController extends Controller
             ->where('tenant_id', $asset->tenant_id)
             ->first();
 
-        if (!$field) {
+        if (! $field) {
             return response()->json(['message' => 'Field not found'], 404);
         }
 
@@ -3748,7 +3662,7 @@ class AssetMetadataController extends Controller
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['message' => 'Category not found'], 404);
         }
 
@@ -3772,7 +3686,7 @@ class AssetMetadataController extends Controller
             }
         }
 
-        if (!$fieldDef) {
+        if (! $fieldDef) {
             return response()->json(['message' => 'Field not found in schema'], 404);
         }
 
@@ -3786,7 +3700,7 @@ class AssetMetadataController extends Controller
             $category->id
         );
 
-        if (!$canEdit) {
+        if (! $canEdit) {
             return response()->json(['message' => 'You do not have permission to edit this field'], 403);
         }
 
@@ -3817,7 +3731,7 @@ class AssetMetadataController extends Controller
             // This allows the UI to show "AI" badge even though user accepted it
             $suggestionSource = $suggestion['source'] ?? 'ai'; // Default to 'ai' for AI suggestions
             $isAISuggestion = ($suggestionSource === 'ai' || isset($suggestion['confidence']));
-            
+
             $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $field->id,
@@ -3866,10 +3780,6 @@ class AssetMetadataController extends Controller
      * Dismiss an AI metadata suggestion (remove from suggestions).
      *
      * POST /assets/{asset}/metadata/suggestions/{fieldKey}/dismiss
-     *
-     * @param Asset $asset
-     * @param string $fieldKey
-     * @return JsonResponse
      */
     public function dismissSuggestion(Asset $asset, string $fieldKey): JsonResponse
     {
@@ -3883,13 +3793,13 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
         // Get suggestions
         $suggestions = $this->suggestionService->getSuggestions($asset);
-        if (!isset($suggestions[$fieldKey])) {
+        if (! isset($suggestions[$fieldKey])) {
             return response()->json(['message' => 'Suggestion not found'], 404);
         }
 
@@ -3958,9 +3868,6 @@ class AssetMetadataController extends Controller
      * GET /assets/{asset}/tags/suggestions
      *
      * Returns tag candidates from asset_tag_candidates table.
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function getTagSuggestions(Asset $asset): JsonResponse
     {
@@ -3974,7 +3881,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission (reuse metadata suggestions permission)
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4013,12 +3920,8 @@ class AssetMetadataController extends Controller
      * POST /assets/{asset}/tags/suggestions/{candidateId}/accept
      *
      * Creates tag in asset_tags table and marks candidate as resolved.
-     *
-     * @param Asset $asset
-     * @param int $candidateId
-     * @return JsonResponse
      */
-    public function acceptTagSuggestion(Asset $asset, int $candidateId): JsonResponse
+    public function acceptTagSuggestion(Request $request, Asset $asset, int $candidateId): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -4030,7 +3933,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4050,7 +3953,7 @@ class AssetMetadataController extends Controller
             ->whereNull('dismissed_at')
             ->first();
 
-        if (!$candidate) {
+        if (! $candidate) {
             return response()->json(['message' => 'Tag suggestion not found'], 404);
         }
 
@@ -4072,8 +3975,8 @@ class AssetMetadataController extends Controller
             ->where('tag', $canonicalTag) // Check against canonical form
             ->first();
 
-        DB::transaction(function () use ($asset, $candidate, $candidateId, $user, $existingTag, $canonicalTag) {
-            if (!$existingTag) {
+        DB::transaction(function () use ($asset, $candidate, $candidateId, $existingTag, $canonicalTag) {
+            if (! $existingTag) {
                 // Create tag in asset_tags table with canonical form
                 DB::table('asset_tags')->insert([
                     'asset_id' => $asset->id,
@@ -4115,10 +4018,6 @@ class AssetMetadataController extends Controller
      * POST /assets/{asset}/tags/suggestions/{candidateId}/dismiss
      *
      * Marks candidate as dismissed to prevent it from reappearing.
-     *
-     * @param Asset $asset
-     * @param int $candidateId
-     * @return JsonResponse
      */
     public function dismissTagSuggestion(Asset $asset, int $candidateId): JsonResponse
     {
@@ -4132,7 +4031,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4145,7 +4044,7 @@ class AssetMetadataController extends Controller
             ->whereNull('dismissed_at')
             ->first();
 
-        if (!$candidate) {
+        if (! $candidate) {
             return response()->json(['message' => 'Tag suggestion not found'], 404);
         }
 
@@ -4153,7 +4052,7 @@ class AssetMetadataController extends Controller
         $tagNormalizationService = app(\App\Services\TagNormalizationService::class);
         $canonicalTag = $tagNormalizationService->normalize($candidate->tag, $tenant);
 
-        DB::transaction(function () use ($asset, $candidateId, $canonicalTag, $candidate, $tagNormalizationService, $tenant) {
+        DB::transaction(function () use ($asset, $candidateId, $canonicalTag, $tagNormalizationService, $tenant) {
             // Mark the specific candidate as dismissed
             DB::table('asset_tag_candidates')
                 ->where('id', $candidateId)
@@ -4179,7 +4078,7 @@ class AssetMetadataController extends Controller
                     }
                 }
 
-                if (!empty($candidatesToDismiss)) {
+                if (! empty($candidatesToDismiss)) {
                     DB::table('asset_tag_candidates')
                         ->whereIn('id', $candidatesToDismiss)
                         ->update([
@@ -4212,11 +4111,9 @@ class AssetMetadataController extends Controller
      * Phase M-1: Returns a consolidated list of:
      * - Tag candidates (from asset_tag_candidates)
      * - Metadata candidates (from asset_metadata_candidates, AI only)
-     * 
+     *
      * Note: Pending metadata from asset_metadata table is excluded.
      * Metadata approval is asset-centric and reviewed inline during asset review.
-     *
-     * @return JsonResponse
      */
     public function getAllPendingSuggestions(): JsonResponse
     {
@@ -4224,12 +4121,12 @@ class AssetMetadataController extends Controller
         $brand = app('brand');
         $user = Auth::user();
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             return response()->json(['message' => 'Tenant and brand must be selected'], 403);
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4304,7 +4201,7 @@ class AssetMetadataController extends Controller
                 ->groupBy('metadata_field_id');
 
             foreach ($options as $fieldId => $opts) {
-                $optionsMap[$fieldId] = $opts->map(fn($opt) => [
+                $optionsMap[$fieldId] = $opts->map(fn ($opt) => [
                     'value' => $opt->value,
                     'display_label' => $opt->display_label,
                 ])->toArray();
@@ -4324,6 +4221,7 @@ class AssetMetadataController extends Controller
         // Load categories for asset category display (category_id in metadata)
         $categoryIds = $assets->pluck('metadata')->map(function ($m) {
             $meta = is_array($m) ? $m : (is_string($m) ? json_decode($m, true) : []);
+
             return $meta['category_id'] ?? null;
         })->filter()->unique()->values()->all();
         $categories = $categoryIds ? Category::whereIn('id', $categoryIds)->get()->keyBy('id') : collect();
@@ -4332,14 +4230,14 @@ class AssetMetadataController extends Controller
         foreach ($tagCandidates as $candidate) {
             $asset = $assets->get($candidate->asset_id);
             $thumbnailUrls = $this->getThumbnailUrls($asset);
-            
+
             // Get thumbnail status and metadata for ThumbnailPreview component
-            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                ? $asset->thumbnail_status->value 
+            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status->value
                 : ($asset->thumbnail_status ?? 'pending')) : 'pending';
             $metadata = $asset ? ($asset->metadata ?? []) : [];
             $categoryId = $metadata['category_id'] ?? null;
-            
+
             $items[] = [
                 'id' => $candidate->id,
                 'asset_id' => $candidate->asset_id,
@@ -4365,14 +4263,14 @@ class AssetMetadataController extends Controller
             $asset = $assets->get($candidate->asset_id);
             $thumbnailUrls = $this->getThumbnailUrls($asset);
             $value = json_decode($candidate->value_json, true);
-            
+
             // Get thumbnail status and metadata for ThumbnailPreview component
-            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                ? $asset->thumbnail_status->value 
+            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status->value
                 : ($asset->thumbnail_status ?? 'pending')) : 'pending';
             $metadata = $asset ? ($asset->metadata ?? []) : [];
             $categoryId = $metadata['category_id'] ?? null;
-            
+
             $items[] = [
                 'id' => $candidate->id,
                 'asset_id' => $candidate->asset_id,
@@ -4407,6 +4305,7 @@ class AssetMetadataController extends Controller
             if ($confB !== $confA) {
                 return $confB <=> $confA;
             }
+
             return 0;
         });
 
@@ -4418,16 +4317,14 @@ class AssetMetadataController extends Controller
 
     /**
      * Get all pending metadata approvals for quick review modal.
-     * 
+     *
      * TASK 2: UI-only endpoint for pending metadata review modal.
      * Does not alter approval logic or persistence.
-     * 
+     *
      * GET /app/api/pending-metadata-approvals
-     * 
+     *
      * Returns pending metadata fields from asset_metadata table (not candidates).
      * Uses AssetMetadataStateResolver as data source.
-     * 
-     * @return JsonResponse
      */
     public function getAllPendingMetadataApprovals(): JsonResponse
     {
@@ -4436,12 +4333,12 @@ class AssetMetadataController extends Controller
             $brand = app('brand');
             $user = Auth::user();
 
-            if (!$tenant || !$brand) {
+            if (! $tenant || ! $brand) {
                 return response()->json(['message' => 'Tenant and brand must be selected'], 403);
             }
 
             // Check permission - only approvers can view pending metadata
-            if (!$this->approvalResolver->canApprove($user, $tenant)) {
+            if (! $this->approvalResolver->canApprove($user, $tenant)) {
                 return response()->json(['message' => 'Permission denied'], 403);
             }
 
@@ -4504,7 +4401,7 @@ class AssetMetadataController extends Controller
                     ->groupBy('metadata_field_id');
 
                 foreach ($options as $fieldId => $opts) {
-                    $optionsMap[$fieldId] = $opts->map(fn($opt) => [
+                    $optionsMap[$fieldId] = $opts->map(fn ($opt) => [
                         'value' => $opt->value,
                         'display_label' => $opt->display_label,
                     ])->toArray();
@@ -4525,11 +4422,11 @@ class AssetMetadataController extends Controller
                     $asset = $assets->get($metadata->asset_id);
                     $thumbnailUrls = $this->getThumbnailUrls($asset);
                     $value = json_decode($metadata->value_json, true);
-                    
+
                     // Get thumbnail status and metadata for ThumbnailPreview component
                     $thumbnailStatus = 'pending';
                     $assetMetadata = [];
-                    
+
                     if ($asset) {
                         // Handle thumbnail_status (could be enum or string)
                         if ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus) {
@@ -4537,18 +4434,18 @@ class AssetMetadataController extends Controller
                         } elseif ($asset->thumbnail_status !== null) {
                             $thumbnailStatus = $asset->thumbnail_status;
                         }
-                        
+
                         // Handle metadata (JSON column, cast to array)
                         $assetMetadata = is_array($asset->metadata) ? $asset->metadata : [];
                     }
-                    
+
                     // Derive file extension from original_filename if available
                     $fileExtension = null;
                     if ($metadata->asset_filename) {
                         $fileExtension = pathinfo($metadata->asset_filename, PATHINFO_EXTENSION);
                         $fileExtension = $fileExtension ? strtolower($fileExtension) : null;
                     }
-                    
+
                     $items[] = [
                         'id' => $metadata->id,
                         'asset_id' => $metadata->asset_id,
@@ -4577,6 +4474,7 @@ class AssetMetadataController extends Controller
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
                     ]);
+
                     // Skip this item and continue
                     continue;
                 }
@@ -4591,7 +4489,7 @@ class AssetMetadataController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'message' => 'Failed to fetch pending metadata approvals',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
@@ -4603,18 +4501,17 @@ class AssetMetadataController extends Controller
      * Get thumbnail URLs for an asset (matches AssetController structure).
      * Returns both preview and final thumbnail URLs separately.
      *
-     * @param Asset|null $asset
      * @return array{preview: string|null, final: string|null}
      */
     protected function getThumbnailUrls(?Asset $asset): array
     {
-        if (!$asset) {
+        if (! $asset) {
             return ['preview' => null, 'final' => null];
         }
 
         $metadata = $asset->metadata ?? [];
-        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-            ? $asset->thumbnail_status->value 
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
 
         // Preview thumbnail URL (temporary, available early)
@@ -4624,14 +4521,14 @@ class AssetMetadataController extends Controller
         $finalThumbnailUrl = null;
         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
         $thumbnails = $metadata['thumbnails'] ?? [];
-        $thumbnailsExistInMetadata = !empty($thumbnails) && (isset($thumbnails['thumb']) || isset($thumbnails['medium']));
+        $thumbnailsExistInMetadata = ! empty($thumbnails) && (isset($thumbnails['thumb']) || isset($thumbnails['medium']));
 
         if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
             // Prefer medium size for better quality, fallback to thumb if medium not available
             $thumbnailStyle = 'medium';
             $thumbnailPath = $asset->thumbnailPathForStyle('medium');
 
-            if (!$thumbnailPath && !isset($thumbnails['medium'])) {
+            if (! $thumbnailPath && ! isset($thumbnails['medium'])) {
                 $thumbnailStyle = 'thumb';
                 $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
             }
@@ -4639,7 +4536,7 @@ class AssetMetadataController extends Controller
             $variant = $thumbnailStyle === 'medium' ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
             $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
             }
         }
 
@@ -4651,35 +4548,32 @@ class AssetMetadataController extends Controller
 
     /**
      * Centralized AI trigger logic.
-     * 
+     *
      * After metadata approval completes, check if all metadata is approved.
      * If no pending metadata exists and AI suggestions haven't been completed,
      * dispatch the AI suggestion job.
-     * 
+     *
      * This is the single place where AI triggers happen after approval.
-     * 
-     * @param Asset $asset
-     * @return void
      */
     protected function triggerAiSuggestionsIfReady(Asset $asset): void
     {
         // Use canonical metadata state resolver to check if all metadata is approved
         $resolver = app(\App\Services\Metadata\AssetMetadataStateResolver::class);
-        
+
         // Check if there's no pending metadata requiring approval
-        if (!$resolver->hasNoPendingMetadata($asset)) {
+        if (! $resolver->hasNoPendingMetadata($asset)) {
             return; // Still has pending metadata, don't trigger AI
         }
-        
+
         // Check if AI suggestions have already been completed
         $metadata = $asset->metadata ?? [];
-        $aiSuggestionsCompleted = isset($metadata['ai_metadata_suggestions_completed']) && 
+        $aiSuggestionsCompleted = isset($metadata['ai_metadata_suggestions_completed']) &&
             $metadata['ai_metadata_suggestions_completed'] === true;
-        
+
         if ($aiSuggestionsCompleted) {
             return; // Already completed, don't trigger again
         }
-        
+
         // All metadata approved and AI suggestions not yet completed - trigger AI
         \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
     }
@@ -4694,7 +4588,7 @@ class AssetMetadataController extends Controller
      */
     protected function syncSortFieldToAsset(Asset $asset, string $fieldKey, $value): void
     {
-        if (!in_array($fieldKey, ['starred', 'quality_rating'], true)) {
+        if (! in_array($fieldKey, ['starred', 'quality_rating'], true)) {
             return;
         }
         $asset->refresh();

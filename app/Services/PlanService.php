@@ -13,8 +13,28 @@ class PlanService
 {
     /**
      * Get the current plan name for a tenant.
+     *
+     * Resolved at most once per tenant per HTTP request (container memo) so middleware
+     * and multiple PlanService resolutions do not repeat the subscriptions query.
      */
     public function getCurrentPlan(Tenant $tenant): string
+    {
+        $memoKey = self::class.'.current_plan.'.$tenant->getKey();
+
+        if (app()->bound($memoKey)) {
+            return app($memoKey);
+        }
+
+        $plan = $this->resolveCurrentPlan($tenant);
+        app()->instance($memoKey, $plan);
+
+        return $plan;
+    }
+
+    /**
+     * Resolve plan name from tenant override, Cashier subscription, and config.
+     */
+    protected function resolveCurrentPlan(Tenant $tenant): string
     {
         // If manual plan override is set, use it
         if ($tenant->manual_plan_override) {
@@ -28,7 +48,7 @@ class PlanService
                 return $overridePlan;
             }
         }
-        
+
         // Get the most recent active subscription with name 'default'
         // Use relationship query (not lazy load) to avoid LazyLoadingViolationException
         $subscription = $tenant->subscriptions()
@@ -43,7 +63,7 @@ class PlanService
 
         // First try to get price from subscription
         $priceId = $subscription->stripe_price;
-        
+
         // If not found, try to get from subscription items
         if (! $priceId && $subscription->items->count() > 0) {
             $priceId = $subscription->items->first()->stripe_price;
@@ -63,25 +83,25 @@ class PlanService
         // Default to free if price ID not found
         return 'free';
     }
-    
+
     /**
      * Check if plan is externally managed (Shopify, etc.) and cannot be adjusted from backend.
      */
     public function isExternallyManaged(Tenant $tenant): bool
     {
         $source = $tenant->plan_management_source;
-        
+
         // If explicitly set to shopify, it's externally managed
         if ($source === 'shopify') {
             return true;
         }
-        
-        // Auto-detect: if no plan_management_source is set but they have stripe_id, 
+
+        // Auto-detect: if no plan_management_source is set but they have stripe_id,
         // we can manage it (Stripe allows admin updates)
         // Only Shopify is considered externally managed
         return false;
     }
-    
+
     /**
      * Get the plan management source, auto-detecting if not set.
      */
@@ -90,12 +110,12 @@ class PlanService
         if ($tenant->plan_management_source) {
             return $tenant->plan_management_source;
         }
-        
+
         // Auto-detect based on available integrations
         if ($tenant->stripe_id) {
             return 'stripe';
         }
-        
+
         // Default to manual if no integration found
         return 'manual';
     }
@@ -117,6 +137,7 @@ class PlanService
     protected function getPlanConfig(Tenant $tenant): array
     {
         $planName = $this->getCurrentPlan($tenant);
+
         return config("plans.{$planName}", config('plans.free'));
     }
 
@@ -126,6 +147,7 @@ class PlanService
     public function maxVersionsPerAsset(Tenant $tenant): int
     {
         $plan = $this->getPlanConfig($tenant);
+
         return $plan['max_versions_per_asset'] ?? 1;
     }
 
@@ -135,6 +157,7 @@ class PlanService
     public function planAllowsVersions(Tenant $tenant): bool
     {
         $plan = $this->getPlanConfig($tenant);
+
         return (bool) ($plan['versions_enabled'] ?? false);
     }
 
@@ -185,6 +208,7 @@ class PlanService
     public function isBrandDisabledByPlanLimit(Brand $brand, Tenant $tenant): bool
     {
         $info = $this->getBrandLimitInfo($tenant);
+
         return in_array($brand->id, $info['disabled']);
     }
 
@@ -227,7 +251,7 @@ class PlanService
     public function canCreateCategory(Tenant $tenant, Brand $brand): bool
     {
         $limits = $this->getPlanLimits($tenant);
-        
+
         // Count only custom (non-system) categories for the brand
         $currentCount = $brand->categories()->custom()->count();
 
@@ -241,15 +265,15 @@ class PlanService
     public function canCreatePrivateCategory(Tenant $tenant, Brand $brand): bool
     {
         $planName = $this->getCurrentPlan($tenant);
-        
+
         // Only Pro, Premium, and Enterprise plans can create private categories
-        if (!in_array($planName, ['pro', 'premium', 'enterprise'])) {
+        if (! in_array($planName, ['pro', 'premium', 'enterprise'])) {
             return false;
         }
 
         $limits = $this->getPlanLimits($tenant);
         $maxPrivateCategories = $limits['max_private_categories'] ?? 0;
-        
+
         // Count only private custom (non-system) categories for the brand
         $currentPrivateCount = $brand->categories()
             ->custom()
@@ -265,13 +289,14 @@ class PlanService
     public function getMaxPrivateCategories(Tenant $tenant): int
     {
         $planName = $this->getCurrentPlan($tenant);
-        
+
         // Only Pro, Premium, and Enterprise plans can create private categories
-        if (!in_array($planName, ['pro', 'premium', 'enterprise'])) {
+        if (! in_array($planName, ['pro', 'premium', 'enterprise'])) {
             return 0;
         }
 
         $limits = $this->getPlanLimits($tenant);
+
         return $limits['max_private_categories'] ?? 0;
     }
 
@@ -372,16 +397,16 @@ class PlanService
 
     /**
      * Enforce storage limits before upload.
-     * 
-     * @param Tenant $tenant
-     * @param int $additionalBytes Additional bytes to be added
+     *
+     * @param  int  $additionalBytes  Additional bytes to be added
+     *
      * @throws PlanLimitExceededException
      */
     public function enforceStorageLimit(Tenant $tenant, int $additionalBytes): void
     {
-        if (!$this->canAddFile($tenant, $additionalBytes)) {
+        if (! $this->canAddFile($tenant, $additionalBytes)) {
             $storageInfo = $this->getStorageInfo($tenant);
-            
+
             throw new PlanLimitExceededException(
                 'storage',
                 $storageInfo['current_usage_bytes'] + $additionalBytes,
@@ -432,7 +457,7 @@ class PlanService
     {
         $planName = $this->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}", config('plans.free'));
-        
+
         return in_array('access_to_more_roles', $plan['features'] ?? []);
     }
 
@@ -443,7 +468,7 @@ class PlanService
     {
         $planName = $this->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}", config('plans.free'));
-        
+
         return $plan['features'] ?? [];
     }
 
@@ -453,7 +478,7 @@ class PlanService
     public function hasFeature(Tenant $tenant, string $feature): bool
     {
         $features = $this->getPlanFeatures($tenant);
-        
+
         return in_array($feature, $features);
     }
 
@@ -463,6 +488,7 @@ class PlanService
     public function getMaxTagsPerAsset(Tenant $tenant): int
     {
         $limits = $this->getPlanLimits($tenant);
+
         return $limits['max_tags_per_asset'] ?? 1; // Default to 1 if not set
     }
 
@@ -472,6 +498,7 @@ class PlanService
     public function getMaxDownloadAssets(Tenant $tenant): int
     {
         $limits = $this->getPlanLimits($tenant);
+
         return $limits['max_download_assets'] ?? 50;
     }
 
@@ -482,6 +509,7 @@ class PlanService
     {
         $limits = $this->getPlanLimits($tenant);
         $mb = $limits['max_download_zip_mb'] ?? 500;
+
         return $mb * 1024 * 1024;
     }
 
@@ -492,6 +520,7 @@ class PlanService
     {
         $planName = $this->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}");
+
         return $plan['download_management'] ?? config('plans.free.download_management', [
             'extend_expiration' => false,
             'revoke' => false,
@@ -659,7 +688,7 @@ class PlanService
      */
     public function enforceTagLimit(Asset $asset, int $additionalTags = 1): void
     {
-        if (!$this->canAddTags($asset, $additionalTags)) {
+        if (! $this->canAddTags($asset, $additionalTags)) {
             $tenant = $asset->tenant;
             $maxTags = $this->getMaxTagsPerAsset($tenant);
             $currentTags = $this->getCurrentTagCount($asset);

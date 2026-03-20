@@ -31,6 +31,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -516,7 +517,7 @@ class BrandDNABuilderController extends Controller
         }
         $validated = $request->validate([
             'asset_id' => 'required|string|uuid|exists:assets,id',
-            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal',
+            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal,crawled_logo_variant',
         ]);
         $draft = $this->draftService->getWorkingVersion($brand);
         $assetId = $validated['asset_id'];
@@ -568,12 +569,22 @@ class BrandDNABuilderController extends Controller
         $count = $draft->assetsForContext($context)->count();
 
         $extra = [];
-        if ($asset && in_array($context, ['logo_reference', 'logo_on_dark', 'logo_on_light', 'logo_horizontal'])) {
+        if ($asset && in_array($context, ['logo_reference', 'logo_on_dark', 'logo_on_light', 'logo_horizontal', 'crawled_logo_variant'])) {
             $thumbStatus = $asset->thumbnail_status ?? 'pending';
-            $thumbUrl = ($thumbStatus === 'completed')
-                ? ($asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null)
-                : null;
-            $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+            $thumbUrl = null;
+            $previewUrl = null;
+            try {
+                $thumbUrl = ($thumbStatus === 'completed')
+                    ? ($asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null)
+                    : null;
+                $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+            } catch (\Throwable $e) {
+                Log::warning('[BrandDNA] attach-asset delivery URL failed', [
+                    'asset_id' => $asset->id,
+                    'context' => $context,
+                    'error' => $e->getMessage(),
+                ]);
+            }
             $assetData = [
                 'id' => $asset->id,
                 'thumbnail_url' => $thumbUrl,
@@ -583,8 +594,10 @@ class BrandDNABuilderController extends Controller
             ];
             if ($context === 'logo_reference') {
                 $extra['logo_asset'] = $assetData;
-            } else {
+            } elseif ($context !== 'crawled_logo_variant') {
                 $extra['variant_asset'] = $assetData;
+            } else {
+                $extra['crawled_logo_asset'] = $assetData;
             }
         }
 
@@ -603,7 +616,7 @@ class BrandDNABuilderController extends Controller
         }
         $validated = $request->validate([
             'asset_id' => 'required|string|uuid|exists:assets,id',
-            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal',
+            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal,crawled_logo_variant',
         ]);
         $draft = $this->draftService->getWorkingVersion($brand);
         $context = $validated['builder_context'];
@@ -1885,12 +1898,13 @@ PROMPT;
 
         $categorySlug = match ($context) {
             'logo_reference' => 'logos',
+            'crawled_logo_variant' => 'logos',
             'visual_reference' => 'photography',
             'guidelines_pdf' => 'reference_material',
             default => null,
         };
 
-        $promoteToAsset = in_array($context, ['logo_reference', 'visual_reference'], true);
+        $promoteToAsset = in_array($context, ['logo_reference', 'crawled_logo_variant', 'visual_reference'], true);
 
         DB::transaction(function () use ($asset, $brand, $categorySlug, $promoteToAsset) {
             if ($categorySlug) {

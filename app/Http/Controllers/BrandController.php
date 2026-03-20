@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
+use App\Models\Category;
 use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
@@ -32,8 +33,7 @@ class BrandController extends Controller
         protected PlanService $planService,
         protected CategoryService $categoryService,
         protected SystemCategoryService $systemCategoryService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of brands.
@@ -59,19 +59,19 @@ class BrandController extends Controller
 
         // Get available users (company users not yet on each brand) and pending invitations
         $tenantUsers = $tenant->users;
-        
+
         // Order brands: default first, then by name (same as in HandleInertiaRequests)
         // Phase MI-1: Load users but we'll filter to active memberships in the map
         $orderedBrands = $brands->load(['categories', 'invitations'])
             ->sortBy([['is_default', 'desc'], ['name', 'asc']])
             ->values();
-        
+
         return Inertia::render('Brands/Index', [
             'brands' => $orderedBrands->map(function ($brand, $index) use ($tenantUsers, $maxBrands, $brandLimitExceeded) {
                 // Mark brands beyond plan limit as disabled
                 // Index is 0-based, so index >= maxBrands means it's beyond the limit
                 $isDisabled = $brandLimitExceeded && ($index >= $maxBrands);
-                
+
                 // Phase MI-1: Get users with active membership only
                 $assignedUserIds = $brand->users()
                     ->wherePivotNull('removed_at')
@@ -85,7 +85,7 @@ class BrandController extends Controller
                     'email' => $user->email,
                     'avatar_url' => $user->avatar_url,
                 ]);
-                
+
                 // Get pending invitations
                 $pendingInvitations = $brand->invitations()->whereNull('accepted_at')->get()->map(fn ($invitation) => [
                     'id' => $invitation->id,
@@ -94,7 +94,7 @@ class BrandController extends Controller
                     'sent_at' => $invitation->sent_at?->toISOString(),
                     'created_at' => $invitation->created_at->toISOString(),
                 ]);
-                
+
                 return [
                     'id' => $brand->id,
                     'name' => $brand->name,
@@ -164,6 +164,7 @@ class BrandController extends Controller
         $planService = app(PlanService::class);
         if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {
             $info = $planService->getBrandLimitInfo($tenant);
+
             return back()->withErrors([
                 'brand' => "This brand is not accessible on your current plan. Your plan allows {$info['max_brands']} brand(s), but you have {$info['total_brands']}. Please upgrade your plan to access all brands.",
             ]);
@@ -241,7 +242,7 @@ class BrandController extends Controller
         $validated['logo_id'] = null;
         $validated['icon_path'] = null;
         $validated['icon_id'] = null;
-        
+
         // Handle icon_bg_color
         if ($request->has('icon_bg_color')) {
             $validated['icon_bg_color'] = $request->input('icon_bg_color') ?: null;
@@ -294,7 +295,7 @@ class BrandController extends Controller
             'user_id' => $user->id,
             'brand_id' => $brand->id,
         ]);
-        
+
         try {
             $this->authorize('view', $brand);
             \Log::info('BrandController::show() - Authorization passed', [
@@ -342,6 +343,8 @@ class BrandController extends Controller
         // Get categories for this brand
         $categories = $brand->categories()->orderBy('asset_type')->ordered()->orderBy('name')->get();
 
+        $templateExistsByCategoryId = Category::templateExistsLookupForCategories($categories);
+
         // Get system category templates and find ones that don't exist yet for this brand
         $systemTemplates = $this->systemCategoryService->getAllTemplates();
         $availableTemplates = collect();
@@ -349,7 +352,7 @@ class BrandController extends Controller
         foreach ($systemTemplates as $template) {
             // Check if brand already has a category with this slug and asset_type
             $exists = $categories->contains(function ($category) use ($template) {
-                return $category->slug === $template->slug && 
+                return $category->slug === $template->slug &&
                        $category->asset_type->value === $template->asset_type->value;
             });
 
@@ -524,19 +527,23 @@ class BrandController extends Controller
                 'background_asset_details' => $this->buildBackgroundAssetDetails($brand),
                 'logo_asset_thumbnail_url' => $this->buildLogoAssetThumbnailUrl($brand),
             ],
-            'categories' => $categories->map(function ($category) {
+            'categories' => $categories->map(function ($category) use ($templateExistsByCategoryId) {
                 // Get access rules for private categories
                 $accessRules = [];
-                if ($category->is_private && !$category->is_system) {
+                if ($category->is_private && ! $category->is_system) {
                     $accessRules = $category->accessRules()->get()->map(function ($rule) {
                         if ($rule->access_type === 'role') {
                             return ['type' => 'role', 'role' => $rule->role];
                         } elseif ($rule->access_type === 'user') {
                             return ['type' => 'user', 'user_id' => $rule->user_id];
                         }
+
                         return null;
                     })->filter()->values()->toArray();
                 }
+
+                $systemTemplateExists = $category->is_system
+                    && ($templateExistsByCategoryId[$category->id] ?? false);
 
                 return [
                     'id' => $category->id,
@@ -552,8 +559,10 @@ class BrandController extends Controller
                     'deletion_available' => $category->deletion_available ?? false,
                     'system_version' => $category->system_version,
                     'order' => $category->order ?? 0,
-                    'template_exists' => $category->systemTemplateExists(),
-                    'can_be_deleted' => $category->canBeDeleted(),
+                    'template_exists' => $systemTemplateExists,
+                    'can_be_deleted' => $category->is_system
+                        ? ! $systemTemplateExists
+                        : $category->canBeDeleted(),
                     'access_rules' => $accessRules,
                 ];
             }),
@@ -682,7 +691,7 @@ class BrandController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->first();
-            if (!$logoAsset) {
+            if (! $logoAsset) {
                 abort(403, 'Logo asset does not belong to this brand.');
             }
             $validated['logo_id'] = $request->input('logo_id');
@@ -701,7 +710,7 @@ class BrandController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->first();
-            if (!$darkLogoAsset) {
+            if (! $darkLogoAsset) {
                 abort(403, 'Dark logo asset does not belong to this brand.');
             }
             $validated['logo_dark_id'] = $request->input('logo_dark_id');
@@ -744,7 +753,7 @@ class BrandController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->first();
-            if (!$iconAsset) {
+            if (! $iconAsset) {
                 abort(403, 'Icon asset does not belong to this brand.');
             }
             $validated['icon_id'] = $request->input('icon_id');
@@ -755,7 +764,7 @@ class BrandController extends Controller
             $validated['icon_id'] = $brand->icon_id;
             $validated['icon'] = null;
         }
-        
+
         // Handle icon_bg_color
         if ($request->has('icon_bg_color')) {
             $validated['icon_bg_color'] = $request->input('icon_bg_color') ?: null;
@@ -881,13 +890,13 @@ class BrandController extends Controller
 
         // Get users in the company
         $tenantUsers = $tenant->users;
-        
+
         // Phase MI-1: Get users with active membership only
         $assignedUserIds = $brand->users()
             ->wherePivotNull('removed_at')
             ->pluck('users.id')
             ->toArray();
-        
+
         // Phase MI-1: Filter to available users (exclude those with active membership)
         $availableUsers = $tenantUsers->reject(fn ($user) => in_array($user->id, $assignedUserIds))->map(fn ($user) => [
             'id' => $user->id,
@@ -1089,7 +1098,7 @@ class BrandController extends Controller
             ->where('user_id', $user->id)
             ->where('brand_id', $brand->id)
             ->first();
-        
+
         // Check if user already has active membership
         $activeMembership = $user->activeBrandMembership($brand);
         if ($activeMembership) {
@@ -1220,7 +1229,7 @@ class BrandController extends Controller
 
         // Phase MI-1: Verify user has active membership
         $membership = $user->activeBrandMembership($brand);
-        if (!$membership) {
+        if (! $membership) {
             abort(404, 'User is not an active member of this brand.');
         }
 
@@ -1302,7 +1311,7 @@ class BrandController extends Controller
 
     /**
      * Show the approval queue page.
-     * 
+     *
      * Phase AF-1: Approval workflow page for pending assets.
      */
     public function approvals(Brand $brand): Response
@@ -1317,14 +1326,14 @@ class BrandController extends Controller
 
         // Phase AF-5: Gate approval queue access based on plan feature
         $featureGate = app(FeatureGate::class);
-        if (!$featureGate->approvalsEnabled($tenant)) {
+        if (! $featureGate->approvalsEnabled($tenant)) {
             $requiredPlan = $featureGate->getRequiredPlanName($tenant);
             abort(403, "Approval workflows require {$requiredPlan} plan or higher. Please upgrade your plan to access approval features.");
         }
 
         // Check if user is approval_capable for this brand
         $brandRole = $user->getRoleForBrand($brand);
-        if (!$brandRole || !PermissionMap::canApproveAssets($brandRole)) {
+        if (! $brandRole || ! PermissionMap::canApproveAssets($brandRole)) {
             abort(403, 'You do not have permission to view the approval queue.');
         }
 
@@ -1377,7 +1386,7 @@ class BrandController extends Controller
             ->get()
             ->filter(fn ($a) => $eligibilityService->isEligibleForDownloadBackground($a))
             ->values()
-            ->map(function ($asset) use ($tenant, $brand) {
+            ->map(function ($asset) {
                 $metadata = $asset->metadata ?? [];
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
                     ? $asset->thumbnail_status->value
@@ -1387,6 +1396,7 @@ class BrandController extends Controller
                     $variant = $asset->thumbnailPathForStyle('medium') ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
                 }
+
                 return [
                     'id' => $asset->id,
                     'original_filename' => $asset->original_filename,
@@ -1420,6 +1430,7 @@ class BrandController extends Controller
                 $out[] = ['id' => $asset->id, 'thumbnail_url' => $url];
             }
         }
+
         return $out;
     }
 
@@ -1437,6 +1448,7 @@ class BrandController extends Controller
             ->where('tenant_id', $brand->tenant_id)
             ->where('brand_id', $brand->id)
             ->first();
+
         return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
     }
 

@@ -178,6 +178,75 @@ function loadImage(src) {
     })
 }
 
+/** WCAG relative luminance for sRGB 8-bit channels */
+function relativeLuminance8bit(r, g, b) {
+    const lin = (c) => {
+        const x = c / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+    }
+    const R = lin(r)
+    const G = lin(g)
+    const B = lin(b)
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B
+}
+
+/** Contrast ratio of white (#fff) over a solid color with luminance L (L is the logo pixel on white bg) */
+function contrastRatioOnWhiteBackground(L) {
+    return (1 + 0.05) / (L + 0.05)
+}
+
+/**
+ * Heuristic: primary logo may be unreadable on pure white (e.g. white wordmark, cream, very light grey).
+ * Samples raster pixels; SVG returns skipped/ok.
+ *
+ * @returns {Promise<{ ok: boolean, lightFraction?: number, lowContrastFraction?: number, skipped?: boolean, reason?: string }>}
+ */
+export async function analyzeLogoLightOnWhiteRisk(imageSrc) {
+    if (!imageSrc || typeof imageSrc !== 'string') {
+        return { ok: true, skipped: true, reason: 'no-src' }
+    }
+    if (isLikelySvg(imageSrc)) {
+        return { ok: true, skipped: true, reason: 'svg' }
+    }
+    try {
+        const img = await loadImage(imageSrc)
+        const maxSide = 72
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight, 1))
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return { ok: true, skipped: true, reason: 'no-ctx' }
+        ctx.drawImage(img, 0, 0, w, h)
+        const data = ctx.getImageData(0, 0, w, h).data
+        let opaque = 0
+        let lightProblem = 0
+        let lowContrast = 0
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] < 25) continue
+            opaque++
+            const L = relativeLuminance8bit(data[i], data[i + 1], data[i + 2])
+            const cr = contrastRatioOnWhiteBackground(L)
+            if (L > 0.86 || cr < 2.05) lightProblem++
+            if (cr < 2.5) lowContrast++
+        }
+        if (opaque === 0) return { ok: true, skipped: true, reason: 'empty' }
+        const lightFraction = lightProblem / opaque
+        const lowContrastFraction = lowContrast / opaque
+        const ok = lightFraction < 0.055 && lowContrastFraction < 0.1
+        return {
+            ok,
+            lightFraction,
+            lowContrastFraction,
+            skipped: false,
+        }
+    } catch {
+        return { ok: true, skipped: true, reason: 'error' }
+    }
+}
+
 /**
  * Generate a white (silhouette) variant of a logo image.
  * Converts all opaque pixels to white while preserving the alpha channel.
@@ -204,6 +273,72 @@ export async function generateWhiteVariant(imageSrc) {
             d[i] = 255
             d[i + 1] = 255
             d[i + 2] = 255
+        }
+    }
+    ctx.putImageData(imageData, 0, 0)
+
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Canvas toBlob failed'))
+        }, 'image/png')
+    })
+}
+
+/**
+ * Parse #RGB or #RRGGBB into { r, g, b } or null.
+ */
+function parseHexRgb(hex) {
+    if (!hex || typeof hex !== 'string') return null
+    let h = hex.trim()
+    if (h.startsWith('#')) h = h.slice(1)
+    if (h.length === 3) {
+        return {
+            r: parseInt(h[0] + h[0], 16),
+            g: parseInt(h[1] + h[1], 16),
+            b: parseInt(h[2] + h[2], 16),
+        }
+    }
+    if (h.length === 6) {
+        return {
+            r: parseInt(h.slice(0, 2), 16),
+            g: parseInt(h.slice(2, 4), 16),
+            b: parseInt(h.slice(4, 6), 16),
+        }
+    }
+    return null
+}
+
+/**
+ * Tint / "color wash" a logo: all non-transparent pixels become the given solid color (alpha preserved).
+ * Useful for a dark-on-light variant when the raw primary mark does not read well on white.
+ *
+ * @param {string} imageSrc - URL, blob URL, or data URL of the source image
+ * @param {string} hexColor - CSS hex e.g. #1e3a5f
+ * @returns {Promise<Blob>} PNG blob
+ */
+export async function generatePrimaryColorWashVariant(imageSrc, hexColor) {
+    const rgb = parseHexRgb(hexColor)
+    if (!rgb || [rgb.r, rgb.g, rgb.b].some((n) => Number.isNaN(n))) {
+        throw new Error('Set a valid primary brand color first.')
+    }
+    if (isLikelySvg(imageSrc)) {
+        throw new Error('SVG logos cannot be converted via Canvas. Please upload a PNG/JPG version or add the variant manually.')
+    }
+    const img = await loadImage(imageSrc)
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const d = imageData.data
+    for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 10) {
+            d[i] = rgb.r
+            d[i + 1] = rgb.g
+            d[i + 2] = rgb.b
         }
     }
     ctx.putImageData(imageData, 0, 0)

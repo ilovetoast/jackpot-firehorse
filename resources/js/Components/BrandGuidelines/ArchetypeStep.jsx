@@ -1,5 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+
+/** Coherence section score (0–100) at or above this → treat extracted snapshot archetype as a default selection */
+const ARCHETYPE_SECTION_SCORE_MIN = 80
 
 const ARCHETYPES = [
     { id: 'Creator', desc: 'Innovation, imagination, self-expression', essence: 'Bring new things into being', accent: '#a78bfa', symbol: '✦' },
@@ -15,6 +18,39 @@ const ARCHETYPES = [
     { id: 'Sage', desc: 'Wisdom, truth, clarity', essence: 'Use intelligence to understand the world', accent: '#60a5fa', symbol: '◈' },
     { id: 'Explorer', desc: 'Freedom, discovery, authenticity', essence: 'Find fulfillment through discovery', accent: '#34d399', symbol: '↗' },
 ]
+
+function unwrapField(val) {
+    if (val == null) return null
+    if (typeof val === 'object' && !Array.isArray(val) && 'value' in val) return val.value
+    return val
+}
+
+/**
+ * Read archetype string from research snapshot (flat PDF/URL extraction + evidence map).
+ */
+function extractArchetypeFromResearchSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null
+    const ev = snapshot.evidence_map?.['personality.primary_archetype']
+    const finalVal = ev?.final_value
+    const candidates = [
+        snapshot.primary_archetype,
+        snapshot.personality?.primary_archetype,
+        finalVal,
+    ]
+    for (const raw of candidates) {
+        if (raw == null) continue
+        const u = unwrapField(raw)
+        if (u) return String(u).trim()
+    }
+    return null
+}
+
+function normalizeArchetypeId(raw) {
+    if (!raw) return null
+    return ARCHETYPES.find(
+        (a) => a.id === raw || a.id.toLowerCase() === String(raw).toLowerCase(),
+    )?.id ?? null
+}
 
 function ArchetypeCard({ archetype, selected = false, isPrimary = false, elevated = false, compact = false, onClick, disabled = false, showActions, onApply, onReject }) {
     return (
@@ -165,7 +201,7 @@ function ArchetypeHero({ archetype, reasoning, onAccept, onReject }) {
 function ArchetypePaths({ onPath }) {
     const paths = [
         {
-            id: 'explore',
+            id: 'explore_direct',
             title: 'I know my archetype',
             desc: 'Jump straight to the selection grid',
             icon: (
@@ -185,7 +221,7 @@ function ArchetypePaths({ onPath }) {
             ),
         },
         {
-            id: 'explore',
+            id: 'explore_browse',
             title: 'Browse all archetypes',
             desc: 'See every archetype and choose freely',
             icon: (
@@ -238,7 +274,7 @@ function ArchetypePaths({ onPath }) {
     )
 }
 
-function ArchetypeGrid({ selected, onSelect, maxSelections = 1 }) {
+function ArchetypeGrid({ selected, onSelect, maxSelections = 1, recommendedId = null, showRecommendationHint = false }) {
     const primaryId = selected[0] || null
     const primaryArchetype = primaryId ? ARCHETYPES.find((a) => a.id === primaryId) : null
     const remaining = ARCHETYPES.filter((a) => !selected.includes(a.id))
@@ -253,6 +289,11 @@ function ArchetypeGrid({ selected, onSelect, maxSelections = 1 }) {
             <div className="text-center space-y-2">
                 <h3 className="text-xl font-semibold text-white">Choose your archetype</h3>
                 <p className="text-sm text-white/35">Select the identity that best represents your brand.</p>
+                {showRecommendationHint && recommendedId && ARCHETYPES.some((a) => a.id === recommendedId) && (
+                    <p className="text-sm text-white/45 max-w-lg mx-auto pt-1">
+                        We&apos;ve pre-selected <span className="text-white/80 font-medium">{recommendedId}</span> from your research — change it anytime below.
+                    </p>
+                )}
             </div>
 
             {/* Selected archetype — elevated at top */}
@@ -410,40 +451,69 @@ export default function ArchetypeStep({
     effectiveSuggestions,
     onUpdate,
     accentColor,
+    researchSnapshot = null,
+    coherence = null,
 }) {
-    const primaryArchetype = typeof personality.primary_archetype === 'object' && 'value' in personality.primary_archetype
+    // typeof null === 'object' — must exclude null before using `in`
+    const primaryArchetype = personality.primary_archetype != null
+        && typeof personality.primary_archetype === 'object'
+        && !Array.isArray(personality.primary_archetype)
+        && 'value' in personality.primary_archetype
         ? personality.primary_archetype.value
         : personality.primary_archetype || null
     const candidateArchetypes = ((typeof personality.candidate_archetypes === 'object' && 'value' in (personality.candidate_archetypes || {}))
         ? personality.candidate_archetypes?.value
         : personality.candidate_archetypes) || []
     const candidates = Array.isArray(candidateArchetypes)
-        ? candidateArchetypes.map((c) => typeof c === 'object' && 'value' in c ? c.value : c).filter(Boolean)
+        ? candidateArchetypes.map((c) => (c != null && typeof c === 'object' && 'value' in c ? c.value : c)).filter(Boolean)
         : []
     const rejectedArchetypes = ((typeof personality.rejected_archetypes === 'object' && 'value' in (personality.rejected_archetypes || {}))
         ? personality.rejected_archetypes?.value
         : personality.rejected_archetypes) || []
     const rejected = Array.isArray(rejectedArchetypes)
-        ? rejectedArchetypes.map((r) => typeof r === 'object' && 'value' in r ? r.value : r).filter(Boolean)
+        ? rejectedArchetypes.map((r) => (r != null && typeof r === 'object' && 'value' in r ? r.value : r)).filter(Boolean)
         : []
 
     const selected = [primaryArchetype, ...candidates].filter(Boolean)
 
     const recommended = effectiveSuggestions?.recommended_archetypes
-    const recommendedId = Array.isArray(recommended) && recommended.length > 0
-        ? (typeof recommended[0] === 'string' ? recommended[0] : recommended[0]?.label || recommended[0]?.value)
+    const rawFromSuggestions = Array.isArray(recommended) && recommended.length > 0
+        ? (typeof recommended[0] === 'string' ? recommended[0] : recommended[0]?.label || recommended[0]?.value || recommended[0]?.archetype)
         : null
 
-    const hasRecommendation = !!recommendedId && ARCHETYPES.some((a) => a.id === recommendedId)
+    const fromItems = Array.isArray(effectiveSuggestions?.items)
+        ? effectiveSuggestions.items.find((p) => p?.path === 'personality.primary_archetype')
+        : null
+    const rawFromItems = fromItems?.value != null
+        ? (typeof fromItems.value === 'object' && fromItems.value !== null
+            ? (fromItems.value.label ?? fromItems.value.value ?? fromItems.value.archetype)
+            : fromItems.value)
+        : null
+
+    const rawFromSnapshot = extractArchetypeFromResearchSnapshot(researchSnapshot)
+    const archetypeSectionScore = coherence?.sections?.archetype?.score
+    /** Use snapshot extraction when coherence says archetype section is strong (e.g. 96), or when no score yet but we have text */
+    const snapshotUsable = rawFromSnapshot && (
+        archetypeSectionScore == null || archetypeSectionScore >= ARCHETYPE_SECTION_SCORE_MIN
+    )
+
+    const recommendedId = normalizeArchetypeId(rawFromSuggestions)
+        || normalizeArchetypeId(rawFromItems)
+        || (snapshotUsable ? normalizeArchetypeId(rawFromSnapshot) : null)
+
+    const hasRecommendation = !!recommendedId
     const hasExistingSelection = !!primaryArchetype
 
+    /** Skip path picker + hero — go straight to grid with AI suggestion pre-selected */
     const getInitialMode = () => {
         if (hasExistingSelection) return 'explore'
-        if (hasRecommendation) return 'recommendation'
+        if (hasRecommendation) return 'explore'
         return 'paths'
     }
 
     const [mode, setMode] = useState(getInitialMode)
+    const [optedOutOfRecommendation, setOptedOutOfRecommendation] = useState(false)
+    const autoAppliedRecommendationRef = useRef(false)
 
     const updateArchetypes = useCallback((primary, cands = [], rej) => {
         onUpdate({
@@ -452,6 +522,27 @@ export default function ArchetypeStep({
             ...(rej !== undefined ? { rejected_archetypes: rej } : {}),
         })
     }, [onUpdate])
+
+    useEffect(() => {
+        if (hasExistingSelection) autoAppliedRecommendationRef.current = true
+    }, [hasExistingSelection])
+
+    useEffect(() => {
+        if (autoAppliedRecommendationRef.current) return
+        if (!hasRecommendation || !recommendedId || hasExistingSelection) return
+        if (primaryArchetype === recommendedId) {
+            autoAppliedRecommendationRef.current = true
+            return
+        }
+        autoAppliedRecommendationRef.current = true
+        updateArchetypes(recommendedId, [])
+    }, [hasRecommendation, recommendedId, hasExistingSelection, primaryArchetype, updateArchetypes])
+
+    const handleExploreOtherOptions = useCallback(() => {
+        setOptedOutOfRecommendation(true)
+        updateArchetypes(null, [], [])
+        setMode('paths')
+    }, [updateArchetypes])
 
     const handleAcceptRecommendation = useCallback(() => {
         updateArchetypes(recommendedId, [])
@@ -511,7 +602,12 @@ export default function ArchetypeStep({
 
                 {mode === 'paths' && (
                     <motion.div key="paths" exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.3 }}>
-                        <ArchetypePaths onPath={(path) => setMode(path)} />
+                        <ArchetypePaths
+                            onPath={(path) => {
+                                if (path === 'guided') setMode('guided')
+                                else if (path === 'explore_direct' || path === 'explore_browse') setMode('explore')
+                            }}
+                        />
                     </motion.div>
                 )}
 
@@ -521,11 +617,28 @@ export default function ArchetypeStep({
                             selected={selected}
                             onSelect={handleGridSelect}
                             maxSelections={2}
+                            recommendedId={recommendedId}
+                            showRecommendationHint={hasRecommendation && !optedOutOfRecommendation}
                         />
-                        {!hasExistingSelection && hasRecommendation && (
-                            <div className="text-center mt-6">
-                                <button type="button" onClick={() => setMode('recommendation')} className="text-sm text-white/30 hover:text-white/50 transition">
-                                    ← Back to recommendation
+                        {hasRecommendation && !optedOutOfRecommendation && (
+                            <div className="flex justify-center mt-8">
+                                <button
+                                    type="button"
+                                    onClick={handleExploreOtherOptions}
+                                    className="px-5 py-2.5 rounded-xl text-sm font-medium border border-white/15 text-white/70 hover:text-white/90 hover:bg-white/[0.06] transition-colors"
+                                >
+                                    Explore other options
+                                </button>
+                            </div>
+                        )}
+                        {hasRecommendation && !optedOutOfRecommendation && hasExistingSelection && primaryArchetype === recommendedId && (
+                            <div className="text-center mt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setMode('recommendation')}
+                                    className="text-sm text-white/30 hover:text-white/50 transition"
+                                >
+                                    See why we suggested this archetype
                                 </button>
                             </div>
                         )}
@@ -558,18 +671,27 @@ export default function ArchetypeStep({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.5 }}
-                    className="flex items-center justify-center gap-4 pt-4 border-t border-white/[0.04]"
+                    className="flex flex-col items-center gap-3 pt-4 border-t border-white/[0.04]"
                 >
-                    {mode !== 'explore' && (
-                        <button type="button" onClick={() => setMode('explore')} className="text-xs text-white/25 hover:text-white/50 transition">
-                            Browse all
-                        </button>
-                    )}
-                    {mode !== 'guided' && (
-                        <button type="button" onClick={() => setMode('guided')} className="text-xs text-white/25 hover:text-white/50 transition">
-                            Guided selection
-                        </button>
-                    )}
+                    <div className="flex items-center justify-center gap-4 flex-wrap">
+                        {mode !== 'explore' && (
+                            <button type="button" onClick={() => setMode('explore')} className="text-xs text-white/25 hover:text-white/50 transition">
+                                Browse all
+                            </button>
+                        )}
+                        {mode !== 'guided' && (
+                            <button type="button" onClick={() => setMode('guided')} className="text-xs text-white/25 hover:text-white/50 transition">
+                                Guided selection
+                            </button>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setMode('paths')}
+                        className="text-xs text-white/20 hover:text-white/45 transition"
+                    >
+                        Choose your path
+                    </button>
                 </motion.div>
             )}
         </div>

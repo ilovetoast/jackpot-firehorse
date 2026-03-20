@@ -99,7 +99,7 @@ export default function ForgotPassword({ status }) {
 
                     <p className="mt-6 text-center text-sm text-gray-500">
                         Remember your password?{' '}
-                        <Link href="/login" className="font-semibold text-indigo-600 hover:text-indigo-500">
+                        <Link href="/gateway" className="font-semibold text-indigo-600 hover:text-indigo-500">
                             Sign in
                         </Link>
                     </p>

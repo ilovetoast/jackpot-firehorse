@@ -623,11 +623,28 @@ export default function Research({
                                                     <StatusBadge status={pdfStatus} />
                                                 </div>
                                             )}
-                                            {urlStatus && (
-                                                <div className="flex items-center justify-between py-2">
-                                                    <span className="text-sm text-white/70">URL Analysis</span>
+                                            {urlStatus && websiteUrl.trim().startsWith('http') && (
+                                                <div className="flex items-center justify-between py-2 gap-3">
+                                                    <div className="min-w-0">
+                                                        <span className="text-sm text-white/70">Website crawl</span>
+                                                        <p className="text-[11px] text-white/35 truncate max-w-[280px]">{websiteUrl.trim()}</p>
+                                                    </div>
                                                     <StatusBadge status={urlStatus} />
                                                 </div>
+                                            )}
+                                            {urlStatus && socialUrls.filter((u) => u.trim().startsWith('http')).map((u, i) => (
+                                                <div key={`soc-${i}`} className="flex items-center justify-between py-2 gap-3">
+                                                    <div className="min-w-0">
+                                                        <span className="text-sm text-white/70">Social crawl</span>
+                                                        <p className="text-[11px] text-white/35 truncate max-w-[280px]">{u.trim()}</p>
+                                                    </div>
+                                                    <StatusBadge status={urlStatus} />
+                                                </div>
+                                            ))}
+                                            {hasUrls && (websiteUrl.trim().startsWith('http') || socialUrls.some((u) => u.trim().startsWith('http'))) && (
+                                                <p className="text-[11px] text-white/30 pt-1">
+                                                    Each URL runs its own crawl job (website + every social link you add). Some networks block automated access — results may vary.
+                                                </p>
                                             )}
                                             {snapStatus && (
                                                 <div className="flex items-center justify-between py-2">
@@ -682,7 +699,7 @@ export default function Research({
                                         {health.can_retry && (
                                             <button
                                                 onClick={handleRetry}
-                                                disabled={analyzing}
+                                                disabled={analyzing || polling}
                                                 className="flex-shrink-0 px-3 py-1.5 rounded-md text-xs font-medium text-white bg-white/10 hover:bg-white/20 transition disabled:opacity-50"
                                             >
                                                 Retry
@@ -874,32 +891,34 @@ export default function Research({
                             {isFinalized && !isStuckOrFailed && (
                                 <button
                                     onClick={handleRerun}
-                                    disabled={analyzing}
+                                    disabled={analyzing || polling}
                                     className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/80 border border-white/10 hover:border-white/20 transition disabled:opacity-50"
                                 >
-                                    Re-run Analysis
+                                    {(analyzing || polling) ? 'Processing…' : 'Re-run Analysis'}
                                 </button>
                             )}
 
                             {isStuckOrFailed && health.can_retry && (
                                 <button
                                     onClick={handleRetry}
-                                    disabled={analyzing}
+                                    disabled={analyzing || polling}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
                                     style={{ backgroundColor: primaryColor }}
                                 >
-                                    {analyzing ? 'Retrying…' : 'Retry Analysis'}
+                                    {(analyzing || polling) ? 'Retrying…' : 'Retry Analysis'}
                                 </button>
                             )}
 
                             {!isFinalized && !isStuckOrFailed && (
                                 <button
+                                    type="button"
                                     onClick={handleAnalyze}
-                                    disabled={analyzing || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')))}
+                                    disabled={analyzing || polling || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')))}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
                                     style={{ backgroundColor: primaryColor }}
+                                    aria-busy={analyzing || polling}
                                 >
-                                    {analyzing ? 'Analyzing…' : 'Run Analysis'}
+                                    {analyzing ? 'Starting…' : polling ? 'Processing…' : 'Run Analysis'}
                                 </button>
                             )}
 

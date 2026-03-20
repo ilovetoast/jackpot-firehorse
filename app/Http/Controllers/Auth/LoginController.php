@@ -3,19 +3,26 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class LoginController extends Controller
 {
     /**
-     * Show the login page.
+     * Legacy URL — unified auth UI lives on the brand gateway (same POST target as /gateway/login).
      */
-    public function show(): Response
+    public function show(Request $request): RedirectResponse
     {
-        return Inertia::render('Auth/Login');
+        $query = array_filter([
+            'mode' => 'login',
+            'company' => $request->query('company'),
+            'tenant' => $request->query('tenant'),
+            'brand' => $request->query('brand'),
+            'switch' => $request->query('switch'),
+        ], fn ($v) => $v !== null && $v !== '');
+
+        return redirect()->route('gateway', $query);
     }
 
     /**
@@ -32,15 +39,16 @@ class LoginController extends Controller
             $request->session()->regenerate();
 
             $user = Auth::user();
-            
+
             // Check if user is suspended
             if ($user->isSuspended()) {
                 Auth::logout();
+
                 return back()->withErrors([
                     'email' => 'Your account has been suspended. Please contact support for assistance.',
                 ])->onlyInput('email');
             }
-            
+
             $tenants = $user->tenants()->with('defaultBrand')->get();
 
             // Auto-select tenant if user has tenants
@@ -50,15 +58,16 @@ class LoginController extends Controller
                 $tenant = $tenants->first();
                 // Use brand marked default, or fall back to first brand (first-time login may not have default set yet)
                 $defaultBrand = $tenant->defaultBrand ?? $tenant->brands()->first();
-                
+
                 if (! $defaultBrand) {
                     abort(500, 'Tenant must have at least one brand');
                 }
-                
+
                 session([
                     'tenant_id' => $tenant->id,
                     'brand_id' => $defaultBrand->id,
                 ]);
+
                 return redirect('/gateway');
             }
 

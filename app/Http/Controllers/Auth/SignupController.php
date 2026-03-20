@@ -5,26 +5,33 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class SignupController extends Controller
 {
     /**
-     * Show the signup page.
+     * Legacy URL — registration UI is on /gateway?mode=register (POST /gateway/register).
      */
-    public function show(): Response|\Illuminate\Http\RedirectResponse
+    public function show(Request $request): RedirectResponse
     {
         if (app()->environment('staging')) {
-            return redirect()->route('login')->with('info', 'Signup is temporarily disabled on staging.');
+            return redirect()->route('gateway', ['mode' => 'login'])
+                ->with('info', 'Signup is temporarily disabled on staging.');
         }
 
-        return Inertia::render('Auth/Signup');
+        $query = array_filter([
+            'mode' => 'register',
+            'company' => $request->query('company'),
+            'tenant' => $request->query('tenant'),
+            'brand' => $request->query('brand'),
+        ], fn ($v) => $v !== null && $v !== '');
+
+        return redirect()->route('gateway', $query);
     }
 
     /**
@@ -33,7 +40,8 @@ class SignupController extends Controller
     public function store(Request $request)
     {
         if (app()->environment('staging')) {
-            return redirect()->route('login')->with('error', 'Signup is temporarily disabled on staging.');
+            return redirect()->route('gateway', ['mode' => 'login'])
+                ->with('error', 'Signup is temporarily disabled on staging.');
         }
 
         $validated = $request->validate([
@@ -67,10 +75,10 @@ class SignupController extends Controller
         if (! $defaultBrand) {
             abort(500, 'Tenant must have at least one brand');
         }
-        
+
         // Ensure owner is automatically connected to default brand
         $defaultBrand->users()->syncWithoutDetaching([
-            $user->id => ['role' => 'admin'] // Owners have admin role on their default brand
+            $user->id => ['role' => 'admin'], // Owners have admin role on their default brand
         ]);
 
         // Log the user in

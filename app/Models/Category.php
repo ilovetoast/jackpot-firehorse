@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Str;
 
 /**
  * Category Model
@@ -164,14 +163,11 @@ class Category extends Model
 
     /**
      * Check if a user has access to this private category.
-     *
-     * @param User $user
-     * @return bool
      */
     public function userHasAccess(User $user): bool
     {
         // Public categories are accessible to all brand users
-        if (!$this->is_private) {
+        if (! $this->is_private) {
             return true;
         }
 
@@ -185,7 +181,7 @@ class Category extends Model
         $tenant = $this->tenant;
         $tenantRole = $user->getRoleForTenant($tenant);
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-        
+
         // Also check brand-level owner/admin role
         $brand = $this->brand;
         $isBrandOwnerOrAdmin = false;
@@ -228,10 +224,6 @@ class Category extends Model
      *
      * Note: This scope provides basic filtering, but CategoryPolicy::view() provides
      * the authoritative access control including owner/admin bypass and permission checks.
-     *
-     * @param Builder $query
-     * @param User $user
-     * @return Builder
      */
     public function scopeAccessibleToUser(Builder $query, User $user): Builder
     {
@@ -253,10 +245,10 @@ class Category extends Model
                                     });
                             })
                             // Check user-based access
-                            ->orWhereHas('accessRules', function ($userQuery) use ($user) {
-                                $userQuery->where('access_type', 'user')
-                                    ->where('user_id', $user->id);
-                            });
+                                ->orWhereHas('accessRules', function ($userQuery) use ($user) {
+                                    $userQuery->where('access_type', 'user')
+                                        ->where('user_id', $user->id);
+                                });
                         });
                 });
         });
@@ -336,17 +328,14 @@ class Category extends Model
 
     /**
      * Scope a query to only include active, selectable categories.
-     * 
+     *
      * Filters out:
      * - Soft-deleted categories (deleted_at IS NOT NULL)
      * - Templates (categories without an ID - these are virtual system templates)
      * - Deleted system categories (where template no longer exists)
-     * 
+     *
      * This scope should be used when fetching categories for dropdowns,
      * sidebars, or any UI where users can select categories.
-     * 
-     * @param Builder $query
-     * @return Builder
      */
     public function scopeActive(Builder $query): Builder
     {
@@ -356,18 +345,16 @@ class Category extends Model
 
     /**
      * Check if this category is active and selectable.
-     * 
+     *
      * A category is considered active if:
      * - It's not soft-deleted (deleted_at IS NULL)
      * - It has an ID (not a template)
      * - If it's a system category, its template still exists
-     * 
-     * @return bool
      */
     public function isActive(): bool
     {
         // Must have an ID (not a template)
-        if (!$this->id) {
+        if (! $this->id) {
             return false;
         }
 
@@ -377,7 +364,7 @@ class Category extends Model
         }
 
         // System categories must have an existing template
-        if ($this->is_system && !$this->systemTemplateExists()) {
+        if ($this->is_system && ! $this->systemTemplateExists()) {
             return false;
         }
 
@@ -385,14 +372,72 @@ class Category extends Model
     }
 
     /**
+     * Batch-resolve {@see self::systemTemplateExists()} for many categories (at most two queries).
+     *
+     * @param  iterable<int, self>  $categories
+     * @return array<int, bool> Maps brand category id => template row exists
+     */
+    public static function templateExistsLookupForCategories(iterable $categories): array
+    {
+        $systemCategories = collect($categories)->filter(fn (self $c) => $c->is_system)->values();
+        if ($systemCategories->isEmpty()) {
+            return [];
+        }
+
+        $idsToCheck = $systemCategories->pluck('system_category_id')->filter()->unique()->values()->all();
+
+        $existingIdSet = [];
+        if ($idsToCheck !== []) {
+            $existingIdSet = array_flip(
+                SystemCategory::query()->whereIn('id', $idsToCheck)->pluck('id')->all()
+            );
+        }
+
+        $needsLegacy = $systemCategories->filter(fn (self $c) => ! $c->system_category_id);
+        $existingLegacyKeys = [];
+        if ($needsLegacy->isNotEmpty()) {
+            $legacyPairs = $needsLegacy
+                ->map(fn (self $c) => ['slug' => $c->slug, 'asset_type' => $c->asset_type->value])
+                ->unique(fn (array $p) => $p['slug'].'|'.$p['asset_type'])
+                ->values();
+
+            $rows = SystemCategory::query()
+                ->where(function ($q) use ($legacyPairs) {
+                    foreach ($legacyPairs as $i => $pair) {
+                        $clause = fn ($sub) => $sub->where('slug', $pair['slug'])->where('asset_type', $pair['asset_type']);
+                        if ($i === 0) {
+                            $q->where($clause);
+                        } else {
+                            $q->orWhere($clause);
+                        }
+                    }
+                })
+                ->get(['slug', 'asset_type']);
+
+            foreach ($rows as $row) {
+                $existingLegacyKeys[$row->slug.'|'.$row->asset_type->value] = true;
+            }
+        }
+
+        $result = [];
+        foreach ($systemCategories as $c) {
+            if ($c->system_category_id) {
+                $result[$c->id] = isset($existingIdSet[$c->system_category_id]);
+            } else {
+                $result[$c->id] = isset($existingLegacyKeys[$c->slug.'|'.$c->asset_type->value]);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * Check if the system template for this category still exists.
      * Returns true if template exists, false if it's been deleted (orphaned).
-     *
-     * @return bool
      */
     public function systemTemplateExists(): bool
     {
-        if (!$this->is_system) {
+        if (! $this->is_system) {
             return false; // Not a system category, so no template to check
         }
 
@@ -410,20 +455,18 @@ class Category extends Model
     /**
      * Check if this category can be deleted.
      * Returns true if deletion is allowed, false otherwise.
-     *
-     * @return bool
      */
     public function canBeDeleted(): bool
     {
         // Custom categories can be deleted if not locked
-        if (!$this->is_system) {
-            return !$this->is_locked;
+        if (! $this->is_system) {
+            return ! $this->is_locked;
         }
 
         // System categories can only be deleted if their template is deleted
         // Even if locked, if the template is gone, the category can be deleted
         if ($this->is_system) {
-            return !$this->systemTemplateExists();
+            return ! $this->systemTemplateExists();
         }
 
         return false;
@@ -431,8 +474,6 @@ class Category extends Model
 
     /**
      * Phase L.5.1: Check if this category requires approval before publishing.
-     *
-     * @return bool
      */
     public function requiresApproval(): bool
     {

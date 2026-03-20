@@ -10,6 +10,7 @@ use App\Models\Download;
 use App\Services\AiUsageService;
 use App\Services\BrandService;
 use App\Services\PlanService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -21,8 +22,7 @@ class CompanyOverviewController extends Controller
         protected PlanService $planService,
         protected AiUsageService $aiUsageService,
         protected BrandService $brandService
-    ) {
-    }
+    ) {}
 
     /**
      * Display company overview with metrics across all brands.
@@ -61,34 +61,42 @@ class CompanyOverviewController extends Controller
         $brandCount = $allBrands->count();
         $brandLimitExceeded = $brandCount > $maxBrands;
 
-        // Build per-brand metrics (only for brands within plan limit for owner/admin)
-        $brandsWithMetrics = [];
-        $companyTotalAssets = 0;
-        $companyStorageBytes = 0;
-        $companyDownloadLinks = 0;
-
         $now = now();
         $startOfMonth = $now->copy()->startOfMonth();
         $endOfMonth = $now->copy()->endOfMonth();
         $startOfLastMonth = $now->copy()->subMonth()->startOfMonth();
         $endOfLastMonth = $now->copy()->subMonth()->endOfMonth();
 
+        $completedAssetMetricsByBrand = $this->completedAssetMetricsByBrandIds(
+            $allBrands->pluck('id')->all(),
+            $tenant->id,
+            $endOfLastMonth
+        );
+
+        // Build per-brand metrics (only for brands within plan limit for owner/admin)
+        $brandsWithMetrics = [];
+        $companyTotalAssets = 0;
+        $companyStorageBytes = 0;
+        $companyDownloadLinks = 0;
+
         foreach ($allBrands as $index => $brand) {
             $isDisabled = $brandLimitExceeded && $index >= $maxBrands;
 
-            $totalAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)->count();
-            $totalAssetsLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
-                ->where('created_at', '<=', $endOfLastMonth)
-                ->count();
+            $m = $completedAssetMetricsByBrand[$brand->id] ?? [
+                'total_assets' => 0,
+                'assets_last_month' => 0,
+                'total_storage' => 0.0,
+                'storage_last_month' => 0.0,
+            ];
+            $totalAssets = $m['total_assets'];
+            $totalAssetsLastMonth = $m['assets_last_month'];
             $assetsChange = $totalAssetsLastMonth > 0
                 ? round((($totalAssets - $totalAssetsLastMonth) / $totalAssetsLastMonth) * 100, 2)
                 : ($totalAssets > 0 ? 100 : 0);
 
-            $storageBytes = $this->getCompletedAssetsQuery($tenant->id, $brand->id)->sum('size_bytes');
+            $storageBytes = (int) $m['total_storage'];
             $storageMB = round($storageBytes / 1024 / 1024, 2);
-            $storageBytesLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
-                ->where('created_at', '<=', $endOfLastMonth)
-                ->sum('size_bytes');
+            $storageBytesLastMonth = (int) $m['storage_last_month'];
             $storageMBLastMonth = round($storageBytesLastMonth / 1024 / 1024, 2);
             $storageChange = $storageMBLastMonth > 0
                 ? round((($storageMB - $storageMBLastMonth) / $storageMBLastMonth) * 100, 2)
@@ -141,12 +149,12 @@ class CompanyOverviewController extends Controller
             if ($brandLimitExceeded && $index >= $maxBrands) {
                 continue;
             }
-            $companyTotalAssetsLastMonth += $this->getCompletedAssetsQuery($tenant->id, $brand->id)
-                ->where('created_at', '<=', $endOfLastMonth)
-                ->count();
-            $companyStorageBytesLastMonth += $this->getCompletedAssetsQuery($tenant->id, $brand->id)
-                ->where('created_at', '<=', $endOfLastMonth)
-                ->sum('size_bytes');
+            $m = $completedAssetMetricsByBrand[$brand->id] ?? [
+                'assets_last_month' => 0,
+                'storage_last_month' => 0.0,
+            ];
+            $companyTotalAssetsLastMonth += $m['assets_last_month'];
+            $companyStorageBytesLastMonth += (int) $m['storage_last_month'];
             $companyDownloadLinksLastMonth += Download::where('tenant_id', $tenant->id)
                 ->where('status', DownloadStatus::READY)
                 ->whereBetween('created_at', [$startOfLastMonth, $endOfLastMonth])
@@ -230,10 +238,23 @@ class CompanyOverviewController extends Controller
         ]);
     }
 
-    protected function getCompletedAssetsQuery(int $tenantId, int $brandId)
+    /**
+     * One grouped query for “completed” assets per brand (same rules as dashboard grid).
+     *
+     * @param  list<int>  $brandIds
+     * @return array<int, array{total_assets: int, assets_last_month: int, total_storage: float, storage_last_month: float}>
+     */
+    protected function completedAssetMetricsByBrandIds(array $brandIds, int $tenantId, Carbon $endOfLastMonth): array
     {
-        return Asset::where('tenant_id', $tenantId)
-            ->where('brand_id', $brandId)
+        if ($brandIds === []) {
+            return [];
+        }
+
+        $cutoff = $endOfLastMonth->format('Y-m-d H:i:s');
+
+        $rows = Asset::query()
+            ->where('tenant_id', $tenantId)
+            ->whereIn('brand_id', $brandIds)
             ->where('status', AssetStatus::VISIBLE)
             ->where('thumbnail_status', ThumbnailStatus::COMPLETED)
             ->where('metadata->ai_tagging_completed', true)
@@ -242,6 +263,38 @@ class CompanyOverviewController extends Controller
                 $query->where('metadata->preview_generated', true)
                     ->orWhereNull('metadata->preview_generated');
             })
-            ->whereNull('deleted_at');
+            ->whereNull('deleted_at')
+            ->groupBy('brand_id')
+            ->selectRaw(
+                'brand_id, COUNT(*) as total_assets, '
+                .'SUM(CASE WHEN created_at <= ? THEN 1 ELSE 0 END) as assets_last_month, '
+                .'COALESCE(SUM(COALESCE(size_bytes, 0)), 0) as total_storage, '
+                .'SUM(CASE WHEN created_at <= ? THEN COALESCE(size_bytes, 0) ELSE 0 END) as storage_last_month',
+                [$cutoff, $cutoff]
+            )
+            ->get();
+
+        /** @var array<int, array{total_assets: int, assets_last_month: int, total_storage: float, storage_last_month: float}> $metrics */
+        $metrics = array_fill_keys(
+            array_map('intval', $brandIds),
+            [
+                'total_assets' => 0,
+                'assets_last_month' => 0,
+                'total_storage' => 0.0,
+                'storage_last_month' => 0.0,
+            ]
+        );
+
+        foreach ($rows as $row) {
+            $bid = (int) $row->brand_id;
+            $metrics[$bid] = [
+                'total_assets' => (int) $row->total_assets,
+                'assets_last_month' => (int) $row->assets_last_month,
+                'total_storage' => (float) $row->total_storage,
+                'storage_last_month' => (float) $row->storage_last_month,
+            ];
+        }
+
+        return $metrics;
     }
 }

@@ -48,7 +48,7 @@ class DownloadPublicPageBrandingResolver
         if ($canBrand) {
             $shareBrand = $this->getSharePageTemplateBrand($download);
             if ($shareBrand !== null) {
-            $branding = $this->buildBrandingFromTemplateBrand($download, $shareBrand);
+                $branding = $this->buildBrandingFromTemplateBrand($download, $shareBrand);
 
                 return [
                     'show_landing_layout' => true,
@@ -122,9 +122,9 @@ class DownloadPublicPageBrandingResolver
             ],
             'show_jackpot_promo' => true,
             'footer_promo' => [
-                'line1' => 'Provided by ' . $appName . ' — Free Digital Asset Management',
+                'line1' => 'Provided by '.$appName.' — Free Digital Asset Management',
                 'line2' => 'Sign up today',
-                'signup_url' => app()->environment('staging') ? null : (config('app.url') . '/signup'),
+                'signup_url' => app()->environment('staging') ? null : (config('app.url').'/gateway?mode=register'),
             ],
         ];
     }

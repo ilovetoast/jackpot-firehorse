@@ -4,8 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
-use App\Support\AssetVariant;
-use App\Support\DeliveryContext;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
@@ -14,23 +12,25 @@ use App\Services\AiMetadataConfidenceService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
-use App\Services\Lifecycle\LifecycleResolver;
-use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\Lifecycle\LifecycleResolver;
+use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
-use Illuminate\Support\Facades\DB;
 
 class AssetController extends Controller
 {
@@ -47,8 +47,7 @@ class AssetController extends Controller
         protected AssetSearchService $assetSearchService,
         protected AssetSortService $assetSortService,
         protected UploadInitiationService $uploadInitiationService
-    ) {
-    }
+    ) {}
 
     /**
      * GET /app/assets/staged
@@ -76,11 +75,12 @@ class AssetController extends Controller
         // Eager load tenants once so policy checks (Asset, Category) avoid N+1 tenant_user queries
         $user?->loadMissing('tenants');
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
             if ($request->get('format') === 'json') {
                 return response()->json(['assets' => [], 'categories' => [], 'categories_by_type' => ['all' => []]]);
             }
+
             return Inertia::render('Assets/Index', [
                 'categories' => [],
                 'categories_by_type' => ['all' => []],
@@ -98,7 +98,8 @@ class AssetController extends Controller
             ->where('brand_id', $brand->id)
             ->where('asset_type', AssetType::ASSET)
             ->active()
-            ->ordered();
+            ->ordered()
+            ->with(['tenant', 'brand']);
 
         // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
@@ -114,6 +115,8 @@ class AssetController extends Controller
             return $user ? Gate::forUser($user)->allows('view', $category) : false;
         });
 
+        $templateExistsByCategoryId = Category::templateExistsLookupForCategories($categories);
+
         // Get only BASIC system category templates
         $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::ASSET)
             ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
@@ -127,28 +130,30 @@ class AssetController extends Controller
         foreach ($categories as $category) {
             // Find matching system template to get sort_order
             $matchingTemplate = $systemTemplates->first(function ($template) use ($category) {
-                return $category->slug === $template->slug && 
+                return $category->slug === $template->slug &&
                        $category->asset_type->value === $template->asset_type->value;
             });
-            
+
             // Get access rules for private categories
             $accessRules = [];
-            if ($category->is_private && !$category->is_system) {
+            if ($category->is_private && ! $category->is_system) {
                 $accessRules = $category->accessRules()->get()->map(function ($rule) {
                     if ($rule->access_type === 'role') {
                         return ['type' => 'role', 'role' => $rule->role];
                     } elseif ($rule->access_type === 'user') {
                         return ['type' => 'user', 'user_id' => $rule->user_id];
                     }
+
                     return null;
                 })->filter()->values()->toArray();
             }
-            
+
             // Check if system category template still exists (for deleted system categories)
-            // Use the model's isActive() method for consistency
-            $templateExists = $category->is_system ? $category->systemTemplateExists() : true;
-            $deletionAvailable = $category->is_system ? !$templateExists : false;
-            
+            $templateExists = $category->is_system
+                ? ($templateExistsByCategoryId[$category->id] ?? false)
+                : true;
+            $deletionAvailable = $category->is_system ? ! $templateExists : false;
+
             $allCategories->push([
                 'id' => $category->id,
                 'name' => $category->name,
@@ -169,7 +174,7 @@ class AssetController extends Controller
         // Add system templates that don't have matching brand categories
         foreach ($systemTemplates as $template) {
             $exists = $categories->contains(function ($category) use ($template) {
-                return $category->slug === $template->slug && 
+                return $category->slug === $template->slug &&
                        $category->asset_type->value === $template->asset_type->value;
             });
 
@@ -208,7 +213,7 @@ class AssetController extends Controller
         $isTrashView = $normalizedLifecycle === 'deleted';
         $sourceParam = $request->get('source');
         $isStagedView = $sourceParam === 'staged';
-        if (!empty($viewableCategoryIds) && ! $isStagedView) {
+        if (! empty($viewableCategoryIds) && ! $isStagedView) {
             $countQuery = Asset::query()
                 ->normalIntakeOnly()
                 ->excludeBuilderStaged()
@@ -226,7 +231,7 @@ class AssetController extends Controller
                 $brand
             );
             $totalAssetCount = (clone $countQuery)->count();
-            if (!empty($categoryIds)) {
+            if (! empty($categoryIds)) {
                 $counts = (clone $countQuery)
                     ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
                     ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
@@ -243,6 +248,7 @@ class AssetController extends Controller
             $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
                 ? $assetCounts[$category['id']]
                 : 0;
+
             return $category;
         });
 
@@ -255,7 +261,7 @@ class AssetController extends Controller
         if ($canViewTrash) {
             if ($isTrashView) {
                 $trashCount = $totalAssetCount;
-            } elseif (!empty($viewableCategoryIds)) {
+            } elseif (! empty($viewableCategoryIds)) {
                 $trashCount = Asset::query()
                     ->excludeBuilderStaged()
                     ->onlyTrashed()
@@ -282,7 +288,7 @@ class AssetController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->first();
-            
+
             if ($category) {
                 $categoryId = $category->id;
             }
@@ -494,7 +500,7 @@ class AssetController extends Controller
         $nextPageUrl = null;
         if ($paginator->hasMorePages()) {
             $query = array_merge($request->query(), ['page' => $paginator->currentPage() + 1]);
-            $nextPageUrl = $request->url() . '?' . http_build_query($query);
+            $nextPageUrl = $request->url().'?'.http_build_query($query);
         }
 
         $isLoadMore = $request->boolean('load_more');
@@ -516,7 +522,7 @@ class AssetController extends Controller
                     'query_brand_id' => $brand->id,
                     'assets_count' => $assetModels->count(),
                     'sample_asset_brand_ids' => $sampleAssetBrandIds,
-                    'brand_id_mismatch_count' => $assetModels->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                    'brand_id_mismatch_count' => $assetModels->filter(fn ($a) => $a->brand_id != $brand->id)->count(),
                     'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
                 ]);
             } else {
@@ -573,228 +579,242 @@ class AssetController extends Controller
             }
         }
 
+        $assetCategoryIds = $assetModels
+            ->map(fn ($asset) => isset($asset->metadata['category_id']) ? (int) $asset->metadata['category_id'] : null)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $categoriesByIdForGrid = collect();
+        if ($assetCategoryIds !== []) {
+            $categoriesByIdForGrid = Category::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereIn('id', $assetCategoryIds)
+                ->get(['id', 'name', 'slug'])
+                ->keyBy('id');
+        }
+
         try {
-            $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable, $incidentSeverityByAsset) {
+            $mappedAssets = $assetModels->map(function ($asset) use ($starredFromTable, $incidentSeverityByAsset, $categoriesByIdForGrid) {
                 try {
-                // Derive file extension from original_filename, with mime_type fallback
-                $fileExtension = null;
-                if ($asset->original_filename && $asset->original_filename !== 'unknown') {
-                    $ext = pathinfo($asset->original_filename, PATHINFO_EXTENSION);
-                    // Normalize extension (lowercase, remove leading dot if any)
-                    if ($ext && !empty(trim($ext))) {
-                        $fileExtension = strtolower(trim($ext, '.'));
+                    // Derive file extension from original_filename, with mime_type fallback
+                    $fileExtension = null;
+                    if ($asset->original_filename && $asset->original_filename !== 'unknown') {
+                        $ext = pathinfo($asset->original_filename, PATHINFO_EXTENSION);
+                        // Normalize extension (lowercase, remove leading dot if any)
+                        if ($ext && ! empty(trim($ext))) {
+                            $fileExtension = strtolower(trim($ext, '.'));
+                        }
                     }
-                }
-                
-                // Fallback to deriving from mime_type if extension not found or filename is "unknown"
-                if (empty($fileExtension) && $asset->mime_type) {
-                    $mimeToExt = [
-                        'image/jpeg' => 'jpg',
-                        'image/jpg' => 'jpg',
-                        'image/png' => 'png',
-                        'image/gif' => 'gif',
-                        'image/webp' => 'webp',
-                        'image/svg+xml' => 'svg',
-                        'image/tiff' => 'tif',
-                        'image/tif' => 'tif',
-                        'image/bmp' => 'bmp',
-                        'application/pdf' => 'pdf',
-                        'application/zip' => 'zip',
-                        'application/x-zip-compressed' => 'zip',
-                        'video/mpeg' => 'mpg',
-                        'video/mp4' => 'mp4',
-                        'video/quicktime' => 'mov',
-                        'video/x-msvideo' => 'avi',
-                        'image/vnd.adobe.photoshop' => 'psd',
-                        'application/vnd.adobe.illustrator' => 'ai',
-                    ];
-                    $mimeTypeLower = strtolower(trim($asset->mime_type));
-                    $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
-                    
-                    // If not in map, try extracting from mime type subtype (e.g., "image/jpeg" -> "jpeg")
-                    if (empty($fileExtension) && strpos($mimeTypeLower, '/') !== false) {
-                        $mimeParts = explode('/', $mimeTypeLower);
-                        $subtype = $mimeParts[1] ?? null;
-                        if ($subtype) {
-                            // Remove "+xml" suffix if present (e.g., "svg+xml" -> "svg")
-                            $subtype = str_replace('+xml', '', $subtype);
-                            $subtype = str_replace('+zip', '', $subtype);
-                            // Normalize common subtypes
-                            if ($subtype === 'jpeg') {
-                                $subtype = 'jpg';
-                            } elseif ($subtype === 'tiff') {
-                                $subtype = 'tif';
+
+                    // Fallback to deriving from mime_type if extension not found or filename is "unknown"
+                    if (empty($fileExtension) && $asset->mime_type) {
+                        $mimeToExt = [
+                            'image/jpeg' => 'jpg',
+                            'image/jpg' => 'jpg',
+                            'image/png' => 'png',
+                            'image/gif' => 'gif',
+                            'image/webp' => 'webp',
+                            'image/svg+xml' => 'svg',
+                            'image/tiff' => 'tif',
+                            'image/tif' => 'tif',
+                            'image/bmp' => 'bmp',
+                            'application/pdf' => 'pdf',
+                            'application/zip' => 'zip',
+                            'application/x-zip-compressed' => 'zip',
+                            'video/mpeg' => 'mpg',
+                            'video/mp4' => 'mp4',
+                            'video/quicktime' => 'mov',
+                            'video/x-msvideo' => 'avi',
+                            'image/vnd.adobe.photoshop' => 'psd',
+                            'application/vnd.adobe.illustrator' => 'ai',
+                        ];
+                        $mimeTypeLower = strtolower(trim($asset->mime_type));
+                        $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
+
+                        // If not in map, try extracting from mime type subtype (e.g., "image/jpeg" -> "jpeg")
+                        if (empty($fileExtension) && strpos($mimeTypeLower, '/') !== false) {
+                            $mimeParts = explode('/', $mimeTypeLower);
+                            $subtype = $mimeParts[1] ?? null;
+                            if ($subtype) {
+                                // Remove "+xml" suffix if present (e.g., "svg+xml" -> "svg")
+                                $subtype = str_replace('+xml', '', $subtype);
+                                $subtype = str_replace('+zip', '', $subtype);
+                                // Normalize common subtypes
+                                if ($subtype === 'jpeg') {
+                                    $subtype = 'jpg';
+                                } elseif ($subtype === 'tiff') {
+                                    $subtype = 'tif';
+                                }
+                                $fileExtension = $subtype;
                             }
-                            $fileExtension = $subtype;
                         }
                     }
-                }
 
-                // Derive title from asset.title or original_filename without extension
-                $title = $asset->title;
-                // If title is empty, null, or "Unknown", derive from filename
-                if (empty($title) || $title === 'Unknown' || $title === 'Untitled Asset') {
-                    if ($asset->original_filename) {
-                        $pathInfo = pathinfo($asset->original_filename);
-                        $title = $pathInfo['filename'] ?? $asset->original_filename;
-                    } else {
-                        $title = null; // Use null instead of "Unknown" or empty string
-                    }
-                }
-                // Ensure title is not empty string (convert to null)
-                if ($title === '') {
-                    $title = null;
-                }
-
-                // Get category name if category_id exists in metadata
-                $categoryName = null;
-                $categoryId = null;
-                $categorySlug = null;
-                if ($asset->metadata && isset($asset->metadata['category_id'])) {
-                    $categoryId = $asset->metadata['category_id'];
-                    $category = Category::with('tenant')->where('id', $categoryId)
-                        ->where('tenant_id', $tenant->id)
-                        ->where('brand_id', $brand->id)
-                        ->first();
-                    if ($category) {
-                        $categoryName = $category->name;
-                        $categorySlug = $category->slug ?? null;
-                    }
-                }
-
-                // Get user who uploaded the asset (eager-loaded via ->with(['user', ...]) to avoid N+1 / 500 on load_more)
-                $uploadedBy = null;
-                if ($asset->user) {
-                    $uploader = $asset->user;
-                    $uploadedBy = [
-                        'id' => $uploader->id,
-                        'name' => $uploader->name,
-                        'first_name' => $uploader->first_name,
-                        'last_name' => $uploader->last_name,
-                        'email' => $uploader->email,
-                        'avatar_url' => $uploader->avatar_url,
-                    ];
-                }
-
-                // Step 6: Thumbnail URLs — CDN-only (no app proxy)
-                // preview_thumbnail_url: LQIP during processing
-                // final_thumbnail_url: permanent CDN URL when thumbnails exist
-                $metadata = $asset->metadata ?? [];
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                    ? $asset->thumbnail_status->value
-                    : ($asset->thumbnail_status ?? 'pending');
-
-                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
-                $finalThumbnailUrl = null;
-                $thumbnailVersion = null;
-                $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'
-                    || strtolower((string) ($fileExtension ?? '')) === 'pdf';
-                $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
-                $pdfPageApiEndpoint = $isPdf
-                    ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
-                    : null;
-                $firstPageUrl = null;
-
-                $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
-                if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
-                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
-                    if ($pathExists) {
-                        $variant = $thumbnailStyle === 'medium' ? AssetVariant::THUMB_MEDIUM : AssetVariant::THUMB_SMALL;
-                        $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
-                        // Do NOT append ?v= to presigned URLs — invalidates S3 signature
-                        if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                            $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
-                        }
-                        if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
-                            Log::info('[AssetController] Providing final_thumbnail_url despite status mismatch', [
-                                'asset_id' => $asset->id,
-                                'thumbnail_status' => $thumbnailStatus,
-                            ]);
+                    // Derive title from asset.title or original_filename without extension
+                    $title = $asset->title;
+                    // If title is empty, null, or "Unknown", derive from filename
+                    if (empty($title) || $title === 'Unknown' || $title === 'Untitled Asset') {
+                        if ($asset->original_filename) {
+                            $pathInfo = pathinfo($asset->original_filename);
+                            $title = $pathInfo['filename'] ?? $asset->original_filename;
+                        } else {
+                            $title = null; // Use null instead of "Unknown" or empty string
                         }
                     }
-                }
-                if ($isPdf) {
-                    $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
-                }
+                    // Ensure title is not empty string (convert to null)
+                    if ($title === '') {
+                        $title = null;
+                    }
 
-                return [
-                    'id' => $asset->id,
-                    'title' => $title,
-                    'original_filename' => $asset->original_filename,
-                    'mime_type' => $asset->mime_type,
-                    'file_extension' => $fileExtension,
-                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status, // AssetStatus enum value
-                    'size_bytes' => $asset->size_bytes,
-                    'created_at' => $asset->created_at?->toIso8601String(),
-                    'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
-                    'starred' => $this->assetIsStarred($metadata['starred'] ?? $starredFromTable[$asset->id] ?? null), // prefer assets.metadata; fallback asset_metadata for display
-                    'category' => $categoryName ? [
-                        'id' => $categoryId,
-                        'name' => $categoryName,
-                        'slug' => $categorySlug,
-                    ] : null,
-                    'user_id' => $asset->user_id, // For delete-own permission check
-                    'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Thumbnail URLs — all via AssetDeliveryService (AUTHENTICATED context)
-                    'thumbnail_small' => $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
-                    'thumbnail_medium' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null,
-                    'thumbnail_large' => $this->thumbnailUrlLarge($asset),
-                    'thumbnail_preview' => $previewThumbnailUrl, // LQIP during processing
-                    'original' => $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null,
-                    'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
-                    // Legacy aliases for frontend migration (remove when frontend updated)
-                    'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl ?? null,
-                    'preview_thumbnail_url' => $previewThumbnailUrl,
-                    'final_thumbnail_url' => $finalThumbnailUrl,
-                    'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
-                    'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
-                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
-                    'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
-                    'pdf_page_count' => $asset->pdf_page_count,
-                    'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
-                    // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
-                    'published_at' => $asset->published_at?->toIso8601String(),
-                    'is_published' => $asset->published_at !== null,
-                    'published_by' => $asset->published_by_id ? [
-                        'id' => $asset->publishedBy?->id ?? null,
-                        'name' => $asset->publishedBy?->name ?? null,
-                        'first_name' => $asset->publishedBy?->first_name ?? null,
-                        'last_name' => $asset->publishedBy?->last_name ?? null,
-                        'email' => $asset->publishedBy?->email ?? null,
-                    ] : null,
-                    'archived_at' => $asset->archived_at?->toIso8601String(),
-                    'archived_by' => $asset->archived_by_id ? [
-                        'id' => $asset->archivedBy?->id ?? null,
-                        'name' => $asset->archivedBy?->name ?? null,
-                        'first_name' => $asset->archivedBy?->first_name ?? null,
-                        'last_name' => $asset->archivedBy?->last_name ?? null,
-                        'email' => $asset->archivedBy?->email ?? null,
-                    ] : null,
-                    // Phase B2: Trash view and drawer "Deleted X days ago"
-                    'deleted_at' => $asset->deleted_at?->toIso8601String(),
-                    // Bulk actions contextual filtering: approval state (approved/pending/rejected; not_required excluded)
-                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? null),
-                    'preview_url' => null, // Reserved for future full-size preview endpoint
-                    'url' => null, // Reserved for future download endpoint
-                    // Phase V-1: Video quick preview on hover (grid and drawer)
-                    'video_preview_url' => $this->videoPreviewUrl($asset),
-                    'video_poster_url' => $this->videoPosterUrl($asset),
-                    // Pipeline status for visible progression (uploading → complete)
-                    'analysis_status' => $asset->analysis_status ?? 'uploading',
-                    // Asset health badge (healthy|warning|critical) for support visibility
-                    'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
-                    // Brand Guidelines Builder: staged reference materials (unpublished, no category)
-                    'builder_staged' => (bool) ($asset->builder_staged ?? false),
-                ];
-                if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                    Log::info('ASSET API RESPONSE URL', [
-                        'asset_id' => $asset->id,
-                        'thumbnail_url' => $finalThumbnailUrl,
+                    // Get category name if category_id exists in metadata (preloaded per page to avoid N+1)
+                    $categoryName = null;
+                    $categoryId = null;
+                    $categorySlug = null;
+                    if ($asset->metadata && isset($asset->metadata['category_id'])) {
+                        $categoryId = (int) $asset->metadata['category_id'];
+                        $categoryRow = $categoriesByIdForGrid->get($categoryId);
+                        if ($categoryRow) {
+                            $categoryName = $categoryRow->name;
+                            $categorySlug = $categoryRow->slug ?? null;
+                        }
+                    }
+
+                    // Get user who uploaded the asset (eager-loaded via ->with(['user', ...]) to avoid N+1 / 500 on load_more)
+                    $uploadedBy = null;
+                    if ($asset->user) {
+                        $uploader = $asset->user;
+                        $uploadedBy = [
+                            'id' => $uploader->id,
+                            'name' => $uploader->name,
+                            'first_name' => $uploader->first_name,
+                            'last_name' => $uploader->last_name,
+                            'email' => $uploader->email,
+                            'avatar_url' => $uploader->avatar_url,
+                        ];
+                    }
+
+                    // Step 6: Thumbnail URLs — CDN-only (no app proxy)
+                    // preview_thumbnail_url: LQIP during processing
+                    // final_thumbnail_url: permanent CDN URL when thumbnails exist
+                    $metadata = $asset->metadata ?? [];
+                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                        ? $asset->thumbnail_status->value
+                        : ($asset->thumbnail_status ?? 'pending');
+
+                    $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+                    $finalThumbnailUrl = null;
+                    $thumbnailVersion = null;
+                    $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'
+                        || strtolower((string) ($fileExtension ?? '')) === 'pdf';
+                    $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
+                    $pdfPageApiEndpoint = $isPdf
+                        ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
+                        : null;
+                    $firstPageUrl = null;
+
+                    $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+                    if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
+                        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                        $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
+                        $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
+                        if ($pathExists) {
+                            $variant = $thumbnailStyle === 'medium' ? AssetVariant::THUMB_MEDIUM : AssetVariant::THUMB_SMALL;
+                            $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
+                            // Do NOT append ?v= to presigned URLs — invalidates S3 signature
+                            if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
+                            }
+                            if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
+                                Log::info('[AssetController] Providing final_thumbnail_url despite status mismatch', [
+                                    'asset_id' => $asset->id,
+                                    'thumbnail_status' => $thumbnailStatus,
+                                ]);
+                            }
+                        }
+                    }
+                    if ($isPdf) {
+                        $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
+                    }
+
+                    return [
+                        'id' => $asset->id,
+                        'title' => $title,
+                        'original_filename' => $asset->original_filename,
+                        'mime_type' => $asset->mime_type,
+                        'file_extension' => $fileExtension,
+                        'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status, // AssetStatus enum value
+                        'size_bytes' => $asset->size_bytes,
+                        'created_at' => $asset->created_at?->toIso8601String(),
+                        'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                        'starred' => $this->assetIsStarred($metadata['starred'] ?? $starredFromTable[$asset->id] ?? null), // prefer assets.metadata; fallback asset_metadata for display
+                        'category' => $categoryName ? [
+                            'id' => $categoryId,
+                            'name' => $categoryName,
+                            'slug' => $categorySlug,
+                        ] : null,
+                        'user_id' => $asset->user_id, // For delete-own permission check
+                        'uploaded_by' => $uploadedBy, // User who uploaded the asset
+                        // Thumbnail URLs — all via AssetDeliveryService (AUTHENTICATED context)
+                        'thumbnail_small' => $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
+                        'thumbnail_medium' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null,
+                        'thumbnail_large' => $this->thumbnailUrlLarge($asset),
+                        'thumbnail_preview' => $previewThumbnailUrl, // LQIP during processing
+                        'original' => $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null,
+                        'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
+                        // Legacy aliases for frontend migration (remove when frontend updated)
+                        'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl ?? null,
+                        'preview_thumbnail_url' => $previewThumbnailUrl,
+                        'final_thumbnail_url' => $finalThumbnailUrl,
                         'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
-                    ]);
-                }
+                        'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
+                        'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
+                        'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                        'pdf_page_count' => $asset->pdf_page_count,
+                        'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+                        // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
+                        'published_at' => $asset->published_at?->toIso8601String(),
+                        'is_published' => $asset->published_at !== null,
+                        'published_by' => $asset->published_by_id ? [
+                            'id' => $asset->publishedBy?->id ?? null,
+                            'name' => $asset->publishedBy?->name ?? null,
+                            'first_name' => $asset->publishedBy?->first_name ?? null,
+                            'last_name' => $asset->publishedBy?->last_name ?? null,
+                            'email' => $asset->publishedBy?->email ?? null,
+                        ] : null,
+                        'archived_at' => $asset->archived_at?->toIso8601String(),
+                        'archived_by' => $asset->archived_by_id ? [
+                            'id' => $asset->archivedBy?->id ?? null,
+                            'name' => $asset->archivedBy?->name ?? null,
+                            'first_name' => $asset->archivedBy?->first_name ?? null,
+                            'last_name' => $asset->archivedBy?->last_name ?? null,
+                            'email' => $asset->archivedBy?->email ?? null,
+                        ] : null,
+                        // Phase B2: Trash view and drawer "Deleted X days ago"
+                        'deleted_at' => $asset->deleted_at?->toIso8601String(),
+                        // Bulk actions contextual filtering: approval state (approved/pending/rejected; not_required excluded)
+                        'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? null),
+                        'preview_url' => null, // Reserved for future full-size preview endpoint
+                        'url' => null, // Reserved for future download endpoint
+                        // Phase V-1: Video quick preview on hover (grid and drawer)
+                        'video_preview_url' => $this->videoPreviewUrl($asset),
+                        'video_poster_url' => $this->videoPosterUrl($asset),
+                        // Pipeline status for visible progression (uploading → complete)
+                        'analysis_status' => $asset->analysis_status ?? 'uploading',
+                        // Asset health badge (healthy|warning|critical) for support visibility
+                        'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
+                        // Brand Guidelines Builder: staged reference materials (unpublished, no category)
+                        'builder_staged' => (bool) ($asset->builder_staged ?? false),
+                    ];
+                    if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                        Log::info('ASSET API RESPONSE URL', [
+                            'asset_id' => $asset->id,
+                            'thumbnail_url' => $finalThumbnailUrl,
+                            'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
+                        ]);
+                    }
                 } catch (\Throwable $e) {
                     Log::error('[AssetController::index] map asset failed', [
                         'asset_id' => $asset->id ?? null,
@@ -802,6 +822,7 @@ class AssetController extends Controller
                         'file' => $e->getFile(),
                         'line' => $e->getLine(),
                     ]);
+
                     return [
                         'id' => $asset->id,
                         'title' => $asset->original_filename ?? 'Asset',
@@ -814,15 +835,15 @@ class AssetController extends Controller
                         'category' => null,
                         'user_id' => $asset->user_id ?? null,
                         'uploaded_by' => null,
-                    'preview_thumbnail_url' => null,
-                    'final_thumbnail_url' => null,
-                    'thumbnail_url_large' => null,
-                    'thumbnail_url' => null,
-                    'thumbnail_small' => null,
-                    'thumbnail_medium' => null,
-                    'thumbnail_large' => null,
-                    'thumbnail_preview' => null,
-                    'original' => null,
+                        'preview_thumbnail_url' => null,
+                        'final_thumbnail_url' => null,
+                        'thumbnail_url_large' => null,
+                        'thumbnail_url' => null,
+                        'thumbnail_small' => null,
+                        'thumbnail_medium' => null,
+                        'thumbnail_large' => null,
+                        'thumbnail_preview' => null,
+                        'original' => null,
                         'thumbnail_status' => 'pending',
                         'thumbnail_error' => null,
                         'pdf_page_count' => null,
@@ -839,49 +860,49 @@ class AssetController extends Controller
                     ];
                 }
             })
-            ->values()
-            ->all();
+                ->values()
+                ->all();
 
-        $t2 = microtime(true);
+            $t2 = microtime(true);
 
-        // Count assets that trigger video preview URL generation
-        $assetsWithVideoPreview = $assetModels->filter(function ($a) {
-            return $a->mime_type && str_starts_with((string) $a->mime_type, 'video/')
-                && ! empty($a->metadata['video_preview'] ?? null);
-        })->count();
+            // Count assets that trigger video preview URL generation
+            $assetsWithVideoPreview = $assetModels->filter(function ($a) {
+                return $a->mime_type && str_starts_with((string) $a->mime_type, 'video/')
+                    && ! empty($a->metadata['video_preview'] ?? null);
+            })->count();
 
-        if (! $isLoadMore) {
-            Log::info('[ASSET_GRID_TIMING] AssetController::index', [
-                'total_ms' => round((microtime(true) - $t0) * 1000),
-                'after_query_ms' => round(($t1 - $t0) * 1000),
-                'after_transform_ms' => round(($t2 - $t1) * 1000),
-                'assets_count' => count($mappedAssets),
-                's3_presign_count' => $assetsWithVideoPreview,
-                'note' => 'video_preview_url via AssetDeliveryService per video asset',
-            ]);
-        }
+            if (! $isLoadMore) {
+                Log::info('[ASSET_GRID_TIMING] AssetController::index', [
+                    'total_ms' => round((microtime(true) - $t0) * 1000),
+                    'after_query_ms' => round(($t1 - $t0) * 1000),
+                    'after_transform_ms' => round(($t2 - $t1) * 1000),
+                    'assets_count' => count($mappedAssets),
+                    's3_presign_count' => $assetsWithVideoPreview,
+                    'note' => 'video_preview_url via AssetDeliveryService per video asset',
+                ]);
+            }
 
-        // Keep collection for availableValues block (expects $assets as collection of arrays)
-        $assets = collect($mappedAssets);
+            // Keep collection for availableValues block (expects $assets as collection of arrays)
+            $assets = collect($mappedAssets);
 
-        // Load-more: return JSON only so the client can append without Inertia replacing the list.
-        // Do this before filterableSchema/availableValues so page 2+ never runs that heavy logic.
-        if ($isLoadMore) {
-            return response()->json([
-                'data' => $mappedAssets,
-                'next_page_url' => $nextPageUrl,
-            ]);
-        }
+            // Load-more: return JSON only so the client can append without Inertia replacing the list.
+            // Do this before filterableSchema/availableValues so page 2+ never runs that heavy logic.
+            if ($isLoadMore) {
+                return response()->json([
+                    'data' => $mappedAssets,
+                    'next_page_url' => $nextPageUrl,
+                ]);
+            }
 
-        // format=json: return plain JSON for pickers/modals (avoids Inertia 409 version mismatch)
-        if ($request->get('format') === 'json') {
-            return response()->json([
-                'assets' => $mappedAssets,
-                'categories' => $allCategories->values()->all(),
-                'categories_by_type' => ['all' => $allCategories->values()->all()],
-                'next_page_url' => $nextPageUrl,
-            ]);
-        }
+            // format=json: return plain JSON for pickers/modals (avoids Inertia 409 version mismatch)
+            if ($request->get('format') === 'json') {
+                return response()->json([
+                    'assets' => $mappedAssets,
+                    'categories' => $allCategories->values()->all(),
+                    'categories_by_type' => ['all' => $allCategories->values()->all()],
+                    'next_page_url' => $nextPageUrl,
+                ]);
+            }
 
         } catch (\Throwable $e) {
             if ($isLoadMore) {
@@ -900,36 +921,36 @@ class AssetController extends Controller
         // but MetadataSchemaResolver expects file type (image/video/document)
         // Default to 'image' for schema resolution when category context doesn't provide file type
         $filterableSchema = [];
-        
+
         // Phase L.5.1: Enable filters in "All Categories" view
         // Resolve schema even when categoryId is null to allow system-level filters
         if ($categoryId && $category) {
             // Use 'image' as default file type for metadata schema resolution
             // Category's asset_type is organizational, not a file type
             $fileType = 'image'; // Default file type for metadata schema resolution
-            
+
             $schema = $this->metadataSchemaResolver->resolve(
                 $tenant->id,
                 $brand->id,
                 $categoryId,
                 $fileType
             );
-            
+
             // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
-        } elseif (!$categoryId) {
+        } elseif (! $categoryId) {
             // "All Categories" view: Resolve schema without category context
             // This enables system-level metadata fields (orientation, color_space, resolution_class, dominant_hue_group)
             // that are computed from assets themselves, not category-specific
             $fileType = 'image'; // Default file type for metadata schema resolution
-            
+
             $schema = $this->metadataSchemaResolver->resolve(
                 $tenant->id,
                 $brand->id,
                 null, // No category context
                 $fileType
             );
-            
+
             // Pass null category to mark system fields as global
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
         }
@@ -939,6 +960,7 @@ class AssetController extends Controller
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
             $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
                 $key = $field['field_key'] ?? $field['key'] ?? null;
+
                 return $key && in_array($key, $keysWithValues, true);
             }));
         }
@@ -946,7 +968,7 @@ class AssetController extends Controller
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set
-        // 
+        //
         // 🔍 CRITICAL: Filter harvesting MUST use the SAME asset query scope as the grid
         // - Same lifecycle filtering (via LifecycleResolver)
         // - Same category filtering
@@ -954,7 +976,7 @@ class AssetController extends Controller
         // If these differ, filter options won't match visible assets
         $availableValues = [];
         $hueGroupToDisplayHex = []; // cluster key -> display_hex from HueClusterService
-        
+
         // 🔍 Step 1: Prove assets used for option harvesting
         // CRITICAL: Use the SAME asset collection that appears in the grid
         // This ensures filter options match what users see
@@ -964,13 +986,13 @@ class AssetController extends Controller
                 break;
             }
         }
-        
+
         // Use current page asset IDs for filter options (initial request only; load_more does not run this block)
         $assetIdsForAvailableValues = $assetModels->pluck('id')->toArray();
-        if (!empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
+        if (! empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
             // Get asset IDs from the current grid result set (or first page when loading page > 1)
             $assetIds = $assetIdsForAvailableValues;
-            
+
             // Build map of filterable field keys for quick lookup
             // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
             // so we don't need to check is_filterable - all fields in the array are filterable
@@ -981,40 +1003,40 @@ class AssetController extends Controller
                     $filterableFieldKeys[$fieldKey] = true;
                 }
             }
-            
-            if (!empty($filterableFieldKeys)) {
+
+            if (! empty($filterableFieldKeys)) {
                 // Source 1: Query asset_metadata table (Phase G.4 structure)
                 // This is the authoritative source for approved metadata values
                 // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
                 // They should be included in available_values regardless of approved_at
-                
+
                 // Get automatic field IDs (fields with population_mode = 'automatic')
                 $automaticFieldIds = \DB::table('metadata_fields')
                     ->where('population_mode', 'automatic')
                     ->pluck('id')
                     ->toArray();
-                
+
                 // Safeguard: Always include dominant_hue_group so it's never excluded
                 $hueGroupField = \DB::table('metadata_fields')->where('key', 'dominant_hue_group')->first();
-                if ($hueGroupField && !in_array($hueGroupField->id, $automaticFieldIds, true)) {
+                if ($hueGroupField && ! in_array($hueGroupField->id, $automaticFieldIds, true)) {
                     $automaticFieldIds[] = (int) $hueGroupField->id;
                 }
-                
+
                 // Build query: Include automatic fields regardless of approved_at, require approved_at for others
                 $assetMetadataValues = \DB::table('asset_metadata')
                     ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                     ->whereIn('asset_metadata.asset_id', $assetIds)
                     ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
                     ->whereNotNull('asset_metadata.value_json')
-                    ->where(function($query) use ($automaticFieldIds) {
+                    ->where(function ($query) use ($automaticFieldIds) {
                         // Automatic fields: include if value exists (no approval required)
-                        if (!empty($automaticFieldIds)) {
+                        if (! empty($automaticFieldIds)) {
                             $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                                  ->orWhere(function($q) use ($automaticFieldIds) {
-                                      // Non-automatic fields require approval
-                                      $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                ->orWhere(function ($q) use ($automaticFieldIds) {
+                                    // Non-automatic fields require approval
+                                    $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
                                         ->whereNotNull('asset_metadata.approved_at');
-                                  });
+                                });
                         } else {
                             // No automatic fields, require approval for all
                             $query->whereNotNull('asset_metadata.approved_at');
@@ -1023,49 +1045,47 @@ class AssetController extends Controller
                     ->select('metadata_fields.key', 'metadata_fields.population_mode', 'asset_metadata.value_json', 'asset_metadata.confidence')
                     ->distinct()
                     ->get();
-                
-                
+
                 // Group values by field key (with confidence filtering for AI metadata)
                 foreach ($assetMetadataValues as $row) {
                     $fieldKey = $row->key;
                     $confidence = $row->confidence !== null ? (float) $row->confidence : null;
                     $populationMode = $row->population_mode ?? 'manual';
-                    
+
                     // CRITICAL: Confidence suppression applies ONLY to AI fields
                     // Automatic/system fields are never suppressed (they are authoritative)
                     $isAiField = $populationMode === 'ai';
                     if ($isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
                         continue; // Skip this value - treat as if it doesn't exist
                     }
-                    
+
                     $value = json_decode($row->value_json, true);
-                    
-                    
+
                     // Skip null values
                     if ($value !== null) {
-                        if (!isset($availableValues[$fieldKey])) {
+                        if (! isset($availableValues[$fieldKey])) {
                             $availableValues[$fieldKey] = [];
                         }
-                        
+
                         // TASK 3: Use MetadataValueNormalizer for consistent normalization
                         // This handles edge cases where values may have been incorrectly stored
                         // For scalar fields (like dominant_hue_group), normalize to scalar
                         // For multiselect fields, keep as array
                         $isMultiselectField = in_array($fieldKey, ['dominant_colors', 'tags']); // Known multiselect fields
-                        
+
                         if ($isMultiselectField) {
                             // Multiselect fields: keep as array, extract individual items
                             if (is_array($value)) {
                                 foreach ($value as $item) {
                                     $normalizedItem = MetadataValueNormalizer::normalizeScalar($item);
-                                    if ($normalizedItem !== null && !in_array($normalizedItem, $availableValues[$fieldKey], true)) {
+                                    if ($normalizedItem !== null && ! in_array($normalizedItem, $availableValues[$fieldKey], true)) {
                                         $availableValues[$fieldKey][] = $normalizedItem;
                                     }
                                 }
                             } else {
                                 // Single value in multiselect field - normalize and add
                                 $normalized = MetadataValueNormalizer::normalizeScalar($value);
-                                if ($normalized !== null && !in_array($normalized, $availableValues[$fieldKey], true)) {
+                                if ($normalized !== null && ! in_array($normalized, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $normalized;
                                 }
                             }
@@ -1073,7 +1093,7 @@ class AssetController extends Controller
                             // Scalar fields (like dominant_hue_group): normalize to scalar
                             $normalized = MetadataValueNormalizer::normalizeScalar($value);
                             if ($normalized !== null) {
-                                if (!in_array($normalized, $availableValues[$fieldKey], true)) {
+                                if (! in_array($normalized, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $normalized;
                                 }
                             } else {
@@ -1087,7 +1107,7 @@ class AssetController extends Controller
                         }
                     }
                 }
-                
+
                 // Source 2a: dominant_hue_group from assets.dominant_hue_group column
                 if (isset($filterableFieldKeys['dominant_hue_group'])) {
                     $hueGroupValues = \DB::table('assets')
@@ -1097,7 +1117,7 @@ class AssetController extends Controller
                         ->distinct()
                         ->pluck('dominant_hue_group')
                         ->all();
-                    if (!empty($hueGroupValues)) {
+                    if (! empty($hueGroupValues)) {
                         $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
                             $availableValues['dominant_hue_group'] ?? [],
                             $hueGroupValues
@@ -1110,29 +1130,30 @@ class AssetController extends Controller
                 // Note: $assets here is the mapped collection (arrays), not Asset models
                 $assetsWithMetadata = $assets->filter(function ($item) {
                     $meta = $item['metadata'] ?? null;
-                    return !empty($meta) && isset($meta['fields']);
+
+                    return ! empty($meta) && isset($meta['fields']);
                 });
-                
+
                 foreach ($assetsWithMetadata as $item) {
                     $fields = ($item['metadata'] ?? [])['fields'] ?? [];
                     foreach ($fields as $fieldKey => $value) {
                         // Only include if field is filterable
                         if (isset($filterableFieldKeys[$fieldKey]) && $value !== null) {
                             // Initialize array if field doesn't exist yet
-                            if (!isset($availableValues[$fieldKey])) {
+                            if (! isset($availableValues[$fieldKey])) {
                                 $availableValues[$fieldKey] = [];
                             }
-                            
+
                             // Handle arrays (multiselect fields) and scalar values
                             // Deduplicate values (values from asset_metadata are authoritative)
                             if (is_array($value)) {
                                 foreach ($value as $item) {
-                                    if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                    if ($item !== null && ! in_array($item, $availableValues[$fieldKey], true)) {
                                         $availableValues[$fieldKey][] = $item;
                                     }
                                 }
                             } else {
-                                if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                if (! in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
                                 // dominant_hue_group: swatch from HueClusterService (handled below)
@@ -1173,7 +1194,7 @@ class AssetController extends Controller
                         ]);
                     }
                 }
-                
+
                 // C9.2: Source 3 - Collection filter values from asset_collections pivot (not asset_metadata)
                 // Primary filter for collection requires available_values; harvest from pivot for current asset set
                 if (isset($filterableFieldKeys['collection'])) {
@@ -1185,7 +1206,7 @@ class AssetController extends Controller
                         ->unique()
                         ->values()
                         ->all();
-                    if (!empty($collectionIds)) {
+                    if (! empty($collectionIds)) {
                         $availableValues['collection'] = array_values(array_unique(array_merge(
                             $availableValues['collection'] ?? [],
                             $collectionIds
@@ -1203,7 +1224,7 @@ class AssetController extends Controller
                         ->filter()
                         ->values()
                         ->all();
-                    if (!empty($tagValues)) {
+                    if (! empty($tagValues)) {
                         $availableValues['tags'] = array_values(array_unique(array_merge(
                             $availableValues['tags'] ?? [],
                             $tagValues
@@ -1247,7 +1268,7 @@ class AssetController extends Controller
 
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
-                    return !empty($values);
+                    return ! empty($values);
                 });
 
                 // Sort values for consistent output
@@ -1268,12 +1289,13 @@ class AssetController extends Controller
                     $label = $meta['label'] ?? (string) $clusterKey;
                     $threshold = $meta['threshold_deltaE'] ?? 18;
                     $count = $hueClusterCounts[(string) $clusterKey] ?? 0;
+
                     return [
                         'value' => (string) $clusterKey,
                         'label' => $label,
                         'swatch' => $meta['display_hex'] ?? '#999999',
                         'row_group' => $meta['row_group'] ?? 4,
-                        'tooltip' => $label . "\nTypical ΔE threshold: " . $threshold,
+                        'tooltip' => $label."\nTypical ΔE threshold: ".$threshold,
                         'count' => $count,
                     ];
                 }, $hueValues));
@@ -1316,7 +1338,7 @@ class AssetController extends Controller
             'categories_by_type' => [
                 'all' => $allCategories,
             ],
-            'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
+            'selected_category' => $categoryId ? (int) $categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'total_asset_count' => $isStagedView ? $stagedCount : $totalAssetCount, // Staged view: staged count; main grid: category total
@@ -1339,35 +1361,32 @@ class AssetController extends Controller
 
     /**
      * GET /app/assets/processing
-     * 
+     *
      * Returns all assets currently processing (backend-driven truth).
      * This is the authoritative source for processing indicators.
-     * 
+     *
      * CRITICAL RULES:
      * - Only returns assets with terminal states excluded (pending, processing, or null)
      * - Includes TTL check to detect stale jobs (>10 minutes)
      * - Terminal states (completed, failed, skipped) are never returned
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function activeProcessingJobs(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
-        
-        if (!$tenant || !$brand || !$user) {
+
+        if (! $tenant || ! $brand || ! $user) {
             return response()->json([
                 'active_jobs' => [],
                 'stale_count' => 0,
             ]);
         }
-        
+
         $now = now();
         $staleThreshold = 10; // 10 minutes
         $staleCount = 0;
-        
+
         try {
             // CRITICAL: Only include assets that are actively processing
             // Terminal states (failed, skipped, completed) are automatically excluded
@@ -1376,8 +1395,8 @@ class AssetController extends Controller
                 ->where(function ($query) {
                     // Only include actively processing states: pending, processing, or null (legacy)
                     $query->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
-                          ->orWhere('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING->value)
-                          ->orWhereNull('thumbnail_status'); // Legacy assets (null = pending)
+                        ->orWhere('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING->value)
+                        ->orWhereNull('thumbnail_status'); // Legacy assets (null = pending)
                 })
                 ->whereNull('deleted_at')
                 ->orderBy('created_at', 'desc')
@@ -1386,7 +1405,7 @@ class AssetController extends Controller
                 ->map(function ($asset) use ($now, $staleThreshold, &$staleCount) {
                     $ageMinutes = $asset->created_at->diffInMinutes($now);
                     $isStale = $ageMinutes > $staleThreshold;
-                    
+
                     if ($isStale) {
                         $staleCount++;
                         Log::warning('[AssetProcessingTray] Stale processing job detected', [
@@ -1396,7 +1415,7 @@ class AssetController extends Controller
                             'created_at' => $asset->created_at->toIso8601String(),
                         ]);
                     }
-                    
+
                     return [
                         'id' => $asset->id,
                         'title' => $asset->title ?? $asset->original_filename ?? 'Untitled Asset',
@@ -1410,18 +1429,18 @@ class AssetController extends Controller
                 })
                 ->filter(function ($asset) {
                     // Filter out stale jobs from active list (but count them)
-                    return !$asset['is_stale'];
+                    return ! $asset['is_stale'];
                 })
                 ->values()
                 ->toArray();
-            
+
             Log::info('[AssetProcessingTray] Active processing jobs fetched', [
                 'active_count' => count($processingAssets),
                 'stale_count' => $staleCount,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
             ]);
-            
+
             return response()->json([
                 'active_jobs' => $processingAssets,
                 'stale_count' => $staleCount,
@@ -1433,7 +1452,7 @@ class AssetController extends Controller
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
             ]);
-            
+
             return response()->json([
                 'active_jobs' => [],
                 'stale_count' => 0,
@@ -1444,38 +1463,35 @@ class AssetController extends Controller
 
     /**
      * GET /app/assets/thumbnail-status/batch
-     * 
+     *
      * Batch endpoint for checking thumbnail status of multiple assets.
      * Used by smart polling to efficiently check which assets have final thumbnails ready.
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function batchThumbnailStatus(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
-        
-        if (!$tenant || !$brand || !$user) {
+
+        if (! $tenant || ! $brand || ! $user) {
             return response()->json([
                 'assets' => [],
             ]);
         }
-        
+
         // Get asset IDs from request (comma-separated or array)
         $assetIds = $request->input('asset_ids', []);
-        
+
         if (is_string($assetIds)) {
             $assetIds = explode(',', $assetIds);
         }
-        
-        if (!is_array($assetIds) || empty($assetIds)) {
+
+        if (! is_array($assetIds) || empty($assetIds)) {
             return response()->json([
                 'assets' => [],
             ]);
         }
-        
+
         // HARD TERMINAL STATE: Check for stuck assets before returning status
         // This prevents infinite processing states by automatically failing
         // assets that have been processing longer than the timeout threshold
@@ -1485,14 +1501,14 @@ class AssetController extends Controller
             ->whereIn('id', $assetIds)
             ->where('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING)
             ->get();
-        
+
         foreach ($stuckAssets as $asset) {
             $timeoutGuard->checkAndRepair($asset);
         }
-        
+
         // Limit to reasonable batch size
         $assetIds = array_slice($assetIds, 0, 50);
-        
+
         try {
             $assets = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
@@ -1501,23 +1517,23 @@ class AssetController extends Controller
                 ->with('storageBucket')
                 ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata', 'storage_bucket_id'])
                 ->map(function ($asset) {
-                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                        ? $asset->thumbnail_status->value 
+                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                        ? $asset->thumbnail_status->value
                         : ($asset->thumbnail_status ?? 'pending');
-                    
+
                     $metadata = $asset->metadata ?? [];
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    
+
                     // Step 4: CRITICAL - Never return status COMPLETED if final thumbnail URL does not exist
                     // Verify thumbnail file exists before returning COMPLETED status
                     // This prevents UI from showing "completed" when files don't exist
                     $finalThumbnailUrl = null;
                     $verifiedStatus = $thumbnailStatus;
-                    
+
                     if ($thumbnailStatus === 'completed') {
                         // Verify thumbnail file actually exists before returning COMPLETED
                         $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
-                        
+
                         if ($thumbnailPath && $asset->storageBucket) {
                             try {
                                 // Create S3 client for verification
@@ -1526,16 +1542,16 @@ class AssetController extends Controller
                                     'Bucket' => $asset->storageBucket->name,
                                     'Key' => $thumbnailPath,
                                 ]);
-                                
+
                                 // Verify file size > minimum threshold (1KB)
                                 $contentLength = $result['ContentLength'] ?? 0;
                                 $minValidSize = 1024; // 1KB
-                                
+
                                 if ($contentLength >= $minValidSize) {
                                     // File exists and is valid - return CDN URL
                                     $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
                                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                                     }
                                 } else {
                                     // File exists but is too small - downgrade to failed
@@ -1567,22 +1583,22 @@ class AssetController extends Controller
                             $verifiedStatus = 'failed';
                             Log::warning('[batchThumbnailStatus] Thumbnail path or bucket missing, downgrading status', [
                                 'asset_id' => $asset->id,
-                                'has_path' => !!$thumbnailPath,
-                                'has_bucket' => !!$asset->storageBucket,
+                                'has_path' => (bool) $thumbnailPath,
+                                'has_bucket' => (bool) $asset->storageBucket,
                             ]);
                         }
                     }
-                    
+
                     // Get skip reason from metadata if status is skipped
                     $skipReason = null;
                     if ($verifiedStatus === 'skipped') {
                         $metadata = $asset->metadata ?? [];
                         $skipReason = $metadata['thumbnail_skip_reason'] ?? 'unsupported_file_type';
                     }
-                    
+
                     // Preview thumbnail URL - returned even when status is pending or processing
                     $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
-                    
+
                     return [
                         'asset_id' => $asset->id,
                         'thumbnail_status' => $verifiedStatus, // Use verified status, not raw status
@@ -1595,7 +1611,7 @@ class AssetController extends Controller
                 })
                 ->values()
                 ->toArray();
-            
+
             return response()->json([
                 'assets' => $assets,
             ]);
@@ -1605,7 +1621,7 @@ class AssetController extends Controller
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
             ]);
-            
+
             return response()->json([
                 'assets' => [],
             ], 500);
@@ -1614,12 +1630,10 @@ class AssetController extends Controller
 
     /**
      * Create S3 client instance for file verification.
-     *
-     * @return \Aws\S3\S3Client
      */
     protected function createS3ClientForVerification(): \Aws\S3\S3Client
     {
-        if (!class_exists(\Aws\S3\S3Client::class)) {
+        if (! class_exists(\Aws\S3\S3Client::class)) {
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
 
@@ -1640,22 +1654,19 @@ class AssetController extends Controller
      * Get processing status for an asset (thumbnail generation status).
      *
      * GET /assets/{asset}/processing-status
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function processingStatus(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
-        
+
         // Verify asset belongs to tenant and brand
         if ($asset->tenant_id !== $tenant->id) {
             return response()->json([
                 'message' => 'Asset not found',
             ], 404);
         }
-        
+
         if ($asset->brand_id !== $brand->id) {
             return response()->json([
                 'message' => 'Asset not found',
@@ -1668,8 +1679,8 @@ class AssetController extends Controller
         // Get thumbnail status from Asset model
         // thumbnail_status is the source of truth for thumbnail generation state
         // Values: 'pending', 'processing', 'completed', 'failed' (ThumbnailStatus enum)
-        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-            ? $asset->thumbnail_status->value 
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
 
         // Generate distinct thumbnail URLs for preview and final (CDN URLs)
@@ -1684,7 +1695,7 @@ class AssetController extends Controller
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
             }
         }
 
@@ -1705,14 +1716,11 @@ class AssetController extends Controller
      * Get activity events for an asset.
      *
      * GET /assets/{asset}/activity
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function activity(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
-        
+
         // Verify asset belongs to tenant
         if ($asset->tenant_id !== $tenant->id) {
             return response()->json([
@@ -1771,7 +1779,7 @@ class AssetController extends Controller
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
             }
         }
         $thumbnailUrl = $finalThumbnailUrl ?: $previewThumbnailUrl;
@@ -1829,14 +1837,11 @@ class AssetController extends Controller
      * Get signed preview URL for an asset.
      *
      * GET /assets/{asset}/preview-url
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function previewUrl(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
-        
+
         // Verify asset belongs to tenant
         if ($asset->tenant_id !== $tenant->id) {
             return response()->json([
@@ -1846,7 +1851,7 @@ class AssetController extends Controller
 
         // Verify asset processing is completed (check processing state, not status)
         $completionService = app(\App\Services\AssetCompletionService::class);
-        if (!$completionService->isComplete($asset)) {
+        if (! $completionService->isComplete($asset)) {
             return response()->json([
                 'message' => 'Asset preview not available - asset is still processing',
             ], 422);
@@ -1872,9 +1877,6 @@ class AssetController extends Controller
      * - dimensions (widthxheight)
      * - dominant_colors (top 3 dominant colors from image analysis)
      * - dominant_hue_group (perceptual hue cluster for filtering)
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function regenerateSystemMetadata(Asset $asset): JsonResponse
     {
@@ -1890,12 +1892,12 @@ class AssetController extends Controller
         }
 
         // Check permission - same as AI metadata regeneration
-        if (!$user || !$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+        if (! $user || ! $user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
             // Also allow owners/admins
             $tenantRole = $user?->getRoleForTenant($tenant);
             $isOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-            
-            if (!$isOwnerOrAdmin) {
+
+            if (! $isOwnerOrAdmin) {
                 return response()->json([
                     'success' => false,
                     'error' => 'You do not have permission to regenerate system metadata',
@@ -1944,7 +1946,7 @@ class AssetController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error' => 'Failed to regenerate system metadata: ' . $e->getMessage(),
+                'error' => 'Failed to regenerate system metadata: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -1953,16 +1955,13 @@ class AssetController extends Controller
      * Publish an asset.
      *
      * POST /assets/{asset}/publish
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function publish(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -1972,6 +1971,7 @@ class AssetController extends Controller
 
         try {
             $this->publicationService->publish($asset, $user);
+
             return response()->json([
                 'message' => 'Asset published successfully',
                 'asset_id' => $asset->id,
@@ -1982,6 +1982,7 @@ class AssetController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error('[AssetController::publish]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
             return response()->json(['message' => 'Failed to publish asset'], 500);
         }
     }
@@ -1990,10 +1991,6 @@ class AssetController extends Controller
      * Finalize a builder-staged asset: assign category, clear builder_staged, and publish.
      *
      * POST /assets/{asset}/finalize-from-builder
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function finalizeFromBuilder(Request $request, Asset $asset): JsonResponse
     {
@@ -2051,6 +2048,7 @@ class AssetController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error('[AssetController::finalizeFromBuilder]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
             return response()->json(['message' => 'Failed to finalize asset'], 500);
         }
     }
@@ -2059,16 +2057,13 @@ class AssetController extends Controller
      * Unpublish an asset.
      *
      * POST /assets/{asset}/unpublish
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function unpublish(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -2078,6 +2073,7 @@ class AssetController extends Controller
 
         try {
             $this->publicationService->unpublish($asset, $user);
+
             return response()->json([
                 'message' => 'Asset unpublished successfully',
                 'asset_id' => $asset->id,
@@ -2086,6 +2082,7 @@ class AssetController extends Controller
             return response()->json(['message' => $e->getMessage()], 403);
         } catch (\Exception $e) {
             Log::error('[AssetController::unpublish]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
             return response()->json(['message' => 'Failed to unpublish asset'], 500);
         }
     }
@@ -2094,16 +2091,13 @@ class AssetController extends Controller
      * Archive an asset.
      *
      * POST /assets/{asset}/archive
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function archive(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -2113,6 +2107,7 @@ class AssetController extends Controller
 
         try {
             $this->archiveService->archive($asset, $user);
+
             return response()->json([
                 'message' => 'Asset archived successfully',
                 'asset_id' => $asset->id,
@@ -2123,6 +2118,7 @@ class AssetController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error('[AssetController::archive]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
             return response()->json(['message' => 'Failed to archive asset'], 500);
         }
     }
@@ -2131,16 +2127,13 @@ class AssetController extends Controller
      * Restore an archived asset.
      *
      * POST /assets/{asset}/restore
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function restore(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -2150,6 +2143,7 @@ class AssetController extends Controller
 
         try {
             $this->archiveService->restore($asset, $user);
+
             return response()->json([
                 'message' => 'Asset restored successfully',
                 'asset_id' => $asset->id,
@@ -2160,6 +2154,7 @@ class AssetController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error('[AssetController::restore]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
             return response()->json(['message' => 'Failed to restore asset'], 500);
         }
     }
@@ -2262,12 +2257,14 @@ class AssetController extends Controller
             $message = $e->limitType === 'storage'
                 ? 'Storage limit exceeded for your plan.'
                 : $e->getMessage();
+
             return response()->json(['error' => $message], 403);
         } catch (\Exception $e) {
             Log::error('[AssetController::initiateReplaceFile]', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
             ]);
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -2276,9 +2273,6 @@ class AssetController extends Controller
      * Delete an asset.
      *
      * DELETE /assets/{asset}
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function destroy(Asset $asset): JsonResponse
     {
@@ -2312,7 +2306,7 @@ class AssetController extends Controller
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to delete asset: ' . $e->getMessage(),
+                'message' => 'Failed to delete asset: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -2327,7 +2321,7 @@ class AssetController extends Controller
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -2337,7 +2331,7 @@ class AssetController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        if (!$assetModel->trashed()) {
+        if (! $assetModel->trashed()) {
             return response()->json(['message' => 'Asset is not deleted'], 409);
         }
 
@@ -2345,13 +2339,14 @@ class AssetController extends Controller
 
         try {
             $this->deletionService->restoreFromTrash($assetModel, $user->id);
+
             return response()->json([
                 'message' => 'Asset restored successfully',
                 'asset_id' => $assetModel->id,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to restore asset: ' . $e->getMessage(),
+                'message' => 'Failed to restore asset: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -2383,13 +2378,14 @@ class AssetController extends Controller
 
         try {
             $this->deletionService->forceDelete($assetModel, $user->id);
+
             return response()->json([
                 'message' => 'Asset permanently deleted',
                 'asset_id' => $assetModel->id,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to permanently delete: ' . $e->getMessage(),
+                'message' => 'Failed to permanently delete: '.$e->getMessage(),
             ], 500);
         }
     }

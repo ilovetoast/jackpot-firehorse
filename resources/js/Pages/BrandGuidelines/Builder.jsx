@@ -30,7 +30,8 @@ import InlineSuggestionBlock from '../../Components/BrandGuidelines/InlineSugges
 import ArchetypeStep from '../../Components/BrandGuidelines/ArchetypeStep'
 import axios from 'axios'
 import useLogoBrightness from '../../utils/useLogoBrightness'
-import { generateWhiteVariant, detectLogoComplexity } from '../../utils/imageUtils'
+import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
+import { generateWhiteVariant, generatePrimaryColorWashVariant, detectLogoComplexity } from '../../utils/imageUtils'
 import ImageCropModal from '../../Components/ImageCropModal'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
@@ -1593,6 +1594,11 @@ function approvedRefsCount(refs) {
 }
 
 // ——— Logo Usage Guidelines (Visual Proof Cards) ———
+/** Subtle keyline when primary logo is at risk on pure white (analysis) */
+function guidelineWhiteOutlineClass(outlineWhiteBg) {
+    return outlineWhiteBg ? 'drop-shadow-[0_0_1px_rgba(0,0,0,0.45)]' : ''
+}
+
 const DEFAULT_LOGO_GUIDELINES = {
     clear_space: 'Maintain a minimum clear space equal to the height of the logo mark on all sides.',
     minimum_size: 'The logo should never be displayed smaller than 24px in height on digital, or 0.5 inches in print.',
@@ -1609,163 +1615,204 @@ const GUIDELINE_CARDS = {
     clear_space: {
         label: 'Clear Space',
         category: 'do',
-        render: (logoSrc) => (
-            <div className="relative w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center">
-                <div className="relative">
-                    <div className="absolute inset-0 -m-5 border-2 border-dashed border-blue-400/50 rounded" />
-                    <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
-                        <div className="w-px h-4 bg-blue-400/60" />
-                        <span className="text-[8px] text-blue-500 font-medium">x</span>
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="relative w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center">
+                    <div className="relative">
+                        <div className="absolute inset-0 -m-5 border-2 border-dashed border-blue-400/50 rounded" />
+                        <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                            <div className="w-px h-4 bg-blue-400/60" />
+                            <span className="text-[8px] text-blue-500 font-medium">x</span>
+                        </div>
+                        <div className="absolute -left-5 top-1/2 -translate-y-1/2 flex items-center">
+                            <div className="h-px w-4 bg-blue-400/60" />
+                            <span className="text-[8px] text-blue-500 font-medium ml-0.5">x</span>
+                        </div>
+                        <img src={w} alt="" className={`h-10 max-w-[100px] object-contain ${oc}`} />
                     </div>
-                    <div className="absolute -left-5 top-1/2 -translate-y-1/2 flex items-center">
-                        <div className="h-px w-4 bg-blue-400/60" />
-                        <span className="text-[8px] text-blue-500 font-medium ml-0.5">x</span>
-                    </div>
-                    <img src={logoSrc} alt="" className="h-10 max-w-[100px] object-contain" />
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     minimum_size: {
         label: 'Minimum Size',
         category: 'do',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-end justify-center gap-6 pb-4 px-4">
-                <div className="flex flex-col items-center gap-1">
-                    <img src={logoSrc} alt="" className="h-10 max-w-[80px] object-contain" />
-                    <span className="text-[8px] text-gray-500 font-medium">Full size</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                    <img src={logoSrc} alt="" className="h-5 max-w-[40px] object-contain" />
-                    <span className="text-[8px] text-gray-500 font-medium">Min size</span>
-                </div>
-                <div className="flex flex-col items-center gap-1 opacity-30">
-                    <img src={logoSrc} alt="" className="h-2.5 max-w-[20px] object-contain" />
-                    <div className="flex items-center gap-0.5">
-                        <span className="text-red-500 text-[10px]">✕</span>
-                        <span className="text-[8px] text-red-500 font-medium">Too small</span>
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-end justify-center gap-6 pb-4 px-4">
+                    <div className="flex flex-col items-center gap-1">
+                        <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} />
+                        <span className="text-[8px] text-gray-500 font-medium">Full size</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                        <img src={w} alt="" className={`h-5 max-w-[40px] object-contain ${oc}`} />
+                        <span className="text-[8px] text-gray-500 font-medium">Min size</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 opacity-30">
+                        <img src={w} alt="" className={`h-2.5 max-w-[20px] object-contain ${oc}`} />
+                        <div className="flex items-center gap-0.5">
+                            <span className="text-red-500 text-[10px]">✕</span>
+                            <span className="text-[8px] text-red-500 font-medium">Too small</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     color_usage: {
         label: 'Color Usage',
         category: 'do',
-        render: (logoSrc, brandColors) => (
-            <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
-                <div className="bg-white flex items-center justify-center p-3">
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain" />
+        render: (logoSrc, brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
+                    <div className="bg-white flex items-center justify-center p-3">
+                        <img src={w} alt="" className={`h-8 max-w-[70px] object-contain ${oc}`} />
+                    </div>
+                    <div className="flex items-center justify-center p-3" style={{ backgroundColor: brandColors?.primary || '#1a1a2e' }}>
+                        <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert" />
+                    </div>
+                    <div className="bg-gray-100 flex items-center justify-center p-3" style={{ backgroundColor: brandColors?.secondary || '#f0f0f0' }}>
+                        <img src={w} alt="" className={`h-8 max-w-[70px] object-contain ${oc}`} />
+                    </div>
+                    <div className="bg-gray-800 flex items-center justify-center p-3">
+                        <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert" />
+                    </div>
                 </div>
-                <div className="flex items-center justify-center p-3" style={{ backgroundColor: brandColors?.primary || '#1a1a2e' }}>
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert" />
-                </div>
-                <div className="bg-gray-100 flex items-center justify-center p-3" style={{ backgroundColor: brandColors?.secondary || '#f0f0f0' }}>
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain" />
-                </div>
-                <div className="bg-gray-800 flex items-center justify-center p-3">
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert" />
-                </div>
-            </div>
-        ),
+            )
+        },
     },
     background_contrast: {
         label: 'Background Contrast',
         category: 'do',
-        render: (logoSrc, brandColors) => (
-            <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
-                <div className="flex items-center justify-center p-3 relative" style={{ backgroundColor: brandColors?.primary || '#002A3A' }}>
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert relative z-10" />
-                    <span className="absolute bottom-1 text-[8px] text-white/60 font-medium">✓ Good</span>
+        render: (logoSrc, brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] rounded-lg overflow-hidden grid grid-cols-2">
+                    <div className="flex items-center justify-center p-3 relative" style={{ backgroundColor: brandColors?.primary || '#002A3A' }}>
+                        <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain brightness-0 invert relative z-10" />
+                        <span className="absolute bottom-1 text-[8px] text-white/60 font-medium">✓ Good</span>
+                    </div>
+                    <div className="flex items-center justify-center p-3 relative bg-[repeating-conic-gradient(#e0e0e0_0%_25%,#fff_0%_50%)] bg-[length:16px_16px]">
+                        <img src={w} alt="" className={`h-8 max-w-[70px] object-contain opacity-40 relative z-10 ${oc}`} />
+                        <span className="absolute bottom-1 text-[8px] text-red-500 font-medium z-10">✕ Busy bg</span>
+                    </div>
                 </div>
-                <div className="flex items-center justify-center p-3 relative bg-[repeating-conic-gradient(#e0e0e0_0%_25%,#fff_0%_50%)] bg-[length:16px_16px]">
-                    <img src={logoSrc} alt="" className="h-8 max-w-[70px] object-contain opacity-40 relative z-10" />
-                    <span className="absolute bottom-1 text-[8px] text-red-500 font-medium z-10">✕ Busy bg</span>
-                </div>
-            </div>
-        ),
+            )
+        },
     },
     dont_stretch: {
         label: "Don't Stretch",
         category: 'dont',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center gap-4 px-4 relative">
-                <div className="flex flex-col items-center gap-1">
-                    <img src={logoSrc} alt="" className="h-8 max-w-[60px] object-contain" style={{ transform: 'scaleX(1.6)' }} />
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                    <img src={logoSrc} alt="" className="h-12 max-w-[30px] object-contain" style={{ transform: 'scaleY(1.5) scaleX(0.6)' }} />
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center gap-4 px-4 relative">
+                    <div className="flex flex-col items-center gap-1">
+                        <img src={w} alt="" className={`h-8 max-w-[60px] object-contain ${oc}`} style={{ transform: 'scaleX(1.6)' }} />
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                        <img src={w} alt="" className={`h-12 max-w-[30px] object-contain ${oc}`} style={{ transform: 'scaleY(1.5) scaleX(0.6)' }} />
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                            <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     dont_rotate: {
         label: "Don't Rotate",
         category: 'dont',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
-                <img src={logoSrc} alt="" className="h-10 max-w-[80px] object-contain" style={{ transform: 'rotate(-15deg)' }} />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
+                    <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ transform: 'rotate(-15deg)' }} />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                            <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     dont_recolor: {
         label: "Don't Recolor",
         category: 'dont',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
-                <img src={logoSrc} alt="" className="h-10 max-w-[80px] object-contain" style={{ filter: 'hue-rotate(180deg) saturate(2)' }} />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
+                    <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ filter: 'hue-rotate(180deg) saturate(2)' }} />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                            <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     dont_crop: {
         label: "Don't Crop",
         category: 'dont',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-end overflow-hidden relative">
-                <img src={logoSrc} alt="" className="h-10 max-w-[80px] object-contain mr-[-20px]" />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-end overflow-hidden relative">
+                    <img src={w} alt="" className={`h-10 max-w-[80px] object-contain mr-[-20px] ${oc}`} />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                            <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
     dont_add_effects: {
         label: "Don't Add Effects",
         category: 'dont',
-        render: (logoSrc) => (
-            <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
-                <img src={logoSrc} alt="" className="h-10 max-w-[80px] object-contain" style={{ filter: 'drop-shadow(4px 4px 6px rgba(0,0,0,0.5))' }} />
-                <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-400/90 rounded text-[7px] font-bold text-black tracking-wide">GLOW</div>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        render: (logoSrc, _brandColors, meta = {}) => {
+            const w = meta.whiteBgSrc || logoSrc
+            const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+            return (
+                <div className="w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center px-4 relative">
+                    <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ filter: 'drop-shadow(4px 4px 6px rgba(0,0,0,0.5))' }} />
+                    <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-400/90 rounded text-[7px] font-bold text-black tracking-wide">GLOW</div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                            <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        ),
+            )
+        },
     },
 }
 
-function LogoUsageGuidelines({ guidelines, onChange, brandId, brandName, logoSrc, brandColors }) {
+function LogoUsageGuidelines({ guidelines, onChange, brandId, brandName, logoSrc, logoOnLightSrc, brandColors }) {
     const [generating, setGenerating] = useState(false)
     const [editingKey, setEditingKey] = useState(null)
+    const { whiteBgSrc, showRiskBanner, outlineWhiteBg, loadingAnalysis } = useLogoWhiteBgPreview(logoSrc, logoOnLightSrc || null)
+    const guidelineMeta = useMemo(
+        () => ({ whiteBgSrc, outlineWhiteBg }),
+        [whiteBgSrc, outlineWhiteBg],
+    )
     const raw = unwrapValue(guidelines)
     const current = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : (guidelines && typeof guidelines === 'object' && !('source' in guidelines)) ? guidelines : {}
     const hasGuidelines = Object.keys(current).length > 0
@@ -1835,7 +1882,7 @@ function LogoUsageGuidelines({ guidelines, onChange, brandId, brandName, logoSrc
                 {/* Visual proof */}
                 {card && logoSrc ? (
                     <div className="relative">
-                        {card.render(logoSrc, brandColors)}
+                        {card.render(logoSrc, brandColors, guidelineMeta)}
                         {isDont && (
                             <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-red-500/90 text-[9px] font-bold text-white uppercase tracking-wider">
                                 Don&apos;t
@@ -1890,6 +1937,22 @@ function LogoUsageGuidelines({ guidelines, onChange, brandId, brandName, logoSrc
 
     return (
         <div className="space-y-6">
+            {loadingAnalysis && (
+                <p className="text-[10px] text-white/35">Checking logo contrast on white…</p>
+            )}
+            {showRiskBanner && (
+                <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-3 py-2.5 flex gap-2 items-start">
+                    <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.008v.008H12v-.008z" />
+                    </svg>
+                    <div>
+                        <p className="text-xs font-medium text-amber-200/90">Light areas in your logo won’t read on white backgrounds</p>
+                        <p className="text-[11px] text-amber-200/55 mt-1">
+                            Previews below add a subtle keyline so examples stay visible. Add an <strong className="text-amber-100/90">on-light</strong> variant (or use primary color) in Logo Variants so published guidelines use the correct mark on light surfaces.
+                        </p>
+                    </div>
+                </div>
+            )}
             {doRules.length > 0 && (
                 <div>
                     <h4 className="text-xs font-semibold text-emerald-400/80 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -2102,7 +2165,6 @@ function ReviewPanel({ payload, brand, logoRef, onStyleChange, onGoToStep, brand
     const isPaid = brandResearchGate?.allowed
 
     const snapshotCompleted = latestSnapshotLite?.status === 'completed'
-    const snapshotHasData = latestSnapshot && (latestSnapshot.primary_colors?.length > 0 || latestSnapshot.detected_fonts?.length > 0 || latestSnapshot.hero_headlines?.length > 0 || latestSnapshot.brand_bio || latestSnapshot.logo_url)
     const crawlFoundLogo = !!latestSnapshot?.logo_url
     const crawlRanForWebsite = !!latestSnapshotLite?.source_url
 
@@ -2141,74 +2203,37 @@ function ReviewPanel({ payload, brand, logoRef, onStyleChange, onGoToStep, brand
         }
     }, [crawlerRunning, snapshotCompleted, researchTriggered])
 
-    const researchResultsSummary = useMemo(() => {
-        if (!snapshotCompleted || !latestSnapshot) return null
-        const parts = []
-        const colorCount = (latestSnapshot.primary_colors?.length || 0) + (latestSnapshot.secondary_colors?.length || 0)
-        if (colorCount > 0) parts.push(`${colorCount} color${colorCount !== 1 ? 's' : ''}`)
-        if (latestSnapshot.detected_fonts?.length > 0) parts.push(`${latestSnapshot.detected_fonts.length} font${latestSnapshot.detected_fonts.length !== 1 ? 's' : ''}`)
-        if (latestSnapshot.hero_headlines?.length > 0) parts.push(`${latestSnapshot.hero_headlines.length} headline${latestSnapshot.hero_headlines.length !== 1 ? 's' : ''}`)
-        if (latestSnapshot.brand_bio) parts.push('brand bio')
-        if (latestSnapshot.logo_url) parts.push('logo')
-        return parts
-    }, [snapshotCompleted, latestSnapshot])
-
     return (
         <div className="space-y-8">
             <h3 className="text-xl font-semibold text-white">Review your brand guidelines</h3>
 
-            {/* Analysis status — always visible when relevant */}
+            {/* Analysis still running (e.g. crawl finishes after user left Background) — keep visible on Review */}
             {isAnalyzing && (
                 <div className="flex items-center gap-2.5 rounded-xl bg-emerald-500/[0.08] px-5 py-3.5 border border-emerald-500/20">
                     <svg className="animate-spin w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                     <div>
                         <p className="text-sm font-medium text-emerald-300">Website analysis in progress</p>
-                        <p className="text-xs text-emerald-300/60 mt-0.5">New AI suggestions will appear as you step back through the builder.</p>
+                        <p className="text-xs text-emerald-300/60 mt-0.5">
+                            Colors, fonts, and headlines are filled in as soon as this finishes. Detailed results are on the <strong className="text-emerald-200/70">Research summary</strong> step — not here at the end.
+                        </p>
                     </div>
                 </div>
             )}
 
-            {/* Analysis completed — show results summary */}
-            {!isAnalyzing && snapshotCompleted && crawlRanForWebsite && (
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 space-y-3">
-                    <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center mt-0.5">
-                            <svg className="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-white/80">Website analysis complete</p>
-                            <p className="text-xs text-white/40 mt-0.5">
-                                {latestSnapshotLite?.source_url && <span className="text-white/50">{latestSnapshotLite.source_url}</span>}
-                            </p>
-                            {researchResultsSummary && researchResultsSummary.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 mt-2">
-                                    {researchResultsSummary.map((item) => (
-                                        <span key={item} className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/15 text-[11px] text-emerald-300/80">{item}</span>
-                                    ))}
-                                </div>
-                            )}
-                            {researchResultsSummary && researchResultsSummary.length === 0 && (
-                                <p className="text-xs text-white/30 mt-1">No structured data could be extracted from this website.</p>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Logo not found warning */}
-                    {!crawlFoundLogo && !hasLogo && (
-                        <div className="flex items-center gap-2.5 rounded-lg bg-amber-500/[0.06] px-4 py-2.5 border border-amber-500/15">
-                            <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                            </svg>
-                            <p className="text-xs text-amber-200/80">We couldn&apos;t find a logo on your website. You&apos;ll need to upload one manually in Standards.</p>
-                            <button
-                                type="button"
-                                onClick={() => onGoToStep?.('standards')}
-                                className="flex-shrink-0 ml-auto px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-500/15 text-amber-200/80 hover:bg-amber-500/25 border border-amber-500/15 transition"
-                            >
-                                Upload Logo
-                            </button>
-                        </div>
-                    )}
+            {/* No “analysis complete” celebration on Review — it often completes async after users passed Research summary; findings belong there + Processing, not this final screen */}
+            {!isAnalyzing && snapshotCompleted && crawlRanForWebsite && !crawlFoundLogo && !hasLogo && (
+                <div className="flex items-center gap-2.5 rounded-xl bg-amber-500/[0.06] px-4 py-3 border border-amber-500/15">
+                    <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <p className="text-xs text-amber-200/80">We couldn&apos;t find a logo on your website. Upload one in Standards to publish.</p>
+                    <button
+                        type="button"
+                        onClick={() => onGoToStep?.('standards')}
+                        className="flex-shrink-0 ml-auto px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-500/15 text-amber-200/80 hover:bg-amber-500/25 border border-amber-500/15 transition"
+                    >
+                        Upload Logo
+                    </button>
                 </div>
             )}
 
@@ -2456,7 +2481,9 @@ export default function BrandGuidelinesBuilder({
     const [logoHorizontal, setLogoHorizontal] = useState(initialLogoHorizontal ?? null)
     const [assetSelectorOpen, setAssetSelectorOpen] = useState(null)
     const [generatingWhiteLogo, setGeneratingWhiteLogo] = useState(false)
-    const [whiteGenError, setWhiteGenError] = useState(null)
+    const [generatingPrimaryOnLight, setGeneratingPrimaryOnLight] = useState(false)
+    /** Banner for logo variant flows: generate white, crop horizontal, attach from library */
+    const [logoVariantBanner, setLogoVariantBanner] = useState(null)
     const [logoComplexity, setLogoComplexity] = useState(null)
     const [cropModalOpen, setCropModalOpen] = useState(null)
     const [dismissedInlineSuggestions, setDismissedInlineSuggestions] = useState([])
@@ -2470,6 +2497,7 @@ export default function BrandGuidelinesBuilder({
     const [pdfAttachedThisSession, setPdfAttachedThisSession] = useState(!!guidelinesPdfAssetId)
     const [polledResearch, setPolledResearch] = useState(null)
     const [showResearchReadyToast, setShowResearchReadyToast] = useState(false)
+    const [brandMaterialFeedback, setBrandMaterialFeedback] = useState(null)
     const prevResearchFinalizedRef = useRef(null)
 
     useEffect(() => {
@@ -2496,6 +2524,12 @@ export default function BrandGuidelinesBuilder({
         })
         return () => document.querySelectorAll(`link[id^="${prefix}"]`).forEach((el) => el.remove())
     }, [payload.typography?.external_font_links])
+
+    useEffect(() => {
+        if (!brandMaterialFeedback) return
+        const t = setTimeout(() => setBrandMaterialFeedback(null), 4000)
+        return () => clearTimeout(t)
+    }, [brandMaterialFeedback])
 
     const logoSrc = logoRef?.preview_url || logoRef?.thumbnail_url || null
     const logoDarkNeeded = useLogoBrightness(logoSrc)
@@ -2535,30 +2569,205 @@ export default function BrandGuidelinesBuilder({
         return { asset_id: asset?.asset_id ?? asset?.id, thumbnail_url: asset?.thumbnail_url ?? null }
     }, [brand.id])
 
+    const triggerIngestion = useCallback(async (opts = {}) => {
+        try {
+            await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
+                pdf_asset_id: opts.pdf_asset_id || null,
+                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
+                material_asset_ids: opts.material_asset_ids || undefined,
+            })
+            setIngestionPolling(true)
+        } catch (e) {
+            const status = e.response?.status
+            const data = e.response?.data
+            if (status === 403 && data?.gate) {
+                setErrors((prev) => [...prev, data.error || 'AI brand research requires a paid plan.'])
+            } else if (status === 429 && data?.gate) {
+                setErrors((prev) => [...prev, data.error || 'Monthly brand research limit reached.'])
+            } else if (status !== 422) {
+                setErrors((prev) => [...prev, data?.error || 'Failed to start processing'])
+            }
+        }
+    }, [brand.id, payload.sources?.website_url])
+
+    const formatAxiosError = useCallback((e) => {
+        const d = e?.response?.data
+        if (typeof d === 'string') return d
+        if (d?.message) {
+            return Array.isArray(d.message) ? d.message.join(' ') : String(d.message)
+        }
+        if (e?.response?.status === 422 && d?.errors) {
+            return Object.values(d.errors).flat().join(' ')
+        }
+        if (d?.error) return typeof d.error === 'string' ? d.error : JSON.stringify(d.error)
+        return e?.message || 'Request failed'
+    }, [])
+
+    const handleAssetAttach = useCallback(async (asset, context, opts = {}) => {
+        const silentBanner = opts.silentBanner === true
+        const assetId = asset?.id ?? asset
+        const item = typeof asset === 'object' ? asset : { id: assetId, title: 'Asset', original_filename: 'file', thumbnail_url: null, signed_url: null }
+        try {
+            const res = await axios.post(route('brands.brand-dna.builder.attach-asset', { brand: brand.id }), {
+                asset_id: assetId,
+                builder_context: context,
+            })
+            if (context === 'brand_material') {
+                const count = res.data?.count ?? 0
+                setBrandMaterialCount(count)
+                setBrandMaterials((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
+                setBrandMaterialFeedback(`Added successfully. ${count} material${count !== 1 ? 's' : ''} total. Processing…`)
+                setIngestionPolling(true)
+                await triggerIngestion({})
+            } else if (context === 'visual_reference') {
+                setVisualReferences((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
+                setPayload((prev) => ({
+                    ...prev,
+                    visual: {
+                        ...(prev.visual || {}),
+                        approved_references: [...(prev.visual?.approved_references || []), { asset_id: assetId, kind: 'photo_reference' }],
+                    },
+                }))
+            } else if (context === 'logo_reference') {
+                const serverLogo = res.data?.logo_asset
+                const logoData = {
+                    id: serverLogo?.id ?? assetId,
+                    thumbnail_url: serverLogo?.thumbnail_url || item.thumbnail_url || null,
+                    preview_url: serverLogo?.preview_url ?? item.preview_url ?? null,
+                    original_filename: serverLogo?.original_filename || item.original_filename,
+                }
+                setLogoRef(logoData)
+            } else if (['logo_on_dark', 'logo_on_light', 'logo_horizontal'].includes(context)) {
+                const va = res.data?.variant_asset
+                const variantData = {
+                    id: va?.id ?? assetId,
+                    thumbnail_url: va?.thumbnail_url || item.thumbnail_url || null,
+                    preview_url: va?.preview_url || item.preview_url || null,
+                    original_filename: va?.original_filename || item.original_filename,
+                }
+                if (context === 'logo_on_dark') setLogoOnDark(variantData)
+                else if (context === 'logo_on_light') setLogoOnLight(variantData)
+                else if (context === 'logo_horizontal') setLogoHorizontal(variantData)
+            }
+            return { ok: true }
+        } catch (e) {
+            const errMsg = formatAxiosError(e)
+            if (context === 'brand_material') {
+                setBrandMaterialFeedback(errMsg)
+            } else if (
+                !silentBanner
+                && ['logo_on_dark', 'logo_on_light', 'logo_horizontal', 'logo_reference', 'visual_reference'].includes(context)
+            ) {
+                setLogoVariantBanner({ type: 'error', message: errMsg, progress: null })
+            }
+            return { ok: false, error: errMsg }
+        }
+    }, [brand.id, triggerIngestion, formatAxiosError])
+
     const handleGenerateWhiteLogo = useCallback(async () => {
         if (!logoSrc) return
         setGeneratingWhiteLogo(true)
-        setWhiteGenError(null)
+        setLogoVariantBanner({ type: 'progress', message: 'Generating light-on-dark variant…', progress: 12 })
         try {
             const blob = await generateWhiteVariant(logoSrc)
+            setLogoVariantBanner({ type: 'progress', message: 'Uploading…', progress: 45 })
             const baseName = (logoRef?.original_filename || 'logo').replace(/\.[^.]+$/, '')
             const { asset_id } = await uploadBlobAsAsset(blob, `${baseName}-white.png`)
-            await handleAssetAttach({ id: asset_id }, 'logo_on_dark')
+            if (!asset_id) {
+                throw new Error('Upload finished but no asset id was returned. Try again or upload manually.')
+            }
+            setLogoVariantBanner({ type: 'progress', message: 'Saving to your brand…', progress: 78 })
+            const attach = await handleAssetAttach({ id: asset_id }, 'logo_on_dark', { silentBanner: true })
+            if (!attach.ok) {
+                throw new Error(attach.error || 'Could not attach logo variant')
+            }
+            setLogoVariantBanner({
+                type: 'success',
+                message: 'Light-on-dark logo saved. If the preview is blank, wait a few seconds for processing.',
+                progress: 100,
+            })
+            window.setTimeout(() => setLogoVariantBanner(null), 6000)
         } catch (err) {
-            setWhiteGenError(err.message || 'Failed to generate white variant')
+            const msg = err?.message || formatAxiosError(err)
+            setLogoVariantBanner({ type: 'error', message: msg, progress: null })
         } finally {
             setGeneratingWhiteLogo(false)
         }
-    }, [logoSrc, logoRef, uploadBlobAsAsset, handleAssetAttach])
+    }, [logoSrc, logoRef, uploadBlobAsAsset, handleAssetAttach, formatAxiosError])
+
+    const normalizePrimaryHex = useCallback((v) => {
+        if (!v || typeof v !== 'string') return null
+        const t = v.trim()
+        if (!t) return null
+        const h = t.startsWith('#') ? t : `#${t}`
+        if (/^#[0-9A-Fa-f]{3}$/i.test(h)) return h
+        if (/^#[0-9A-Fa-f]{6}$/i.test(h)) return h
+        if (/^#[0-9A-Fa-f]{8}$/i.test(h)) return h.slice(0, 7)
+        return null
+    }, [])
+
+    const effectivePrimaryHex = normalizePrimaryHex(brandColors.primary_color || brand.primary_color || '')
+
+    const handleGeneratePrimaryOnLightLogo = useCallback(async () => {
+        if (!logoSrc) return
+        const hex = normalizePrimaryHex(brandColors.primary_color || brand.primary_color || '')
+        if (!hex) {
+            setLogoVariantBanner({ type: 'error', message: 'Set a primary brand color in Brand Colors first.', progress: null })
+            return
+        }
+        setGeneratingPrimaryOnLight(true)
+        setLogoVariantBanner({ type: 'progress', message: 'Applying primary color to logo…', progress: 12 })
+        try {
+            const blob = await generatePrimaryColorWashVariant(logoSrc, hex)
+            setLogoVariantBanner({ type: 'progress', message: 'Uploading…', progress: 45 })
+            const baseName = (logoRef?.original_filename || 'logo').replace(/\.[^.]+$/, '')
+            const { asset_id } = await uploadBlobAsAsset(blob, `${baseName}-on-light-primary.png`)
+            if (!asset_id) {
+                throw new Error('Upload finished but no asset id was returned. Try again or upload manually.')
+            }
+            setLogoVariantBanner({ type: 'progress', message: 'Saving to your brand…', progress: 78 })
+            const attach = await handleAssetAttach({ id: asset_id }, 'logo_on_light', { silentBanner: true })
+            if (!attach.ok) {
+                throw new Error(attach.error || 'Could not attach logo variant')
+            }
+            setLogoVariantBanner({
+                type: 'success',
+                message: 'On-light logo saved using your primary color. If the preview is blank, wait a few seconds for processing.',
+                progress: 100,
+            })
+            window.setTimeout(() => setLogoVariantBanner(null), 6000)
+        } catch (err) {
+            const msg = err?.message || formatAxiosError(err)
+            setLogoVariantBanner({ type: 'error', message: msg, progress: null })
+        } finally {
+            setGeneratingPrimaryOnLight(false)
+        }
+    }, [logoSrc, logoRef, brandColors.primary_color, brand.primary_color, normalizePrimaryHex, uploadBlobAsAsset, handleAssetAttach, formatAxiosError])
 
     const handleCropHorizontal = useCallback(async (croppedBlob) => {
+        setLogoVariantBanner({ type: 'progress', message: 'Uploading horizontal crop…', progress: 35 })
         try {
             const baseName = (logoRef?.original_filename || 'logo').replace(/\.[^.]+$/, '')
             const { asset_id } = await uploadBlobAsAsset(croppedBlob, `${baseName}-horizontal.png`)
-            await handleAssetAttach({ id: asset_id }, 'logo_horizontal')
-        } catch {}
-        setCropModalOpen(null)
-    }, [logoRef, uploadBlobAsAsset, handleAssetAttach])
+            if (!asset_id) {
+                throw new Error('Upload finished but no asset id was returned. Try again or upload manually.')
+            }
+            setLogoVariantBanner({ type: 'progress', message: 'Saving horizontal logo…', progress: 72 })
+            const attach = await handleAssetAttach({ id: asset_id }, 'logo_horizontal', { silentBanner: true })
+            if (!attach.ok) {
+                throw new Error(attach.error || 'Could not attach horizontal logo')
+            }
+            setLogoVariantBanner({
+                type: 'success',
+                message: 'Horizontal logo saved.', progress: 100,
+            })
+            window.setTimeout(() => setLogoVariantBanner(null), 6000)
+        } catch (err) {
+            const msg = err?.message || formatAxiosError(err)
+            setLogoVariantBanner({ type: 'error', message: msg, progress: null })
+            throw err
+        }
+    }, [logoRef, uploadBlobAsAsset, handleAssetAttach, formatAxiosError])
 
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
@@ -2660,27 +2869,6 @@ export default function BrandGuidelinesBuilder({
         ? (allPdfPagesDone && (polledResearch?.researchFinalized ?? researchFinalized ?? false))
         : (polledResearch?.researchFinalized ?? researchFinalized ?? false)
 
-    const triggerIngestion = useCallback(async (opts = {}) => {
-        try {
-            await axios.post(route('brands.brand-dna.builder.trigger-ingestion', { brand: brand.id }), {
-                pdf_asset_id: opts.pdf_asset_id || null,
-                website_url: opts.website_url || (payload.sources?.website_url || '').trim() || null,
-                material_asset_ids: opts.material_asset_ids || undefined,
-            })
-            setIngestionPolling(true)
-        } catch (e) {
-            const status = e.response?.status
-            const data = e.response?.data
-            if (status === 403 && data?.gate) {
-                setErrors((prev) => [...prev, data.error || 'AI brand research requires a paid plan.'])
-            } else if (status === 429 && data?.gate) {
-                setErrors((prev) => [...prev, data.error || 'Monthly brand research limit reached.'])
-            } else if (status !== 422) {
-                setErrors((prev) => [...prev, data?.error || 'Failed to start processing'])
-            }
-        }
-    }, [brand.id, payload.sources?.website_url])
-
     const handleNext = useCallback(async () => {
         if (isReviewStep) return
         if (isLastDataStep) {
@@ -2763,13 +2951,6 @@ export default function BrandGuidelinesBuilder({
         } catch {}
     }, [payload.sources?.website_url, payload.sources?.social_urls, brand.id])
 
-    const [brandMaterialFeedback, setBrandMaterialFeedback] = useState(null)
-    useEffect(() => {
-        if (!brandMaterialFeedback) return
-        const t = setTimeout(() => setBrandMaterialFeedback(null), 4000)
-        return () => clearTimeout(t)
-    }, [brandMaterialFeedback])
-
     const handleBrandMaterialUploadComplete = useCallback(async (assetId, meta) => {
         if (!assetId) return
         try {
@@ -2785,58 +2966,6 @@ export default function BrandGuidelinesBuilder({
             await triggerIngestion({})
         } catch (e) {
             setBrandMaterialFeedback(e.response?.data?.message || 'Upload failed')
-        }
-    }, [brand.id, triggerIngestion])
-
-    const handleAssetAttach = useCallback(async (asset, context) => {
-        const assetId = asset?.id ?? asset
-        const item = typeof asset === 'object' ? asset : { id: assetId, title: 'Asset', original_filename: 'file', thumbnail_url: null, signed_url: null }
-        try {
-            const res = await axios.post(route('brands.brand-dna.builder.attach-asset', { brand: brand.id }), {
-                asset_id: assetId,
-                builder_context: context,
-            })
-            if (context === 'brand_material') {
-                const count = res.data?.count ?? 0
-                setBrandMaterialCount(count)
-                setBrandMaterials((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
-                setBrandMaterialFeedback(`Added successfully. ${count} material${count !== 1 ? 's' : ''} total. Processing…`)
-                setIngestionPolling(true)
-                await triggerIngestion({})
-            } else if (context === 'visual_reference') {
-                setVisualReferences((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
-                setPayload((prev) => ({
-                    ...prev,
-                    visual: {
-                        ...(prev.visual || {}),
-                        approved_references: [...(prev.visual?.approved_references || []), { asset_id: assetId, kind: 'photo_reference' }],
-                    },
-                }))
-            } else if (context === 'logo_reference') {
-                const serverLogo = res.data?.logo_asset
-                const logoData = {
-                    id: serverLogo?.id ?? assetId,
-                    thumbnail_url: serverLogo?.thumbnail_url || item.thumbnail_url || null,
-                    preview_url: item.preview_url || null,
-                    original_filename: serverLogo?.original_filename || item.original_filename,
-                }
-                setLogoRef(logoData)
-            } else if (['logo_on_dark', 'logo_on_light', 'logo_horizontal'].includes(context)) {
-                const va = res.data?.variant_asset
-                const variantData = {
-                    id: va?.id ?? assetId,
-                    thumbnail_url: va?.thumbnail_url || item.thumbnail_url || null,
-                    preview_url: va?.preview_url || item.preview_url || null,
-                    original_filename: va?.original_filename || item.original_filename,
-                }
-                if (context === 'logo_on_dark') setLogoOnDark(variantData)
-                else if (context === 'logo_on_light') setLogoOnLight(variantData)
-                else if (context === 'logo_horizontal') setLogoHorizontal(variantData)
-            }
-        } catch (e) {
-            if (context === 'brand_material') {
-                setBrandMaterialFeedback(e.response?.data?.message || 'Failed to add')
-            }
         }
     }, [brand.id, triggerIngestion])
 
@@ -3700,6 +3829,8 @@ export default function BrandGuidelinesBuilder({
                                         <ArchetypeStep
                                             personality={personality}
                                             effectiveSuggestions={effectiveSuggestions}
+                                            researchSnapshot={effectiveLatestSnapshot}
+                                            coherence={effectiveCoherence}
                                             accentColor={displayAccent}
                                             onUpdate={(updates) => {
                                                 setPayload((prev) => ({
@@ -3953,6 +4084,7 @@ export default function BrandGuidelinesBuilder({
                                                         brandId={brand.id}
                                                         brandName={brand.name}
                                                         logoSrc={logoRef?.preview_url || logoRef?.thumbnail_url}
+                                                        logoOnLightSrc={logoOnLight?.preview_url || logoOnLight?.thumbnail_url || null}
                                                         brandColors={{ primary: brandColors.primary_color || displayPrimary, secondary: brandColors.secondary_color || displaySecondary }}
                                                     />
                                                 </FieldCard>
@@ -3962,6 +4094,61 @@ export default function BrandGuidelinesBuilder({
                                             {logoRef && (
                                                 <FieldCard title="Logo Variants">
                                                     <p className="text-white/60 text-sm mb-5">Upload or generate alternate versions of your logo for different contexts.</p>
+
+                                                    {logoVariantBanner && (
+                                                        <div
+                                                            className={`mb-5 rounded-xl border overflow-hidden ${
+                                                                logoVariantBanner.type === 'error'
+                                                                    ? 'border-red-500/35 bg-red-500/[0.06]'
+                                                                    : logoVariantBanner.type === 'success'
+                                                                        ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
+                                                                        : 'border-white/12 bg-white/[0.03]'
+                                                            }`}
+                                                            role="status"
+                                                            aria-live="polite"
+                                                        >
+                                                            {logoVariantBanner.type === 'progress' && typeof logoVariantBanner.progress === 'number' && (
+                                                                <div className="h-1 bg-white/10">
+                                                                    <div
+                                                                        className="h-full bg-emerald-500/80 transition-[width] duration-300 ease-out"
+                                                                        style={{ width: `${Math.min(100, Math.max(0, logoVariantBanner.progress))}%` }}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            <div className="px-3 py-2.5 flex items-start gap-2.5">
+                                                                {logoVariantBanner.type === 'progress' && (
+                                                                    <div
+                                                                        className="w-4 h-4 border-2 border-white/15 border-t-emerald-400/90 rounded-full animate-spin flex-shrink-0 mt-0.5"
+                                                                        aria-hidden
+                                                                    />
+                                                                )}
+                                                                {logoVariantBanner.type === 'success' && (
+                                                                    <svg className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                                    </svg>
+                                                                )}
+                                                                {logoVariantBanner.type === 'error' && (
+                                                                    <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                                                                    </svg>
+                                                                )}
+                                                                <p
+                                                                    className={`text-xs leading-snug ${
+                                                                        logoVariantBanner.type === 'error' ? 'text-red-300' : logoVariantBanner.type === 'success' ? 'text-emerald-200/90' : 'text-white/80'
+                                                                    }`}
+                                                                >
+                                                                    {logoVariantBanner.message}
+                                                                </p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setLogoVariantBanner(null)}
+                                                                    className="ml-auto text-[10px] text-white/40 hover:text-white/70 px-1.5 py-0.5 rounded flex-shrink-0"
+                                                                >
+                                                                    Dismiss
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
 
                                                     {/* Contrast warning */}
                                                     {logoDarkNeeded && !logoOnDark && (
@@ -4010,11 +4197,6 @@ export default function BrandGuidelinesBuilder({
                                                                     </>
                                                                 )}
                                                             </div>
-                                                            {whiteGenError && (
-                                                                <div className="px-3 pb-2">
-                                                                    <p className="text-[10px] text-red-400">{whiteGenError}</p>
-                                                                </div>
-                                                            )}
                                                             {!logoOnDark && logoComplexity?.complexity === 'complex' && (
                                                                 <div className="px-3 pb-2">
                                                                     <p className="text-[10px] text-amber-300/60">Complex logo detected — auto-generated version may not look ideal. Consider uploading a proper white version.</p>
@@ -4044,9 +4226,32 @@ export default function BrandGuidelinesBuilder({
                                                                         <button type="button" onClick={() => handleDetachLogoVariant('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-red-400/80 hover:text-red-300">Remove</button>
                                                                     </>
                                                                 ) : (
-                                                                    <button type="button" onClick={() => setAssetSelectorOpen('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Upload</button>
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Upload</button>
+                                                                        {logoRef && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setLogoVariantBanner(null)
+                                                                                    handleGeneratePrimaryOnLightLogo()
+                                                                                }}
+                                                                                disabled={generatingPrimaryOnLight || !effectivePrimaryHex}
+                                                                                title={!effectivePrimaryHex ? 'Set a primary color in Brand Colors below' : 'Recolor the primary logo with your primary brand color for use on white/light backgrounds'}
+                                                                                className="px-2 py-1 rounded text-[10px] font-medium border border-blue-500/30 text-blue-300/80 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                            >
+                                                                                {generatingPrimaryOnLight ? 'Applying…' : 'Use primary color'}
+                                                                            </button>
+                                                                        )}
+                                                                    </>
                                                                 )}
                                                             </div>
+                                                            {!logoOnLight && logoRef && (
+                                                                <div className="px-3 pb-2">
+                                                                    <p className="text-[10px] text-white/35">
+                                                                        If your primary mark doesn’t read on white, generate a solid version in your primary color, or upload a custom dark variant.
+                                                                    </p>
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         {/* Horizontal */}
@@ -4074,7 +4279,10 @@ export default function BrandGuidelinesBuilder({
                                                                         {logoRef && (
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={() => setCropModalOpen('horizontal')}
+                                                                                onClick={() => {
+                                                                                    setLogoVariantBanner(null)
+                                                                                    setCropModalOpen('horizontal')
+                                                                                }}
                                                                                 className="px-2 py-1 rounded text-[10px] font-medium border border-blue-500/30 text-blue-300/80 hover:bg-blue-500/10"
                                                                             >
                                                                                 Crop from Primary
@@ -4238,7 +4446,7 @@ export default function BrandGuidelinesBuilder({
                         <button
                             type="button"
                             onClick={handleBack}
-                            disabled={stepIndex <= 0 || saving}
+                            disabled={saving}
                             className="px-4 py-2.5 rounded-xl border border-white/20 text-white/90 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             Back

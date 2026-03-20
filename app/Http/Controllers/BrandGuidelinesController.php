@@ -12,6 +12,7 @@ use App\Services\BrandDNA\PipelineFinalizationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -104,11 +105,37 @@ class BrandGuidelinesController extends Controller
         if ($activeVersion) {
             $darkAsset = $activeVersion->assetsForContext('logo_on_dark')->first();
             if ($darkAsset) {
-                $logoDarkUrl = $darkAsset->deliveryUrl(\App\Enums\AssetVariant::ORIGINAL, \App\Enums\DeliveryContext::AUTHENTICATED) ?: null;
+                try {
+                    $logoDarkUrl = $darkAsset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+                } catch (\Throwable $e) {
+                    Log::warning('[BrandGuidelines] logo_on_dark delivery URL failed', [
+                        'brand_id' => $brand->id,
+                        'asset_id' => $darkAsset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $logoDarkUrl = null;
+                }
             }
         }
         if (! $logoDarkUrl) {
             $logoDarkUrl = $brand->logo_dark_path;
+        }
+
+        $logoOnLightUrl = null;
+        if ($activeVersion) {
+            $lightAsset = $activeVersion->assetsForContext('logo_on_light')->first();
+            if ($lightAsset) {
+                try {
+                    $logoOnLightUrl = $lightAsset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+                } catch (\Throwable $e) {
+                    Log::warning('[BrandGuidelines] logo_on_light delivery URL failed', [
+                        'brand_id' => $brand->id,
+                        'asset_id' => $lightAsset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $logoOnLightUrl = null;
+                }
+            }
         }
 
         return Inertia::render('Brands/BrandGuidelines/Index', [
@@ -120,6 +147,7 @@ class BrandGuidelinesController extends Controller
                 'accent_color' => $brand->accent_color,
                 'logo_url' => $brand->logo_path,
                 'logo_dark_url' => $logoDarkUrl,
+                'logo_on_light_url' => $logoOnLightUrl,
             ],
             'logoAssets' => $logoAssets,
             'visualReferences' => $visualReferences,

@@ -33,9 +33,12 @@ class BrandContextResolver
             $tenant = $this->resolveFromSubdomain($request);
         }
 
-        // 2. URL param resolution
+        // 2. URL param resolution (?company= or ?tenant= slug/id — legacy login used ?tenant=)
         if (! $tenant) {
             $tenant = $this->resolveFromUrlParams($request, 'company');
+        }
+        if (! $tenant) {
+            $tenant = $this->resolveFromUrlParams($request, 'tenant');
         }
         if (! $brand && $request->query('brand')) {
             $brand = $this->resolveBrandFromSlug($request->query('brand'), $tenant);
@@ -105,12 +108,13 @@ class BrandContextResolver
         }
 
         $escapedDomain = preg_quote($mainDomain, '/');
-        if (preg_match('/^([a-z0-9-]+)\.' . $escapedDomain . '$/', $host, $matches)) {
+        if (preg_match('/^([a-z0-9-]+)\.'.$escapedDomain.'$/', $host, $matches)) {
             $slug = $matches[1];
             $reserved = config('subdomain.reserved_slugs', []);
             if (in_array($slug, $reserved, true)) {
                 return null;
             }
+
             return Tenant::where('slug', $slug)->first();
         }
 
@@ -133,6 +137,7 @@ class BrandContextResolver
         if ($tenant) {
             $query->where('tenant_id', $tenant->id);
         }
+
         return $query->first();
     }
 
@@ -156,6 +161,7 @@ class BrandContextResolver
         if ($tenantId) {
             return Tenant::find($tenantId);
         }
+
         return null;
     }
 
@@ -192,9 +198,9 @@ class BrandContextResolver
 
         if ($isTenantOwnerOrAdmin) {
             $brands = $tenant->brands()
-                ->where(function ($q) use ($tenant) {
+                ->where(function ($q) {
                     $q->where('show_in_selector', '!=', false)
-                      ->orWhereNull('show_in_selector');
+                        ->orWhereNull('show_in_selector');
                 })
                 ->where('tenant_id', $tenant->id)
                 ->orderBy('is_default', 'desc')

@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
+import useLogoWhiteBgPreview from '../../../utils/useLogoWhiteBgPreview'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -37,126 +38,166 @@ function copyToClipboard(text) {
     navigator.clipboard?.writeText(text).then(() => {})
 }
 
+function guidelineWhiteOutlineClass(outlineWhiteBg) {
+    return outlineWhiteBg ? 'drop-shadow-[0_0_1px_rgba(0,0,0,0.45)]' : ''
+}
+
 const LOGO_VISUAL_TREATMENTS = {
-    clear_space: (src) => (
-        <div className="relative w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center">
-            <div className="relative">
-                <div className="absolute inset-0 -m-5 border-2 border-dashed border-blue-400/50 rounded" />
-                <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
-                    <div className="w-px h-4 bg-blue-400/60" />
-                    <span className="text-[8px] text-blue-500 font-medium">x</span>
-                </div>
-                <div className="absolute -left-5 top-1/2 -translate-y-1/2 flex items-center">
-                    <div className="h-px w-4 bg-blue-400/60" />
-                    <span className="text-[8px] text-blue-500 font-medium ml-0.5">x</span>
-                </div>
-                <img src={src} alt="" className="h-10 max-w-[100px] object-contain" />
-            </div>
-        </div>
-    ),
-    minimum_size: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-end justify-center gap-6 pb-4 px-4">
-            <div className="flex flex-col items-center gap-1">
-                <img src={src} alt="" className="h-10 max-w-[80px] object-contain" />
-                <span className="text-[8px] text-gray-500 font-medium">Full size</span>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-                <img src={src} alt="" className="h-5 max-w-[40px] object-contain" />
-                <span className="text-[8px] text-gray-500 font-medium">Min size</span>
-            </div>
-            <div className="flex flex-col items-center gap-1 opacity-30">
-                <img src={src} alt="" className="h-2.5 max-w-[20px] object-contain" />
-                <div className="flex items-center gap-0.5">
-                    <span className="text-red-500 text-[10px]">✕</span>
-                    <span className="text-[8px] text-red-500 font-medium">Too small</span>
+    clear_space: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="relative w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center">
+                <div className="relative">
+                    <div className="absolute inset-0 -m-5 border-2 border-dashed border-blue-400/50 rounded" />
+                    <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                        <div className="w-px h-4 bg-blue-400/60" />
+                        <span className="text-[8px] text-blue-500 font-medium">x</span>
+                    </div>
+                    <div className="absolute -left-5 top-1/2 -translate-y-1/2 flex items-center">
+                        <div className="h-px w-4 bg-blue-400/60" />
+                        <span className="text-[8px] text-blue-500 font-medium ml-0.5">x</span>
+                    </div>
+                    <img src={w} alt="" className={`h-10 max-w-[100px] object-contain ${oc}`} />
                 </div>
             </div>
-        </div>
-    ),
-    color_usage: (src, colors, isTransparent) => (
-        <div className="w-full aspect-[3/2] rounded-t-xl overflow-hidden grid grid-cols-2">
-            <div className="bg-white flex items-center justify-center p-3">
-                <img src={src} alt="" className="h-8 max-w-[70px] object-contain" />
-            </div>
-            <div className="flex items-center justify-center p-3" style={{ backgroundColor: colors?.primary || '#1a1a2e' }}>
-                <img src={src} alt="" className={`h-8 max-w-[70px] object-contain${isTransparent ? '' : ' brightness-0 invert'}`} />
-            </div>
-            <div className="flex items-center justify-center p-3" style={{ backgroundColor: colors?.secondary || '#f0f0f0' }}>
-                <img src={src} alt="" className="h-8 max-w-[70px] object-contain" />
-            </div>
-            <div className="bg-gray-800 flex items-center justify-center p-3">
-                <img src={src} alt="" className={`h-8 max-w-[70px] object-contain${isTransparent ? '' : ' brightness-0 invert'}`} />
-            </div>
-        </div>
-    ),
-    background_contrast: (src, colors, isTransparent) => (
-        <div className="w-full aspect-[3/2] rounded-t-xl overflow-hidden grid grid-cols-2">
-            <div className="flex items-center justify-center p-3 relative" style={{ backgroundColor: colors?.primary || '#002A3A' }}>
-                <img src={src} alt="" className={`h-8 max-w-[70px] object-contain relative z-10${isTransparent ? '' : ' brightness-0 invert'}`} />
-                <span className="absolute bottom-1 text-[8px] text-white/60 font-medium">✓ Good</span>
-            </div>
-            <div className="flex items-center justify-center p-3 relative bg-[repeating-conic-gradient(#e0e0e0_0%_25%,#fff_0%_50%)] bg-[length:16px_16px]">
-                <img src={src} alt="" className="h-8 max-w-[70px] object-contain opacity-40 relative z-10" />
-                <span className="absolute bottom-1 text-[8px] text-red-500 font-medium z-10">✕ Busy bg</span>
-            </div>
-        </div>
-    ),
-    dont_stretch: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center gap-4 px-4 relative">
-            <div className="flex flex-col items-center gap-1">
-                <img src={src} alt="" className="h-8 max-w-[60px] object-contain" style={{ transform: 'scaleX(1.6)' }} />
-            </div>
-            <div className="flex flex-col items-center gap-1">
-                <img src={src} alt="" className="h-12 max-w-[30px] object-contain" style={{ transform: 'scaleY(1.5) scaleX(0.6)' }} />
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                    <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        )
+    },
+    minimum_size: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-end justify-center gap-6 pb-4 px-4">
+                <div className="flex flex-col items-center gap-1">
+                    <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} />
+                    <span className="text-[8px] text-gray-500 font-medium">Full size</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                    <img src={w} alt="" className={`h-5 max-w-[40px] object-contain ${oc}`} />
+                    <span className="text-[8px] text-gray-500 font-medium">Min size</span>
+                </div>
+                <div className="flex flex-col items-center gap-1 opacity-30">
+                    <img src={w} alt="" className={`h-2.5 max-w-[20px] object-contain ${oc}`} />
+                    <div className="flex items-center gap-0.5">
+                        <span className="text-red-500 text-[10px]">✕</span>
+                        <span className="text-[8px] text-red-500 font-medium">Too small</span>
+                    </div>
                 </div>
             </div>
-        </div>
-    ),
-    dont_rotate: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
-            <img src={src} alt="" className="h-10 max-w-[80px] object-contain" style={{ transform: 'rotate(-15deg)' }} />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                    <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        )
+    },
+    color_usage: (src, colors, isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] rounded-t-xl overflow-hidden grid grid-cols-2">
+                <div className="bg-white flex items-center justify-center p-3">
+                    <img src={w} alt="" className={`h-8 max-w-[70px] object-contain ${oc}`} />
+                </div>
+                <div className="flex items-center justify-center p-3" style={{ backgroundColor: colors?.primary || '#1a1a2e' }}>
+                    <img src={src} alt="" className={`h-8 max-w-[70px] object-contain${isTransparent ? '' : ' brightness-0 invert'}`} />
+                </div>
+                <div className="flex items-center justify-center p-3" style={{ backgroundColor: colors?.secondary || '#f0f0f0' }}>
+                    <img src={w} alt="" className={`h-8 max-w-[70px] object-contain ${oc}`} />
+                </div>
+                <div className="bg-gray-800 flex items-center justify-center p-3">
+                    <img src={src} alt="" className={`h-8 max-w-[70px] object-contain${isTransparent ? '' : ' brightness-0 invert'}`} />
                 </div>
             </div>
-        </div>
-    ),
-    dont_recolor: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
-            <img src={src} alt="" className="h-10 max-w-[80px] object-contain" style={{ filter: 'hue-rotate(180deg) saturate(2)' }} />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                    <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        )
+    },
+    background_contrast: (src, colors, isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] rounded-t-xl overflow-hidden grid grid-cols-2">
+                <div className="flex items-center justify-center p-3 relative" style={{ backgroundColor: colors?.primary || '#002A3A' }}>
+                    <img src={src} alt="" className={`h-8 max-w-[70px] object-contain relative z-10${isTransparent ? '' : ' brightness-0 invert'}`} />
+                    <span className="absolute bottom-1 text-[8px] text-white/60 font-medium">✓ Good</span>
+                </div>
+                <div className="flex items-center justify-center p-3 relative bg-[repeating-conic-gradient(#e0e0e0_0%_25%,#fff_0%_50%)] bg-[length:16px_16px]">
+                    <img src={w} alt="" className={`h-8 max-w-[70px] object-contain opacity-40 relative z-10 ${oc}`} />
+                    <span className="absolute bottom-1 text-[8px] text-red-500 font-medium z-10">✕ Busy bg</span>
                 </div>
             </div>
-        </div>
-    ),
-    dont_crop: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-end overflow-hidden relative">
-            <img src={src} alt="" className="h-10 max-w-[80px] object-contain mr-[-20px]" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                    <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        )
+    },
+    dont_stretch: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center gap-4 px-4 relative">
+                <div className="flex flex-col items-center gap-1">
+                    <img src={w} alt="" className={`h-8 max-w-[60px] object-contain ${oc}`} style={{ transform: 'scaleX(1.6)' }} />
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                    <img src={w} alt="" className={`h-12 max-w-[30px] object-contain ${oc}`} style={{ transform: 'scaleY(1.5) scaleX(0.6)' }} />
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                    </div>
                 </div>
             </div>
-        </div>
-    ),
-    dont_add_effects: (src) => (
-        <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
-            <img src={src} alt="" className="h-10 max-w-[80px] object-contain" style={{ filter: 'drop-shadow(4px 4px 6px rgba(0,0,0,0.5))' }} />
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-400/90 rounded text-[7px] font-bold text-black tracking-wide">GLOW</div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
-                    <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+        )
+    },
+    dont_rotate: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
+                <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ transform: 'rotate(-15deg)' }} />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                    </div>
                 </div>
             </div>
-        </div>
-    ),
+        )
+    },
+    dont_recolor: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
+                <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ filter: 'hue-rotate(180deg) saturate(2)' }} />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                    </div>
+                </div>
+            </div>
+        )
+    },
+    dont_crop: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-end overflow-hidden relative">
+                <img src={w} alt="" className={`h-10 max-w-[80px] object-contain mr-[-20px] ${oc}`} />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                    </div>
+                </div>
+            </div>
+        )
+    },
+    dont_add_effects: (src, _colors, _isTransparent, meta = {}) => {
+        const w = meta.whiteBgSrc || src
+        const oc = guidelineWhiteOutlineClass(meta.outlineWhiteBg)
+        return (
+            <div className="w-full aspect-[3/2] bg-white rounded-t-xl flex items-center justify-center px-4 relative">
+                <img src={w} alt="" className={`h-10 max-w-[80px] object-contain ${oc}`} style={{ filter: 'drop-shadow(4px 4px 6px rgba(0,0,0,0.5))' }} />
+                <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-400/90 rounded text-[7px] font-bold text-black tracking-wide">GLOW</div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-12 h-12 rounded-full border-[3px] border-red-500/70 flex items-center justify-center">
+                        <div className="w-10 h-[3px] bg-red-500/70 rotate-45 rounded-full" />
+                    </div>
+                </div>
+            </div>
+        )
+    },
 }
 
 function SectionLabel({ children, color = '#94a3b8', bold = false, textured = false }) {
@@ -280,6 +321,9 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const secondaryDark = darkenHex(secondaryColor, 0.3)
 
     const logoUrl = brand.logo_url || (auth?.activeBrand?.id === brand.id ? auth?.activeBrand?.logo_thumbnail_url : null)
+    const logoOnLightUrl = brand.logo_on_light_url || null
+    const { whiteBgSrc, showRiskBanner, outlineWhiteBg, loadingAnalysis } = useLogoWhiteBgPreview(logoUrl, logoOnLightUrl)
+    const guidelineMeta = useMemo(() => ({ whiteBgSrc, outlineWhiteBg }), [whiteBgSrc, outlineWhiteBg])
     const logoDarkUrl = brand.logo_dark_url || null
     const heroLogoUrl = logoDarkUrl || logoUrl
     const logoIsTransparent = logoUrl && /\.(png|svg|webp)(\?|$)/i.test(logoUrl)
@@ -1255,7 +1299,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     >
                                         {treatment && (
                                             <div className="relative">
-                                                {treatment(logoUrl, brandColors, isTransparent)}
+                                                {treatment(logoUrl, brandColors, isTransparent, guidelineMeta)}
                                                 {isDont && (
                                                     <div className="absolute top-1.5 left-1.5 px-1 py-0.5 rounded bg-red-500/90 text-[8px] font-bold text-white uppercase tracking-wider z-10">
                                                         Don&apos;t
@@ -1291,6 +1335,18 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
 
                                 <div className="relative mx-auto max-w-6xl px-6 lg:px-8">
                                     <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : isBold ? secondaryColor : hexToRgba(secondaryColor, 0.7)} bold={isBold} textured={isTextured}>Logo Standards</SectionLabel>
+
+                                    {loadingAnalysis && logoUrl && (
+                                        <p className="text-center text-[10px] text-white/35 mb-4">Checking logo contrast on white…</p>
+                                    )}
+                                    {showRiskBanner && logoUrl && (
+                                        <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-500/[0.08] px-4 py-3 max-w-2xl mx-auto text-left">
+                                            <p className="text-xs font-medium text-amber-100/90">Light areas in this logo don’t read on pure white.</p>
+                                            <p className="text-[11px] text-amber-100/60 mt-1">
+                                                Examples below use a subtle edge or your <strong className="text-amber-50/90">on-light</strong> variant when available. Add an on-light logo in Brand DNA so light backgrounds always show the right mark.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {logoUrl && (
                                         <div className="flex justify-center mb-10">

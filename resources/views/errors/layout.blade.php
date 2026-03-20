@@ -69,7 +69,7 @@
                         Dashboard <span aria-hidden="true">→</span>
                     </a>
                 @else
-                    <a href="{{ url('/login') }}" class="text-sm font-semibold leading-6 text-gray-900 hover:text-gray-700">
+                    <a href="{{ url('/gateway') }}" class="text-sm font-semibold leading-6 text-gray-900 hover:text-gray-700">
                         Sign in <span aria-hidden="true">→</span>
                     </a>
                 @endif
