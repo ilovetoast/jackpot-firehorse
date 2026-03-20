@@ -160,35 +160,13 @@ class BrandController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        // Check plan limits - prevent switching to disabled brands even for admins
+        // Check plan limits - prevent switching to disabled brands
         $planService = app(PlanService::class);
-        $limits = $planService->getPlanLimits($tenant);
-        $currentBrandCount = $tenant->brands()->count();
-        $maxBrands = $limits['max_brands'] ?? PHP_INT_MAX;
-        $brandLimitExceeded = $currentBrandCount > $maxBrands;
-
-        if ($brandLimitExceeded) {
-            // Get all brands for tenant ordered the same way as in HandleInertiaRequests
-            $allBrands = $tenant->brands()
-                ->orderBy('is_default', 'desc')
-                ->orderBy('name')
-                ->get();
-            
-            // Find the index of this brand
-            $brandIndex = $allBrands->search(function ($b) use ($brand) {
-                return $b->id === $brand->id;
-            });
-            
-            // Check if this brand is beyond the limit
-            $activeBrand = app('brand');
-            $isActive = $activeBrand && $brand->id === $activeBrand->id;
-            
-            // Only allow if it's the active brand (can't switch away from active) or if index < maxBrands
-            if (!$isActive && $brandIndex !== false && $brandIndex >= $maxBrands) {
-                return back()->withErrors([
-                    'brand' => "This brand is not accessible on your current plan. Your plan allows {$maxBrands} brand(s), but you have {$currentBrandCount}. Please upgrade your plan to access all brands.",
-                ]);
-            }
+        if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {
+            $info = $planService->getBrandLimitInfo($tenant);
+            return back()->withErrors([
+                'brand' => "This brand is not accessible on your current plan. Your plan allows {$info['max_brands']} brand(s), but you have {$info['total_brands']}. Please upgrade your plan to access all brands.",
+            ]);
         }
 
         // Check if user is tenant owner/admin - they can switch to any accessible brand
@@ -250,6 +228,7 @@ class BrandController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
+            'icon_style' => 'nullable|string|in:subtle,gradient,solid',
             'primary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'secondary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'accent_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
@@ -266,6 +245,11 @@ class BrandController extends Controller
         // Handle icon_bg_color
         if ($request->has('icon_bg_color')) {
             $validated['icon_bg_color'] = $request->input('icon_bg_color') ?: null;
+        }
+
+        // Handle icon_style
+        if ($request->has('icon_style')) {
+            $validated['icon_style'] = $request->input('icon_style') ?: 'subtle';
         }
 
         try {
@@ -517,13 +501,20 @@ class BrandController extends Controller
                 'logo_dark_path' => $brand->logo_dark_path,
                 'logo_dark_id' => $brand->logo_dark_id,
                 'logo_dark_thumbnail_url' => $brand->logo_dark_id ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
+                'logo_horizontal_path' => $brand->logo_horizontal_path,
+                'logo_horizontal_id' => $brand->logo_horizontal_id,
+                'logo_horizontal_thumbnail_url' => $brand->logo_horizontal_id ? \App\Models\Asset::find($brand->logo_horizontal_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
                 'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
+                'icon_style' => $brand->icon_style ?? 'subtle',
                 'is_default' => $brand->is_default,
                 'show_in_selector' => $brand->show_in_selector ?? true,
                 'primary_color' => $brand->primary_color,
+                'primary_color_user_defined' => (bool) $brand->primary_color_user_defined,
                 'secondary_color' => $brand->secondary_color,
+                'secondary_color_user_defined' => (bool) $brand->secondary_color_user_defined,
                 'accent_color' => $brand->accent_color,
+                'accent_color_user_defined' => (bool) $brand->accent_color_user_defined,
                 'nav_color' => $brand->nav_color,
                 'workspace_button_style' => $brand->workspace_button_style ?? $brand->settings['button_style'] ?? 'primary',
                 'logo_filter' => $brand->logo_filter ?? 'none',
@@ -597,6 +588,7 @@ class BrandController extends Controller
                 'updated_at' => $activeVersion->updated_at->toISOString(),
             ] : null,
             'all_versions' => $allVersions,
+            'research_insights' => $this->buildResearchInsights($brand, $brandModel),
             'compliance_aggregate' => $complianceAggregate ? [
                 'avg_score' => $complianceAggregate->execution_count > 0 ? (float) $complianceAggregate->avg_score : null,
                 'execution_count' => (int) $complianceAggregate->execution_count,
@@ -637,6 +629,7 @@ class BrandController extends Controller
             'clear_logo_dark' => 'nullable|boolean',
             'clear_icon' => 'nullable|boolean',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
+            'icon_style' => 'nullable|string|in:subtle,gradient,solid',
             'show_in_selector' => 'nullable|boolean',
             'primary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
@@ -718,6 +711,25 @@ class BrandController extends Controller
             $validated['logo_dark_id'] = $brand->logo_dark_id;
         }
 
+        // Handle horizontal logo variant: explicit clear or asset_id
+        if ($request->boolean('clear_logo_horizontal')) {
+            $validated['logo_horizontal_path'] = null;
+            $validated['logo_horizontal_id'] = null;
+        } elseif ($request->filled('logo_horizontal_id')) {
+            $horizAsset = \App\Models\Asset::where('id', $request->input('logo_horizontal_id'))
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+            if (! $horizAsset) {
+                abort(403, 'Horizontal logo asset does not belong to this brand.');
+            }
+            $validated['logo_horizontal_id'] = $request->input('logo_horizontal_id');
+            $validated['logo_horizontal_path'] = null;
+        } else {
+            $validated['logo_horizontal_path'] = $brand->logo_horizontal_path;
+            $validated['logo_horizontal_id'] = $brand->logo_horizontal_id;
+        }
+
         // Handle icon: explicit clear or asset_id (all icons must be assets, no direct file upload)
         if ($request->boolean('clear_icon')) {
             if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
@@ -750,6 +762,13 @@ class BrandController extends Controller
         } else {
             // Keep existing icon_bg_color if not provided
             $validated['icon_bg_color'] = $brand->icon_bg_color;
+        }
+
+        // Handle icon_style
+        if ($request->has('icon_style')) {
+            $validated['icon_style'] = $request->input('icon_style') ?: 'subtle';
+        } else {
+            $validated['icon_style'] = $brand->icon_style ?? 'subtle';
         }
 
         // Handle download_landing_settings (D10, Phase 1.4: includes custom_color)
@@ -790,6 +809,17 @@ class BrandController extends Controller
 
         // Always set settings (even if empty) to ensure the column is updated
         $validated['settings'] = $mergedSettings;
+
+        // Mark colors as user-defined when explicitly provided
+        if ($request->filled('primary_color')) {
+            $validated['primary_color_user_defined'] = true;
+        }
+        if ($request->filled('secondary_color')) {
+            $validated['secondary_color_user_defined'] = true;
+        }
+        if ($request->filled('accent_color')) {
+            $validated['accent_color_user_defined'] = true;
+        }
 
         try {
             $this->brandService->update($brand, $validated);
@@ -1408,6 +1438,100 @@ class BrandController extends Controller
             ->where('brand_id', $brand->id)
             ->first();
         return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+    }
+
+    protected function buildResearchInsights(Brand $brand, ?\App\Models\BrandModel $brandModel): array
+    {
+        if (! $brandModel) {
+            return ['runs' => [], 'snapshots' => [], 'latest_snapshot_data' => null];
+        }
+
+        $versionIds = $brandModel->versions()->pluck('id')->toArray();
+        if (empty($versionIds)) {
+            return ['runs' => [], 'snapshots' => [], 'latest_snapshot_data' => null];
+        }
+
+        $runs = \App\Models\BrandPipelineRun::where('brand_id', $brand->id)
+            ->whereIn('brand_model_version_id', $versionIds)
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get()
+            ->map(fn ($r) => [
+                'id' => $r->id,
+                'status' => $r->status,
+                'stage' => $r->stage,
+                'extraction_mode' => $r->extraction_mode,
+                'pages_total' => $r->pages_total,
+                'pages_processed' => $r->pages_processed,
+                'error_message' => $r->error_message,
+                'created_at' => $r->created_at->toISOString(),
+                'completed_at' => $r->completed_at?->toISOString(),
+                'duration_seconds' => $r->completed_at && $r->created_at
+                    ? $r->completed_at->diffInSeconds($r->created_at)
+                    : null,
+                'version_id' => $r->brand_model_version_id,
+                'has_asset' => (bool) $r->asset_id,
+            ]);
+
+        $snapshots = \App\Models\BrandPipelineSnapshot::where('brand_id', $brand->id)
+            ->whereIn('brand_model_version_id', $versionIds)
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get()
+            ->map(fn ($s) => [
+                'id' => $s->id,
+                'status' => $s->status,
+                'source_url' => $s->source_url,
+                'created_at' => $s->created_at->toISOString(),
+                'has_snapshot' => ! empty($s->snapshot),
+                'has_suggestions' => ! empty($s->suggestions),
+                'has_coherence' => ! empty($s->coherence),
+                'suggestion_count' => is_array($s->suggestions) ? count(array_filter($s->suggestions, fn ($v) => is_array($v) && isset($v['key']))) : 0,
+                'coherence_score' => $s->coherence['overall']['score'] ?? null,
+                'version_id' => $s->brand_model_version_id,
+            ]);
+
+        $latestCompleted = \App\Models\BrandPipelineSnapshot::where('brand_id', $brand->id)
+            ->whereIn('brand_model_version_id', $versionIds)
+            ->where('status', 'completed')
+            ->orderByDesc('created_at')
+            ->first();
+
+        $latestSnapshotData = null;
+        if ($latestCompleted && ! empty($latestCompleted->snapshot)) {
+            $snap = $latestCompleted->snapshot;
+            $latestSnapshotData = [
+                'source_url' => $latestCompleted->source_url,
+                'created_at' => $latestCompleted->created_at->toISOString(),
+                'mission' => $snap['mission'] ?? null,
+                'vision' => $snap['vision'] ?? null,
+                'tagline' => $snap['tagline'] ?? null,
+                'industry' => $snap['industry'] ?? null,
+                'target_audience' => $snap['target_audience'] ?? null,
+                'positioning' => $snap['positioning'] ?? null,
+                'brand_bio' => $snap['brand_bio'] ?? null,
+                'voice_description' => $snap['voice_description'] ?? null,
+                'brand_look' => $snap['brand_look'] ?? null,
+                'visual_style' => $snap['visual_style'] ?? null,
+                'photography_style' => $snap['photography_style'] ?? null,
+                'primary_colors' => $snap['primary_colors'] ?? [],
+                'secondary_colors' => $snap['secondary_colors'] ?? [],
+                'detected_fonts' => $snap['detected_fonts'] ?? [],
+                'hero_headlines' => array_slice($snap['hero_headlines'] ?? [], 0, 10),
+                'logo_url' => $snap['logo_url'] ?? null,
+                'logo_description' => $snap['logo_description'] ?? null,
+                'design_cues' => $snap['design_cues'] ?? null,
+                'coherence_score' => $latestCompleted->coherence['overall']['score'] ?? null,
+                'coherence_strengths' => array_slice($latestCompleted->coherence['overall']['strengths'] ?? [], 0, 5),
+                'coherence_risks' => array_slice($latestCompleted->coherence['overall']['risks'] ?? [], 0, 5),
+            ];
+        }
+
+        return [
+            'runs' => $runs,
+            'snapshots' => $snapshots,
+            'latest_snapshot_data' => $latestSnapshotData,
+        ];
     }
 
     protected function resolvePortalFeatures(\App\Models\Tenant $tenant): array

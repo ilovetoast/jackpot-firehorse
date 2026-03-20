@@ -27,6 +27,28 @@ class BrandPipelineRun extends Model
 
     public const EXTRACTION_MODE_VISION = 'vision';
 
+    /**
+     * Max raw PDF file size (bytes) that can be sent via Anthropic's base64 document API.
+     * 32MB request limit / 1.33 base64 overhead ≈ 24MB, with margin for prompt + JSON.
+     */
+    public const MAX_VISION_PDF_BYTES = 20 * 1024 * 1024; // 20 MB
+
+    /**
+     * Determine the correct extraction mode for a PDF asset based on page count.
+     * Large PDFs (>20MB) still use vision mode — ClaudePdfExtractionService automatically
+     * routes them through Anthropic's Files API instead of inline base64.
+     */
+    public static function resolveExtractionMode(Asset $asset): string
+    {
+        try {
+            $pageCount = app(\App\Services\PdfPageRenderingService::class)->getPdfPageCount($asset, true);
+
+            return $pageCount > 1 ? self::EXTRACTION_MODE_VISION : self::EXTRACTION_MODE_TEXT;
+        } catch (\Throwable $e) {
+            return self::EXTRACTION_MODE_VISION;
+        }
+    }
+
     protected $fillable = [
         'brand_id',
         'brand_model_version_id',

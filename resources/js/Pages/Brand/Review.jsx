@@ -4,7 +4,7 @@
  * strengths/risks, and a clear path to continue building.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { router } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
@@ -86,6 +86,11 @@ export default function Review({
     modelPayload,
 }) {
     const [advancing, setAdvancing] = useState(false)
+
+    useEffect(() => {
+        document.documentElement.classList.add('scrollbar-cinematic')
+        return () => document.documentElement.classList.remove('scrollbar-cinematic')
+    }, [])
 
     const accentColor = brand.primary_color || '#6366f1'
 

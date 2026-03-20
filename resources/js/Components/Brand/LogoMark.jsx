@@ -5,7 +5,6 @@ export default function LogoMark({ name, logo, size = 'md', className = '' }) {
     const resolvedName = name || theme?.name || 'Jackpot'
     const resolvedLogo = logo ?? theme?.logo
     const primary = theme?.colors?.primary || '#6366f1'
-    const secondary = theme?.colors?.secondary || '#8b5cf6'
     const letter = resolvedName.charAt(0).toUpperCase()
 
     const sizes = {
@@ -21,7 +20,7 @@ export default function LogoMark({ name, logo, size = 'md', className = '' }) {
             <div
                 className={`${s.pill} flex items-center justify-center`}
                 style={{
-                    background: `linear-gradient(135deg, ${primary}, ${secondary})`,
+                    background: `linear-gradient(135deg, ${primary}CC, ${primary}55)`,
                 }}
             >
                 {resolvedLogo ? (

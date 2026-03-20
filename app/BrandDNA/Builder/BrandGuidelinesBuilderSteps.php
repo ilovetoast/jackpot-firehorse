@@ -104,7 +104,7 @@ class BrandGuidelinesBuilderSteps
                 'title' => 'Standards',
                 'description' => 'Typography, colors, fonts, visual references',
                 'skippable' => true,
-                'allowed_paths' => ['typography', 'scoring_rules', 'visual', 'brand_colors'],
+                'allowed_paths' => ['typography', 'scoring_rules', 'visual', 'brand_colors', 'presentation'],
                 'required_on_publish_paths' => [],
             ],
         ];

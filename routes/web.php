@@ -19,6 +19,9 @@ if ($rootDomain && config('subdomain.enabled')) {
         Route::get('/assets/{asset}', [PublicBrandPortalController::class, 'asset'])->name('public-portal.asset');
     });
 }
+// Bare /portal with no slug — redirect to app
+Route::get('portal', fn () => redirect('/app'))->name('portal.index');
+
 // Path-based fallback (always available — useful for dev + preview)
 Route::prefix('portal/{brandSlug}')->group(function () {
     Route::get('/', [PublicBrandPortalController::class, 'index'])->name('public-portal.path.index');
@@ -151,6 +154,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     
     // User limit error can be accessed even if tenant is resolved (user just can't access other routes)
     Route::get('/errors/user-limit-exceeded', [\App\Http\Controllers\ErrorController::class, 'userLimitExceeded'])->name('errors.user-limit-exceeded');
+    
+    // Brand disabled by plan limit - user only has access to brands beyond the plan limit
+    Route::get('/errors/brand-disabled', [\App\Http\Controllers\ErrorController::class, 'brandDisabled'])->name('errors.brand-disabled');
     
     // Company settings (requires tenant to be selected). C12: RestrictCollectionOnlyUser gates collection-only users.
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
@@ -719,10 +725,13 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/attach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'attachAsset'])->name('brands.brand-dna.builder.attach-asset');
             Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
             Route::post('/brands/{brand}/brand-dna/builder/generate-logo-guidelines', [\App\Http\Controllers\BrandDNABuilderController::class, 'generateLogoGuidelines'])->name('brands.brand-dna.builder.generate-logo-guidelines');
+            Route::post('/brands/{brand}/brand-dna/builder/suggest-field', [\App\Http\Controllers\BrandDNABuilderController::class, 'suggestField'])->name('brands.brand-dna.builder.suggest-field');
             Route::post('/brands/{brand}/brand-dna/versions/{version}/publish', [\App\Http\Controllers\BrandDNABuilderController::class, 'publish'])->name('brands.brand-dna.versions.publish');
             Route::post('/brands/{brand}/brand-dna/unpublish', [\App\Http\Controllers\BrandDNABuilderController::class, 'unpublish'])->name('brands.brand-dna.unpublish');
             Route::get('/brands/{brand}/brand-dna/ingestions', [\App\Http\Controllers\BrandDNABuilderController::class, 'listIngestions'])->name('brands.brand-dna.ingestions.index');
             Route::get('/brands/{brand}/brand-dna/builder/brand-pipeline/{run}', [\App\Http\Controllers\BrandPipelineController::class, 'show'])->name('brands.brand-dna.builder.brand-pipeline.show');
+            Route::get('/brands/{brand}/brand-dna/builder/brand-pipeline/{run}/detail', [\App\Http\Controllers\BrandPipelineController::class, 'detail'])->name('brands.brand-dna.builder.brand-pipeline.detail');
+            Route::get('/brands/{brand}/brand-dna/builder/brand-pipeline-snapshot/{snapshot}/detail', [\App\Http\Controllers\BrandPipelineController::class, 'snapshotDetail'])->name('brands.brand-dna.builder.brand-pipeline-snapshot.detail');
 
             // Brand Bootstrap (foundation only)
             Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');

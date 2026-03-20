@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\BrandPipelineRunnerJob;
+use App\Jobs\ExtractPdfTextJob;
 use App\Jobs\RunBrandResearchJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
 use App\Models\BrandPipelineRun;
 use App\Models\BrandPipelineSnapshot;
+use App\Models\PdfTextExtraction;
 use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\PipelineFinalizationService;
 use App\Services\BrandDNA\ResearchProgressService;
@@ -16,6 +18,7 @@ use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -34,12 +37,18 @@ class BrandResearchController extends Controller
     /**
      * GET /brands/{brand}/research
      */
-    public function show(Request $request, Brand $brand): Response
+    public function show(Request $request, Brand $brand): Response|RedirectResponse
     {
         $this->authorize('update', $brand);
         $tenant = app('tenant');
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $planName = app(\App\Services\PlanService::class)->getCurrentPlan($tenant);
+        if ($planName === 'free') {
+            return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'strategy'])
+                ->with('warning', 'Brand Research requires a paid plan. You can manually configure your Brand DNA below.');
         }
 
         $version = $this->versionService->getWorkingVersion($brand);
@@ -104,6 +113,7 @@ class BrandResearchController extends Controller
                 'pdf' => $guidelinesPdfAsset ? [
                     'id' => $guidelinesPdfAsset->id,
                     'filename' => $guidelinesPdfAsset->original_filename,
+                    'size_bytes' => $guidelinesPdfAsset->size_bytes,
                     'thumbnail_url' => $guidelinesPdfAsset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
                 ] : null,
                 'website_url' => $sources['website_url'] ?? '',
@@ -190,8 +200,29 @@ class BrandResearchController extends Controller
         $socialUrls = $validated['social_urls'] ?? [];
         $materialIds = $validated['material_asset_ids'] ?? [];
 
+        // Link the PDF to this version so it persists across page reloads
+        if ($pdfAssetId) {
+            \App\Models\BrandModelVersionAsset::where('brand_model_version_id', $version->id)
+                ->where('builder_context', 'guidelines_pdf')
+                ->delete();
+
+            \App\Models\BrandModelVersionAsset::create([
+                'brand_model_version_id' => $version->id,
+                'asset_id' => $pdfAssetId,
+                'builder_context' => 'guidelines_pdf',
+            ]);
+        }
+
+        // Persist URL inputs into the version payload
+        $payload = $version->model_payload ?? [];
+        $payload['sources'] = [
+            'website_url' => $websiteUrl ?? '',
+            'social_urls' => $socialUrls,
+        ];
+        $version->update(['model_payload' => $payload]);
+
         if (empty($materialIds)) {
-            $materialIds = $version->assetsForContext('brand_material')->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
+            $materialIds = $version->assetsForContext('brand_material')->pluck('assets.id')->map(fn ($id) => (string) $id)->values()->all();
         }
 
         $triggered = [];
@@ -202,12 +233,7 @@ class BrandResearchController extends Controller
             if ($pdfAssetId) {
                 $pdfAsset = Asset::find($pdfAssetId);
                 if ($pdfAsset && str_contains(strtolower($pdfAsset->mime_type ?? ''), 'pdf')) {
-                    try {
-                        $pageCount = app(\App\Services\PdfPageRenderingService::class)->getPdfPageCount($pdfAsset, true);
-                        $extractionMode = $pageCount > 1 ? BrandPipelineRun::EXTRACTION_MODE_VISION : BrandPipelineRun::EXTRACTION_MODE_TEXT;
-                    } catch (\Throwable $e) {
-                        $extractionMode = BrandPipelineRun::EXTRACTION_MODE_VISION;
-                    }
+                    $extractionMode = BrandPipelineRun::resolveExtractionMode($pdfAsset);
                 }
             }
 
@@ -270,7 +296,7 @@ class BrandResearchController extends Controller
         $triggered = [];
 
         if ($guidelinesPdfAsset) {
-            $extractionMode = BrandPipelineRun::EXTRACTION_MODE_VISION;
+            $extractionMode = BrandPipelineRun::resolveExtractionMode($guidelinesPdfAsset);
             $run = BrandPipelineRun::create([
                 'brand_id' => $brand->id,
                 'brand_model_version_id' => $version->id,
@@ -444,6 +470,25 @@ class BrandResearchController extends Controller
             'elapsed_seconds' => null,
             'last_activity_at' => $lastActivity?->toIso8601String(),
         ];
+    }
+
+    protected function ensureTextExtractionStarted(Asset $asset): void
+    {
+        $asset->loadMissing('currentVersion');
+        $versionId = $asset->currentVersion?->id;
+        $existing = $asset->getLatestPdfTextExtractionForVersion($versionId);
+
+        if ($existing && in_array($existing->status, [PdfTextExtraction::STATUS_PENDING, 'processing', 'complete'])) {
+            return;
+        }
+
+        $extraction = $asset->pdfTextExtractions()->create([
+            'asset_version_id' => $versionId,
+            'extraction_source' => null,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        ExtractPdfTextJob::dispatch($asset->id, $extraction->id, $versionId);
     }
 
     protected function getBrandResearchGate($tenant): array

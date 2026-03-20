@@ -94,4 +94,46 @@ class ErrorController extends Controller
             ] : null,
         ]);
     }
+
+    /**
+     * Display brand disabled by plan limit error page.
+     * Shown when a user only has access to brands that are beyond the plan limit.
+     */
+    public function brandDisabled(): Response
+    {
+        $tenant = null;
+        $tenantId = session('tenant_id');
+        if ($tenantId) {
+            $tenant = \App\Models\Tenant::find($tenantId);
+            if ($tenant) {
+                app()->instance('tenant', $tenant);
+            }
+        }
+
+        $user = auth()->user();
+
+        $planInfo = null;
+        if ($tenant) {
+            $planService = app(\App\Services\PlanService::class);
+            $brandLimitInfo = $planService->getBrandLimitInfo($tenant);
+            $planInfo = [
+                'plan_name' => $planService->getCurrentPlan($tenant),
+                'max_brands' => $brandLimitInfo['max_brands'],
+                'total_brands' => $brandLimitInfo['total_brands'],
+            ];
+        }
+
+        return Inertia::render('Errors/BrandDisabled', [
+            'tenant' => $tenant ? [
+                'id' => $tenant->id,
+                'name' => $tenant->name,
+            ] : null,
+            'user' => $user ? [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ] : null,
+            'plan_info' => $planInfo,
+        ]);
+    }
 }

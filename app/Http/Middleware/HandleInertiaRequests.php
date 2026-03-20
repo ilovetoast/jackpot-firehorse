@@ -203,29 +203,28 @@ class HandleInertiaRequests extends Middleware
                     return false;
                 });
 
-                // Determine which brands are disabled (those beyond the limit)
-                // If limit is exceeded, brands beyond the limit count are disabled
-                // IMPORTANT: Even admins/owners cannot access disabled brands - plan limits apply to everyone
-                // However, the active brand should never be disabled (can't switch away from it)
-                $brands = $accessibleBrands->values()->map(function ($brand, $index) use ($activeBrand, $maxBrands, $brandLimitExceeded) {
+                // Use centralized brand limit info from PlanService
+                $brandLimitInfo = $planService->getBrandLimitInfo($tenant);
+                $disabledBrandIds = $brandLimitInfo['disabled'];
+
+                $brands = $accessibleBrands->values()->map(function ($brand) use ($activeBrand, $disabledBrandIds) {
                     $isActive = $activeBrand && $brand->id === $activeBrand->id;
-                    // Brands beyond the limit are disabled (but still shown so user knows they exist)
-                    // Index is 0-based, so index >= maxBrands means it's beyond the limit
-                    // But never disable the active brand (user must be able to see their current brand)
-                    // Plan limits apply to EVERYONE, including admins/owners
-                    $isDisabled = $brandLimitExceeded && ($index >= $maxBrands) && !$isActive;
+                    $isDisabled = in_array($brand->id, $disabledBrandIds) && !$isActive;
                     
                     $brandData = [
                         'id' => $brand->id,
                         'name' => $brand->name,
                         'slug' => $brand->slug,
                         'logo_path' => $brand->logo_path,
+                        'logo_dark_path' => $brand->logo_dark_path,
                         'icon_path' => $brand->icon_path,
                         'is_default' => $brand->is_default,
                         'is_active' => $isActive,
                         'is_disabled' => $isDisabled,
                         'logo_filter' => $brand->logo_filter ?? 'none',
                         'primary_color' => $brand->primary_color,
+                        'secondary_color' => $brand->secondary_color,
+                        'icon_style' => $brand->icon_style ?? 'subtle',
                         'show_in_selector' => $brand->show_in_selector ?? true,
                         'settings' => [
                             'nav_display_mode' => $brand->settings['nav_display_mode'] ?? 'logo',
@@ -413,6 +412,7 @@ class HandleInertiaRequests extends Middleware
                     'icon_path' => $activeBrand->icon_path,
                     'primary_color' => $activeBrand->primary_color,
                     'secondary_color' => $activeBrand->secondary_color,
+                    'icon_style' => $activeBrand->icon_style ?? 'subtle',
                     'accent_color' => $activeBrand->accent_color,
                     'nav_color' => $activeBrand->nav_color,
                     'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',

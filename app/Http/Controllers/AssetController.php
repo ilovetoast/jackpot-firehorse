@@ -298,7 +298,7 @@ class AssetController extends Controller
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
         // Intake: main grid excludes staged (intake_state=normal); staged view shows intake_state=staged only.
         $assetsQuery = Asset::query()
-            ->when($isStagedView, fn ($q) => $q->stagedOnly(), fn ($q) => $q->normalIntakeOnly())
+            ->when($isStagedView, fn ($q) => $q->stagedOnly(), fn ($q) => $q->when(! $isReferenceMaterialsView, fn ($q2) => $q2->normalIntakeOnly()))
             ->when($isReferenceMaterialsView, fn ($q) => $q->referenceMaterialsOnly(), fn ($q) => $q->when(! $isStagedView, fn ($q2) => $q2->excludeBuilderStaged()))
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
@@ -325,15 +325,14 @@ class AssetController extends Controller
             );
         }
 
-        // Reference materials count for sidebar — must match grid (apply same lifecycle as assets query)
+        // Reference materials count for sidebar — no lifecycle filter (reference materials are unpublished working assets)
         $referenceMaterialsCount = 0;
         if (! $isTrashView) {
-            $refCountQuery = Asset::query()
+            $referenceMaterialsCount = Asset::query()
                 ->referenceMaterialsOnly()
                 ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id);
-            $this->lifecycleResolver->apply($refCountQuery, $normalizedLifecycle, $user, $tenant, $brand);
-            $referenceMaterialsCount = $refCountQuery->count();
+                ->where('brand_id', $brand->id)
+                ->count();
         }
 
         // Staged count for sidebar (intake_state=staged, not in trash)
@@ -347,9 +346,10 @@ class AssetController extends Controller
                 ->count();
         }
 
-        // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver (skip for staged view per spec)
+        // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
+        // Skip for staged and reference materials views — these are working materials, not published library assets
         // Phase B2: Resolver validates viewTrash for lifecycle=deleted and applies exclusions
-        if (! $isStagedView) {
+        if (! $isStagedView && ! $isReferenceMaterialsView) {
             $this->lifecycleResolver->apply(
                 $assetsQuery,
                 $normalizedLifecycle,

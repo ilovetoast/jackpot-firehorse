@@ -97,8 +97,10 @@ class PublicCollectionController extends Controller
 
     /**
      * D6: Create a download (ZIP) for the public collection. No auth.
-     * Validates collection is public and tenant has public_collection_downloads_enabled.
-     * Resolves asset IDs server-side from collection. Redirects to public download status page.
+     *
+     * Uses cached ZIP strategy: builds once, stores in S3, serves via signed URL.
+     * ZIP is rebuilt lazily on first request after assets change (invalidation via
+     * CollectionAssetService). High-traffic links serve the cached S3 object directly.
      */
     public function createDownload(string $brand_slug, string $collection_slug, Request $request): RedirectResponse|JsonResponse
     {
@@ -124,7 +126,7 @@ class PublicCollectionController extends Controller
         }
 
         $query = $this->collectionAssetQueryService->queryPublic($collection);
-        $assetModels = $query->get();
+        $assetModels = $query->with('storageBucket')->get();
         $visibleIds = $assetModels->pluck('id')->all();
 
         if (empty($visibleIds)) {
@@ -158,25 +160,38 @@ class PublicCollectionController extends Controller
             return redirect()->back()->with('error', 'Estimated ZIP size exceeds plan limit.');
         }
 
-        $zipUrl = URL::temporarySignedRoute(
-            'public.collections.zip',
-            now()->addMinutes(15),
-            ['brand_slug' => $brand_slug, 'collection_slug' => $collection_slug]
-        );
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
+
+        try {
+            $s3Client = $this->zipBuilder->createS3Client();
+            $s3Key = $this->zipBuilder->getOrBuildCachedZip($collection, $assetModels, $bucket, $s3Client);
+            $signedUrl = $this->zipBuilder->getSignedZipUrl($bucket, $s3Key, $s3Client, ttlMinutes: 30);
+        } catch (\Throwable $e) {
+            Log::error('[PublicCollectionController] Failed to build/serve collection ZIP', [
+                'collection_id' => $collection->id,
+                'error' => $e->getMessage(),
+            ]);
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Failed to prepare download. Please try again.'], 500);
+            }
+            return redirect()->back()->with('error', 'Failed to prepare download. Please try again.');
+        }
 
         if ($request->expectsJson()) {
             return response()->json([
-                'zip_url' => $zipUrl,
+                'zip_url' => $signedUrl,
                 'asset_count' => count($visibleIds),
+                'cached' => $collection->hasPublicZipCached(),
             ], 200);
         }
 
-        return redirect()->away($zipUrl);
+        return redirect()->away($signedUrl);
     }
 
     /**
-     * D6: Stream collection ZIP on-the-fly. Signed URL required; no Download record.
-     * Builds ZIP from current collection assets and streams it; temp file deleted after send.
+     * D6: Stream collection ZIP. Signed URL required; no Download record.
+     * Falls back to on-the-fly build for backwards compatibility with existing signed URLs.
      */
     public function streamZip(string $brand_slug, string $collection_slug, Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse|RedirectResponse
     {

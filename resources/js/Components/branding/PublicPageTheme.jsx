@@ -17,6 +17,7 @@ export default function PublicPageTheme({
   data,
   setData,
   route,
+  onSave,
 }) {
   const [showBackgroundPicker, setShowBackgroundPicker] = useState(false)
   // Full asset objects for immediate display — not persisted until save
@@ -54,20 +55,23 @@ export default function PublicPageTheme({
       setSelectedBackgroundAssets(resolved)
     })
 
-    // Merge to preserve other download_landing_settings fields (logo, color_role, etc.)
-    setData('download_landing_settings', {
+    const newSettings = {
       ...(data.download_landing_settings || {}),
       background_asset_ids: idsArray,
-    })
+    }
+    setData('download_landing_settings', newSettings)
+    onSave?.({ download_landing_settings: newSettings })
   }
 
   const handleRemoveBackground = (id) => {
     const ids = backgroundAssetIds.filter((x) => String(x) !== String(id))
-    setData('download_landing_settings', {
+    const newSettings = {
       ...(data.download_landing_settings || {}),
       background_asset_ids: ids,
-    })
+    }
+    setData('download_landing_settings', newSettings)
     setSelectedBackgroundAssets((prev) => prev.filter((a) => a?.id != null && String(a.id) !== String(id)))
+    onSave?.({ download_landing_settings: newSettings })
   }
 
   // Build display assets: prefer local full objects; when we have IDs but no local assets (e.g. from save, or lost state), hydrate from backend-provided background_asset_details
@@ -96,10 +100,14 @@ export default function PublicPageTheme({
           <button
             type="button"
             id="dls-enabled"
-            onClick={() => setData('download_landing_settings', {
-              ...(data.download_landing_settings || {}),
-              enabled: !(data.download_landing_settings?.enabled !== false),
-            })}
+            onClick={() => {
+              const newSettings = {
+                ...(data.download_landing_settings || {}),
+                enabled: !(data.download_landing_settings?.enabled !== false),
+              }
+              setData('download_landing_settings', newSettings)
+              onSave?.({ download_landing_settings: newSettings })
+            }}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
               (data.download_landing_settings?.enabled !== false) ? 'bg-indigo-600' : 'bg-gray-200'
             }`}

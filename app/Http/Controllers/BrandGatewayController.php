@@ -379,9 +379,25 @@ class BrandGatewayController extends Controller
             return redirect()->route('gateway');
         }
 
+        $tenant = Tenant::findOrFail($tenantId);
         $brand = Brand::where('id', $validated['brand_id'])
             ->where('tenant_id', $tenantId)
             ->firstOrFail();
+
+        $planService = app(\App\Services\PlanService::class);
+
+        if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {
+            $enabledBrand = $planService->findFirstEnabledBrand($tenant, $user);
+
+            if ($enabledBrand) {
+                session(['brand_id' => $enabledBrand->id]);
+                session()->flash('warning', "The brand \"{$brand->name}\" is unavailable on your current plan. You've been redirected to \"{$enabledBrand->name}\".");
+
+                return $this->redirectToGatewayIntended();
+            }
+
+            return redirect()->route('errors.brand-disabled');
+        }
 
         session(['brand_id' => $brand->id]);
 

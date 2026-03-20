@@ -23,18 +23,43 @@ class Collection extends Model
         'visibility',
         'is_public',
         'created_by',
+        'public_zip_path',
+        'public_zip_built_at',
+        'public_zip_asset_count',
     ];
 
     /**
-     * Get the attributes that should be cast.
-     *
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
             'is_public' => 'boolean',
+            'public_zip_built_at' => 'datetime',
+            'public_zip_asset_count' => 'integer',
         ];
+    }
+
+    /**
+     * Mark the cached public ZIP as stale (needs rebuild on next download).
+     */
+    public function invalidatePublicZip(): void
+    {
+        $this->update([
+            'public_zip_path' => null,
+            'public_zip_built_at' => null,
+            'public_zip_asset_count' => null,
+        ]);
+    }
+
+    /**
+     * Whether this collection has a current cached ZIP ready for download.
+     */
+    public function hasPublicZipCached(): bool
+    {
+        return $this->is_public
+            && $this->public_zip_path !== null
+            && $this->public_zip_built_at !== null;
     }
 
     /**

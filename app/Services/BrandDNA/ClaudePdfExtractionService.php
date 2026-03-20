@@ -36,10 +36,15 @@ class ClaudePdfExtractionService
         $version = $asset->currentVersion;
         $tempPath = $this->pdfRenderingService->downloadSourcePdfToTemp($asset, $version);
 
-        try {
-            $pdfBase64 = base64_encode(file_get_contents($tempPath));
-        } finally {
-            @unlink($tempPath);
+        $rawSize = filesize($tempPath);
+        $useFilesApi = $rawSize > \App\Models\BrandPipelineRun::MAX_VISION_PDF_BYTES;
+
+        if (! $useFilesApi) {
+            try {
+                $pdfBase64 = base64_encode(file_get_contents($tempPath));
+            } finally {
+                @unlink($tempPath);
+            }
         }
 
         $prompt = $this->buildPrompt();
@@ -62,22 +67,31 @@ class ClaudePdfExtractionService
             'started_at' => now(),
             'metadata' => [
                 'asset_id' => $asset->id,
-                'pdf_size_bytes' => (int) (strlen($pdfBase64) * 3 / 4),
-                'method' => 'claude_single_pass',
+                'pdf_size_bytes' => $rawSize,
+                'method' => $useFilesApi ? 'claude_files_api' : 'claude_single_pass',
             ],
         ]);
 
         Log::channel('pipeline')->info('[ClaudePdfExtractionService] Sending PDF to Claude', [
             'asset_id' => $asset->id,
             'agent_run_id' => $agentRun->id,
-            'pdf_size_bytes' => (int) (strlen($pdfBase64) * 3 / 4),
+            'pdf_size_bytes' => $rawSize,
+            'method' => $useFilesApi ? 'files_api' : 'inline_base64',
         ]);
 
         try {
-            $response = $this->anthropicProvider->analyzePdf($pdfBase64, $prompt, [
-                'model' => $modelName,
-                'max_tokens' => 8192,
-            ]);
+            if ($useFilesApi) {
+                $response = $this->anthropicProvider->analyzePdfViaFilesApi($tempPath, $prompt, [
+                    'model' => $modelName,
+                    'max_tokens' => 8192,
+                ]);
+                @unlink($tempPath);
+            } else {
+                $response = $this->anthropicProvider->analyzePdf($pdfBase64, $prompt, [
+                    'model' => $modelName,
+                    'max_tokens' => 8192,
+                ]);
+            }
 
             $cost = $this->anthropicProvider->calculateCost(
                 $response['tokens_in'],
@@ -149,6 +163,9 @@ class ClaudePdfExtractionService
                 ],
             ];
         } catch (\Throwable $e) {
+            if ($useFilesApi && isset($tempPath) && file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
             $agentRun->markAsFailed($e->getMessage());
             throw $e;
         }

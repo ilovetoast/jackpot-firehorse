@@ -4,7 +4,7 @@ import JackpotLogo from './JackpotLogo'
 import { usePermission } from '../hooks/usePermission'
 import BrandIconUnified from './BrandIconUnified'
 
-export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchBrand, rootLinkHref }) {
+export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
     const { auth } = usePage().props
     const { can } = usePermission()
     const tenant = auth?.activeCompany
@@ -14,6 +14,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
         && planLimitInfo
         && !planLimitInfo.brand_limit_exceeded
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
+    const [logoError, setLogoError] = useState(false)
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
     const hasMultipleBrands = validBrands && validBrands.length > 1
 
@@ -60,7 +61,19 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
         if (firstBrand) {
             return (
                 <Link href="/app" className="flex items-center min-w-0">
-                    <BrandIconUnified brand={firstBrand} size="lg" />
+                    {firstBrand.logo_path ? (
+                        <img src={firstBrand.logo_path} alt={firstBrand.name || 'Brand'} className="h-12 w-auto max-w-72 object-contain" style={logoFilterStyle} />
+                    ) : (
+                        <>
+                            <BrandIconUnified brand={firstBrand} size="lg" />
+                            <span
+                                className="ml-2.5 font-semibold truncate min-w-0"
+                                style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
+                            >
+                                {firstBrand.name || 'Brand'}
+                            </span>
+                        </>
+                    )}
                 </Link>
             )
         }
@@ -94,7 +107,25 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
                     title="Open menu"
                 >
                     {!(isOnCompanyOverview && canViewCompanyOverview && tenant) ? (
-                        <BrandIconUnified brand={activeBrand} size="lg" />
+                        activeBrand.logo_path && !logoError ? (
+                            <img
+                                src={activeBrand.logo_path}
+                                alt={brandName}
+                                className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
+                                style={logoFilterStyle}
+                                onError={() => setLogoError(true)}
+                            />
+                        ) : (
+                            <>
+                                <BrandIconUnified brand={activeBrand} size="lg" />
+                                <span
+                                    className="font-semibold truncate min-w-0"
+                                    style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
+                                >
+                                    {brandName}
+                                </span>
+                            </>
+                        )
                     ) : (
                         <span 
                             className="truncate min-w-0"
@@ -130,26 +161,31 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
                             onClick={() => setBrandMenuOpen(false)}
                         />
                         <div 
-                            className="absolute left-0 top-full z-[101] mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                            className="absolute left-0 top-full z-[101] mt-2 w-72 origin-top-left rounded-xl bg-white py-1.5 shadow-lg ring-1 ring-black/5 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                         >
                             {canViewCompanyOverview && tenant && (
                                 <>
-                                    <div className="px-3 pt-2 pb-1 text-xs text-gray-400 uppercase">
+                                    <div className="px-4 pt-2 pb-1 text-xs text-gray-400 uppercase">
                                         Company
                                     </div>
                                     <Link
                                         href="/app"
-                                        className={`flex items-center px-3 py-2 rounded-md hover:bg-gray-100 ${
+                                        className={`flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-100 ${
                                             route().current('app') ? 'bg-gray-100 font-medium' : ''
                                         }`}
                                         onClick={() => setBrandMenuOpen(false)}
                                     >
-                                        <span className="text-sm">{tenant?.name || 'Company Portal'}</span>
+                                        <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                            <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 7.5h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
+                                            </svg>
+                                        </div>
+                                        <span className="flex-1 truncate">{tenant?.name || 'Company Portal'}</span>
                                     </Link>
                                 </>
                             )}
-                            <div className="px-3 pt-3 pb-1 text-xs text-gray-400 uppercase">
+                            <div className="px-4 pt-3 pb-1 text-xs text-gray-400 uppercase">
                                 Switch Brand
                             </div>
                             <div className="max-h-64 overflow-y-auto">
@@ -177,7 +213,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
                                                 }`}
                                                 title={isDisabled ? 'This brand is not accessible on your current plan. Upgrade to access it.' : undefined}
                                             >
-                                        <BrandIconUnified brand={brandOption} size="sm" />
+                                                <BrandIconUnified brand={brandOption} size="md" />
                                                 <span className="flex-1 truncate">{brandOption.name}</span>
                                                 {isActive && !isDisabled && (
                                                     <svg
@@ -212,16 +248,18 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
                                 )}
                             </div>
                             {canAddBrand && (
-                                <div className="border-t border-gray-100 px-3 py-2">
+                                <div className="border-t border-gray-100">
                                     <Link
                                         href="/app/brands/create"
-                                        className="flex items-center justify-start gap-1.5 px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors"
                                         onClick={() => setBrandMenuOpen(false)}
                                     >
-                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                                        </svg>
-                                        Add Brand
+                                        <div className="h-10 w-10 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0">
+                                            <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                            </svg>
+                                        </div>
+                                        <span>Add Brand</span>
                                     </Link>
                                 </div>
                             )}
@@ -237,7 +275,25 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, onSwitchB
     const singleBrandHref = rootLinkHref ?? '/app'
     return (
         <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
-            <BrandIconUnified brand={activeBrand} size="lg" />
+            {activeBrand.logo_path && !logoError ? (
+                <img
+                    src={activeBrand.logo_path}
+                    alt={brandName}
+                    className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
+                    style={logoFilterStyle}
+                    onError={() => setLogoError(true)}
+                />
+            ) : (
+                <>
+                    <BrandIconUnified brand={activeBrand} size="lg" />
+                    <span
+                        className="ml-2.5 font-semibold truncate min-w-0"
+                        style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
+                    >
+                        {brandName}
+                    </span>
+                </>
+            )}
         </Link>
     )
 }

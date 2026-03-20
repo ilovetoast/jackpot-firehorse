@@ -1,5 +1,6 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import { ARCHETYPES } from '../../constants/brandOptions'
@@ -12,7 +13,8 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 import { getImageBackgroundStyle } from '../../utils/imageUtils'
 import { getContrastTextColor } from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
-import BrandAvatar from '../../Components/BrandAvatar'
+import BrandIconUnified from '../../Components/BrandIconUnified'
+import FontManager from '../../Components/BrandGuidelines/FontManager'
 import VersionPanel from '../../Components/BrandGuidelines/VersionPanel'
 import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
 import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
@@ -520,6 +522,502 @@ function unwrapAi(val) {
     return val
 }
 
+// ——— JSON Syntax Highlighter ———
+function JsonSyntaxHighlighted({ data }) {
+    if (data === null || data === undefined) return <span className="text-gray-400 italic">null</span>
+
+    const json = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+
+    const highlighted = json.replace(
+        /("(?:\\.|[^"\\])*")\s*:/g,
+        '<span class="text-indigo-600 font-medium">$1</span>:'
+    ).replace(
+        /:\s*("(?:\\.|[^"\\])*")/g,
+        ': <span class="text-emerald-600">$1</span>'
+    ).replace(
+        /:\s*(\d+\.?\d*)/g,
+        ': <span class="text-amber-600">$1</span>'
+    ).replace(
+        /:\s*(true|false)/g,
+        ': <span class="text-blue-600 font-medium">$1</span>'
+    ).replace(
+        /:\s*(null)/g,
+        ': <span class="text-gray-400 italic">$1</span>'
+    )
+
+    return (
+        <pre
+            className="text-xs leading-relaxed text-gray-700 whitespace-pre-wrap break-words font-mono"
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+        />
+    )
+}
+
+// ——— Research Data Modal ———
+function ResearchDataModal({ open, onClose, title, loading, data, error }) {
+    const tabs = data ? Object.keys(data).filter(k => data[k] != null) : []
+    const [activeTab, setActiveTabState] = useState(tabs[0] || '')
+
+    useEffect(() => {
+        if (data) {
+            const keys = Object.keys(data).filter(k => data[k] != null)
+            if (keys.length > 0 && !keys.includes(activeTab)) setActiveTabState(keys[0])
+        }
+    }, [data])
+
+    const tabLabel = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+    if (!open) return null
+
+    return createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+            <div
+                className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                    <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+                    <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-400 hover:text-gray-600">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+
+                {/* Content */}
+                {loading && (
+                    <div className="flex-1 flex items-center justify-center py-20">
+                        <div className="flex flex-col items-center gap-3">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500 border-t-transparent" />
+                            <span className="text-sm text-gray-500">Loading data…</span>
+                        </div>
+                    </div>
+                )}
+
+                {error && (
+                    <div className="flex-1 flex items-center justify-center py-20">
+                        <div className="text-center">
+                            <p className="text-sm text-red-600">{error}</p>
+                        </div>
+                    </div>
+                )}
+
+                {!loading && !error && data && (
+                    <>
+                        {/* Tabs */}
+                        {tabs.length > 1 && (
+                            <div className="flex gap-1 px-6 pt-3 pb-0 overflow-x-auto">
+                                {tabs.map(key => (
+                                    <button
+                                        type="button"
+                                        key={key}
+                                        onClick={() => setActiveTabState(key)}
+                                        className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
+                                            activeTab === key
+                                                ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {tabLabel(key)}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* JSON */}
+                        <div className="flex-1 overflow-auto px-6 py-4">
+                            <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 overflow-auto max-h-[60vh]">
+                                <JsonSyntaxHighlighted data={data[activeTab]} />
+                            </div>
+                        </div>
+                    </>
+                )}
+
+                {!loading && !error && !data && (
+                    <div className="flex-1 flex items-center justify-center py-20">
+                        <p className="text-sm text-gray-400">No data available for this item.</p>
+                    </div>
+                )}
+            </div>
+        </div>,
+        document.body
+    )
+}
+
+// ——— Research Insights Panel ———
+function ResearchInsightsPanel({ insights, brandId }) {
+    const [modalOpen, setModalOpen] = useState(false)
+    const [modalTitle, setModalTitle] = useState('')
+    const [modalLoading, setModalLoading] = useState(false)
+    const [modalData, setModalData] = useState(null)
+    const [modalError, setModalError] = useState(null)
+
+    if (!insights) return (
+        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden px-6 py-10 sm:px-10 sm:py-12 text-center">
+            <p className="text-gray-400 text-sm">No research data yet. Run the Brand Guidelines Builder or Research page to generate insights.</p>
+            <Link href={`/app/brands/${brandId}/research`} className="mt-3 inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                Go to Research →
+            </Link>
+        </div>
+    )
+
+    const { runs = [], snapshots = [], latest_snapshot_data } = insights
+
+    const statusBadge = (status) => {
+        const map = {
+            completed: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+            processing: 'bg-blue-50 text-blue-700 ring-blue-600/20',
+            running: 'bg-blue-50 text-blue-700 ring-blue-600/20',
+            pending: 'bg-gray-50 text-gray-600 ring-gray-500/10',
+            failed: 'bg-red-50 text-red-700 ring-red-600/10',
+        }
+        return (
+            <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${map[status] || map.pending}`}>
+                {status}
+            </span>
+        )
+    }
+
+    const formatTime = (iso) => {
+        if (!iso) return '—'
+        const d = new Date(iso)
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    }
+
+    const formatDuration = (seconds) => {
+        if (!seconds) return '—'
+        if (seconds < 60) return `${seconds}s`
+        const m = Math.floor(seconds / 60)
+        const s = seconds % 60
+        return `${m}m ${s}s`
+    }
+
+    const openRunDetail = async (run) => {
+        setModalTitle(`Pipeline Run #${run.id} — ${run.has_asset ? 'PDF Extraction' : 'Website Analysis'}`)
+        setModalData(null)
+        setModalError(null)
+        setModalLoading(true)
+        setModalOpen(true)
+        try {
+            const { data } = await axios.get(`/app/brands/${brandId}/brand-dna/builder/brand-pipeline/${run.id}/detail`)
+            const sections = {}
+            if (data.merged_extraction) sections.merged_extraction = data.merged_extraction
+            if (data.raw_api_response) sections.raw_api_response = data.raw_api_response
+            sections.run_metadata = {
+                id: data.id,
+                status: data.status,
+                stage: data.stage,
+                extraction_mode: data.extraction_mode,
+                pages_total: data.pages_total,
+                pages_processed: data.pages_processed,
+                error_message: data.error_message,
+                created_at: data.created_at,
+                completed_at: data.completed_at,
+            }
+            setModalData(Object.keys(sections).length > 0 ? sections : null)
+        } catch (err) {
+            setModalError(err?.response?.data?.message || 'Failed to load run data.')
+        } finally {
+            setModalLoading(false)
+        }
+    }
+
+    const openSnapshotDetail = async (snap) => {
+        setModalTitle(`Snapshot — ${snap.source_url || `#${snap.id}`}`)
+        setModalData(null)
+        setModalError(null)
+        setModalLoading(true)
+        setModalOpen(true)
+        try {
+            const { data } = await axios.get(`/app/brands/${brandId}/brand-dna/builder/brand-pipeline-snapshot/${snap.id}/detail`)
+            const sections = {}
+            if (data.snapshot) sections.snapshot = data.snapshot
+            if (data.suggestions) sections.suggestions = data.suggestions
+            if (data.coherence) sections.coherence = data.coherence
+            if (data.alignment) sections.alignment = data.alignment
+            sections.metadata = {
+                id: data.id,
+                status: data.status,
+                source_url: data.source_url,
+                created_at: data.created_at,
+            }
+            setModalData(Object.keys(sections).length > 0 ? sections : null)
+        } catch (err) {
+            setModalError(err?.response?.data?.message || 'Failed to load snapshot data.')
+        } finally {
+            setModalLoading(false)
+        }
+    }
+
+    const closeModal = () => {
+        setModalOpen(false)
+        setModalData(null)
+        setModalError(null)
+    }
+
+    return (
+        <div className="space-y-6">
+            <ResearchDataModal
+                open={modalOpen}
+                onClose={closeModal}
+                title={modalTitle}
+                loading={modalLoading}
+                data={modalData}
+                error={modalError}
+            />
+
+            {/* Latest Extracted Data */}
+            {latest_snapshot_data && (
+                <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                    <div className="px-6 py-5 sm:px-8 border-b border-gray-100">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-900">Extracted Insights</h2>
+                                <p className="mt-0.5 text-xs text-gray-500">
+                                    Latest completed research
+                                    {latest_snapshot_data.source_url && <> from <span className="font-medium text-gray-700">{latest_snapshot_data.source_url}</span></>}
+                                    {latest_snapshot_data.created_at && <> · {formatTime(latest_snapshot_data.created_at)}</>}
+                                </p>
+                            </div>
+                            {latest_snapshot_data.coherence_score != null && (
+                                <div className="text-right">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Coherence</p>
+                                    <p className="text-2xl font-bold text-indigo-600">{Math.round(latest_snapshot_data.coherence_score)}%</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="px-6 py-5 sm:px-8 space-y-5">
+                        {/* Identity fields */}
+                        <div className="grid grid-cols-2 gap-4">
+                            {[
+                                { label: 'Mission', value: latest_snapshot_data.mission },
+                                { label: 'Vision', value: latest_snapshot_data.vision },
+                                { label: 'Tagline', value: latest_snapshot_data.tagline },
+                                { label: 'Industry', value: latest_snapshot_data.industry },
+                                { label: 'Target Audience', value: latest_snapshot_data.target_audience },
+                                { label: 'Positioning', value: latest_snapshot_data.positioning },
+                            ].filter((f) => f.value).map(({ label, value }) => (
+                                <div key={label} className="col-span-2 sm:col-span-1">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-1">{label}</p>
+                                    <p className="text-sm text-gray-800 leading-relaxed">{typeof value === 'string' ? value.slice(0, 200) : JSON.stringify(value)}</p>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Brand bio */}
+                        {latest_snapshot_data.brand_bio && (
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-1">Brand Bio</p>
+                                <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-3">{latest_snapshot_data.brand_bio.slice(0, 500)}</p>
+                            </div>
+                        )}
+
+                        {/* Voice & Look */}
+                        {(latest_snapshot_data.voice_description || latest_snapshot_data.brand_look) && (
+                            <div className="grid grid-cols-2 gap-4">
+                                {latest_snapshot_data.voice_description && (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-1">Voice</p>
+                                        <p className="text-sm text-gray-700">{latest_snapshot_data.voice_description.slice(0, 200)}</p>
+                                    </div>
+                                )}
+                                {latest_snapshot_data.brand_look && (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-1">Brand Look</p>
+                                        <p className="text-sm text-gray-700">{latest_snapshot_data.brand_look.slice(0, 200)}</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Visual: Colors */}
+                        {(latest_snapshot_data.primary_colors?.length > 0 || latest_snapshot_data.secondary_colors?.length > 0) && (
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-2">Detected Colors</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {[...(latest_snapshot_data.primary_colors || []), ...(latest_snapshot_data.secondary_colors || [])].map((c, i) => {
+                                        const hex = typeof c === 'string' ? c : c?.hex || ''
+                                        return (
+                                            <div key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-gray-50 border border-gray-200">
+                                                <div className="w-4 h-4 rounded border border-gray-300" style={{ backgroundColor: hex }} />
+                                                <span className="text-xs font-mono text-gray-600">{hex}</span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Visual: Fonts */}
+                        {latest_snapshot_data.detected_fonts?.length > 0 && (
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-2">Detected Fonts</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {latest_snapshot_data.detected_fonts.map((f, i) => (
+                                        <span key={i} className="px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 text-xs font-medium text-gray-700">{f}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Headlines */}
+                        {latest_snapshot_data.hero_headlines?.length > 0 && (
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-2">Hero Headlines</p>
+                                <div className="space-y-1">
+                                    {latest_snapshot_data.hero_headlines.map((h, i) => (
+                                        <p key={i} className="text-sm text-gray-600 pl-3 border-l-2 border-gray-200">{h}</p>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Coherence strengths / risks */}
+                        {(latest_snapshot_data.coherence_strengths?.length > 0 || latest_snapshot_data.coherence_risks?.length > 0) && (
+                            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+                                {latest_snapshot_data.coherence_strengths?.length > 0 && (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-emerald-500 font-medium mb-2">Strengths</p>
+                                        <ul className="space-y-1">
+                                            {latest_snapshot_data.coherence_strengths.map((s, i) => (
+                                                <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
+                                                    <span className="w-1 h-1 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" />
+                                                    {s}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                                {latest_snapshot_data.coherence_risks?.length > 0 && (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-amber-500 font-medium mb-2">Risks</p>
+                                        <ul className="space-y-1">
+                                            {latest_snapshot_data.coherence_risks.map((r, i) => (
+                                                <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
+                                                    <span className="w-1 h-1 rounded-full bg-amber-400 mt-1.5 flex-shrink-0" />
+                                                    {r}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Pipeline Runs */}
+            <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                <div className="px-6 py-5 sm:px-8 border-b border-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-900">Pipeline Runs</h2>
+                    <p className="mt-0.5 text-xs text-gray-500">History of PDF extractions and website analyses</p>
+                </div>
+                {runs.length === 0 ? (
+                    <div className="px-6 py-8 sm:px-8 text-center">
+                        <p className="text-sm text-gray-400">No pipeline runs yet</p>
+                    </div>
+                ) : (
+                    <div className="divide-y divide-gray-100">
+                        {runs.map((run) => (
+                            <button
+                                key={run.id}
+                                type="button"
+                                onClick={() => openRunDetail(run)}
+                                className="w-full text-left px-6 sm:px-8 py-4 flex items-center gap-4 hover:bg-gray-50/80 transition cursor-pointer group"
+                            >
+                                <div className="flex-shrink-0">
+                                    {run.has_asset ? (
+                                        <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center" title="PDF Extraction">
+                                            <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                                        </div>
+                                    ) : (
+                                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center" title="Website Crawl">
+                                            <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-gray-800">
+                                            {run.has_asset ? 'PDF Extraction' : 'Website Analysis'}
+                                        </span>
+                                        {statusBadge(run.status)}
+                                        {run.extraction_mode === 'vision' && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-medium ring-1 ring-purple-500/10">Vision</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                                        <span>{formatTime(run.created_at)}</span>
+                                        {run.duration_seconds && <span>· {formatDuration(run.duration_seconds)}</span>}
+                                        {run.pages_total > 0 && <span>· {run.pages_processed}/{run.pages_total} pages</span>}
+                                    </div>
+                                    {run.error_message && run.status === 'failed' && (
+                                        <p className="mt-1 text-xs text-red-600 bg-red-50 rounded px-2 py-1">{run.error_message.slice(0, 200)}</p>
+                                    )}
+                                </div>
+                                <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3" /></svg>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Website Snapshots */}
+            {snapshots.length > 0 && (
+                <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                    <div className="px-6 py-5 sm:px-8 border-b border-gray-100">
+                        <h2 className="text-lg font-semibold text-gray-900">Website Research Snapshots</h2>
+                        <p className="mt-0.5 text-xs text-gray-500">Results from website crawls and AI analysis</p>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                        {snapshots.map((snap) => (
+                            <button
+                                key={snap.id}
+                                type="button"
+                                onClick={() => openSnapshotDetail(snap)}
+                                className="w-full text-left px-6 sm:px-8 py-4 flex items-center gap-4 hover:bg-gray-50/80 transition cursor-pointer group"
+                            >
+                                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+                                    <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-gray-800 truncate">{snap.source_url || 'ingestion'}</span>
+                                        {statusBadge(snap.status)}
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                                        <span>{formatTime(snap.created_at)}</span>
+                                        {snap.suggestion_count > 0 && <span>· {snap.suggestion_count} suggestions</span>}
+                                        {snap.coherence_score != null && <span>· Coherence: {Math.round(snap.coherence_score)}%</span>}
+                                    </div>
+                                </div>
+                                <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3" /></svg>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Link to full research page */}
+            <div className="text-center pt-2">
+                <Link
+                    href={`/app/brands/${brandId}/research`}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                    Open Full Research Page
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+                </Link>
+            </div>
+        </div>
+    )
+}
+
 function deepUnwrap(obj) {
     if (!obj || typeof obj !== 'object') return obj
     if (Array.isArray(obj)) return obj.map(deepUnwrap)
@@ -575,6 +1073,8 @@ function modelPayloadToForm(payload) {
             secondary_font: typography.secondary_font || null,
             heading_style: typography.heading_style || null,
             body_style: typography.body_style || null,
+            fonts: Array.isArray(typography.fonts) ? typography.fonts : [],
+            external_font_links: Array.isArray(typography.external_font_links) ? typography.external_font_links : [],
             allowed_colors: allowedColors,
             banned_colors: Array.isArray(scoringRules.banned_colors) ? scoringRules.banned_colors : [],
             allowed_fonts: Array.isArray(scoringRules.allowed_fonts) ? scoringRules.allowed_fonts : [],
@@ -634,6 +1134,8 @@ function formToModelPayload(form, existingPayload) {
     typography.secondary_font = form.standards?.secondary_font ?? typography.secondary_font
     typography.heading_style = form.standards?.heading_style ?? typography.heading_style
     typography.body_style = form.standards?.body_style ?? typography.body_style
+    if (form.standards?.fonts !== undefined) typography.fonts = form.standards.fonts
+    if (form.standards?.external_font_links !== undefined) typography.external_font_links = form.standards.external_font_links
 
     const palette = (form.standards?.allowed_colors || []).map((hex) =>
         typeof hex === 'string' && hex ? { hex, role: null } : null
@@ -813,14 +1315,15 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
     const { auth } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
+    const isFreePlan = current_plan === 'free'
     const can = (p) => effectivePermissions.includes(p)
     const canAccessCategoriesAndFields = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
-    const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'scoring', 'presentation']
+    const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'scoring', 'presentation', 'research']
     const ALL_TABS = ['identity', 'workspace', 'public-site', ...DNA_TABS, 'members']
     const getInitialTab = () => {
         if (typeof window === 'undefined') return 'identity'
@@ -877,19 +1380,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         })
     }
     
-    // Derive icon_bg_style from stored icon_bg_color (preserve saved values, no schema change)
-    const normalizeHex = (h) => (h || '').replace(/^#/, '').toLowerCase()
-    const deriveIconBgStyle = (stored, primary, secondary, accent) => {
-        const s = normalizeHex(stored)
-        if (!s) return 'primary'
-        if (s === normalizeHex(primary)) return 'primary'
-        if (s === normalizeHex(secondary)) return 'secondary'
-        if (s === normalizeHex(accent)) return 'accent'
-        return 'custom'
-    }
-    const [iconBgStyle, setIconBgStyle] = useState(() =>
-        deriveIconBgStyle(brand.icon_bg_color, brand.primary_color, brand.secondary_color, brand.accent_color)
-    )
+    
 
     const { data, setData, put, processing, errors } = useForm({
         name: brand.name,
@@ -901,13 +1392,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         logo_dark_id: brand.logo_dark_id ?? null,
         logo_dark_preview: brand.logo_dark_thumbnail_url || brand.logo_dark_path || '',
         clear_logo_dark: false,
+        logo_horizontal_id: brand.logo_horizontal_id ?? null,
+        logo_horizontal_preview: brand.logo_horizontal_thumbnail_url || brand.logo_horizontal_path || '',
+        clear_logo_horizontal: false,
         icon_id: brand.icon_id ?? null,
         icon_preview: brand.icon_thumbnail_url || brand.icon_path || '',
         icon_bg_color: brand.icon_bg_color || brand.primary_color || '#6366f1',
+        icon_style: brand.icon_style || 'subtle',
         show_in_selector: brand.show_in_selector !== undefined ? brand.show_in_selector : true,
-        primary_color: brand.primary_color || '',
-        secondary_color: brand.secondary_color || '',
-        accent_color: brand.accent_color || '',
+        primary_color: brand.primary_color_user_defined ? (brand.primary_color || '#6366f1') : '#6366f1',
+        secondary_color: brand.secondary_color_user_defined ? (brand.secondary_color || '#8b5cf6') : '#8b5cf6',
+        accent_color: brand.accent_color_user_defined ? (brand.accent_color || '') : '',
         nav_color: brand.nav_color || brand.primary_color || '',
         workspace_button_style: brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary',
         logo_filter: brand.logo_filter || 'none',
@@ -1146,12 +1641,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         }
     }, [data.logo_preview, data.icon_preview])
 
-    // Sync icon_bg_color when palette changes and style is not custom
-    useEffect(() => {
-        if (iconBgStyle === 'primary') setData('icon_bg_color', data.primary_color || brand.primary_color || '')
-        else if (iconBgStyle === 'secondary') setData('icon_bg_color', data.secondary_color || brand.secondary_color || '')
-        else if (iconBgStyle === 'accent') setData('icon_bg_color', data.accent_color || brand.accent_color || '')
-    }, [iconBgStyle, data.primary_color, data.secondary_color, data.accent_color])
+    
 
     // Detect if icon is white and set background style
     useEffect(() => {
@@ -1240,6 +1730,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     { id: 'standards', label: 'Standards' },
                                     { id: 'scoring', label: 'Scoring' },
                                     { id: 'presentation', label: 'Presentation' },
+                                    { id: 'research', label: 'Research' },
                                 ].map((item) => (
                                     <button
                                         key={item.id}
@@ -1259,6 +1750,35 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     )}
 
                     <div className="flex-1 min-w-0">
+
+                    {/* Upgrade banner for free plan users */}
+                    {isDnaTab && isFreePlan && (
+                        <div className="mb-6 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50 p-5">
+                            <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0 mt-0.5 rounded-lg bg-indigo-100 p-2">
+                                    <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="text-sm font-semibold text-indigo-900">You're on the Free plan</h3>
+                                    <p className="mt-1 text-sm text-indigo-700/70">
+                                        You can manually configure your Brand DNA settings below. Upgrade to unlock the AI-powered Brand Guidelines Builder, automated research, and all presentation styles.
+                                    </p>
+                                    <div className="mt-3 flex items-center gap-3">
+                                        <Link
+                                            href={route('billing.index')}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                                            Upgrade Plan
+                                        </Link>
+                                        <span className="text-xs text-indigo-600/50">Presentation style limited to Clean on the free plan</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {isDnaTab && (() => {
                         const draftVersion = (all_versions || []).find((v) => v.status === 'draft')
@@ -1308,6 +1828,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         brandId={brand.id}
                                         selectedVersionId={selectedVersionId}
                                         onSelect={handleVersionSelect}
+                                        isFreePlan={isFreePlan}
                                     />
                                 ) : (
                                     <p className="text-sm text-gray-500 mb-3">No versions yet.</p>
@@ -1316,12 +1837,24 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 {/* New version CTA — only when no draft exists */}
                                 {!draftVersion && (
                                     <div className="mt-4 pt-4 border-t border-gray-100">
-                                        <Link
-                                            href={typeof route === 'function' ? route('brands.research.show', { brand: brand.id }) : `/app/brands/${brand.id}/research`}
-                                            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-                                        >
-                                            {hasActiveVersion ? 'Start New Version' : 'Start Brand Builder'}
-                                        </Link>
+                                        {isFreePlan ? (
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-sm text-gray-500">AI-powered builder requires a paid plan.</span>
+                                                <Link
+                                                    href={route('billing.index')}
+                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                                                >
+                                                    Upgrade
+                                                </Link>
+                                            </div>
+                                        ) : (
+                                            <Link
+                                                href={typeof route === 'function' ? route('brands.research.show', { brand: brand.id }) : `/app/brands/${brand.id}/research`}
+                                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                                            >
+                                                {hasActiveVersion ? 'Start New Version' : 'Start Brand Builder'}
+                                            </Link>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1427,7 +1960,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
-                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'scoring' || activeTab === 'presentation') ? (
+                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'scoring' || activeTab === 'presentation' || activeTab === 'research') ? (
                 /* DNA tabs: separate form, saves to model_payload */
                 <form onSubmit={handleSaveDna} className="mt-8 space-y-8">
                     {activeTab === 'strategy' && (
@@ -1567,48 +2100,214 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                     )}
                     {activeTab === 'standards' && (
-                    <div id="standards" className="scroll-mt-8">
+                    <div id="standards" className="scroll-mt-8 space-y-8">
+                        {/* ——— Typography & Fonts ——— */}
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-2">
-                                    <h2 className="text-xl font-semibold text-gray-900">Standards</h2>
+                                    <h2 className="text-xl font-semibold text-gray-900">Typography</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Typography, colors, fonts, and visual references for compliance scoring.
+                                        Manage brand fonts — select from Google Fonts, add custom/licensed fonts, or link external stylesheets.
+                                    </p>
+                                </div>
+
+                                {/* FontManager in dark container */}
+                                <div className="mt-6 rounded-xl bg-[#14131a] border border-white/10 p-5">
+                                    <FontManager
+                                        fonts={modelPayload.standards?.fonts || []}
+                                        onChange={(fonts) => {
+                                            setModelPayloadField('standards.fonts', fonts)
+                                            const primary = fonts.find((f) => f.role === 'primary' || f.role === 'display')
+                                            const secondary = fonts.find((f) => f.role === 'secondary' || f.role === 'body')
+                                            if (primary) setModelPayloadField('standards.primary_font', primary.name)
+                                            if (secondary) setModelPayloadField('standards.secondary_font', secondary.name)
+                                            const fontNames = fonts.map((f) => typeof f === 'string' ? f : f?.name).filter(Boolean)
+                                            setModelPayloadField('standards.allowed_fonts', fontNames)
+                                        }}
+                                    />
+
+                                    {/* External Font URLs */}
+                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                        <label className="block text-xs text-white/60 mb-1.5">External Font URLs</label>
+                                        <div className="space-y-2">
+                                            {(modelPayload.standards?.external_font_links || []).map((url, i) => (
+                                                <div key={i} className="flex items-center gap-2">
+                                                    <input
+                                                        type="url"
+                                                        value={url}
+                                                        onChange={(e) => {
+                                                            const links = [...(modelPayload.standards?.external_font_links || [])]
+                                                            links[i] = e.target.value
+                                                            setModelPayloadField('standards.external_font_links', links)
+                                                        }}
+                                                        className="flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/30 focus:ring-1 focus:ring-white/30 focus:border-white/30"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const links = (modelPayload.standards?.external_font_links || []).filter((_, j) => j !== i)
+                                                            setModelPayloadField('standards.external_font_links', links)
+                                                        }}
+                                                        className="p-2 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const links = [...(modelPayload.standards?.external_font_links || []), '']
+                                                    setModelPayloadField('standards.external_font_links', links)
+                                                }}
+                                                className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white/60 transition-colors"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                                                Add font CSS URL
+                                            </button>
+                                        </div>
+                                        <p className="mt-1.5 text-[11px] text-white/30">Google Fonts or self-hosted font CSS URLs (HTTPS only).</p>
+                                    </div>
+                                </div>
+
+                                {/* Font source alerts */}
+                                {(() => {
+                                    const fonts = modelPayload.standards?.fonts || []
+                                    const missingSource = fonts.filter((f) => {
+                                        if (typeof f === 'string') return true
+                                        return f.source === 'unknown' || (f.source === 'custom' && !f.purchase_url && (!f.file_urls || f.file_urls.length === 0))
+                                    })
+                                    if (missingSource.length === 0) return null
+                                    return (
+                                        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                                            <div className="flex gap-3">
+                                                <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                                                <div>
+                                                    <p className="text-sm font-medium text-amber-800">Missing font source files</p>
+                                                    <p className="mt-1 text-xs text-amber-700">
+                                                        {missingSource.length} font{missingSource.length > 1 ? 's' : ''} ({missingSource.map((f) => typeof f === 'string' ? f : f.name).join(', ')}) {missingSource.length > 1 ? 'have' : 'has'} no source files or license URL.
+                                                        Edit the font to add WOFF2/OTF files or a purchase link so team members can access them.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })()}
+
+                                {/* Heading / body style overrides */}
+                                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                    <div>
+                                        <label htmlFor="heading_style" className="block text-sm font-medium text-gray-900">Heading style</label>
+                                        <p className="text-xs text-gray-500 mb-1.5">How headings should appear (e.g. "Bold uppercase", "32px semi-bold").</p>
+                                        <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" placeholder="e.g. Bold, uppercase, 2rem" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
+                                        <p className="text-xs text-gray-500 mb-1.5">How body text should appear (e.g. "Regular 16px/1.6", "Light 14px").</p>
+                                        <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" placeholder="e.g. Regular, 16px / 1.6 line height" />
+                                    </div>
+                                </div>
+
+                                <div className="mt-6">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ——— Colors ——— */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Colors</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Define allowed and banned color palettes for brand compliance scoring.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                        <div>
-                                            <label htmlFor="primary_font" className="block text-sm font-medium text-gray-900">Primary font</label>
-                                            <input type="text" id="primary_font" value={modelPayload.standards?.primary_font ?? ''} onChange={(e) => setModelPayloadField('standards.primary_font', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="secondary_font" className="block text-sm font-medium text-gray-900">Secondary font</label>
-                                            <input type="text" id="secondary_font" value={modelPayload.standards?.secondary_font ?? ''} onChange={(e) => setModelPayloadField('standards.secondary_font', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                        <div>
-                                            <label htmlFor="heading_style" className="block text-sm font-medium text-gray-900">Heading style</label>
-                                            <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
-                                            <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm" />
-                                        </div>
-                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Allowed colors</label>
                                         <textarea rows={3} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
+                                        {(modelPayload.standards?.allowed_colors || []).length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                {(modelPayload.standards?.allowed_colors || []).map((c, i) => (
+                                                    <div key={i} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2 py-1">
+                                                        <span className="w-4 h-4 rounded-sm border border-gray-300" style={{ backgroundColor: c }} />
+                                                        <span className="text-xs text-gray-600 font-mono">{c}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Banned colors</label>
                                         <textarea rows={3} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated" />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900">Allowed fonts</label>
+                                        <label className="block text-sm font-medium text-gray-900">Allowed fonts (for scoring)</label>
+                                        <p className="text-xs text-gray-500 mb-1.5">Auto-populated from the Typography section above. Add additional names if needed.</p>
                                         <textarea rows={3} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-indigo-600 focus:border-indigo-500 text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
+
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ——— Logo Variants ——— */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Logo Variants</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Logo versions for different contexts. Managed in{' '}
+                                        <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Identity &rarr; Brand Images</button>.
+                                    </p>
+                                </div>
+                                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                                    {[
+                                        { label: 'Primary', preview: data.logo_preview || brand.logo_path, bg: 'bg-white', desc: 'Light backgrounds' },
+                                        { label: 'On Dark', preview: data.logo_dark_preview || brand.logo_dark_path, bg: 'bg-gray-900', desc: 'Dark backgrounds' },
+                                        { label: 'Horizontal', preview: data.logo_horizontal_preview || brand.logo_horizontal_path, bg: 'bg-white', desc: 'Wide placements' },
+                                        { label: 'Icon', preview: data.icon_preview || brand.icon_path, bg: 'bg-white', desc: 'Compact displays' },
+                                    ].map(({ label, preview, bg, desc }) => (
+                                        <div key={label} className="rounded-lg border border-gray-200 overflow-hidden">
+                                            <div className={`${bg} flex items-center justify-center h-20 p-3`}>
+                                                {preview ? (
+                                                    <img src={preview} alt={label} className={`max-h-14 max-w-full object-contain ${bg === 'bg-gray-900' ? 'brightness-0 invert' : ''}`} style={bg === 'bg-gray-900' && (data.logo_dark_preview || brand.logo_dark_path) ? { filter: 'none' } : undefined} />
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">Not set</span>
+                                                )}
+                                            </div>
+                                            <div className="px-3 py-2 bg-gray-50 border-t border-gray-200">
+                                                <p className="text-xs font-medium text-gray-700">{label}</p>
+                                                <p className="text-[10px] text-gray-500">{desc}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {!data.logo_preview && !brand.logo_path && (
+                                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-2">
+                                        <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                                        <p className="text-xs text-amber-700">No primary logo uploaded. <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-amber-800 font-medium underline underline-offset-2">Upload in Identity</button></p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* ——— Visual References & Logo Usage ——— */}
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Visual References & Logo Usage</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Reference imagery for scoring and logo usage guidelines.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
                                     {/* Visual References by Category */}
                                     <VisualReferenceCategoryPicker
                                         brandId={brand.id}
@@ -1621,7 +2320,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <div className="flex items-center justify-between mb-4">
                                             <div>
                                                 <h4 className="text-sm font-semibold text-gray-900">Logo Usage Guidelines</h4>
-                                                <p className="text-xs text-gray-500 mt-0.5">Rules for how the logo should and shouldn&apos;t be used in brand guidelines.</p>
+                                                <p className="text-xs text-gray-500 mt-0.5">Rules for how the logo should and shouldn&apos;t be used in brand guidelines. Uses the logo uploaded in <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Identity</button>.</p>
                                             </div>
                                         </div>
 
@@ -1971,22 +2670,29 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         },
                                     ].map((style) => {
                                         const isSelected = (modelPayload.presentation?.style || 'clean') === style.id
+                                        const isLocked = isFreePlan && style.id !== 'clean'
                                         return (
                                             <button
                                                 key={style.id}
                                                 type="button"
-                                                onClick={() => setModelPayloadField('presentation.style', style.id)}
+                                                onClick={() => !isLocked && setModelPayloadField('presentation.style', style.id)}
+                                                disabled={isLocked}
                                                 className={`relative flex flex-col rounded-xl border-2 p-0 text-left transition-all overflow-hidden ${
-                                                    isSelected
-                                                        ? 'border-indigo-600 ring-2 ring-indigo-600 shadow-md'
-                                                        : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                                                    isLocked
+                                                        ? 'border-gray-200 opacity-50 cursor-not-allowed'
+                                                        : isSelected
+                                                            ? 'border-indigo-600 ring-2 ring-indigo-600 shadow-md'
+                                                            : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                                                 }`}
                                             >
+                                                {isLocked && (
+                                                    <div className="absolute top-2 right-2 z-10 rounded-full bg-gray-800/80 px-2 py-0.5 text-[10px] font-medium text-white">Paid</div>
+                                                )}
                                                 {style.preview}
                                                 <div className="p-4 flex-1 flex flex-col">
                                                     <div className="flex items-center justify-between mb-1">
                                                         <h3 className="text-sm font-semibold text-gray-900">{style.label}</h3>
-                                                        {isSelected && (
+                                                        {isSelected && !isLocked && (
                                                             <svg className="h-5 w-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                         )}
                                                     </div>
@@ -2025,12 +2731,44 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                     )}
 
+                    {activeTab === 'research' && (
+                    <ResearchInsightsPanel insights={research_insights} brandId={brand.id} />
+                    )}
+
                 </form>
                 ) : (
                 <form onSubmit={submit} className="space-y-8">
                     {/* Tab: Identity */}
                     {activeTab === 'identity' && (
                     <>
+                    <div className="flex gap-8">
+                        {/* Left: Section navigation */}
+                        <nav className="hidden lg:block w-44 flex-shrink-0">
+                            <div className="sticky top-8 space-y-1">
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3 px-3">On this page</p>
+                                {[
+                                    { id: 'basic-information', label: 'Brand Identity' },
+                                    { id: 'brand-images', label: 'Brand Images' },
+                                    { id: 'brand-colors', label: 'Brand Colors' },
+                                ].map((s) => (
+                                    <a
+                                        key={s.id}
+                                        href={`#${s.id}`}
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                        }}
+                                        className="block px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
+                                    >
+                                        {s.label}
+                                    </a>
+                                ))}
+                            </div>
+                        </nav>
+
+                        {/* Center: Main content */}
+                        <div className="flex-1 min-w-0 space-y-8">
+
                     {/* Section 1: Brand Identity */}
                     <div id="basic-information" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
@@ -2084,240 +2822,209 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </p>
                                 </div>
 
-                                {/* Brand Images Section — Part 1.4: Equal boxes, Live Preview below */}
-                                <div className="pt-6 border-t border-gray-200">
-                                    <h4 className="text-sm font-semibold text-gray-900 mb-1">Brand Images</h4>
-                                    <p className="text-sm text-gray-500 mb-4">
-                                        This logo will be used in creative generation and brand guidelines.
-                                    </p>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* Logo (Light Background) */}
-                                        <div className="flex flex-col">
-                                            <label htmlFor="logo" className="block text-sm font-medium text-gray-900 mb-1">
-                                                Logo
-                                            </label>
-                                            <p className="text-xs text-gray-500 mb-2">Used on light backgrounds.</p>
-                                            <div className="flex-1 min-h-[180px] rounded-lg border border-gray-200 bg-white p-2">
-                                                <AssetImagePickerField
-                                                    value={{
-                                                        preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_path) : null),
-                                                        asset_id: data.logo_id ?? null,
-                                                    }}
-                                                    onChange={(v) => {
-                                                        if (v == null) {
-                                                            setData('logo_id', null)
-                                                            setData('logo_preview', null)
-                                                            setData('clear_logo', true)
-                                                        } else if (v?.asset_id) {
-                                                            setData('logo_id', v.asset_id)
-                                                            setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                            setData('logo', null)
-                                                            setData('clear_logo', false)
-                                                        }
-                                                    }}
-                                                    fetchAssets={(opts) => {
-                                                        const params = new URLSearchParams({ format: 'json' })
-                                                        if (opts?.category) params.set('category', opts.category)
-                                                        return fetch(`/app/assets?${params}`, {
-                                                            credentials: 'same-origin',
-                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                        }).then((r) => r.json())
-                                                    }}
-                                                    getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                    title="Select logo"
-                                                    defaultCategoryLabel="Logos"
-                                                    contextCategory="logos"
-                                                    aspectRatio={{ width: 265, height: 64 }}
-                                                    minWidth={265}
-                                                    minHeight={64}
-                                                    placeholder="Click to choose from library or upload"
-                                                    helperText="Recommended: 265×64 px or similar aspect ratio"
-                                                    className="h-full"
-                                                />
-                                            </div>
-                                            {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
-                                        </div>
-
-                                        {/* Logo (Dark Background) */}
-                                        <div className="flex flex-col">
-                                            <label htmlFor="logo_dark" className="block text-sm font-medium text-gray-900 mb-1">
-                                                Logo (Dark Background)
-                                            </label>
-                                            <p className="text-xs text-gray-500 mb-2">Optional. Used on dark backgrounds like the brand overview hero.</p>
-                                            <div className="flex-1 min-h-[180px] rounded-lg border border-gray-700 bg-gray-900 p-2">
-                                                <AssetImagePickerField
-                                                    value={{
-                                                        preview_url: data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_path) : null),
-                                                        asset_id: data.logo_dark_id ?? null,
-                                                    }}
-                                                    onChange={(v) => {
-                                                        if (v == null) {
-                                                            setData('logo_dark_id', null)
-                                                            setData('logo_dark_preview', null)
-                                                            setData('clear_logo_dark', true)
-                                                        } else if (v?.asset_id) {
-                                                            setData('logo_dark_id', v.asset_id)
-                                                            setData('logo_dark_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                            setData('clear_logo_dark', false)
-                                                        }
-                                                    }}
-                                                    fetchAssets={(opts) => {
-                                                        const params = new URLSearchParams({ format: 'json' })
-                                                        if (opts?.category) params.set('category', opts.category)
-                                                        return fetch(`/app/assets?${params}`, {
-                                                            credentials: 'same-origin',
-                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                        }).then((r) => r.json())
-                                                    }}
-                                                    getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                    title="Select dark logo"
-                                                    defaultCategoryLabel="Logos"
-                                                    contextCategory="logos"
-                                                    aspectRatio={{ width: 265, height: 64 }}
-                                                    minWidth={265}
-                                                    minHeight={64}
-                                                    placeholder="Click to choose from library or upload"
-                                                    helperText="Light-colored logo for dark backgrounds"
-                                                    className="h-full"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                                        {/* Icon */}
-                                        <div className="flex flex-col">
-                                            <label htmlFor="icon" className="block text-sm font-medium text-gray-900 mb-2">
-                                                Icon
-                                            </label>
-                                            <p className="text-xs text-gray-500 mb-2">
-                                                Square (1:1) format. Used in compact displays.
-                                            </p>
-                                            <div className="flex-1 min-h-[180px]">
-                                                <AssetImagePickerField
-                                                    value={{
-                                                        preview_url: data.icon_preview ?? (data.icon_id && data.icon_id === brand.icon_id ? (brand.icon_thumbnail_url ?? brand.icon_path) : null),
-                                                        asset_id: data.icon_id ?? null,
-                                                    }}
-                                                    onChange={(v) => {
-                                                        if (v == null) {
-                                                            setData('icon_id', null)
-                                                            setData('icon_preview', null)
-                                                            setData('clear_icon', true)
-                                                        } else if (v?.asset_id) {
-                                                            setData('icon_id', v.asset_id)
-                                                            setData('icon_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                            setData('icon', null)
-                                                            setData('clear_icon', false)
-                                                        }
-                                                    }}
-                                                    fetchAssets={(opts) => {
-                                                        const params = new URLSearchParams({ format: 'json' })
-                                                        if (opts?.category) params.set('category', opts.category)
-                                                        return fetch(`/app/assets?${params}`, {
-                                                            credentials: 'same-origin',
-                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                        }).then((r) => r.json())
-                                                    }}
-                                                    getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                    title="Select icon"
-                                                    defaultCategoryLabel="Logos"
-                                                    contextCategory="logos"
-                                                    aspectRatio={{ width: 1, height: 1 }}
-                                                    minWidth={64}
-                                                    minHeight={64}
-                                                    placeholder="Click to choose from library or upload"
-                                                    helperText="Square format recommended"
-                                                    className="h-full"
-                                                />
-                                            </div>
-                                            {errors.icon && <p className="mt-2 text-sm text-red-600">{errors.icon}</p>}
-                                        </div>
-                                    </div>
-
-                                    {/* Live Preview — full width below both columns */}
-                                    <div className="mt-6 p-4 bg-gray-50/80 rounded-xl border border-gray-200/80">
-                                        <p className="text-sm font-medium text-gray-700 mb-4">Live Preview</p>
-                                        <div className="flex items-center gap-6">
-                                            <BrandAvatar
-                                                iconPath={data.icon_preview ?? brand.icon_thumbnail_url ?? brand.icon_path}
-                                                name={brand.name}
-                                                primaryColor={data.primary_color ?? brand.primary_color ?? '#6366f1'}
-                                                iconBgColor={(() => {
-                                                    if (iconBgStyle === 'primary') return data.primary_color ?? brand.primary_color ?? '#6366f1'
-                                                    if (iconBgStyle === 'secondary') return data.secondary_color ?? brand.secondary_color ?? '#64748b'
-                                                    if (iconBgStyle === 'accent') return data.accent_color ?? brand.accent_color ?? '#6366f1'
-                                                    return data.icon_bg_color ?? brand.icon_bg_color ?? data.primary_color ?? '#6366f1'
-                                                })()}
-                                                showIcon={true}
-                                                size="xl"
-                                                className="shadow-md"
-                                            />
-                                            <div className="flex-1">
-                                                <label className="block text-xs font-medium text-gray-700 mb-2">
-                                                    Background Style
-                                                </label>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {['primary', 'secondary', 'accent', 'custom'].map((style) => (
-                                                        <button
-                                                            key={style}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setIconBgStyle(style)
-                                                                if (style === 'primary') setData('icon_bg_color', data.primary_color || brand.primary_color || '')
-                                                                else if (style === 'secondary') setData('icon_bg_color', data.secondary_color || brand.secondary_color || '')
-                                                                else if (style === 'accent') setData('icon_bg_color', data.accent_color || brand.accent_color || '')
-                                                                else if (style === 'custom') setData('icon_bg_color', data.icon_bg_color || data.primary_color || '#6366f1')
-                                                            }}
-                                                            className={`px-3 py-1.5 rounded-md text-xs font-medium border-2 transition-all ${
-                                                                iconBgStyle === style
-                                                                    ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50 text-indigo-700'
-                                                                    : 'border-gray-200 hover:border-gray-300 text-gray-700'
-                                                            }`}
-                                                        >
-                                                            {style.charAt(0).toUpperCase() + style.slice(1)}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                {iconBgStyle === 'custom' && (
-                                                    <div className="mt-3 flex gap-2 items-center">
-                                                        <input
-                                                            type="color"
-                                                            value={(() => {
-                                                                const v = data.icon_bg_color || data.primary_color || '#6366f1'
-                                                                return v.startsWith('#') ? v : '#' + v
-                                                            })()}
-                                                            onChange={(e) => setData('icon_bg_color', e.target.value)}
-                                                            className="h-8 w-14 rounded border border-gray-300 cursor-pointer flex-shrink-0"
-                                                        />
-                                                        <input
-                                                            type="text"
-                                                            name="icon_bg_color"
-                                                            value={data.icon_bg_color || ''}
-                                                            onChange={(e) => setData('icon_bg_color', e.target.value)}
-                                                            className="block w-24 rounded-md border py-1.5 px-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600"
-                                                            placeholder="#6366f1"
-                                                            pattern="^#[0-9A-Fa-f]{6}$"
-                                                        />
-                                                    </div>
-                                                )}
-                                                {errors.icon_bg_color && <p className="mt-1 text-xs text-red-600">{errors.icon_bg_color}</p>}
-                                            </div>
-                                        </div>
-                                        {!(data.icon_preview ?? brand.icon_thumbnail_url ?? brand.icon_path) && (
-                                            <p className="text-xs text-gray-400 text-center py-4 mt-2">
-                                                Upload an icon to see preview
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Section 2: Brand Colors */}
+                    {/* Section 2: Brand Images */}
+                    <div id="brand-images" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
+                            <div className="px-6 py-8 sm:px-8 sm:py-10">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Brand Images</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Upload your logo and icon. These are used across the app, brand guidelines, and creative exports.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                            {/* Logo (Light) */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-900 mb-1">Logo</label>
+                                                <p className="text-xs text-gray-500 mb-2">Primary logo for light backgrounds.</p>
+                                                <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                                    <AssetImagePickerField
+                                                        value={{
+                                                            preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_path) : null),
+                                                            asset_id: data.logo_id ?? null,
+                                                        }}
+                                                        onChange={(v) => {
+                                                            if (v == null) {
+                                                                setData('logo_id', null)
+                                                                setData('logo_preview', null)
+                                                                setData('clear_logo', true)
+                                                            } else if (v?.asset_id) {
+                                                                setData('logo_id', v.asset_id)
+                                                                setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                                setData('logo', null)
+                                                                setData('clear_logo', false)
+                                                            } else if (v?.preview_url) {
+                                                                setData('logo_preview', v.preview_url)
+                                                            }
+                                                        }}
+                                                        fetchAssets={(opts) => {
+                                                            const params = new URLSearchParams({ format: 'json' })
+                                                            if (opts?.category) params.set('category', opts.category)
+                                                            return fetch(`/app/assets?${params}`, {
+                                                                credentials: 'same-origin',
+                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                            }).then((r) => r.json())
+                                                        }}
+                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                        title="Select logo"
+                                                        defaultCategoryLabel="Logos"
+                                                        contextCategory="logos"
+                                                        aspectRatio={{ width: 265, height: 64 }}
+                                                        minWidth={265}
+                                                        minHeight={64}
+                                                        placeholder="Click to choose from library or upload"
+                                                        helperText="Recommended: 265×64 px or similar aspect ratio"
+                                                        brandId={brand.id}
+                                                    />
+                                                </div>
+                                                {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
+                                            </div>
+                                            {/* Logo (Dark) */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-900 mb-1">Logo (Dark Background)</label>
+                                                <p className="text-xs text-gray-500 mb-2">Optional. Used on dark backgrounds like the brand overview hero.</p>
+                                                <div className="rounded-lg border border-gray-700 bg-gray-900 p-2">
+                                                    <AssetImagePickerField
+                                                        value={{
+                                                            preview_url: data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_path) : null),
+                                                            asset_id: data.logo_dark_id ?? null,
+                                                        }}
+                                                        onChange={(v) => {
+                                                            if (v == null) {
+                                                                setData('logo_dark_id', null)
+                                                                setData('logo_dark_preview', null)
+                                                                setData('clear_logo_dark', true)
+                                                            } else if (v?.asset_id) {
+                                                                setData('logo_dark_id', v.asset_id)
+                                                                setData('logo_dark_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                                setData('clear_logo_dark', false)
+                                                            } else if (v?.preview_url) {
+                                                                setData('logo_dark_preview', v.preview_url)
+                                                            }
+                                                        }}
+                                                        fetchAssets={(opts) => {
+                                                            const params = new URLSearchParams({ format: 'json' })
+                                                            if (opts?.category) params.set('category', opts.category)
+                                                            return fetch(`/app/assets?${params}`, {
+                                                                credentials: 'same-origin',
+                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                            }).then((r) => r.json())
+                                                        }}
+                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                        title="Select dark logo"
+                                                        defaultCategoryLabel="Logos"
+                                                        contextCategory="logos"
+                                                        aspectRatio={{ width: 265, height: 64 }}
+                                                        minWidth={265}
+                                                        minHeight={64}
+                                                        placeholder="Click to choose from library or upload"
+                                                        helperText="Light-colored logo for dark backgrounds"
+                                                        theme="dark"
+                                                        brandId={brand.id}
+                                                    />
+                                                </div>
+                                            </div>
+                                            {/* Horizontal Logo */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-900 mb-1">Horizontal Logo</label>
+                                                <p className="text-xs text-gray-500 mb-2">Optional. Landscape/wordmark version for wide placements like navigation bars.</p>
+                                                <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                                    <AssetImagePickerField
+                                                        value={{
+                                                            preview_url: data.logo_horizontal_preview ?? (data.logo_horizontal_id && data.logo_horizontal_id === brand.logo_horizontal_id ? (brand.logo_horizontal_thumbnail_url ?? brand.logo_horizontal_path) : null),
+                                                            asset_id: data.logo_horizontal_id ?? null,
+                                                        }}
+                                                        onChange={(v) => {
+                                                            if (v == null) {
+                                                                setData('logo_horizontal_id', null)
+                                                                setData('logo_horizontal_preview', null)
+                                                                setData('clear_logo_horizontal', true)
+                                                            } else if (v?.asset_id) {
+                                                                setData('logo_horizontal_id', v.asset_id)
+                                                                setData('logo_horizontal_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                                setData('clear_logo_horizontal', false)
+                                                            } else if (v?.preview_url) {
+                                                                setData('logo_horizontal_preview', v.preview_url)
+                                                            }
+                                                        }}
+                                                        fetchAssets={(opts) => {
+                                                            const params = new URLSearchParams({ format: 'json' })
+                                                            if (opts?.category) params.set('category', opts.category)
+                                                            return fetch(`/app/assets?${params}`, {
+                                                                credentials: 'same-origin',
+                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                            }).then((r) => r.json())
+                                                        }}
+                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                        title="Select horizontal logo"
+                                                        defaultCategoryLabel="Logos"
+                                                        contextCategory="logos"
+                                                        aspectRatio={{ width: 4, height: 1 }}
+                                                        minWidth={200}
+                                                        minHeight={50}
+                                                        placeholder="Click to choose from library or upload"
+                                                        helperText="Wide/landscape format recommended (e.g. 4:1 ratio)"
+                                                        brandId={brand.id}
+                                                    />
+                                                </div>
+                                            </div>
+                                            {/* Icon */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-900 mb-1">Icon</label>
+                                                <p className="text-xs text-gray-500 mb-2">Square (1:1) format. Used in the brand selector and compact displays.</p>
+                                                <div className="max-w-xs">
+                                                    <AssetImagePickerField
+                                                        value={{
+                                                            preview_url: data.icon_preview ?? (data.icon_id && data.icon_id === brand.icon_id ? (brand.icon_thumbnail_url ?? brand.icon_path) : null),
+                                                            asset_id: data.icon_id ?? null,
+                                                        }}
+                                                        onChange={(v) => {
+                                                            if (v == null) {
+                                                                setData('icon_id', null)
+                                                                setData('icon_preview', null)
+                                                                setData('clear_icon', true)
+                                                            } else if (v?.asset_id) {
+                                                                setData('icon_id', v.asset_id)
+                                                                setData('icon_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                                setData('icon', null)
+                                                                setData('clear_icon', false)
+                                                            } else if (v?.preview_url) {
+                                                                setData('icon_preview', v.preview_url)
+                                                            }
+                                                        }}
+                                                        fetchAssets={(opts) => {
+                                                            const params = new URLSearchParams({ format: 'json' })
+                                                            if (opts?.category) params.set('category', opts.category)
+                                                            return fetch(`/app/assets?${params}`, {
+                                                                credentials: 'same-origin',
+                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                            }).then((r) => r.json())
+                                                        }}
+                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                        title="Select icon"
+                                                        defaultCategoryLabel="Logos"
+                                                        contextCategory="logos"
+                                                        aspectRatio={{ width: 1, height: 1 }}
+                                                        minWidth={64}
+                                                        minHeight={64}
+                                                        placeholder="Click to choose from library or upload"
+                                                        helperText="Square format recommended"
+                                                        brandId={brand.id}
+                                                    />
+                                                </div>
+                                                {errors.icon && <p className="mt-2 text-sm text-red-600">{errors.icon}</p>}
+                                            </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 3: Brand Colors */}
                     <div id="brand-colors" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
                             <div className="px-6 py-8 sm:px-8 sm:py-10">
@@ -2455,6 +3162,54 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </div>
                                 </div>
                             )}
+
+                                    {/* Icon Style */}
+                                    <div className="mt-6 pt-6 border-t border-gray-200">
+                                        <label className="block text-sm font-medium leading-6 text-gray-900 mb-1">Icon Style</label>
+                                        <p className="text-sm text-gray-500 mb-3">Choose how the brand icon appears when no logo is uploaded.</p>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            {[
+                                                { value: 'subtle', label: 'Subtle', desc: 'Soft single-color gradient' },
+                                                { value: 'gradient', label: 'Gradient', desc: 'Primary to secondary' },
+                                                { value: 'solid', label: 'Solid', desc: 'Flat primary color' },
+                                            ].map((opt) => {
+                                                const pri = data.primary_color || '#6366f1'
+                                                const sec = data.secondary_color || '#8b5cf6'
+                                                const previewBg = opt.value === 'subtle'
+                                                    ? `linear-gradient(135deg, ${pri}CC, ${pri}55)`
+                                                    : opt.value === 'gradient'
+                                                        ? `linear-gradient(135deg, ${sec !== pri ? sec : pri}, ${pri})`
+                                                        : pri
+                                                return (
+                                                    <button
+                                                        key={opt.value}
+                                                        type="button"
+                                                        onClick={() => setData('icon_style', opt.value)}
+                                                        className={`relative rounded-lg border-2 p-3 text-left transition-all ${
+                                                            data.icon_style === opt.value
+                                                                ? 'border-indigo-500 ring-1 ring-indigo-500'
+                                                                : 'border-gray-200 hover:border-gray-300'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <div
+                                                                className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                                                                style={{ background: previewBg }}
+                                                            >
+                                                                <span className="text-sm font-bold text-white">
+                                                                    {(data.name || brand.name || 'B').charAt(0).toUpperCase()}
+                                                                </span>
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <p className="text-sm font-medium text-gray-900">{opt.label}</p>
+                                                                <p className="text-xs text-gray-500 truncate">{opt.desc}</p>
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2601,6 +3356,120 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                     )}
 
+                        </div>{/* end center column */}
+
+                        {/* Right: Live Preview sidebar */}
+                        <div className="hidden lg:block w-64 flex-shrink-0">
+                            <div className="sticky top-8">
+                                <div className="rounded-2xl bg-gray-950 p-4 shadow-lg ring-1 ring-white/10">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="flex gap-1">
+                                            <span className="h-2 w-2 rounded-full bg-red-400/70" />
+                                            <span className="h-2 w-2 rounded-full bg-yellow-400/70" />
+                                            <span className="h-2 w-2 rounded-full bg-green-400/70" />
+                                        </div>
+                                        <span className="text-[10px] text-white/30 font-medium uppercase tracking-wider">Live Preview</span>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {/* Navigation Bar preview */}
+                                        <div>
+                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Navigation</p>
+                                            <div className="rounded-lg bg-white px-3 py-2.5 flex items-center gap-2.5">
+                                                <BrandIconUnified
+                                                    brand={{
+                                                        ...brand,
+                                                        icon_path: data.icon_preview ?? brand.icon_path,
+                                                        logo_path: data.logo_preview ?? brand.logo_path,
+                                                        primary_color: data.primary_color || brand.primary_color,
+                                                        secondary_color: data.secondary_color || brand.secondary_color,
+                                                        icon_style: data.icon_style,
+                                                        name: data.name || brand.name,
+                                                    }}
+                                                    size="md"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[11px] font-medium text-gray-900 truncate">{data.name || brand.name || 'Brand'}</p>
+                                                    <p className="text-[9px] text-gray-400">Brand Selector</p>
+                                                </div>
+                                                <svg className="h-3 w-3 text-gray-300" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+                                            </div>
+                                        </div>
+
+                                        {/* Overview Hero preview */}
+                                        <div>
+                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Overview Hero</p>
+                                            <div
+                                                className="rounded-lg px-4 py-6 flex flex-col items-center justify-center min-h-[100px]"
+                                                style={{
+                                                    background: `radial-gradient(ellipse at 30% 20%, ${data.primary_color || brand.primary_color || '#6366f1'}66, transparent 70%), radial-gradient(ellipse at 70% 80%, ${data.secondary_color || brand.secondary_color || '#8b5cf6'}66, transparent 70%), #0B0B0D`,
+                                                }}
+                                            >
+                                                {(() => {
+                                                    const darkLogoUrl = data.logo_dark_preview ?? brand.logo_dark_path
+                                                    const lightLogoUrl = data.logo_preview ?? brand.logo_path
+                                                    if (darkLogoUrl) {
+                                                        return <img src={darkLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
+                                                    }
+                                                    if (lightLogoUrl) {
+                                                        return <img src={lightLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" style={{ filter: 'brightness(0) invert(1)' }} />
+                                                    }
+                                                    return (
+                                                        <span className="text-lg font-bold text-white/90">{(data.name || brand.name || 'B').charAt(0).toUpperCase()}</span>
+                                                    )
+                                                })()}
+                                                <p className="mt-1.5 text-[9px] text-white/30">{data.name || brand.name || 'Brand Name'}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Icon sizes */}
+                                        <div>
+                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Icon Sizes</p>
+                                            <div className="rounded-lg bg-white/5 px-3 py-3">
+                                                <div className="flex items-end gap-2 flex-wrap">
+                                                    {['xs', 'sm', 'md', 'lg', 'xl'].map((sz) => (
+                                                        <div key={sz} className="flex flex-col items-center gap-1">
+                                                            <BrandIconUnified
+                                                                brand={{
+                                                                    ...brand,
+                                                                    icon_path: data.icon_preview ?? brand.icon_path,
+                                                                    logo_path: data.logo_preview ?? brand.logo_path,
+                                                                    primary_color: data.primary_color || brand.primary_color,
+                                                                    secondary_color: data.secondary_color || brand.secondary_color,
+                                                                    icon_style: data.icon_style,
+                                                                    name: data.name || brand.name,
+                                                                }}
+                                                                size={sz}
+                                                            />
+                                                            <span className="text-[8px] text-white/20">{sz}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Color palette preview */}
+                                        {(data.primary_color || data.secondary_color || data.accent_color) && (
+                                        <div>
+                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Colors</p>
+                                            <div className="flex gap-1.5">
+                                                {data.primary_color && (
+                                                    <div className="flex-1 h-8 rounded-md ring-1 ring-white/10" style={{ backgroundColor: data.primary_color }} />
+                                                )}
+                                                {data.secondary_color && (
+                                                    <div className="flex-1 h-8 rounded-md ring-1 ring-white/10" style={{ backgroundColor: data.secondary_color }} />
+                                                )}
+                                                {data.accent_color && (
+                                                    <div className="flex-1 h-8 rounded-md ring-1 ring-white/10" style={{ backgroundColor: data.accent_color }} />
+                                                )}
+                                            </div>
+                                        </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>{/* end 3-column flex */}
                     </>
                     )}
 
@@ -2644,6 +3513,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     setData={setData}
                                     portalFeatures={portal_features}
                                     brand={brand}
+                                    onSave={autoSaveBrandField}
                                 />
                             </div>
                         </div>
@@ -2657,6 +3527,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     portalFeatures={portal_features}
                                     brand={brand}
                                     portalUrl={portal_url}
+                                    onSave={autoSaveBrandField}
                                     route={typeof route === 'function' ? route : (name, params) => {
                                         const p = params && typeof params === 'object' && !Array.isArray(params) ? params : {}
                                         if (name === 'brands.download-background-candidates') return `/app/brands/${p.brand ?? params ?? brand.id}/download-background-candidates`
@@ -2673,6 +3544,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     data={data}
                                     setData={setData}
                                     portalFeatures={portal_features}
+                                    onSave={autoSaveBrandField}
                                 />
                             </div>
                         </div>
@@ -2685,6 +3557,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     setData={setData}
                                     portalFeatures={portal_features}
                                     brand={brand}
+                                    onSave={autoSaveBrandField}
                                 />
                             </div>
                         </div>
@@ -2696,6 +3569,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     data={data}
                                     setData={setData}
                                     portalFeatures={portal_features}
+                                    onSave={autoSaveBrandField}
                                 />
                             </div>
                         </div>
@@ -2705,7 +3579,9 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     {/* Tab: Workspace Appearance */}
                     {activeTab === 'workspace' && (
                     <div id="workspace-appearance" className="scroll-mt-8 space-y-6">
-                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                        <div className="flex gap-8">
+                        {/* Left: Settings */}
+                        <div className="flex-1 min-w-0 rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-1">
                                     <h2 className="text-xl font-semibold text-gray-900">Workspace Appearance</h2>
@@ -2959,88 +3835,92 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         </div>
                                         {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
                                     </div>
-                                    {/* DAM Appearance Preview */}
-                                    <div>
-                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Preview</h4>
-                                        <p className="text-sm text-gray-500 mb-4">
-                                            A preview of how the workspace will appear in the DAM.
-                                        </p>
-                                        {(() => {
-                                            const sidebarColor = data.nav_color || data.primary_color || brand.primary_color || '#6366f1'
-                                            const sidebarTextColor = getContrastTextColor(sidebarColor)
-                                            const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
-                                            const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
-                                            const previewLogoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
-                                            const previewNavMode = data.settings?.nav_display_mode || 'logo'
-                                            const previewFilterValue = data.logo_filter || 'none'
-                                            const previewLogoFilter = previewFilterValue === 'white'
-                                                ? { filter: 'brightness(0) invert(1)' }
-                                                : previewFilterValue === 'black'
-                                                ? { filter: 'brightness(0)' }
-                                                : previewFilterValue === 'primary'
-                                                ? getFilterStyleForColor(data.primary_color || brand.primary_color || '#6366f1')
-                                                : {}
-                                            return (
-                                                <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 shadow-inner">
-                                                    {/* Top navigation bar (white) */}
-                                                    <div className="bg-white border-b border-gray-200 px-3 py-1.5 flex items-center gap-2">
-                                                        {previewNavMode === 'logo' && previewLogoSrc ? (
-                                                            <img src={previewLogoSrc} alt="" className="h-5 w-auto max-w-[80px] object-contain" style={previewLogoFilter} />
-                                                        ) : (
-                                                            <div className="flex items-center gap-1.5">
-                                                                <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: data.primary_color || brand.primary_color || '#6366f1' }} />
-                                                                <span className="text-[9px] font-semibold text-gray-800 truncate max-w-[70px]">{data.name || brand.name}</span>
-                                                            </div>
-                                                        )}
-                                                        <div className="flex-1" />
-                                                        <div className="flex gap-2">
-                                                            {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL_SINGULAR + 's'].map((l) => (
-                                                                <span key={l} className="text-[8px] text-gray-400 font-medium">{l}</span>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex" style={{ minHeight: 190 }}>
-                                                        {/* Sidebar */}
-                                                        <aside
-                                                            className="w-[52px] flex flex-col flex-shrink-0"
-                                                            style={{ backgroundColor: sidebarColor, color: sidebarTextColor }}
-                                                        >
-                                                            <nav className="flex-1 py-2 space-y-0.5">
-                                                                {['All', 'Logos', 'Photos', 'Graphics'].map((label, idx) => (
-                                                                    <div key={label} className={`px-2 py-1 text-[8px] font-medium truncate ${idx === 0 ? 'opacity-100' : 'opacity-60'}`} style={{ color: 'inherit' }}>
-                                                                        {label}
-                                                                    </div>
-                                                                ))}
-                                                            </nav>
-                                                        </aside>
-                                                        {/* Main content */}
-                                                        <main className="flex-1 flex flex-col bg-[#f8f9fa] min-w-0">
-                                                            <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
-                                                                <span
-                                                                    className="px-2 py-0.5 rounded text-[9px] font-medium text-white"
-                                                                    style={{ backgroundColor: btnColor }}
-                                                                >
-                                                                    Add Asset
-                                                                </span>
-                                                                <div className="flex-1" />
-                                                                <div className="h-5 bg-white border border-gray-200 rounded w-full max-w-[100px]" />
-                                                            </div>
-                                                            <div className="flex-1 px-3 pb-2 overflow-hidden">
-                                                                <div className="grid grid-cols-4 gap-1.5">
-                                                                    {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                                                                        <div key={i} className="aspect-square bg-white border border-gray-100 rounded" />
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                        </main>
-                                                    </div>
-                                                </div>
-                                            )
-                                        })()}
-                                    </div>
                                 </div>
                             </div>
                         </div>
+
+                        {/* Right: Sticky Workspace Preview */}
+                        <div className="hidden lg:block w-80 flex-shrink-0">
+                            <div className="sticky top-8">
+                                <h4 className="text-sm font-medium text-gray-900 mb-1">Preview</h4>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    How the workspace will appear in the DAM.
+                                </p>
+                                {(() => {
+                                    const sidebarColor = data.nav_color || data.primary_color || brand.primary_color || '#6366f1'
+                                    const sidebarTextColor = getContrastTextColor(sidebarColor)
+                                    const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
+                                    const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                    const previewLogoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
+                                    const previewNavMode = data.settings?.nav_display_mode || 'logo'
+                                    const previewFilterValue = data.logo_filter || 'none'
+                                    const previewLogoFilter = previewFilterValue === 'white'
+                                        ? { filter: 'brightness(0) invert(1)' }
+                                        : previewFilterValue === 'black'
+                                        ? { filter: 'brightness(0)' }
+                                        : previewFilterValue === 'primary'
+                                        ? getFilterStyleForColor(data.primary_color || brand.primary_color || '#6366f1')
+                                        : {}
+                                    return (
+                                        <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 shadow-lg">
+                                            {/* Top navigation bar (white) */}
+                                            <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center gap-2">
+                                                {previewNavMode === 'logo' && previewLogoSrc ? (
+                                                    <img src={previewLogoSrc} alt="" className="h-5 w-auto max-w-[100px] object-contain" style={previewLogoFilter} />
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: data.primary_color || brand.primary_color || '#6366f1' }} />
+                                                        <span className="text-[10px] font-semibold text-gray-800 truncate max-w-[80px]">{data.name || brand.name}</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex-1" />
+                                                <div className="flex gap-2">
+                                                    {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL_SINGULAR + 's'].map((l) => (
+                                                        <span key={l} className="text-[8px] text-gray-400 font-medium">{l}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="flex" style={{ minHeight: 260 }}>
+                                                {/* Sidebar */}
+                                                <aside
+                                                    className="w-[56px] flex flex-col flex-shrink-0"
+                                                    style={{ backgroundColor: sidebarColor, color: sidebarTextColor }}
+                                                >
+                                                    <nav className="flex-1 py-2 space-y-0.5">
+                                                        {['All', 'Logos', 'Photos', 'Graphics'].map((label, idx) => (
+                                                            <div key={label} className={`px-2 py-1 text-[8px] font-medium truncate ${idx === 0 ? 'opacity-100' : 'opacity-60'}`} style={{ color: 'inherit' }}>
+                                                                {label}
+                                                            </div>
+                                                        ))}
+                                                    </nav>
+                                                </aside>
+                                                {/* Main content */}
+                                                <main className="flex-1 flex flex-col bg-[#f8f9fa] min-w-0">
+                                                    <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0">
+                                                        <span
+                                                            className="px-2.5 py-1 rounded text-[9px] font-medium text-white"
+                                                            style={{ backgroundColor: btnColor }}
+                                                        >
+                                                            Add Asset
+                                                        </span>
+                                                        <div className="flex-1" />
+                                                        <div className="h-5 bg-white border border-gray-200 rounded w-full max-w-[80px]" />
+                                                    </div>
+                                                    <div className="flex-1 px-3 pb-3 overflow-hidden">
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {[1, 2, 3, 4, 5, 6].map((i) => (
+                                                                <div key={i} className="aspect-square bg-white border border-gray-100 rounded shadow-sm" />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </main>
+                                            </div>
+                                        </div>
+                                    )
+                                })()}
+                            </div>
+                        </div>
+                        </div>{/* end flex row */}
                     </div>
                     )}
 

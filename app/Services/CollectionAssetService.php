@@ -22,10 +22,18 @@ class CollectionAssetService
         }
 
         $collection->assets()->syncWithoutDetaching([$asset->id]);
+
+        if ($collection->is_public) {
+            $collection->invalidatePublicZip();
+        }
     }
 
     public function detach(Collection $collection, Asset $asset): void
     {
         $collection->assets()->detach($asset->id);
+
+        if ($collection->is_public) {
+            $collection->invalidatePublicZip();
+        }
     }
 }

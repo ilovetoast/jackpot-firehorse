@@ -14,7 +14,7 @@
  * - No backend changes; same patch/publish endpoints
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
@@ -27,7 +27,11 @@ import ResearchSummary, { canProceedFromResearchSummary } from '../../Components
 import ProcessingProgressPanel from '../../Components/BrandGuidelines/ProcessingProgressPanel'
 import BrandResearchReadyToast from '../../Components/BrandGuidelines/BrandResearchReadyToast'
 import InlineSuggestionBlock from '../../Components/BrandGuidelines/InlineSuggestionBlock'
+import ArchetypeStep from '../../Components/BrandGuidelines/ArchetypeStep'
 import axios from 'axios'
+import useLogoBrightness from '../../utils/useLogoBrightness'
+import { generateWhiteVariant, detectLogoComplexity } from '../../utils/imageUtils'
+import ImageCropModal from '../../Components/ImageCropModal'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
 
@@ -54,6 +58,87 @@ function AiFieldBadge({ field, className = '' }) {
             <span>AI detected</span>
             {conf != null && <span className="text-white/50">({conf}% confidence)</span>}
         </span>
+    )
+}
+
+// ——— FieldSuggestButton: on-demand AI suggestion for empty fields ———
+function FieldSuggestButton({ fieldPath, brandId, value, onSuggestion, isArray = false }) {
+    const [loading, setLoading] = useState(false)
+    const [suggestion, setSuggestion] = useState(null)
+    const [error, setError] = useState(null)
+
+    const isEmpty = isArray
+        ? !value || (Array.isArray(value) ? value.length === 0 : !value)
+        : !value || (typeof value === 'string' && !value.trim())
+
+    if (!isEmpty && !suggestion) return null
+
+    const handleSuggest = async () => {
+        setLoading(true)
+        setError(null)
+        try {
+            const { data } = await axios.post(route('brands.brand-dna.builder.suggest-field', { brand: brandId }), {
+                field_path: fieldPath,
+            })
+            setSuggestion(data.suggestion)
+        } catch (err) {
+            const msg = err?.response?.data?.error
+            if (err?.response?.status === 429) {
+                setError(msg || 'Suggestion limit reached')
+            } else {
+                setError(msg || 'Could not generate suggestion')
+            }
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleApply = (val) => {
+        onSuggestion(val)
+        setSuggestion(null)
+    }
+
+    if (suggestion) {
+        const items = Array.isArray(suggestion) ? suggestion : [suggestion]
+        return (
+            <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-3 mt-2">
+                <p className="text-xs font-medium text-violet-300 mb-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.233.616 1.738 5.42a1 1 0 01-.285 1.05A3.989 3.989 0 0115 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.715-5.349L11 6.477V16h2a1 1 0 110 2H7a1 1 0 110-2h2V6.477L6.237 7.582l1.715 5.349a1 1 0 01-.285 1.05A3.989 3.989 0 015 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.738-5.42-1.233-.617a1 1 0 01.894-1.789l1.599.799L9 4.323V3a1 1 0 011-1z" /></svg>
+                    AI suggestion
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                    {items.map((item, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 text-sm text-white/90">
+                            {item}
+                            <button type="button" onClick={() => handleApply(item)} className="text-violet-300 hover:text-violet-200 text-xs font-medium">Use</button>
+                        </span>
+                    ))}
+                    <button type="button" onClick={() => setSuggestion(null)} className="text-xs text-white/40 hover:text-white/60">Dismiss</button>
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <button
+            type="button"
+            onClick={handleSuggest}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg text-xs font-medium text-violet-300 bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/20 hover:text-violet-200 transition disabled:opacity-50"
+        >
+            {loading ? (
+                <>
+                    <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    Thinking…
+                </>
+            ) : (
+                <>
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.233.616 1.738 5.42a1 1 0 01-.285 1.05A3.989 3.989 0 0115 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.715-5.349L11 6.477V16h2a1 1 0 110 2H7a1 1 0 110-2h2V6.477L6.237 7.582l1.715 5.349a1 1 0 01-.285 1.05A3.989 3.989 0 015 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.738-5.42-1.233-.617a1 1 0 01.894-1.789l1.599.799L9 4.323V3a1 1 0 011-1z" /></svg>
+                    Suggest
+                </>
+            )}
+            {error && <span className="text-red-400 ml-1">{error}</span>}
+        </button>
     )
 }
 
@@ -140,10 +225,272 @@ function ChipInput({ value = [], onChange, placeholder = 'Type and press Enter',
     )
 }
 
+// ——— Color conversion helpers ———
+function hexToRgb(hex) {
+    if (!hex) return { r: 0, g: 0, b: 0 }
+    let h = hex.replace('#', '')
+    if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+    return { r: parseInt(h.substring(0, 2), 16), g: parseInt(h.substring(2, 4), 16), b: parseInt(h.substring(4, 6), 16) }
+}
+
+function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map((c) => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0')).join('')
+}
+
+function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255
+    const max = Math.max(r, g, b), min = Math.min(r, g, b)
+    let h = 0, s = 0, l = (max + min) / 2
+    if (max !== min) {
+        const d = max - min
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+        else if (max === g) h = ((b - r) / d + 2) / 6
+        else h = ((r - g) / d + 4) / 6
+    }
+    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) }
+}
+
+function hslToHex(h, s, l) {
+    s /= 100; l /= 100
+    const a = s * Math.min(l, 1 - l)
+    const f = (n) => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1) }
+    return rgbToHex(Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255))
+}
+
+function rgbToCmyk(r, g, b) {
+    if (r === 0 && g === 0 && b === 0) return { c: 0, m: 0, y: 0, k: 100 }
+    const c1 = 1 - r / 255, m1 = 1 - g / 255, y1 = 1 - b / 255
+    const k = Math.min(c1, m1, y1)
+    return {
+        c: Math.round(((c1 - k) / (1 - k)) * 100),
+        m: Math.round(((m1 - k) / (1 - k)) * 100),
+        y: Math.round(((y1 - k) / (1 - k)) * 100),
+        k: Math.round(k * 100),
+    }
+}
+
+const PMS_COLORS = [
+    { name: '185 C', hex: '#E4002B' }, { name: '186 C', hex: '#C8102E' }, { name: '199 C', hex: '#D50032' },
+    { name: '200 C', hex: '#BA0C2F' }, { name: '201 C', hex: '#9B2335' }, { name: '202 C', hex: '#862633' },
+    { name: '485 C', hex: '#DA291C' }, { name: '1788 C', hex: '#E03C31' },
+    { name: '021 C', hex: '#FE5000' }, { name: '151 C', hex: '#FF8200' }, { name: '1505 C', hex: '#FF6900' },
+    { name: '137 C', hex: '#FFA300' }, { name: '116 C', hex: '#FFCD00' }, { name: '109 C', hex: '#FFD100' },
+    { name: '012 C', hex: '#FFD700' }, { name: '123 C', hex: '#FFC72C' },
+    { name: '348 C', hex: '#00843D' }, { name: '349 C', hex: '#046A38' }, { name: '356 C', hex: '#007A33' },
+    { name: '347 C', hex: '#009A44' }, { name: '361 C', hex: '#43B02A' }, { name: '375 C', hex: '#97D700' },
+    { name: '802 C', hex: '#44D62C' },
+    { name: '300 C', hex: '#005EB8' }, { name: '285 C', hex: '#0072CE' }, { name: '286 C', hex: '#0033A0' },
+    { name: '072 C', hex: '#10069F' }, { name: '293 C', hex: '#003DA5' }, { name: '2728 C', hex: '#0057B8' },
+    { name: '279 C', hex: '#418FDE' }, { name: '299 C', hex: '#00A3E0' }, { name: '306 C', hex: '#00B5E2' },
+    { name: '311 C', hex: '#009CA6' }, { name: '320 C', hex: '#009B8D' },
+    { name: '2685 C', hex: '#56368A' }, { name: '267 C', hex: '#500778' }, { name: '2597 C', hex: '#59198B' },
+    { name: '2587 C', hex: '#7D55C7' }, { name: '2577 C', hex: '#A17DB8' },
+    { name: '219 C', hex: '#DA1984' }, { name: '226 C', hex: '#D0006F' }, { name: 'Rhodamine Red C', hex: '#E10098' },
+    { name: '213 C', hex: '#EA7FA6' }, { name: '509 C', hex: '#D4A5A5' }, { name: '502 C', hex: '#E5B3B4' },
+    { name: 'Black C', hex: '#2D2926' }, { name: 'Black 7 C', hex: '#3D3935' },
+    { name: 'Cool Gray 11 C', hex: '#53565A' }, { name: 'Cool Gray 9 C', hex: '#75787B' },
+    { name: 'Cool Gray 7 C', hex: '#97999B' }, { name: 'Cool Gray 5 C', hex: '#B1B3B3' },
+    { name: 'Cool Gray 3 C', hex: '#C8C9C7' }, { name: 'Cool Gray 1 C', hex: '#D9D9D6' },
+    { name: 'White', hex: '#FFFFFF' },
+    { name: '1245 C', hex: '#C99700' }, { name: '7406 C', hex: '#F2A900' }, { name: '7409 C', hex: '#F0AB00' },
+    { name: '7549 C', hex: '#D69D00' }, { name: '4655 C', hex: '#9B6700' },
+    { name: '4975 C', hex: '#5C3317' }, { name: '7519 C', hex: '#5E4B3C' }, { name: '476 C', hex: '#4E3629' },
+    { name: '7530 C', hex: '#A69888' }, { name: '7534 C', hex: '#D5C7B5' },
+]
+
+function nearestPms(hex) {
+    const { r, g, b } = hexToRgb(hex)
+    let best = PMS_COLORS[0], bestDist = Infinity
+    for (const pms of PMS_COLORS) {
+        const p = hexToRgb(pms.hex)
+        const d = Math.sqrt((r - p.r) ** 2 + (g - p.g) ** 2 + (b - p.b) ** 2)
+        if (d < bestDist) { bestDist = d; best = pms }
+    }
+    return best
+}
+
+// ——— ColorPickerPopover ———
+function ColorPickerPopover({ color, onChange, onClose }) {
+    const [hex, setHex] = useState(color || '#6366f1')
+    const [hexInput, setHexInput] = useState(color || '#6366f1')
+    const canvasRef = useRef(null)
+    const hueRef = useRef(null)
+    const [dragging, setDragging] = useState(null)
+    const popoverRef = useRef(null)
+
+    const rgb = hexToRgb(hex)
+    const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b)
+    const cmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b)
+    const pms = nearestPms(hex)
+
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (popoverRef.current && !popoverRef.current.contains(e.target)) onClose?.()
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [onClose])
+
+    useEffect(() => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        const ctx = canvas.getContext('2d')
+        const w = canvas.width, h = canvas.height
+        for (let x = 0; x < w; x++) {
+            const s = (x / w) * 100
+            for (let y = 0; y < h; y++) {
+                const l = 100 - (y / h) * 100
+                ctx.fillStyle = `hsl(${hsl.h}, ${s}%, ${l}%)`
+                ctx.fillRect(x, y, 1, 1)
+            }
+        }
+    }, [hsl.h])
+
+    useEffect(() => {
+        const canvas = hueRef.current
+        if (!canvas) return
+        const ctx = canvas.getContext('2d')
+        const w = canvas.width, h = canvas.height
+        const grad = ctx.createLinearGradient(0, 0, w, 0)
+        for (let i = 0; i <= 360; i += 30) grad.addColorStop(i / 360, `hsl(${i}, 100%, 50%)`)
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, w, h)
+    }, [])
+
+    const updateFromSL = useCallback((e, canvas) => {
+        const rect = canvas.getBoundingClientRect()
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+        const s = Math.round(x * 100)
+        const l = Math.round(100 - y * 100)
+        const newHex = hslToHex(hsl.h, s, l)
+        setHex(newHex)
+        setHexInput(newHex)
+    }, [hsl.h])
+
+    const updateFromHue = useCallback((e, canvas) => {
+        const rect = canvas.getBoundingClientRect()
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+        const newH = Math.round(x * 360)
+        const newHex = hslToHex(newH, hsl.s || 50, hsl.l || 50)
+        setHex(newHex)
+        setHexInput(newHex)
+    }, [hsl.s, hsl.l])
+
+    useEffect(() => {
+        if (!dragging) return
+        const handler = (e) => {
+            if (dragging === 'sl') updateFromSL(e, canvasRef.current)
+            else if (dragging === 'hue') updateFromHue(e, hueRef.current)
+        }
+        const up = () => setDragging(null)
+        window.addEventListener('mousemove', handler)
+        window.addEventListener('mouseup', up)
+        return () => { window.removeEventListener('mousemove', handler); window.removeEventListener('mouseup', up) }
+    }, [dragging, updateFromSL, updateFromHue])
+
+    const handleHexChange = (v) => {
+        setHexInput(v)
+        const clean = v.startsWith('#') ? v : '#' + v
+        if (/^#[0-9A-Fa-f]{6}$/.test(clean)) setHex(clean)
+    }
+
+    const slX = (hsl.s / 100)
+    const slY = 1 - (hsl.l / 100)
+    const hueX = hsl.h / 360
+
+    return (
+        <div ref={popoverRef} className="absolute z-50 mt-2 w-72 rounded-xl border border-white/20 bg-[#1a1920] shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-3 space-y-3">
+                {/* SL canvas */}
+                <div className="relative rounded-lg overflow-hidden cursor-crosshair" style={{ height: 140 }}>
+                    <canvas
+                        ref={canvasRef}
+                        width={256}
+                        height={140}
+                        className="w-full h-full"
+                        onMouseDown={(e) => { setDragging('sl'); updateFromSL(e, canvasRef.current) }}
+                    />
+                    <div
+                        className="absolute w-4 h-4 rounded-full border-2 border-white shadow-lg pointer-events-none -translate-x-1/2 -translate-y-1/2"
+                        style={{ left: `${slX * 100}%`, top: `${slY * 100}%`, backgroundColor: hex }}
+                    />
+                </div>
+
+                {/* Hue slider */}
+                <div className="relative rounded-md overflow-hidden cursor-pointer" style={{ height: 16 }}>
+                    <canvas
+                        ref={hueRef}
+                        width={256}
+                        height={16}
+                        className="w-full h-full"
+                        onMouseDown={(e) => { setDragging('hue'); updateFromHue(e, hueRef.current) }}
+                    />
+                    <div
+                        className="absolute top-0 w-3 h-full rounded-sm border-2 border-white shadow pointer-events-none -translate-x-1/2"
+                        style={{ left: `${hueX * 100}%` }}
+                    />
+                </div>
+
+                {/* Preview + Hex input */}
+                <div className="flex gap-2 items-center">
+                    <div className="w-10 h-10 rounded-lg border border-white/20 flex-shrink-0" style={{ backgroundColor: hex }} />
+                    <input
+                        type="text"
+                        value={hexInput}
+                        onChange={(e) => handleHexChange(e.target.value)}
+                        className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2.5 py-2 text-sm text-white font-mono focus:ring-1 focus:ring-white/30 focus:outline-none"
+                        spellCheck={false}
+                    />
+                </div>
+
+                {/* Color values */}
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
+                    <div className="flex justify-between">
+                        <span className="text-white/40">RGB</span>
+                        <span className="text-white/70 font-mono">{rgb.r}, {rgb.g}, {rgb.b}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-white/40">HSL</span>
+                        <span className="text-white/70 font-mono">{hsl.h}°, {hsl.s}%, {hsl.l}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-white/40">CMYK</span>
+                        <span className="text-white/70 font-mono">{cmyk.c}, {cmyk.m}, {cmyk.y}, {cmyk.k}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-white/40">PMS</span>
+                        <span className="text-white/70 font-mono truncate ml-1" title={`Pantone ${pms.name}`}>{pms.name}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex border-t border-white/10">
+                <button
+                    type="button"
+                    onClick={() => onClose?.()}
+                    className="flex-1 px-3 py-2.5 text-xs text-white/50 hover:text-white/80 hover:bg-white/5 transition-colors"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    onClick={() => { onChange(hex); onClose?.() }}
+                    className="flex-1 px-3 py-2.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/10 border-l border-white/10 transition-colors"
+                >
+                    Apply Color
+                </button>
+            </div>
+        </div>
+    )
+}
+
 // ——— ColorPaletteChipInput ———
-// Like ChipInput but each chip shows a color swatch.
 function ColorPaletteChipInput({ value = [], onChange, placeholder = '#hex and press Enter' }) {
     const [input, setInput] = useState('')
+    const [showPicker, setShowPicker] = useState(false)
+    const [editingIdx, setEditingIdx] = useState(null)
     const inputRef = useRef(null)
 
     const add = (v) => {
@@ -163,6 +510,12 @@ function ColorPaletteChipInput({ value = [], onChange, placeholder = '#hex and p
         onChange(next)
     }
 
+    const updateColor = (i, newHex) => {
+        const next = [...(value || [])]
+        next[i] = newHex
+        onChange(next)
+    }
+
     const handleKeyDown = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault()
@@ -173,41 +526,144 @@ function ColorPaletteChipInput({ value = [], onChange, placeholder = '#hex and p
     }
 
     return (
-        <div className="flex flex-wrap gap-2 p-3 rounded-xl border border-white/20 bg-white/5 min-h-[52px]">
-            {(value || []).map((item, i) => {
-                const hex = (typeof item === 'object' && item?.hex) || (typeof item === 'string' ? item : '')
-                const displayHex = hex.startsWith('#') ? hex : '#' + hex
-                const isValidHex = /^#[0-9A-Fa-f]{6}$/.test(displayHex)
-                return (
-                    <span
-                        key={i}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/15 text-sm text-white border border-white/10"
-                    >
-                        <span
-                            className="w-5 h-5 rounded border border-white/20 flex-shrink-0"
-                            style={{ backgroundColor: isValidHex ? displayHex : 'transparent' }}
-                        />
-                                                        {displayHex}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => remove(i)}
-                                                            className="hover:bg-white/20 rounded p-0.5 -mr-1"
-                                                            aria-label="Remove"
-                                                        >
-                                                            ×
-                                                        </button>
-                                                    </span>
-                )
-            })}
-            <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={placeholder}
-                className="flex-1 min-w-[120px] bg-transparent border-0 text-white placeholder-white/50 focus:ring-0 focus:outline-none text-sm"
-            />
+        <div className="space-y-3">
+            {/* Color chips */}
+            <div className="flex flex-wrap gap-2 p-3 rounded-xl border border-white/20 bg-white/5 min-h-[52px]">
+                {(value || []).map((item, i) => {
+                    const hex = (typeof item === 'object' && item?.hex) || (typeof item === 'string' ? item : '')
+                    const displayHex = hex.startsWith('#') ? hex : '#' + hex
+                    const isValidHex = /^#[0-9A-Fa-f]{6}$/.test(displayHex)
+                    return (
+                        <div key={i} className="relative">
+                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/15 text-sm text-white border border-white/10">
+                                <span
+                                    className="w-5 h-5 rounded border border-white/20 flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-white/30 transition-all"
+                                    style={{ backgroundColor: isValidHex ? displayHex : 'transparent' }}
+                                    onClick={() => setEditingIdx(editingIdx === i ? null : i)}
+                                    title="Click to edit color"
+                                />
+                                <span className="font-mono text-xs">{displayHex}</span>
+                                <button type="button" onClick={() => remove(i)} className="hover:bg-white/20 rounded p-0.5 -mr-1 text-white/50 hover:text-white/80" aria-label="Remove">×</button>
+                            </span>
+                            {editingIdx === i && (
+                                <ColorPickerPopover
+                                    color={displayHex}
+                                    onChange={(newHex) => updateColor(i, newHex)}
+                                    onClose={() => setEditingIdx(null)}
+                                />
+                            )}
+                        </div>
+                    )
+                })}
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={value?.length ? '#hex' : placeholder}
+                    className="flex-1 min-w-[100px] bg-transparent border-0 text-white placeholder-white/50 focus:ring-0 focus:outline-none text-sm"
+                />
+            </div>
+
+            {/* Color Picker button */}
+            <div className="relative inline-block">
+                <button
+                    type="button"
+                    onClick={() => setShowPicker(!showPicker)}
+                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                        showPicker
+                            ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300'
+                            : 'border-white/15 bg-white/[0.03] text-white/50 hover:text-white/70 hover:bg-white/[0.06]'
+                    }`}
+                >
+                    <span className="w-4 h-4 rounded border border-white/20 bg-gradient-to-br from-red-500 via-yellow-400 to-blue-500" />
+                    Pick a Color
+                </button>
+                {showPicker && (
+                    <ColorPickerPopover
+                        color="#6366f1"
+                        onChange={(hex) => add(hex)}
+                        onClose={() => setShowPicker(false)}
+                    />
+                )}
+            </div>
+        </div>
+    )
+}
+
+// ——— BrandColorPickers — Primary / Secondary / Accent with popover ———
+function BrandColorPickers({ brandColors, setBrandColors }) {
+    const [openPicker, setOpenPicker] = useState(null)
+
+    const slots = [
+        { key: 'primary_color', label: 'Primary', placeholder: '#6366f1' },
+        { key: 'secondary_color', label: 'Secondary', placeholder: '#8b5cf6' },
+        { key: 'accent_color', label: 'Accent', placeholder: '#06b6d4' },
+    ]
+
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+                {slots.map(({ key, label, placeholder }) => {
+                    const colorVal = brandColors[key]
+                    const hasColor = !!colorVal
+                    const displayHex = hasColor ? (colorVal.startsWith('#') ? colorVal : '#' + colorVal) : null
+                    const isValidHex = displayHex && /^#[0-9A-Fa-f]{3,8}$/.test(displayHex)
+                    return (
+                        <div key={key} className="relative">
+                            <label className="block text-xs font-medium text-white/60 mb-2">{label}</label>
+                            <div
+                                className={`group relative h-20 rounded-xl border-2 cursor-pointer transition-all overflow-hidden ${
+                                    hasColor
+                                        ? 'border-white/20 hover:border-white/40'
+                                        : 'border-dashed border-white/15 hover:border-white/30 bg-white/[0.03]'
+                                }`}
+                                onClick={() => setOpenPicker(openPicker === key ? null : key)}
+                            >
+                                {hasColor && isValidHex ? (
+                                    <div className="absolute inset-0" style={{ backgroundColor: displayHex }} />
+                                ) : (
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-8 h-8 rounded-lg border border-dashed border-white/20 flex items-center justify-center">
+                                            <span className="text-white/30 text-lg">+</span>
+                                        </div>
+                                    </div>
+                                )}
+                                {hasColor && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setBrandColors((c) => ({ ...c, [key]: null })) }}
+                                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-black/40 backdrop-blur flex items-center justify-center text-white/60 hover:text-white hover:bg-black/60 opacity-0 group-hover:opacity-100 transition-all"
+                                        title={`Clear ${label.toLowerCase()}`}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                    </button>
+                                )}
+                            </div>
+                            <div className="mt-1.5">
+                                <input
+                                    type="text"
+                                    value={colorVal || ''}
+                                    onChange={(e) => {
+                                        const v = e.target.value.trim()
+                                        setBrandColors((c) => ({ ...c, [key]: v ? (v.startsWith('#') ? v : '#' + v) : null }))
+                                    }}
+                                    placeholder={placeholder}
+                                    className="w-full rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white font-mono placeholder-white/30 focus:ring-1 focus:ring-white/30 focus:outline-none"
+                                />
+                            </div>
+                            {openPicker === key && (
+                                <ColorPickerPopover
+                                    color={displayHex || placeholder}
+                                    onChange={(hex) => setBrandColors((c) => ({ ...c, [key]: hex }))}
+                                    onClose={() => setOpenPicker(null)}
+                                />
+                            )}
+                        </div>
+                    )
+                })}
+            </div>
         </div>
     )
 }
@@ -1478,8 +1934,159 @@ function LogoUsageGuidelines({ guidelines, onChange, brandId, brandName, logoSrc
     )
 }
 
+// ——— Presentation style definitions (shared between ReviewPanel and Brand Portal) ———
+const PRESENTATION_STYLES = [
+    {
+        id: 'clean',
+        label: 'Clean',
+        description: 'Minimal and refined. Thin accent lines, open whitespace, flat backgrounds.',
+        preview: (
+            <div className="h-24 rounded-lg bg-white/[0.06] border border-white/10 p-3 flex flex-col gap-1.5 overflow-hidden">
+                <div className="flex items-center gap-1.5">
+                    <div className="w-0.5 h-3 bg-indigo-400 rounded-full" />
+                    <div className="h-2 w-14 bg-white/40 rounded" />
+                </div>
+                <div className="space-y-1">
+                    <div className="h-1 w-full bg-white/10 rounded" />
+                    <div className="h-1 w-4/5 bg-white/10 rounded" />
+                </div>
+                <div className="mt-auto flex gap-1.5">
+                    <div className="h-5 w-5 rounded bg-white/5 border border-white/10" />
+                    <div className="h-5 w-5 rounded bg-white/5 border border-white/10" />
+                    <div className="h-5 w-5 rounded bg-white/5 border border-white/10" />
+                </div>
+            </div>
+        ),
+    },
+    {
+        id: 'textured',
+        label: 'Textured',
+        description: 'Rich and immersive. Full-bleed imagery, overlay blends, atmospheric depth.',
+        preview: (
+            <div className="h-24 rounded-lg bg-gray-900 p-3 flex flex-col gap-1.5 overflow-hidden relative">
+                <div className="absolute inset-0 opacity-30" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #0f172a 50%, #6366f1 100%)' }} />
+                <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' viewBox=\'0 0 40 40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23fff\' fill-opacity=\'0.08\'%3E%3Cpath d=\'M0 0h20v20H0zM20 20h20v20H20z\'/%3E%3C/g%3E%3C/svg%3E")' }} />
+                <div className="relative z-10">
+                    <div className="h-2 w-16 bg-white/60 rounded mb-1" />
+                    <div className="h-1 w-full bg-white/15 rounded" />
+                    <div className="h-1 w-3/4 bg-white/15 rounded mt-1" />
+                </div>
+                <div className="relative z-10 mt-auto flex gap-1.5">
+                    <div className="h-5 w-8 rounded bg-white/10 backdrop-blur-sm" />
+                    <div className="h-5 w-8 rounded bg-white/10 backdrop-blur-sm" />
+                </div>
+            </div>
+        ),
+    },
+    {
+        id: 'bold',
+        label: 'Bold',
+        description: 'Strong and graphic. Container shapes, heavy type, high-contrast blocks.',
+        preview: (
+            <div className="h-24 rounded-lg bg-gray-950 p-3 flex flex-col gap-1.5 overflow-hidden relative">
+                <div className="absolute inset-0 opacity-10" style={{ background: 'repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255,255,255,0.03) 8px, rgba(255,255,255,0.03) 16px)' }} />
+                <div className="relative z-10">
+                    <div className="inline-block bg-red-600 px-1.5 py-0.5 mb-1">
+                        <div className="h-2 w-10 bg-white rounded-sm" />
+                    </div>
+                </div>
+                <div className="relative z-10 flex gap-1.5">
+                    <div className="flex-1 bg-white/5 border border-white/10 rounded p-1.5">
+                        <div className="h-1.5 w-8 bg-white/50 rounded mb-1" />
+                        <div className="h-1 w-full bg-white/10 rounded" />
+                    </div>
+                    <div className="flex-1 bg-white/5 border border-white/10 rounded p-1.5">
+                        <div className="h-1.5 w-6 bg-white/50 rounded mb-1" />
+                        <div className="h-1 w-full bg-white/10 rounded" />
+                    </div>
+                </div>
+            </div>
+        ),
+    },
+]
+
+// ——— AI Presentation Style Recommendation ———
+function recommendPresentationStyle(payload) {
+    const personality = payload.personality || {}
+    const identity = payload.identity || {}
+    const scoringRules = payload.scoring_rules || {}
+
+    const unwrap = (v) => (typeof v === 'object' && v !== null && 'value' in v) ? v.value : v
+
+    const archetype = (unwrap(personality.primary_archetype) || '').toLowerCase()
+    const toneKeywords = (unwrap(scoringRules.tone_keywords) || unwrap(personality.tone_keywords) || []).map((t) => (typeof t === 'string' ? t : unwrap(t) || '').toLowerCase())
+    const traits = (unwrap(personality.traits) || []).map((t) => (typeof t === 'string' ? t : unwrap(t) || '').toLowerCase())
+    const brandLook = (unwrap(personality.brand_look) || '').toLowerCase()
+    const voice = (unwrap(personality.voice_description) || '').toLowerCase()
+    const industry = (unwrap(identity.industry) || '').toLowerCase()
+
+    const allSignals = [...toneKeywords, ...traits, brandLook, voice, industry].join(' ')
+
+    const scores = { clean: 0, textured: 0, bold: 0 }
+
+    const boldArchetypes = ['hero', 'outlaw', 'ruler', 'magician']
+    const texturedArchetypes = ['creator', 'explorer', 'lover', 'jester']
+    const cleanArchetypes = ['sage', 'innocent', 'caregiver', 'everyman']
+
+    if (boldArchetypes.includes(archetype)) scores.bold += 3
+    if (texturedArchetypes.includes(archetype)) scores.textured += 3
+    if (cleanArchetypes.includes(archetype)) scores.clean += 3
+
+    const boldWords = ['bold', 'strong', 'powerful', 'edgy', 'disruptive', 'intense', 'aggressive', 'dramatic', 'fierce', 'commanding', 'authoritative', 'striking', 'high-contrast', 'impactful', 'loud']
+    const texturedWords = ['warm', 'organic', 'artistic', 'creative', 'expressive', 'textured', 'layered', 'rich', 'vibrant', 'playful', 'whimsical', 'handcrafted', 'authentic', 'eclectic', 'artisan', 'vintage', 'retro']
+    const cleanWords = ['minimal', 'clean', 'refined', 'elegant', 'simple', 'modern', 'sleek', 'professional', 'corporate', 'subtle', 'understated', 'polished', 'sophisticated', 'luxury', 'premium', 'crisp']
+
+    for (const w of boldWords) { if (allSignals.includes(w)) scores.bold += 2 }
+    for (const w of texturedWords) { if (allSignals.includes(w)) scores.textured += 2 }
+    for (const w of cleanWords) { if (allSignals.includes(w)) scores.clean += 2 }
+
+    const boldIndustries = ['sports', 'fitness', 'gaming', 'entertainment', 'music', 'fashion', 'streetwear', 'media', 'automotive']
+    const texturedIndustries = ['food', 'beverage', 'restaurant', 'hospitality', 'travel', 'art', 'craft', 'photography', 'wellness', 'beauty']
+    const cleanIndustries = ['technology', 'saas', 'finance', 'banking', 'healthcare', 'legal', 'consulting', 'education', 'real estate']
+
+    for (const ind of boldIndustries) { if (industry.includes(ind)) scores.bold += 2 }
+    for (const ind of texturedIndustries) { if (industry.includes(ind)) scores.textured += 2 }
+    for (const ind of cleanIndustries) { if (industry.includes(ind)) scores.clean += 2 }
+
+    const sorted = Object.entries(scores).sort(([, a], [, b]) => b - a)
+    const [topId, topScore] = sorted[0]
+    const [, secondScore] = sorted[1]
+
+    if (topScore === 0) return null
+
+    const confidence = topScore > secondScore + 2 ? 'high' : topScore > secondScore ? 'medium' : 'low'
+
+    const reasons = []
+    if (boldArchetypes.includes(archetype) && topId === 'bold') reasons.push(`the ${archetype} archetype`)
+    if (texturedArchetypes.includes(archetype) && topId === 'textured') reasons.push(`the ${archetype} archetype`)
+    if (cleanArchetypes.includes(archetype) && topId === 'clean') reasons.push(`the ${archetype} archetype`)
+    if (toneKeywords.length > 0) {
+        const matchedTone = toneKeywords.filter((t) =>
+            (topId === 'bold' && boldWords.some((w) => t.includes(w))) ||
+            (topId === 'textured' && texturedWords.some((w) => t.includes(w))) ||
+            (topId === 'clean' && cleanWords.some((w) => t.includes(w)))
+        ).slice(0, 2)
+        if (matchedTone.length) reasons.push(`tone like "${matchedTone.join('", "')}"`)
+    }
+    if (industry) {
+        const matchedIndustry =
+            (topId === 'bold' && boldIndustries.some((i) => industry.includes(i))) ||
+            (topId === 'textured' && texturedIndustries.some((i) => industry.includes(i))) ||
+            (topId === 'clean' && cleanIndustries.some((i) => industry.includes(i)))
+        if (matchedIndustry) reasons.push(`${industry} positioning`)
+    }
+
+    return {
+        styleId: topId,
+        confidence,
+        reason: reasons.length > 0
+            ? `Based on ${reasons.join(' and ')}`
+            : `Based on your overall brand direction`,
+    }
+}
+
 // ——— ReviewPanel ———
-function ReviewPanel({ payload, brand, logoRef }) {
+function ReviewPanel({ payload, brand, logoRef, onStyleChange, onGoToStep, brandResearchGate, onTriggerWebsiteResearch, crawlerRunning = false, latestSnapshot = null, latestSnapshotLite = null, logoOnDark = null, logoDarkNeeded = false }) {
     const sources = payload.sources || {}
     const identity = payload.identity || {}
     const personality = payload.personality || {}
@@ -1487,6 +2094,17 @@ function ReviewPanel({ payload, brand, logoRef }) {
     const visual = payload.visual || {}
     const scoringRules = payload.scoring_rules || {}
     const brandColors = brand?.primary_color ? { primary: brand.primary_color, secondary: brand.secondary_color, accent: brand.accent_color } : null
+    const currentStyle = payload.presentation?.style || 'clean'
+    const styleRecommendation = useMemo(() => recommendPresentationStyle(payload), [payload])
+
+    const hasLogo = !!logoRef?.original_filename
+    const hasWebsite = !!(unwrapValue(sources.website_url) || '').trim()
+    const isPaid = brandResearchGate?.allowed
+
+    const snapshotCompleted = latestSnapshotLite?.status === 'completed'
+    const snapshotHasData = latestSnapshot && (latestSnapshot.primary_colors?.length > 0 || latestSnapshot.detected_fonts?.length > 0 || latestSnapshot.hero_headlines?.length > 0 || latestSnapshot.brand_bio || latestSnapshot.logo_url)
+    const crawlFoundLogo = !!latestSnapshot?.logo_url
+    const crawlRanForWebsite = !!latestSnapshotLite?.source_url
 
     const truncate = (s, len = 80) => {
         const t = String(s || '').trim()
@@ -1494,8 +2112,8 @@ function ReviewPanel({ payload, brand, logoRef }) {
     }
 
     const items = [
-        { label: 'Website & Social', value: unwrapValue(sources.website_url) ? `Website: ${unwrapValue(sources.website_url)}` : `Social URLs: ${(unwrapValue(sources.social_urls) || []).length}` },
-        { label: 'Logo', value: logoRef?.original_filename ? `✓ ${logoRef.original_filename}` : '—' },
+        { label: 'Website & Social', value: unwrapValue(sources.website_url) ? `Website: ${unwrapValue(sources.website_url)}` : `Social URLs: ${(unwrapValue(sources.social_urls) || []).length}`, missing: !hasWebsite },
+        { label: 'Logo', value: logoRef?.original_filename ? `✓ ${logoRef.original_filename}` : '—', missing: !hasLogo },
         { label: 'Archetype', value: unwrapValue(personality.primary_archetype) || (unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c)).filter(Boolean).join(', ') || '—' },
         { label: 'Why', value: truncate(unwrapValue(identity.mission)) },
         { label: 'What', value: truncate(unwrapValue(identity.positioning)) },
@@ -1513,15 +2131,249 @@ function ReviewPanel({ payload, brand, logoRef }) {
         { label: 'Visual References', value: approvedRefsCount(unwrapValue(visual.approved_references)) ? `${approvedRefsCount(unwrapValue(visual.approved_references))} references` : '—' },
     ]
 
+    const [websiteInput, setWebsiteInput] = useState('')
+    const [researchTriggered, setResearchTriggered] = useState(false)
+    const isAnalyzing = researchTriggered || crawlerRunning
+
+    useEffect(() => {
+        if (researchTriggered && !crawlerRunning && snapshotCompleted) {
+            setResearchTriggered(false)
+        }
+    }, [crawlerRunning, snapshotCompleted, researchTriggered])
+
+    const researchResultsSummary = useMemo(() => {
+        if (!snapshotCompleted || !latestSnapshot) return null
+        const parts = []
+        const colorCount = (latestSnapshot.primary_colors?.length || 0) + (latestSnapshot.secondary_colors?.length || 0)
+        if (colorCount > 0) parts.push(`${colorCount} color${colorCount !== 1 ? 's' : ''}`)
+        if (latestSnapshot.detected_fonts?.length > 0) parts.push(`${latestSnapshot.detected_fonts.length} font${latestSnapshot.detected_fonts.length !== 1 ? 's' : ''}`)
+        if (latestSnapshot.hero_headlines?.length > 0) parts.push(`${latestSnapshot.hero_headlines.length} headline${latestSnapshot.hero_headlines.length !== 1 ? 's' : ''}`)
+        if (latestSnapshot.brand_bio) parts.push('brand bio')
+        if (latestSnapshot.logo_url) parts.push('logo')
+        return parts
+    }, [snapshotCompleted, latestSnapshot])
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             <h3 className="text-xl font-semibold text-white">Review your brand guidelines</h3>
+
+            {/* Analysis status — always visible when relevant */}
+            {isAnalyzing && (
+                <div className="flex items-center gap-2.5 rounded-xl bg-emerald-500/[0.08] px-5 py-3.5 border border-emerald-500/20">
+                    <svg className="animate-spin w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    <div>
+                        <p className="text-sm font-medium text-emerald-300">Website analysis in progress</p>
+                        <p className="text-xs text-emerald-300/60 mt-0.5">New AI suggestions will appear as you step back through the builder.</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Analysis completed — show results summary */}
+            {!isAnalyzing && snapshotCompleted && crawlRanForWebsite && (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 space-y-3">
+                    <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center mt-0.5">
+                            <svg className="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white/80">Website analysis complete</p>
+                            <p className="text-xs text-white/40 mt-0.5">
+                                {latestSnapshotLite?.source_url && <span className="text-white/50">{latestSnapshotLite.source_url}</span>}
+                            </p>
+                            {researchResultsSummary && researchResultsSummary.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                    {researchResultsSummary.map((item) => (
+                                        <span key={item} className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/15 text-[11px] text-emerald-300/80">{item}</span>
+                                    ))}
+                                </div>
+                            )}
+                            {researchResultsSummary && researchResultsSummary.length === 0 && (
+                                <p className="text-xs text-white/30 mt-1">No structured data could be extracted from this website.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Logo not found warning */}
+                    {!crawlFoundLogo && !hasLogo && (
+                        <div className="flex items-center gap-2.5 rounded-lg bg-amber-500/[0.06] px-4 py-2.5 border border-amber-500/15">
+                            <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                            </svg>
+                            <p className="text-xs text-amber-200/80">We couldn&apos;t find a logo on your website. You&apos;ll need to upload one manually in Standards.</p>
+                            <button
+                                type="button"
+                                onClick={() => onGoToStep?.('standards')}
+                                className="flex-shrink-0 ml-auto px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-500/15 text-amber-200/80 hover:bg-amber-500/25 border border-amber-500/15 transition"
+                            >
+                                Upload Logo
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Smart nudges for missing critical items */}
+            {(( !hasLogo && !(snapshotCompleted && crawlRanForWebsite && !crawlFoundLogo) ) || (!hasWebsite && !isAnalyzing && !snapshotCompleted) || (logoDarkNeeded && hasLogo && !logoOnDark)) && isPaid && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-5 space-y-3">
+                    <div className="flex items-start gap-3">
+                        <svg className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        <p className="text-sm font-medium text-amber-200">A few things could strengthen your guidelines</p>
+                    </div>
+
+                    {/* Logo contrast nudge — dark logo without a light variant */}
+                    {logoDarkNeeded && hasLogo && !logoOnDark && (
+                        <div className="flex items-center justify-between rounded-lg bg-white/[0.04] px-4 py-3 border border-white/[0.06]">
+                            <div>
+                                <p className="text-sm text-white/80">Logo may not display well on dark backgrounds</p>
+                                <p className="text-xs text-white/40">Your logo appears dark. Upload or generate a white version in Standards.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => onGoToStep?.('standards')}
+                                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-500/20 transition"
+                            >
+                                Fix in Standards
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Logo nudge — show if missing and analysis didn't cover it above */}
+                    {!hasLogo && !(snapshotCompleted && crawlRanForWebsite && !crawlFoundLogo) && (
+                        <div className="flex items-center justify-between rounded-lg bg-white/[0.04] px-4 py-3 border border-white/[0.06]">
+                            <div>
+                                <p className="text-sm text-white/80">No logo uploaded</p>
+                                <p className="text-xs text-white/40">A logo is required to publish. Go to Standards to upload one.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => onGoToStep?.('standards')}
+                                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-500/20 transition"
+                            >
+                                Add Logo
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Website nudge — show if no website analyzed and not currently analyzing */}
+                    {!hasWebsite && !isAnalyzing && !snapshotCompleted && (
+                        <div className="rounded-lg bg-white/[0.04] px-4 py-3 border border-white/[0.06] space-y-3">
+                            <div>
+                                <p className="text-sm text-white/80">No website analyzed</p>
+                                <p className="text-xs text-white/40">Add your website to run AI research — it can improve suggestions for tone, positioning, and more.</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="url"
+                                    value={websiteInput}
+                                    onChange={(e) => setWebsiteInput(e.target.value)}
+                                    placeholder="https://yourbrand.com"
+                                    className="flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/30 focus:ring-1 focus:ring-amber-500/50 focus:border-amber-500/30"
+                                />
+                                <button
+                                    type="button"
+                                    disabled={!websiteInput.trim()}
+                                    onClick={() => {
+                                        if (websiteInput.trim()) {
+                                            onTriggerWebsiteResearch?.(websiteInput.trim())
+                                            setResearchTriggered(true)
+                                        }
+                                    }}
+                                    className="px-4 py-2 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-500/20 transition disabled:opacity-40"
+                                >
+                                    Analyze Website
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2">
-                {items.map(({ label, value }, i) => (
-                    <FieldCard key={i} title={label}>
-                        <p className="text-white/90 text-sm">{value || '—'}</p>
+                {items.map(({ label, value, missing }, i) => (
+                    <FieldCard key={i} title={label} className={missing ? 'border-amber-500/20' : ''}>
+                        <p className={`text-sm ${missing ? 'text-white/40 italic' : 'text-white/90'}`}>{value || '—'}</p>
                     </FieldCard>
                 ))}
+            </div>
+
+            {/* Presentation Style Selector */}
+            <div className="pt-6 border-t border-white/10">
+                <h3 className="text-lg font-semibold text-white mb-1">Presentation Style</h3>
+                <p className="text-sm text-white/50 mb-2">Choose how your published brand guidelines will look.</p>
+
+                {/* AI Recommendation */}
+                {styleRecommendation && currentStyle !== styleRecommendation.styleId && (
+                    <div className="mb-5 flex items-center gap-3 rounded-xl bg-indigo-500/[0.06] border border-indigo-500/20 px-4 py-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-indigo-500/15 flex items-center justify-center">
+                            <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                            </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm text-indigo-300">
+                                <span className="font-medium">{PRESENTATION_STYLES.find((s) => s.id === styleRecommendation.styleId)?.label}</span> would suit this brand
+                            </p>
+                            <p className="text-xs text-indigo-300/50 mt-0.5">{styleRecommendation.reason}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => onStyleChange?.(styleRecommendation.styleId)}
+                            className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/25 hover:bg-indigo-500/30 transition-colors"
+                        >
+                            Apply
+                        </button>
+                    </div>
+                )}
+
+                {/* Already using recommended style */}
+                {styleRecommendation && currentStyle === styleRecommendation.styleId && (
+                    <p className="mb-5 text-xs text-emerald-400/60 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                        AI recommended — matches your brand&apos;s style and tone
+                    </p>
+                )}
+
+                <div className="grid grid-cols-3 gap-4">
+                    {PRESENTATION_STYLES.map((style) => {
+                        const isSelected = currentStyle === style.id
+                        const isRecommended = styleRecommendation?.styleId === style.id
+                        const brandColor = brand?.primary_color || '#6366f1'
+                        return (
+                            <button
+                                key={style.id}
+                                type="button"
+                                onClick={() => onStyleChange?.(style.id)}
+                                className={`relative flex flex-col rounded-xl border-2 text-left transition-all overflow-hidden ${
+                                    isSelected
+                                        ? 'bg-white/[0.04]'
+                                        : 'border-white/10 hover:border-white/20 bg-white/[0.02]'
+                                }`}
+                                style={isSelected ? { borderColor: brandColor, boxShadow: `0 0 0 1px ${brandColor}40` } : undefined}
+                            >
+                                {isRecommended && !isSelected && (
+                                    <div className="absolute top-2 right-2 z-10">
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/25 text-[9px] font-medium text-indigo-300">
+                                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+                                            AI Pick
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="p-3 pb-0">{style.preview}</div>
+                                <div className="p-3 flex-1">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                        <span className="text-sm font-medium text-white">{style.label}</span>
+                                        {isSelected && (
+                                            <svg className="h-4 w-4" style={{ color: brandColor }} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-white/40 leading-relaxed">{style.description}</p>
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
             </div>
         </div>
     )
@@ -1561,6 +2413,9 @@ export default function BrandGuidelinesBuilder({
     brandMaterials: initialBrandMaterials = [],
     visualReferences: initialVisualReferences = [],
     logoAsset: initialLogoAsset = null,
+    logoOnDarkAsset: initialLogoOnDark = null,
+    logoOnLightAsset: initialLogoOnLight = null,
+    logoHorizontalAsset: initialLogoHorizontal = null,
     guidelinesPdfAssetId = null,
     guidelinesPdfFilename = null,
     overallStatus: initialOverallStatus = 'pending',
@@ -1596,7 +2451,14 @@ export default function BrandGuidelinesBuilder({
     const [brandMaterials, setBrandMaterials] = useState(initialBrandMaterials ?? [])
     const [visualReferences, setVisualReferences] = useState(initialVisualReferences ?? [])
     const [logoRef, setLogoRef] = useState(initialLogoAsset ?? null)
+    const [logoOnDark, setLogoOnDark] = useState(initialLogoOnDark ?? null)
+    const [logoOnLight, setLogoOnLight] = useState(initialLogoOnLight ?? null)
+    const [logoHorizontal, setLogoHorizontal] = useState(initialLogoHorizontal ?? null)
     const [assetSelectorOpen, setAssetSelectorOpen] = useState(null)
+    const [generatingWhiteLogo, setGeneratingWhiteLogo] = useState(false)
+    const [whiteGenError, setWhiteGenError] = useState(null)
+    const [logoComplexity, setLogoComplexity] = useState(null)
+    const [cropModalOpen, setCropModalOpen] = useState(null)
     const [dismissedInlineSuggestions, setDismissedInlineSuggestions] = useState([])
     const [publishWarnings, setPublishWarnings] = useState([])
     const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false)
@@ -1635,6 +2497,69 @@ export default function BrandGuidelinesBuilder({
         return () => document.querySelectorAll(`link[id^="${prefix}"]`).forEach((el) => el.remove())
     }, [payload.typography?.external_font_links])
 
+    const logoSrc = logoRef?.preview_url || logoRef?.thumbnail_url || null
+    const logoDarkNeeded = useLogoBrightness(logoSrc)
+
+    useEffect(() => {
+        if (!logoSrc) { setLogoComplexity(null); return }
+        let cancelled = false
+        detectLogoComplexity(logoSrc).then((result) => {
+            if (!cancelled) setLogoComplexity(result)
+        }).catch(() => { if (!cancelled) setLogoComplexity(null) })
+        return () => { cancelled = true }
+    }, [logoSrc])
+
+    const uploadBlobAsAsset = useCallback(async (blob, filename) => {
+        const file = new File([blob], filename, { type: blob.type })
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+        const headers = { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'application/json' }
+        const initRes = await fetch('/app/uploads/initiate-batch', {
+            method: 'POST', headers, credentials: 'same-origin',
+            body: JSON.stringify({ files: [{ file_name: file.name, file_size: file.size, mime_type: file.type }], brand_id: brand.id }),
+        })
+        if (!initRes.ok) throw new Error(`Initiate failed: ${initRes.status}`)
+        const initData = await initRes.json()
+        const result = initData.uploads?.[0]
+        const uploadUrl = result?.upload_url
+        const uploadKey = `temp/uploads/${result?.upload_session_id}/original`
+        if (!uploadUrl) throw new Error('No upload URL returned')
+        const putRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file })
+        if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`)
+        const finalRes = await fetch('/app/assets/upload/finalize', {
+            method: 'POST', headers, credentials: 'same-origin',
+            body: JSON.stringify({ manifest: [{ upload_key: uploadKey, expected_size: file.size, resolved_filename: file.name, category_slug: 'logos' }] }),
+        })
+        if (!finalRes.ok) throw new Error(`Finalize failed: ${finalRes.status}`)
+        const finalData = await finalRes.json()
+        const asset = finalData.results?.[0]
+        return { asset_id: asset?.asset_id ?? asset?.id, thumbnail_url: asset?.thumbnail_url ?? null }
+    }, [brand.id])
+
+    const handleGenerateWhiteLogo = useCallback(async () => {
+        if (!logoSrc) return
+        setGeneratingWhiteLogo(true)
+        setWhiteGenError(null)
+        try {
+            const blob = await generateWhiteVariant(logoSrc)
+            const baseName = (logoRef?.original_filename || 'logo').replace(/\.[^.]+$/, '')
+            const { asset_id } = await uploadBlobAsAsset(blob, `${baseName}-white.png`)
+            await handleAssetAttach({ id: asset_id }, 'logo_on_dark')
+        } catch (err) {
+            setWhiteGenError(err.message || 'Failed to generate white variant')
+        } finally {
+            setGeneratingWhiteLogo(false)
+        }
+    }, [logoSrc, logoRef, uploadBlobAsAsset, handleAssetAttach])
+
+    const handleCropHorizontal = useCallback(async (croppedBlob) => {
+        try {
+            const baseName = (logoRef?.original_filename || 'logo').replace(/\.[^.]+$/, '')
+            const { asset_id } = await uploadBlobAsAsset(croppedBlob, `${baseName}-horizontal.png`)
+            await handleAssetAttach({ id: asset_id }, 'logo_horizontal')
+        } catch {}
+        setCropModalOpen(null)
+    }, [logoRef, uploadBlobAsAsset, handleAssetAttach])
+
     const REVIEW_STEP = 'review'
     const [viewingReview, setViewingReview] = useState(false)
     const hasProcessingEarly = pdfExtractionPolling || ingestionProcessing || ingestionPolling || (researchPolling || (polledResearch?.crawlerRunning ?? crawlerRunning))
@@ -1653,7 +2578,16 @@ export default function BrandGuidelinesBuilder({
     // UI-only fallback for preview; never write back or send in payload
     const displayPrimary = brand.primary_color ?? '#6366f1'
     const displaySecondary = brand.secondary_color ?? '#8b5cf6'
-    const displayAccent = brand.accent_color ?? '#06b6d4'
+    const rawAccent = brand.accent_color ?? '#06b6d4'
+
+    const isColorTooLight = (hex) => {
+        const c = hex.replace('#', '')
+        const r = parseInt(c.substring(0, 2), 16)
+        const g = parseInt(c.substring(2, 4), 16)
+        const b = parseInt(c.substring(4, 6), 16)
+        return (r * 299 + g * 587 + b * 114) / 1000 > 200
+    }
+    const displayAccent = isColorTooLight(rawAccent) ? displayPrimary : rawAccent
 
     const updatePayload = useCallback((path, key, value) => {
         setPayload((prev) => ({
@@ -1887,6 +2821,17 @@ export default function BrandGuidelinesBuilder({
                     original_filename: serverLogo?.original_filename || item.original_filename,
                 }
                 setLogoRef(logoData)
+            } else if (['logo_on_dark', 'logo_on_light', 'logo_horizontal'].includes(context)) {
+                const va = res.data?.variant_asset
+                const variantData = {
+                    id: va?.id ?? assetId,
+                    thumbnail_url: va?.thumbnail_url || item.thumbnail_url || null,
+                    preview_url: va?.preview_url || item.preview_url || null,
+                    original_filename: va?.original_filename || item.original_filename,
+                }
+                if (context === 'logo_on_dark') setLogoOnDark(variantData)
+                else if (context === 'logo_on_light') setLogoOnLight(variantData)
+                else if (context === 'logo_horizontal') setLogoHorizontal(variantData)
             }
         } catch (e) {
             if (context === 'brand_material') {
@@ -1922,6 +2867,20 @@ export default function BrandGuidelinesBuilder({
             setLogoRef(null)
         } catch {}
     }, [brand.id, logoRef])
+
+    const handleDetachLogoVariant = useCallback(async (context) => {
+        const ref = context === 'logo_on_dark' ? logoOnDark : context === 'logo_on_light' ? logoOnLight : logoHorizontal
+        if (!ref?.id) return
+        try {
+            await axios.post(route('brands.brand-dna.builder.detach-asset', { brand: brand.id }), {
+                asset_id: ref.id,
+                builder_context: context,
+            })
+            if (context === 'logo_on_dark') setLogoOnDark(null)
+            else if (context === 'logo_on_light') setLogoOnLight(null)
+            else if (context === 'logo_horizontal') setLogoHorizontal(null)
+        } catch {}
+    }, [brand.id, logoOnDark, logoOnLight, logoHorizontal])
 
     const handleDetachBrandMaterial = useCallback(async (assetId) => {
         try {
@@ -2114,6 +3073,7 @@ export default function BrandGuidelinesBuilder({
     }, [currentStep, effectiveResearchFinalizedForGate, brand.id])
 
     const effectiveSnapshotLite = polledResearch?.latestSnapshotLite ?? latestSnapshotLite
+    const effectiveLatestSnapshot = polledResearch?.latestSnapshot ?? latestSnapshot ?? null
     const effectiveCoherence = polledResearch?.latestCoherence ?? latestCoherence
     const effectiveAlignment = polledResearch?.latestAlignment ?? latestAlignment
     const effectiveSuggestions = polledResearch?.latestSuggestions ?? latestSuggestions
@@ -2145,23 +3105,24 @@ export default function BrandGuidelinesBuilder({
 
     return (
         <div className="h-screen flex flex-col bg-[#0B0B0D] relative overflow-hidden">
-            {/* Cinematic background — brand-driven radial gradients */}
+            {/* Cinematic background — matches Brand Overview glow (primary + secondary) */}
             <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: `radial-gradient(ellipse at 20% 0%, ${displayPrimary}30, transparent 70%), radial-gradient(ellipse at 80% 100%, ${displayPrimary}20, transparent 60%), #0B0B0D`,
+                    background: `radial-gradient(circle at 20% 20%, ${displayPrimary}33, transparent), radial-gradient(circle at 80% 80%, ${displaySecondary}33, transparent), #0B0B0D`,
                 }}
             />
+            {/* Left column radial accent (brand primary glow) */}
             <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: `radial-gradient(circle at 60% 30%, ${displayPrimary}12, transparent 50%)`,
+                    background: `radial-gradient(circle at 30% 40%, ${displayPrimary}14, transparent 60%)`,
                 }}
             />
             {/* Depth overlays */}
             <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-0 bg-black/20" />
-                <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/40" />
+                <div className="absolute inset-0 bg-black/30" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
             </div>
             {/* Film grain */}
             <div
@@ -2226,7 +3187,7 @@ export default function BrandGuidelinesBuilder({
                     </div>
                 </header>
 
-                <div className="flex-1 flex min-h-0 overflow-y-auto">
+                <div className="flex-1 flex min-h-0 overflow-y-auto scrollbar-cinematic">
                     <main className="flex-1 min-w-0 px-4 sm:px-8 py-8 max-w-4xl mx-auto w-full">
                     {/* Non-review errors (e.g. general save failures) shown at top of all steps */}
                     {!isReviewStep && errors.length > 0 && (
@@ -2252,10 +3213,38 @@ export default function BrandGuidelinesBuilder({
                                 exit={{ opacity: 0, y: -12 }}
                                 transition={{ duration: 0.3 }}
                             >
-                                <ReviewPanel payload={payload} brand={brand} logoRef={logoRef} />
+                                <ReviewPanel
+                                    payload={payload}
+                                    brand={brand}
+                                    logoRef={logoRef}
+                                    logoOnDark={logoOnDark}
+                                    logoDarkNeeded={logoDarkNeeded}
+                                    brandResearchGate={brandResearchGate}
+                                    crawlerRunning={effectiveCrawlerRunning}
+                                    latestSnapshot={effectiveLatestSnapshot}
+                                    latestSnapshotLite={effectiveSnapshotLite}
+                                    onGoToStep={(step) => {
+                                        setViewingReview(false)
+                                        router.visit(route('brands.brand-guidelines.builder', { brand: brand.id, step }))
+                                    }}
+                                    onTriggerWebsiteResearch={async (url) => {
+                                        updatePayload('sources', 'website_url', url)
+                                        try {
+                                            await axios.post(route('brands.brand-dna.builder.trigger-research', { brand: brand.id }), { url })
+                                            setResearchPolling(true)
+                                        } catch (e) { /* gate errors handled elsewhere */ }
+                                    }}
+                                    onStyleChange={(styleId) => {
+                                        updatePayload('presentation', 'style', styleId)
+                                        axios.post(route('brands.brand-dna.builder.patch', { brand: brand.id }), {
+                                            step_key: 'standards',
+                                            payload: { presentation: { style: styleId } },
+                                        }).catch(() => {})
+                                    }}
+                                />
 
-                                {/* Publish section — sticky-visible at bottom of review */}
-                                <div className="mt-10 mb-32 pt-8 border-t border-white/10">
+                                {/* Validation messages for publish */}
+                                <div className="mt-8 mb-20 pt-6 border-t border-white/10">
                                     {/* Inline validation near the button */}
                                     {missingFields.length > 0 && (
                                         <div className="mb-6 rounded-xl bg-red-500/20 border border-red-500/40 p-4">
@@ -2318,30 +3307,6 @@ export default function BrandGuidelinesBuilder({
                                         </div>
                                     )}
 
-                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-                                        <label className="flex items-center gap-3 cursor-pointer order-2 sm:order-1">
-                                            <button
-                                                type="button"
-                                                role="switch"
-                                                aria-checked={enableScoring}
-                                                onClick={() => setEnableScoring((v) => !v)}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-transparent ${enableScoring ? 'bg-indigo-500' : 'bg-white/20'}`}
-                                            >
-                                                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${enableScoring ? 'translate-x-5' : 'translate-x-0'}`} />
-                                            </button>
-                                            <span className="text-white/80 text-sm">Enable On-Brand Scoring</span>
-                                            <span className="text-white/40 text-xs">(can change later)</span>
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={handlePublish}
-                                            disabled={saving || (missingFields.length > 0)}
-                                            className="order-1 sm:order-2 w-full sm:w-auto px-10 py-3.5 rounded-xl font-semibold text-white text-base transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
-                                            style={{ backgroundColor: (saving || missingFields.length > 0) ? '#4b5563' : displayPrimary }}
-                                        >
-                                            {saving ? 'Publishing…' : 'Publish Brand Guidelines'}
-                                        </button>
-                                    </div>
                                 </div>
                             </motion.div>
                         ) : (
@@ -2353,8 +3318,8 @@ export default function BrandGuidelinesBuilder({
                                 transition={{ duration: 0.3 }}
                             >
                                 <StepShell
-                                    title={currentStep === 'processing' ? 'Processing your Brand Guidelines' : currentStep === 'research-summary' ? 'Research Summary' : currentStepConfig?.title}
-                                    description={currentStep === 'processing' ? 'Extracting data to fill and suggest the next steps.' : currentStep === 'research-summary' ? 'Review what the system discovered before editing brand fields.' : currentStepConfig?.description}
+                                    title={currentStep === 'archetype' ? 'Brand Archetype' : currentStep === 'processing' ? 'Processing your Brand Guidelines' : currentStep === 'research-summary' ? 'Research Summary' : currentStepConfig?.title}
+                                    description={currentStep === 'archetype' ? 'Define the core identity your brand embodies.' : currentStep === 'processing' ? 'Extracting data to fill and suggest the next steps.' : currentStep === 'research-summary' ? 'Review what the system discovered before editing brand fields.' : currentStepConfig?.description}
                                 >
                                     {/* Processing status — show on non-Background, non-Processing steps */}
                                     {/* Brand Guidelines PDF summary — show on non-Background, non-Processing steps when PDF was uploaded */}
@@ -2607,6 +3572,9 @@ export default function BrandGuidelinesBuilder({
                                                             onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'positioning:industry'])}
                                                         />
                                                     )}
+                                                    {!effectiveSuggestions?.industry_suggestion && (
+                                                        <FieldSuggestButton fieldPath="identity.industry" brandId={brand.id} value={unwrapValue(identity.industry)} onSuggestion={(val) => updatePayload('identity', 'industry', val)} />
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-white/80 mb-2">Target Audience</label>
@@ -2626,6 +3594,9 @@ export default function BrandGuidelinesBuilder({
                                                             onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'positioning:target_audience'])}
                                                         />
                                                     )}
+                                                    {!effectiveSuggestions?.target_audience_suggestion && (
+                                                        <FieldSuggestButton fieldPath="identity.target_audience" brandId={brand.id} value={unwrapValue(identity.target_audience)} onSuggestion={(val) => updatePayload('identity', 'target_audience', val)} />
+                                                    )}
                                                 </div>
                                             </div>
                                             <div>
@@ -2637,6 +3608,7 @@ export default function BrandGuidelinesBuilder({
                                                     placeholder="e.g. Premium consumer electronics"
                                                     className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40"
                                                 />
+                                                <FieldSuggestButton fieldPath="identity.market_category" brandId={brand.id} value={unwrapValue(identity.market_category)} onSuggestion={(val) => updatePayload('identity', 'market_category', val)} />
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-medium text-white/80 mb-2">Competitive Position</label>
@@ -2647,6 +3619,7 @@ export default function BrandGuidelinesBuilder({
                                                     placeholder="How you differentiate from competitors"
                                                     className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/40"
                                                 />
+                                                <FieldSuggestButton fieldPath="identity.competitive_position" brandId={brand.id} value={unwrapValue(identity.competitive_position)} onSuggestion={(val) => updatePayload('identity', 'competitive_position', val)} />
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-medium text-white/80 mb-2">Tagline</label>
@@ -2665,6 +3638,9 @@ export default function BrandGuidelinesBuilder({
                                                         onApply={(val) => updatePayload('identity', 'tagline', val)}
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'positioning:tagline'])}
                                                     />
+                                                )}
+                                                {!effectiveSuggestions?.tagline_suggestion && (
+                                                    <FieldSuggestButton fieldPath="identity.tagline" brandId={brand.id} value={unwrapValue(identity.tagline)} onSuggestion={(val) => updatePayload('identity', 'tagline', val)} />
                                                 )}
                                             </div>
                                             <div>
@@ -2685,6 +3661,12 @@ export default function BrandGuidelinesBuilder({
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'positioning:beliefs'])}
                                                     />
                                                 )}
+                                                {!effectiveSuggestions?.beliefs_suggestion?.length && (
+                                                    <FieldSuggestButton fieldPath="identity.beliefs" brandId={brand.id} value={unwrapValue(identity.beliefs)} isArray onSuggestion={(val) => {
+                                                        const current = (unwrapValue(identity.beliefs) || []).filter(v => typeof v === 'string')
+                                                        if (!current.includes(val)) updatePayload('identity', 'beliefs', [...current, val])
+                                                    }} />
+                                                )}
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-medium text-white/80 mb-2">Values</label>
@@ -2704,211 +3686,31 @@ export default function BrandGuidelinesBuilder({
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'positioning:values'])}
                                                     />
                                                 )}
+                                                {!effectiveSuggestions?.values_suggestion?.length && (
+                                                    <FieldSuggestButton fieldPath="identity.values" brandId={brand.id} value={unwrapValue(identity.values)} isArray onSuggestion={(val) => {
+                                                        const current = (unwrapValue(identity.values) || []).filter(v => typeof v === 'string')
+                                                        if (!current.includes(val)) updatePayload('identity', 'values', [...current, val])
+                                                    }} />
+                                                )}
                                             </div>
                                         </div>
                                     )}
 
                                     {currentStep === 'archetype' && (
-                                        <div className="space-y-8">
-                                            {effectiveSuggestions?.recommended_archetypes?.length > 0 && !dismissedInlineSuggestions.includes('archetype:recommended') && (
-                                                <InlineSuggestionBlock
-                                                    title="Recommended archetypes"
-                                                    items={effectiveSuggestions.recommended_archetypes}
-                                                    onApply={(archetype) => {
-                                                        setPayload((prev) => ({
-                                                            ...prev,
-                                                            personality: {
-                                                                ...(prev.personality || {}),
-                                                                primary_archetype: archetype,
-                                                                candidate_archetypes: (unwrapValue(prev.personality?.candidate_archetypes) || []).map((a) => unwrapValue(a)).filter((a) => a !== archetype),
-                                                            },
-                                                        }))
-                                                    }}
-                                                    onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'archetype:recommended'])}
-                                                />
-                                            )}
-                                            {/* Two avenues: I know / I don't know */}
-                                            <div className="flex gap-4 mb-6">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPayload((prev) => ({ ...prev, personality: { ...(prev.personality || {}), archetype_mode: 'know' } }))}
-                                                    className={`flex-1 py-3 px-4 rounded-xl border text-sm font-medium transition-colors ${(personality.archetype_mode || 'dont_know') === 'know' ? 'border-indigo-500/60 bg-indigo-500/20 text-indigo-200' : 'border-white/20 bg-white/5 text-white/70 hover:bg-white/10'}`}
-                                                >
-                                                    I know my archetype
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPayload((prev) => ({ ...prev, personality: { ...(prev.personality || {}), archetype_mode: 'dont_know' } }))}
-                                                    className={`flex-1 py-3 px-4 rounded-xl border text-sm font-medium transition-colors ${(personality.archetype_mode || 'dont_know') === 'dont_know' ? 'border-indigo-500/60 bg-indigo-500/20 text-indigo-200' : 'border-white/20 bg-white/5 text-white/70 hover:bg-white/10'}`}
-                                                >
-                                                    I don&apos;t know — help me narrow it down
-                                                </button>
-                                            </div>
-
-                                            {(personality.archetype_mode || 'dont_know') === 'know' ? (
-                                                /* Avenue 1: Direct selection — hero-style cards */
-                                                <div className="space-y-4">
-                                                    {isAiPopulated(personality.primary_archetype) && (
-                                                        <div className="flex items-center gap-2">
-                                                            <AiFieldBadge field={personality.primary_archetype} />
-                                                        </div>
-                                                    )}
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                                                    {ARCHETYPES.map((a) => {
-                                                        const primary = unwrapValue(personality.primary_archetype)
-                                                        const selected = [primary, ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean)
-                                                        const isSelected = selected.includes(a.id)
-                                                        const isSelectedFirst = primary === a.id
-                                                        const canSelect = selected.length < 2 && !isSelected
-                                                        return (
-                                                            <button
-                                                                key={a.id}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    if (isSelected) {
-                                                                        const next = selected.filter((x) => x !== a.id)
-                                                                        setPayload((prev) => ({
-                                                                            ...prev,
-                                                                            personality: {
-                                                                                ...(prev.personality || {}),
-                                                                                primary_archetype: next[0] || null,
-                                                                                candidate_archetypes: next.slice(1),
-                                                                            },
-                                                                        }))
-                                                                    } else if (canSelect) {
-                                                                        const next = [...selected, a.id]
-                                                                        setPayload((prev) => ({
-                                                                            ...prev,
-                                                                            personality: {
-                                                                                ...(prev.personality || {}),
-                                                                                primary_archetype: next[0],
-                                                                                candidate_archetypes: next.slice(1),
-                                                                            },
-                                                                        }))
-                                                                    }
-                                                                }}
-                                                                disabled={!canSelect && !isSelected}
-                                                                className={`rounded-2xl border p-6 text-left transition-all min-h-[180px] flex flex-col items-center justify-center ${
-                                                                    isSelected ? 'border-indigo-500/60 bg-indigo-500/15 ring-2 ring-indigo-400/40' : 'border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30'
-                                                                }`}
-                                                            >
-                                                                <div className="w-20 h-20 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
-                                                                    <span className="text-white/50 text-3xl">◇</span>
-                                                                </div>
-                                                                <h4 className="font-semibold text-white text-center mb-1">{a.id}</h4>
-                                                                <p className="text-xs text-white/60 text-center">{a.desc}</p>
-                                                                {isSelected && <span className="mt-3 text-xs text-indigo-300">{isSelectedFirst ? 'Primary' : 'Secondary'}</span>}
-                                                            </button>
-                                                        )
-                                                    })}
-                                                </div>
-                                                </div>
-                                            ) : (
-                                                /* Avenue 2: Apply / Doesn't apply — two groupings + hero cards */
-                                                <div className="space-y-6">
-                                                    <p className="text-white/70 text-sm">Click each archetype to add it to &quot;Applies to us&quot; (up to 2) or &quot;Doesn&apos;t apply&quot;.</p>
-                                                    <div className="grid md:grid-cols-2 gap-6">
-                                                        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                                                            <h4 className="text-sm font-semibold text-emerald-300 mb-3">Applies to us</h4>
-                                                            <div className="space-y-2 min-h-[100px]">
-                                                                {[unwrapValue(personality.primary_archetype), ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean).map((id) => {
-                                                                    const a = ARCHETYPES.find((x) => x.id === id)
-                                                                    if (!a) return null
-                                                                    return (
-                                                                        <div key={a.id} className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
-                                                                            <span className="text-white font-medium">{a.id}</span>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => {
-                                                                                    const selected = [unwrapValue(personality.primary_archetype), ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean)
-                                                                                    const next = selected.filter((x) => x !== a.id)
-                                                                                    setPayload((prev) => ({
-                                                                                        ...prev,
-                                                                                        personality: {
-                                                                                            ...(prev.personality || {}),
-                                                                                            primary_archetype: next[0] || null,
-                                                                                            candidate_archetypes: next.slice(1),
-                                                                                        },
-                                                                                    }))
-                                                                                }}
-                                                                                className="text-xs text-white/60 hover:text-white"
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        </div>
-                                                                    )
-                                                                })}
-                                                            </div>
-                                                        </div>
-                                                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                                                            <h4 className="text-sm font-semibold text-white/70 mb-3">Doesn&apos;t apply</h4>
-                                                            <div className="flex flex-wrap gap-2 min-h-[100px]">
-                                                                {(unwrapValue(personality.rejected_archetypes) || []).map((id) => unwrapValue(id)).filter(Boolean).map((id) => {
-                                                                    const a = ARCHETYPES.find((x) => x.id === id)
-                                                                    if (!a) return null
-                                                                    return (
-                                                                        <button
-                                                                            key={a.id}
-                                                                            type="button"
-                                                                            onClick={() => updatePayload('personality', 'rejected_archetypes', (unwrapValue(personality.rejected_archetypes) || []).map((x) => unwrapValue(x)).filter((x) => x !== a.id))}
-                                                                            className="px-3 py-2 rounded-lg bg-red-500/20 text-red-300 text-sm border border-red-400/30 hover:bg-red-500/30"
-                                                                        >
-                                                                            {a.id} ✕
-                                                                        </button>
-                                                                    )
-                                                                })}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                        <div>
-                                                        <h4 className="text-sm font-semibold text-white/80 mb-3">Choose</h4>
-                                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                                                            {ARCHETYPES.filter((x) => {
-                                                                const selected = [unwrapValue(personality.primary_archetype), ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean)
-                                                                const rejected = (unwrapValue(personality.rejected_archetypes) || []).map((r) => unwrapValue(r))
-                                                                return !selected.includes(x.id) && !rejected.includes(x.id)
-                                                            }).map((a) => (
-                                                                <div key={a.id} className="rounded-2xl border border-white/20 bg-white/5 p-5 text-center">
-                                                                    <div className="w-16 h-16 mx-auto mb-3 rounded-xl bg-white/10 flex items-center justify-center">
-                                                                        <span className="text-white/50 text-2xl">◇</span>
-                                                                    </div>
-                                                                    <h4 className="font-semibold text-white mb-1">{a.id}</h4>
-                                                                    <p className="text-xs text-white/60 mb-3">{a.desc}</p>
-                                                                    <div className="flex gap-2 justify-center">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => {
-                                                                                const selected = [unwrapValue(personality.primary_archetype), ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean)
-                                                                                if (selected.length >= 2) return
-                                                                                setPayload((prev) => ({
-                                                                                    ...prev,
-                                                                                    personality: {
-                                                                                        ...(prev.personality || {}),
-                                                                                        primary_archetype: selected[0] || a.id,
-                                                                                        candidate_archetypes: selected[0] ? [...selected.slice(1), a.id].slice(0, 1) : [],
-                                                                                    },
-                                                                                }))
-                                                                            }}
-                                                                            disabled={[unwrapValue(personality.primary_archetype), ...(unwrapValue(personality.candidate_archetypes) || []).map((c) => unwrapValue(c))].filter(Boolean).length >= 2}
-                                                                            className="px-3 py-1.5 rounded-lg bg-emerald-500/30 text-emerald-200 text-xs font-medium hover:bg-emerald-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                        >
-                                                                            Applies
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => updatePayload('personality', 'rejected_archetypes', [...(unwrapValue(personality.rejected_archetypes) || []).map((r) => unwrapValue(r)), a.id])}
-                                                                            className="px-3 py-1.5 rounded-lg bg-white/10 text-white/70 text-xs font-medium hover:bg-white/20 border border-white/20"
-                                                                        >
-                                                                            Not us
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
+                                        <ArchetypeStep
+                                            personality={personality}
+                                            effectiveSuggestions={effectiveSuggestions}
+                                            accentColor={displayAccent}
+                                            onUpdate={(updates) => {
+                                                setPayload((prev) => ({
+                                                    ...prev,
+                                                    personality: {
+                                                        ...(prev.personality || {}),
+                                                        ...updates,
+                                                    },
+                                                }))
+                                            }}
+                                        />
                                     )}
 
                                     {currentStep === 'purpose_promise' && (
@@ -2933,6 +3735,9 @@ export default function BrandGuidelinesBuilder({
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'purpose:mission'])}
                                                     />
                                                 )}
+                                                {!effectiveSuggestions?.mission_suggestion && (
+                                                    <FieldSuggestButton fieldPath="identity.mission" brandId={brand.id} value={unwrapValue(identity.mission)} onSuggestion={(val) => updatePayload('identity', 'mission', val)} />
+                                                )}
                                                 <p className="mt-3 text-xs text-white/50">Examples: Apple — &quot;Think different&quot; / challenge conformity. Patagonia — &quot;We&apos;re in business to save our home planet.&quot;</p>
                                             </div>
                                             {/* What */}
@@ -2954,6 +3759,9 @@ export default function BrandGuidelinesBuilder({
                                                         onApply={(val) => updatePayload('identity', 'positioning', val)}
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'purpose:positioning'])}
                                                     />
+                                                )}
+                                                {!effectiveSuggestions?.positioning_suggestion && (
+                                                    <FieldSuggestButton fieldPath="identity.positioning" brandId={brand.id} value={unwrapValue(identity.positioning)} onSuggestion={(val) => updatePayload('identity', 'positioning', val)} />
                                                 )}
                                                 <p className="mt-3 text-xs text-white/50">Examples: Nike — &quot;To bring inspiration and innovation to every athlete.&quot; Tesla — &quot;Accelerate the world&apos;s transition to sustainable energy.&quot;</p>
                                             </div>
@@ -2994,6 +3802,9 @@ export default function BrandGuidelinesBuilder({
                                                             onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'expression:brand_look'])}
                                                         />
                                                     )}
+                                                    {!effectiveSuggestions?.brand_look_suggestion && (
+                                                        <FieldSuggestButton fieldPath="personality.brand_look" brandId={brand.id} value={unwrapValue(personality.brand_look)} onSuggestion={(val) => updatePayload('personality', 'brand_look', val)} />
+                                                    )}
                                                     <p className="mt-3 text-xs text-white/50">Example: &quot;Bold, high-contrast visuals. Product shots on pure white. Typography is geometric and modern.&quot;</p>
                                                 </div>
                                                 <div className="rounded-2xl border border-white/20 bg-white/5 p-6">
@@ -3014,6 +3825,9 @@ export default function BrandGuidelinesBuilder({
                                                             onApply={(val) => updatePayload('personality', 'voice_description', val)}
                                                             onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'expression:voice'])}
                                                         />
+                                                    )}
+                                                    {!effectiveSuggestions?.voice_description_suggestion && (
+                                                        <FieldSuggestButton fieldPath="personality.voice_description" brandId={brand.id} value={unwrapValue(personality.voice_description)} onSuggestion={(val) => updatePayload('personality', 'voice_description', val)} />
                                                     )}
                                                     <p className="mt-3 text-xs text-white/50">Example: &quot;Warm, approachable, and slightly playful. We speak like a knowledgeable friend, not a salesperson.&quot;</p>
                                                 </div>
@@ -3036,6 +3850,12 @@ export default function BrandGuidelinesBuilder({
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'expression:tone'])}
                                                     />
                                                 )}
+                                                {!effectiveSuggestions?.tone_keywords_suggestion?.length && (
+                                                    <FieldSuggestButton fieldPath="scoring_rules.tone_keywords" brandId={brand.id} value={unwrapValue(scoringRules.tone_keywords)} isArray onSuggestion={(val) => {
+                                                        const current = (unwrapValue(scoringRules.tone_keywords) || []).filter(v => typeof v === 'string')
+                                                        if (!current.includes(val)) updatePayload('scoring_rules', 'tone_keywords', [...current, val])
+                                                    }} />
+                                                )}
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-medium text-white/80 mb-2">Traits</label>
@@ -3054,6 +3874,12 @@ export default function BrandGuidelinesBuilder({
                                                         }}
                                                         onDismiss={() => setDismissedInlineSuggestions((p) => [...p, 'expression:traits_ai'])}
                                                     />
+                                                )}
+                                                {!effectiveSuggestions?.traits_suggestion?.length && (
+                                                    <FieldSuggestButton fieldPath="personality.traits" brandId={brand.id} value={unwrapValue(personality.traits)} isArray onSuggestion={(val) => {
+                                                        const current = (unwrapValue(personality.traits) || []).filter(v => typeof v === 'string')
+                                                        if (!current.includes(val)) updatePayload('personality', 'traits', [...current, val])
+                                                    }} />
                                                 )}
                                             </div>
                                         </div>
@@ -3131,6 +3957,137 @@ export default function BrandGuidelinesBuilder({
                                                     />
                                                 </FieldCard>
                                             )}
+
+                                            {/* ——— Logo Variants ——— */}
+                                            {logoRef && (
+                                                <FieldCard title="Logo Variants">
+                                                    <p className="text-white/60 text-sm mb-5">Upload or generate alternate versions of your logo for different contexts.</p>
+
+                                                    {/* Contrast warning */}
+                                                    {logoDarkNeeded && !logoOnDark && (
+                                                        <div className="flex items-start gap-2.5 rounded-lg bg-amber-500/[0.08] border border-amber-500/20 px-4 py-3 mb-5">
+                                                            <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                                            </svg>
+                                                            <div>
+                                                                <p className="text-sm text-amber-200">Your logo appears dark and may not display well on dark backgrounds</p>
+                                                                <p className="text-xs text-amber-200/60 mt-0.5">This includes your published brand guidelines hero. Add a light/white version below.</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                        {/* On Dark */}
+                                                        <div className="rounded-xl border border-white/10 overflow-hidden">
+                                                            <div className="px-3 py-2 border-b border-white/10">
+                                                                <p className="text-xs font-medium text-white/70">On Dark Background</p>
+                                                                <p className="text-[10px] text-white/40 mt-0.5">White or light version</p>
+                                                            </div>
+                                                            <div className="bg-gray-900 p-4 flex items-center justify-center min-h-[100px]">
+                                                                {logoOnDark ? (
+                                                                    <img src={logoOnDark.preview_url || logoOnDark.thumbnail_url} alt="On dark" className="max-h-16 max-w-full object-contain" />
+                                                                ) : (
+                                                                    <span className="text-white/20 text-xs">No variant</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="px-3 py-2 flex flex-wrap gap-1.5 border-t border-white/10">
+                                                                {logoOnDark ? (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_on_dark')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Replace</button>
+                                                                        <button type="button" onClick={() => handleDetachLogoVariant('logo_on_dark')} className="px-2 py-1 rounded text-[10px] text-red-400/80 hover:text-red-300">Remove</button>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_on_dark')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Upload</button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={handleGenerateWhiteLogo}
+                                                                            disabled={generatingWhiteLogo}
+                                                                            className="px-2 py-1 rounded text-[10px] font-medium border border-emerald-500/30 text-emerald-300/80 hover:bg-emerald-500/10 disabled:opacity-40"
+                                                                        >
+                                                                            {generatingWhiteLogo ? 'Generating…' : 'Generate White'}
+                                                                        </button>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                            {whiteGenError && (
+                                                                <div className="px-3 pb-2">
+                                                                    <p className="text-[10px] text-red-400">{whiteGenError}</p>
+                                                                </div>
+                                                            )}
+                                                            {!logoOnDark && logoComplexity?.complexity === 'complex' && (
+                                                                <div className="px-3 pb-2">
+                                                                    <p className="text-[10px] text-amber-300/60">Complex logo detected — auto-generated version may not look ideal. Consider uploading a proper white version.</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* On Light */}
+                                                        <div className="rounded-xl border border-white/10 overflow-hidden">
+                                                            <div className="px-3 py-2 border-b border-white/10">
+                                                                <p className="text-xs font-medium text-white/70">On Light Background</p>
+                                                                <p className="text-[10px] text-white/40 mt-0.5">Dark version for white/light</p>
+                                                            </div>
+                                                            <div className="bg-white p-4 flex items-center justify-center min-h-[100px] rounded-none">
+                                                                {logoOnLight ? (
+                                                                    <img src={logoOnLight.preview_url || logoOnLight.thumbnail_url} alt="On light" className="max-h-16 max-w-full object-contain" />
+                                                                ) : logoRef ? (
+                                                                    <img src={logoRef.preview_url || logoRef.thumbnail_url} alt="Primary" className="max-h-16 max-w-full object-contain opacity-40" />
+                                                                ) : (
+                                                                    <span className="text-gray-300 text-xs">No variant</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="px-3 py-2 flex flex-wrap gap-1.5 border-t border-white/10">
+                                                                {logoOnLight ? (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Replace</button>
+                                                                        <button type="button" onClick={() => handleDetachLogoVariant('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-red-400/80 hover:text-red-300">Remove</button>
+                                                                    </>
+                                                                ) : (
+                                                                    <button type="button" onClick={() => setAssetSelectorOpen('logo_on_light')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Upload</button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Horizontal */}
+                                                        <div className="rounded-xl border border-white/10 overflow-hidden">
+                                                            <div className="px-3 py-2 border-b border-white/10">
+                                                                <p className="text-xs font-medium text-white/70">Horizontal Logo</p>
+                                                                <p className="text-[10px] text-white/40 mt-0.5">Landscape / wordmark</p>
+                                                            </div>
+                                                            <div className="bg-white/5 p-4 flex items-center justify-center min-h-[100px]">
+                                                                {logoHorizontal ? (
+                                                                    <img src={logoHorizontal.preview_url || logoHorizontal.thumbnail_url} alt="Horizontal" className="max-h-12 max-w-full object-contain" />
+                                                                ) : (
+                                                                    <span className="text-white/20 text-xs">No variant</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="px-3 py-2 flex flex-wrap gap-1.5 border-t border-white/10">
+                                                                {logoHorizontal ? (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_horizontal')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Replace</button>
+                                                                        <button type="button" onClick={() => handleDetachLogoVariant('logo_horizontal')} className="px-2 py-1 rounded text-[10px] text-red-400/80 hover:text-red-300">Remove</button>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setAssetSelectorOpen('logo_horizontal')} className="px-2 py-1 rounded text-[10px] text-white/60 border border-white/15 hover:bg-white/5">Upload</button>
+                                                                        {logoRef && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setCropModalOpen('horizontal')}
+                                                                                className="px-2 py-1 rounded text-[10px] font-medium border border-blue-500/30 text-blue-300/80 hover:bg-blue-500/10"
+                                                                            >
+                                                                                Crop from Primary
+                                                                            </button>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </FieldCard>
+                                            )}
+
                                             <FieldCard title="Typography">
                                                 {isAiPopulated(typography.primary_font) && <AiFieldBadge field={typography.primary_font} className="mb-2" />}
                                                 <FontManager
@@ -3161,15 +4118,14 @@ export default function BrandGuidelinesBuilder({
                                                     <p className="mt-1 text-xs text-white/40">Google Fonts or self-hosted font CSS URLs. HTTPS only.</p>
                                                 </div>
                                             </FieldCard>
-                                            <FieldCard title="Allowed Color Palette (hex)">
-                                                <p className="text-white/60 text-sm mb-3">Additional colors for scoring. Hex codes only.</p>
+                                            <FieldCard title="Allowed Color Palette">
+                                                <p className="text-white/60 text-sm mb-3">Additional brand colors used for on-brand scoring. Pick visually or type a hex code.</p>
                                                 {isAiPopulated(scoringRules.allowed_color_palette) && <AiFieldBadge field={scoringRules.allowed_color_palette} className="mb-2" />}
                                                 <ColorPaletteChipInput
                                                     value={(unwrapValue(scoringRules.allowed_color_palette) || []).map((c) => (typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')).filter(Boolean)}
                                                     onChange={(v) => updatePayload('scoring_rules', 'allowed_color_palette', v.map((hex) => ({ hex, role: null })))}
                                                     placeholder="#hex and press Enter"
                                                 />
-                                                <p className="mt-2 text-xs text-white/50">Hex validation hint only; does not block save.</p>
                                             </FieldCard>
                                             <FieldCard title="Visual References">
                                                 <p className="text-white/60 text-sm mb-2">Images that represent your brand look. Used for scoring.</p>
@@ -3210,60 +4166,8 @@ export default function BrandGuidelinesBuilder({
                                             </FieldCard>
                                             <FieldCard title="Brand Colors">
                                                 <p className="text-white/60 text-sm mb-4">Define your brand&apos;s color palette. These colors will be used throughout the application.</p>
-                                                <div className="grid sm:grid-cols-3 gap-6">
-                                                    {[
-                                                        { key: 'primary_color', label: 'Primary Color', placeholder: '#6366f1' },
-                                                        { key: 'secondary_color', label: 'Secondary Color', placeholder: '#8b5cf6' },
-                                                        { key: 'accent_color', label: 'Accent Color', placeholder: '#06b6d4' },
-                                                    ].map(({ key, label, placeholder }) => {
-                                                        const colorVal = brandColors[key]
-                                                        const hasColor = !!colorVal
-                                                        return (
-                                                            <div key={key}>
-                                                                <label className="block text-sm font-medium text-white/80 mb-2">{label}</label>
-                                                                <div className="flex gap-2">
-                                                                    {hasColor ? (
-                                                                        <input
-                                                                            type="color"
-                                                                            value={colorVal.startsWith('#') ? colorVal : '#' + colorVal}
-                                                                            onChange={(e) => setBrandColors((c) => ({ ...c, [key]: e.target.value || null }))}
-                                                                            className="h-10 w-12 rounded-lg border border-white/20 cursor-pointer bg-transparent flex-shrink-0"
-                                                                            style={{ padding: 2 }}
-                                                                        />
-                                                                    ) : (
-                                                                        <div
-                                                                            className="h-10 w-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center flex-shrink-0 cursor-pointer"
-                                                                            title="Click to set a color"
-                                                                            onClick={() => setBrandColors((c) => ({ ...c, [key]: placeholder }))}
-                                                                        >
-                                                                            <span className="text-white/30 text-lg">+</span>
-                                                                        </div>
-                                                                    )}
-                                                                    <input
-                                                                        type="text"
-                                                                        value={colorVal || ''}
-                                                                        onChange={(e) => {
-                                                                            const v = e.target.value.trim()
-                                                                            setBrandColors((c) => ({ ...c, [key]: v ? (v.startsWith('#') ? v : '#' + v) : null }))
-                                                                        }}
-                                                                        placeholder={placeholder}
-                                                                        className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white text-sm placeholder-white/40"
-                                                                    />
-                                                                    {hasColor && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setBrandColors((c) => ({ ...c, [key]: null }))}
-                                                                            className="h-10 w-10 rounded-lg border border-white/20 bg-white/5 flex items-center justify-center text-white/40 hover:text-red-400 hover:border-red-400/30 transition-colors flex-shrink-0"
-                                                                            title={`Clear ${label.toLowerCase()}`}
-                                                                        >
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
+                                                <BrandColorPickers brandColors={brandColors} setBrandColors={setBrandColors} />
+
                                                 {effectiveSuggestions?.brand_color_suggestions?.length > 0 && !dismissedInlineSuggestions.includes('standards:brand_colors') && (
                                                     <div className="mt-4 rounded-xl bg-indigo-900/30 border border-indigo-500/30 p-4">
                                                         <p className="text-sm font-medium text-indigo-300 mb-3">Brand colors from guidelines</p>
@@ -3290,37 +4194,27 @@ export default function BrandGuidelinesBuilder({
                                                         </button>
                                                     </div>
                                                 )}
+                                                {/* Color values display — CMYK/PMS for brand colors */}
                                                 {(brandColors.primary_color || brandColors.secondary_color || brandColors.accent_color) && (
-                                                    <div className="mt-6 pt-6 border-t border-white/10">
-                                                        <p className="text-sm font-medium text-white/70 mb-3">Color Preview</p>
-                                                        <div className="flex gap-3">
-                                                            {brandColors.primary_color && (
-                                                                <div className="flex-1">
-                                                                    <div
-                                                                        className="h-16 rounded-xl border border-white/20"
-                                                                        style={{ backgroundColor: brandColors.primary_color }}
-                                                                    />
-                                                                    <p className="mt-2 text-xs text-center text-white/60">Primary</p>
-                                                                </div>
-                                                            )}
-                                                            {brandColors.secondary_color && (
-                                                                <div className="flex-1">
-                                                                    <div
-                                                                        className="h-16 rounded-xl border border-white/20"
-                                                                        style={{ backgroundColor: brandColors.secondary_color }}
-                                                                    />
-                                                                    <p className="mt-2 text-xs text-center text-white/60">Secondary</p>
-                                                                </div>
-                                                            )}
-                                                            {brandColors.accent_color && (
-                                                                <div className="flex-1">
-                                                                    <div
-                                                                        className="h-16 rounded-xl border border-white/20"
-                                                                        style={{ backgroundColor: brandColors.accent_color }}
-                                                                    />
-                                                                    <p className="mt-2 text-xs text-center text-white/60">Accent</p>
-                                                                </div>
-                                                            )}
+                                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                                        <div className="grid grid-cols-3 gap-4">
+                                                            {[
+                                                                { key: 'primary_color', label: 'Primary' },
+                                                                { key: 'secondary_color', label: 'Secondary' },
+                                                                { key: 'accent_color', label: 'Accent' },
+                                                            ].map(({ key, label }) => {
+                                                                const val = brandColors[key]
+                                                                if (!val) return <div key={key} />
+                                                                const c = rgbToCmyk(...Object.values(hexToRgb(val)))
+                                                                const p = nearestPms(val)
+                                                                return (
+                                                                    <div key={key} className="space-y-1">
+                                                                        <p className="text-[10px] text-white/40">{label}</p>
+                                                                        <p className="text-[11px] text-white/60 font-mono">CMYK {c.c}/{c.m}/{c.y}/{c.k}</p>
+                                                                        <p className="text-[11px] text-white/60 font-mono">PMS {p.name}</p>
+                                                                    </div>
+                                                                )
+                                                            })}
                                                         </div>
                                                     </div>
                                                 )}
@@ -3360,7 +4254,32 @@ export default function BrandGuidelinesBuilder({
                                     Skip
                                 </button>
                             )}
-                            {!isReviewStep && (
+                            {isReviewStep ? (
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-2.5 cursor-pointer">
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={enableScoring}
+                                            onClick={() => setEnableScoring((v) => !v)}
+                                            className="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                                            style={{ backgroundColor: enableScoring ? displayPrimary : 'rgba(255,255,255,0.15)' }}
+                                        >
+                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${enableScoring ? 'translate-x-5' : 'translate-x-0'}`} />
+                                        </button>
+                                        <span className="text-white/80 text-sm">On-Brand Scoring</span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={handlePublish}
+                                        disabled={saving || (missingFields.length > 0)}
+                                        className="px-8 py-2.5 rounded-xl font-semibold text-white transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                                        style={{ backgroundColor: (saving || missingFields.length > 0) ? '#4b5563' : displayPrimary }}
+                                    >
+                                        {saving ? 'Publishing…' : 'Publish'}
+                                    </button>
+                                </div>
+                            ) : (
                                 <>
                                     {currentStep === 'background' && backgroundUploadingCount > 0 && !(guidelinesPdfAssetId || pdfAttachedThisSession) && (
                                         <span className="text-sm text-amber-200/90">Wait for upload to finish</span>
@@ -3418,6 +4337,37 @@ export default function BrandGuidelinesBuilder({
                     builderContext="logo_reference"
                     onSelect={(asset) => handleAssetAttach(asset, 'logo_reference')}
                     title="Select Brand Logo"
+                />
+                <BuilderAssetSelectorModal
+                    open={assetSelectorOpen === 'logo_on_dark'}
+                    onClose={() => setAssetSelectorOpen(null)}
+                    brandId={brand.id}
+                    builderContext="logo_on_dark"
+                    onSelect={(asset) => handleAssetAttach(asset, 'logo_on_dark')}
+                    title="Select Logo (Dark Background)"
+                />
+                <BuilderAssetSelectorModal
+                    open={assetSelectorOpen === 'logo_on_light'}
+                    onClose={() => setAssetSelectorOpen(null)}
+                    brandId={brand.id}
+                    builderContext="logo_on_light"
+                    onSelect={(asset) => handleAssetAttach(asset, 'logo_on_light')}
+                    title="Select Logo (Light Background)"
+                />
+                <BuilderAssetSelectorModal
+                    open={assetSelectorOpen === 'logo_horizontal'}
+                    onClose={() => setAssetSelectorOpen(null)}
+                    brandId={brand.id}
+                    builderContext="logo_horizontal"
+                    onSelect={(asset) => handleAssetAttach(asset, 'logo_horizontal')}
+                    title="Select Horizontal Logo"
+                />
+                <ImageCropModal
+                    open={cropModalOpen === 'horizontal'}
+                    imageSrc={logoSrc}
+                    aspectRatio={{ width: 4, height: 1 }}
+                    onCropComplete={handleCropHorizontal}
+                    onClose={() => setCropModalOpen(null)}
                 />
             </div>
         </div>

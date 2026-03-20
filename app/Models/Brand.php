@@ -38,6 +38,7 @@ class Brand extends Model
         'icon_id',
         'icon',
         'icon_bg_color',
+        'icon_style',
         'is_default',
         'show_in_selector',
         'primary_color',
@@ -51,6 +52,8 @@ class Brand extends Model
         'logo_filter',
         'logo_dark_path',
         'logo_dark_id',
+        'logo_horizontal_path',
+        'logo_horizontal_id',
         'settings',
         'download_landing_settings', // D10: JSON { enabled, logo_asset_id, color_role, background_asset_ids, default_headline, default_subtext }
         'portal_settings', // Brand Portal: JSON { entry, public, sharing, invite }

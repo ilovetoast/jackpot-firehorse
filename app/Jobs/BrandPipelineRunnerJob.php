@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
 use App\Models\BrandPipelineRun;
+use App\Models\PdfTextExtraction;
 use App\Services\BrandDNA\BrandSnapshotService;
 use App\Services\BrandDNA\BrandWebsiteCrawlerService;
 use App\Services\BrandDNA\ClaudePdfExtractionService;
@@ -200,7 +201,29 @@ class BrandPipelineRunnerJob implements ShouldQueue
             'asset_id' => $asset->id,
         ]);
 
-        $result = $claudeService->extract($asset);
+        try {
+            $result = $claudeService->extract($asset);
+        } catch (\Throwable $e) {
+            if (str_contains($e->getMessage(), 'too large') || str_contains($e->getMessage(), 'maximum size') || str_contains($e->getMessage(), 'exceeds')) {
+                Log::channel('pipeline')->warning('[BrandPipelineRunnerJob] Vision extraction failed due to size, falling back to text path', [
+                    'run_id' => $run->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $run->update([
+                    'extraction_mode' => BrandPipelineRun::EXTRACTION_MODE_TEXT,
+                    'stage' => BrandPipelineRun::STAGE_INIT,
+                    'status' => BrandPipelineRun::STATUS_PENDING,
+                    'pages_processed' => 0,
+                ]);
+
+                $this->ensureTextExtractionStarted($asset);
+                $this->advanceTextPath($run->fresh(), $brand, $draft, $asset, app(BrandSnapshotService::class));
+
+                return;
+            }
+            throw $e;
+        }
 
         $run->update([
             'merged_extraction_json' => $result['extraction'],
@@ -260,6 +283,25 @@ class BrandPipelineRunnerJob implements ShouldQueue
         }
 
         return $sources;
+    }
+
+    protected function ensureTextExtractionStarted(Asset $asset): void
+    {
+        $asset->loadMissing('currentVersion');
+        $versionId = $asset->currentVersion?->id;
+        $existing = $asset->getLatestPdfTextExtractionForVersion($versionId);
+
+        if ($existing && in_array($existing->status, [PdfTextExtraction::STATUS_PENDING, 'processing', 'complete'])) {
+            return;
+        }
+
+        $extraction = $asset->pdfTextExtractions()->create([
+            'asset_version_id' => $versionId,
+            'extraction_source' => null,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        ExtractPdfTextJob::dispatch($asset->id, $extraction->id, $versionId);
     }
 
     public function failed(?\Throwable $exception): void

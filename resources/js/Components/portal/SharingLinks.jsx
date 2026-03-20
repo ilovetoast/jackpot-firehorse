@@ -1,17 +1,19 @@
 import PortalGate from './PortalGate'
 
-export default function SharingLinks({ data, setData, portalFeatures }) {
+export default function SharingLinks({ data, setData, portalFeatures, onSave }) {
     const canAccess = portalFeatures?.sharing
     const sharing = data.portal_settings?.sharing || {}
 
     const updateSharing = (key, value) => {
-        setData('portal_settings', {
+        const newPortalSettings = {
             ...(data.portal_settings || {}),
             sharing: {
                 ...sharing,
                 [key]: value,
             },
-        })
+        }
+        setData('portal_settings', newPortalSettings)
+        onSave?.({ portal_settings: newPortalSettings })
     }
 
     return (

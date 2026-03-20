@@ -2,7 +2,6 @@ import { usePage, Link } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
-import useLogoBrightness from '../../utils/useLogoBrightness'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
 import AssetCollage from '../../Components/dashboard/AssetCollage'
 import ActiveSignals from '../../Components/Brand/ActiveSignals'
@@ -37,7 +36,6 @@ export default function Overview({
 }) {
     const { auth: authFromPage } = usePage().props
     const activeBrand = brand ?? authFromPage?.activeBrand ?? auth?.activeBrand
-    const heroLogoIsDark = useLogoBrightness(theme.logo || null)
     const brandColor = theme.colors?.primary || '#6366f1'
 
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
@@ -115,39 +113,12 @@ export default function Overview({
                         {plan?.show_badge && plan?.name && (
                             <div className="animate-fadeInUp">
                                 <span
-                                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium mb-6"
-                                    style={{
-                                        backgroundColor: `${theme.colors?.primary || '#6366f1'}22`,
-                                        color: theme.colors?.primary || '#6366f1',
-                                    }}
+                                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium mb-6 border border-white/10 text-white/60 bg-white/[0.06] backdrop-blur-sm"
                                 >
                                     {plan.name} Plan
                                 </span>
                             </div>
                         )}
-
-                        {/* Brand logo or initial */}
-                        <div className="animate-fadeInUp-d1 mb-5">
-                            {(theme.logo_dark || theme.logo) ? (
-                                <img
-                                    src={theme.logo_dark || theme.logo}
-                                    alt={theme.name || 'Brand'}
-                                    className="h-16 md:h-20 w-auto max-w-[240px] object-contain"
-                                    style={!theme.logo_dark && heroLogoIsDark ? { filter: 'brightness(0) invert(1)' } : undefined}
-                                />
-                            ) : (
-                                <div
-                                    className="h-14 w-14 rounded-xl flex items-center justify-center"
-                                    style={{
-                                        background: `linear-gradient(135deg, ${theme.colors?.primary || '#6366f1'}, ${theme.colors?.secondary || '#8b5cf6'})`,
-                                    }}
-                                >
-                                    <span className="text-xl font-bold text-white">
-                                        {(theme.name || 'J').charAt(0).toUpperCase()}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
 
                         {/* Brand name */}
                         <h1 className="animate-fadeInUp-d2 text-3xl md:text-4xl font-semibold tracking-tight text-white leading-tight">

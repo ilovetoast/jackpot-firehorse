@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Models\Brand;
+use App\Models\Tenant;
+use App\Services\PlanService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -58,8 +60,30 @@ class EnsureGatewayEntry
             return redirect('/gateway');
         }
 
-        // Tenant owners/admins can access any brand — check pivot only for regular users
         $user = Auth::user();
+        $tenant = Tenant::find($tenantId);
+
+        // Brand plan limit enforcement: if the session brand is disabled by plan limit,
+        // auto-redirect to the first enabled brand the user can access.
+        if ($tenant) {
+            $planService = app(PlanService::class);
+            if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {
+                $enabledBrand = $planService->findFirstEnabledBrand($tenant, $user);
+
+                if ($enabledBrand) {
+                    session(['brand_id' => $enabledBrand->id]);
+                    session()->flash('warning', "The brand \"{$brand->name}\" is unavailable on your current plan. You've been redirected to \"{$enabledBrand->name}\".");
+
+                    return redirect($request->fullUrl());
+                }
+
+                // No enabled brands accessible — show error page
+                session()->forget('brand_id');
+                return redirect()->route('errors.brand-disabled');
+            }
+        }
+
+        // Tenant owners/admins can access any brand — check pivot only for regular users
         $tenantRole = $user->tenants()
             ->where('tenants.id', $tenantId)
             ->first()?->pivot?->role;

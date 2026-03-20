@@ -131,6 +131,100 @@ class AnthropicProvider implements AIProviderInterface
         return $this->sendRequest($body, $model);
     }
 
+    /**
+     * Analyze a PDF via Anthropic Files API (for large PDFs that exceed the 32MB inline limit).
+     * Uploads the file, sends the message referencing file_id, then deletes the file.
+     */
+    public function analyzePdfViaFilesApi(string $tempFilePath, string $prompt, array $options = []): array
+    {
+        $model = $options['model'] ?? config('ai.anthropic.model', 'claude-sonnet-4-20250514');
+        $maxTokens = $options['max_tokens'] ?? 8192;
+
+        $fileId = $this->uploadFileToAnthropicApi($tempFilePath);
+
+        try {
+            $body = [
+                'model' => $model,
+                'max_tokens' => $maxTokens,
+                'messages' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'document',
+                                'source' => [
+                                    'type' => 'file',
+                                    'file_id' => $fileId,
+                                ],
+                            ],
+                            [
+                                'type' => 'text',
+                                'text' => $prompt,
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+
+            return $this->sendRequest($body, $model, ['anthropic-beta' => 'files-api-2025-04-14']);
+        } finally {
+            $this->deleteAnthropicFile($fileId);
+        }
+    }
+
+    protected function uploadFileToAnthropicApi(string $filePath): string
+    {
+        $filename = basename($filePath);
+        if (! str_ends_with(strtolower($filename), '.pdf')) {
+            $filename .= '.pdf';
+        }
+
+        $response = Http::timeout(120)
+            ->withHeaders([
+                'x-api-key' => $this->apiKey,
+                'anthropic-version' => $this->apiVersion,
+                'anthropic-beta' => 'files-api-2025-04-14',
+            ])
+            ->attach('file', file_get_contents($filePath), $filename, ['Content-Type' => 'application/pdf'])
+            ->post("{$this->baseUrl}/files");
+
+        if ($response->failed()) {
+            $error = $response->json();
+            $msg = $error['error']['message'] ?? 'File upload failed';
+            throw new \RuntimeException("Anthropic Files API upload error: {$msg}");
+        }
+
+        $fileId = $response->json('id');
+        if (! $fileId) {
+            throw new \RuntimeException('Anthropic Files API: no file_id in upload response');
+        }
+
+        Log::info('[AnthropicProvider] File uploaded to Anthropic', [
+            'file_id' => $fileId,
+            'size_bytes' => filesize($filePath),
+        ]);
+
+        return $fileId;
+    }
+
+    protected function deleteAnthropicFile(string $fileId): void
+    {
+        try {
+            Http::timeout(15)
+                ->withHeaders([
+                    'x-api-key' => $this->apiKey,
+                    'anthropic-version' => $this->apiVersion,
+                    'anthropic-beta' => 'files-api-2025-04-14',
+                ])
+                ->delete("{$this->baseUrl}/files/{$fileId}");
+        } catch (\Throwable $e) {
+            Log::warning('[AnthropicProvider] Failed to delete Anthropic file (non-critical)', [
+                'file_id' => $fileId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function calculateCost(int $tokensIn, int $tokensOut, string $model): float
     {
         $pricing = $this->modelPricing[$model] ?? $this->modelPricing['claude-sonnet-4-20250514'];
@@ -148,15 +242,17 @@ class AnthropicProvider implements AIProviderInterface
         return in_array($model, $this->supportedModels, true);
     }
 
-    protected function sendRequest(array $body, string $model): array
+    protected function sendRequest(array $body, string $model, array $extraHeaders = []): array
     {
         try {
+            $headers = array_merge([
+                'x-api-key' => $this->apiKey,
+                'anthropic-version' => $this->apiVersion,
+                'content-type' => 'application/json',
+            ], $extraHeaders);
+
             $response = Http::timeout(180)
-                ->withHeaders([
-                    'x-api-key' => $this->apiKey,
-                    'anthropic-version' => $this->apiVersion,
-                    'content-type' => 'application/json',
-                ])
+                ->withHeaders($headers)
                 ->post("{$this->baseUrl}/messages", $body);
 
             if ($response->failed()) {

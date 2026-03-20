@@ -73,8 +73,8 @@ export async function isImageWhite(imageSrc, threshold = 0.9, samplePixels = 100
                     const gLinear = g / 255 <= 0.03928 
                         ? (g / 255) / 12.92 
                         : Math.pow(((g / 255) + 0.055) / 1.055, 2.4)
-                    const bLinear = b / 255 <= 0.03928 
-                        ? (b / 255) / 12.92 
+                    const bLinear = b / 255 <= 0.03928
+                        ? (b / 255) / 12.92
                         : Math.pow(((b / 255) + 0.055) / 1.055, 2.4)
                     
                     const luminance = 0.2126 * rLinear + 0.7152 * gLinear + 0.0722 * bLinear
@@ -163,5 +163,92 @@ export async function getImageStyleWithDetection(imageSrc, backgroundColor = '#e
             isLoading: false,
             isWhite: false,
         }
+    }
+}
+
+function loadImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image()
+        if (src.startsWith('http://') || src.startsWith('https://')) {
+            img.crossOrigin = 'anonymous'
+        }
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('Failed to load image'))
+        img.src = src
+    })
+}
+
+/**
+ * Generate a white (silhouette) variant of a logo image.
+ * Converts all opaque pixels to white while preserving the alpha channel.
+ * Works best on flat logos without gradients or photographs.
+ *
+ * @param {string} imageSrc - URL, blob URL, or data URL of the source image
+ * @returns {Promise<Blob>} PNG blob of the white variant
+ */
+export async function generateWhiteVariant(imageSrc) {
+    if (isLikelySvg(imageSrc)) {
+        throw new Error('SVG logos cannot be converted via Canvas. Please upload a white version manually.')
+    }
+    const img = await loadImage(imageSrc)
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const d = imageData.data
+    for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 10) {
+            d[i] = 255
+            d[i + 1] = 255
+            d[i + 2] = 255
+        }
+    }
+    ctx.putImageData(imageData, 0, 0)
+
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Canvas toBlob failed'))
+        }, 'image/png')
+    })
+}
+
+/**
+ * Analyse a logo to determine if it is "flat" (few solid colours) or "complex"
+ * (gradients, photographs, many colour clusters).
+ * Uses k-means-style colour bucketing on opaque pixels sampled at a small size.
+ *
+ * @param {string} imageSrc - URL, blob URL, or data URL
+ * @returns {Promise<{ complexity: 'flat'|'complex', uniqueColors: number }>}
+ */
+export async function detectLogoComplexity(imageSrc) {
+    if (isLikelySvg(imageSrc)) {
+        return { complexity: 'flat', uniqueColors: 1 }
+    }
+    const img = await loadImage(imageSrc)
+    const size = 48
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, size, size)
+
+    const data = ctx.getImageData(0, 0, size, size).data
+    const buckets = new Set()
+    for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 64) continue
+        const r = Math.round(data[i] / 32) * 32
+        const g = Math.round(data[i + 1] / 32) * 32
+        const b = Math.round(data[i + 2] / 32) * 32
+        buckets.add(`${r},${g},${b}`)
+    }
+
+    const uniqueColors = buckets.size
+    return {
+        complexity: uniqueColors > 12 ? 'complex' : 'flat',
+        uniqueColors,
     }
 }

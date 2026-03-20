@@ -7,18 +7,20 @@ const VISIBILITY_OPTIONS = [
     { value: 'public', label: 'Public', desc: 'Discoverable on your subdomain' },
 ]
 
-export default function PublicAccess({ data, setData, portalFeatures, brand, route, portalUrl }) {
+export default function PublicAccess({ data, setData, portalFeatures, brand, route, portalUrl, onSave }) {
     const canAccess = portalFeatures?.public_access
     const pub = data.portal_settings?.public || {}
 
     const updatePublic = (key, value) => {
-        setData('portal_settings', {
+        const newPortalSettings = {
             ...(data.portal_settings || {}),
             public: {
                 ...pub,
                 [key]: value,
             },
-        })
+        }
+        setData('portal_settings', newPortalSettings)
+        onSave?.({ portal_settings: newPortalSettings })
     }
 
     return (
@@ -163,6 +165,7 @@ export default function PublicAccess({ data, setData, portalFeatures, brand, rou
                     data={data}
                     setData={setData}
                     route={route}
+                    onSave={onSave}
                 />
             </div>
         </div>

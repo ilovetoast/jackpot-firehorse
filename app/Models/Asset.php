@@ -407,22 +407,16 @@ class Asset extends Model
      * Determine whether the asset is publicly accessible through collection membership.
      *
      * Public eligibility is derived from collections, not from asset-level flags.
-     * Rules:
-     * - Asset must belong to at least one collection
-     * - collections.is_public = true
-     * - collections.public_enabled = true (when column exists)
-     * - collections.public_url is not null (when column exists), otherwise slug must exist
+     * An asset is public when it belongs to at least one collection where
+     * is_public = true and slug is set (slug is required for public URL generation).
      */
     public function isPublic(): bool
     {
-        $query = $this->collections()
-            ->where('collections.is_public', true);
-
-        $query->where('collections.public_enabled', true)
-            ->whereNotNull('collections.public_url')
-            ->where('collections.public_url', '!=', '');
-
-        return $query->exists();
+        return $this->collections()
+            ->where('collections.is_public', true)
+            ->whereNotNull('collections.slug')
+            ->where('collections.slug', '!=', '')
+            ->exists();
     }
 
     /**

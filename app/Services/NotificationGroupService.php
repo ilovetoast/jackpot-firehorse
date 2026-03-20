@@ -30,6 +30,18 @@ class NotificationGroupService
             ->where('group_key', $groupKey)
             ->first();
 
+        // Clean up any legacy ungrouped notifications of the same type for this user
+        if (! $existing) {
+            $legacyOrphans = Notification::where('user_id', $userId)
+                ->where('type', $type)
+                ->whereNull('group_key')
+                ->get();
+
+            if ($legacyOrphans->isNotEmpty()) {
+                $legacyOrphans->each->delete();
+            }
+        }
+
         $item = [
             'brand_id' => $data['brand_id'] ?? null,
             'brand_name' => $data['brand_name'] ?? null,

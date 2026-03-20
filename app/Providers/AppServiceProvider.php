@@ -45,6 +45,10 @@ class AppServiceProvider extends ServiceProvider
             return new AnthropicProvider();
         });
 
+        $this->app->singleton(OpenAIProvider::class, function ($app) {
+            return new OpenAIProvider();
+        });
+
         $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {
             return new ImageEmbeddingService();
         });

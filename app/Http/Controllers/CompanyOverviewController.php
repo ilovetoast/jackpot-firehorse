@@ -121,6 +121,7 @@ class CompanyOverviewController extends Controller
                 'icon_path' => $brand->icon_path,
                 'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
+                'icon_style' => $brand->icon_style ?? 'subtle',
                 'primary_color' => $brand->primary_color,
                 'is_default' => $brand->is_default,
                 'is_disabled' => $isDisabled,

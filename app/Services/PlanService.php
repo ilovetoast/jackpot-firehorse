@@ -6,6 +6,7 @@ use App\Exceptions\PlanLimitExceededException;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 class PlanService
@@ -146,6 +147,77 @@ class PlanService
         $currentCount = $tenant->brands()->count();
 
         return $currentCount < $limits['max_brands'];
+    }
+
+    /**
+     * Get the ordered list of brand IDs that are enabled (within plan limit).
+     * Brands are ordered by is_default DESC, name ASC — same order used everywhere.
+     * Brands at index >= maxBrands are considered disabled.
+     *
+     * @return array{enabled: int[], disabled: int[], max_brands: int}
+     */
+    public function getBrandLimitInfo(Tenant $tenant): array
+    {
+        $limits = $this->getPlanLimits($tenant);
+        $maxBrands = $limits['max_brands'] ?? PHP_INT_MAX;
+
+        $allBrands = $tenant->brands()
+            ->orderBy('is_default', 'desc')
+            ->orderBy('name')
+            ->pluck('id')
+            ->values();
+
+        $enabled = $allBrands->take($maxBrands)->all();
+        $disabled = $allBrands->slice($maxBrands)->values()->all();
+
+        return [
+            'enabled' => $enabled,
+            'disabled' => $disabled,
+            'max_brands' => $maxBrands,
+            'total_brands' => $allBrands->count(),
+            'limit_exceeded' => $allBrands->count() > $maxBrands,
+        ];
+    }
+
+    /**
+     * Check if a specific brand is disabled by the plan limit.
+     */
+    public function isBrandDisabledByPlanLimit(Brand $brand, Tenant $tenant): bool
+    {
+        $info = $this->getBrandLimitInfo($tenant);
+        return in_array($brand->id, $info['disabled']);
+    }
+
+    /**
+     * Find the first enabled brand a user can access.
+     * Returns null if no enabled brand is accessible.
+     */
+    public function findFirstEnabledBrand(Tenant $tenant, User $user): ?Brand
+    {
+        $info = $this->getBrandLimitInfo($tenant);
+        $enabledIds = $info['enabled'];
+
+        if (empty($enabledIds)) {
+            return null;
+        }
+
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        if ($isTenantOwnerOrAdmin) {
+            return Brand::whereIn('id', $enabledIds)
+                ->orderBy('is_default', 'desc')
+                ->orderBy('name')
+                ->first();
+        }
+
+        return $user->brands()
+            ->whereIn('brands.id', $enabledIds)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_user.removed_at')
+            ->orderBy('is_default', 'desc')
+            ->orderBy('name')
+            ->first();
     }
 
     /**

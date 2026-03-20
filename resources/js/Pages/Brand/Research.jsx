@@ -116,17 +116,28 @@ export default function Research({
     const [polledStatus, setPolledStatus] = useState(status)
     const [polledResults, setPolledResults] = useState(results)
     const [health, setHealth] = useState(initialPipelineHealth || { state: 'idle', error: null, can_retry: false })
-    const [requiresAnalysis, setRequiresAnalysis] = useState(false)
+    const [inputsDirty, setInputsDirty] = useState(false)
     const [showPdfModal, setShowPdfModal] = useState(false)
     const [pdfAsset, setPdfAsset] = useState(inputs.pdf)
+    const [pdfDragOver, setPdfDragOver] = useState(false)
+    const [pdfUploading, setPdfUploading] = useState(false)
+    const [pdfUploadName, setPdfUploadName] = useState('')
+    const [pdfUploadError, setPdfUploadError] = useState(null)
+    const pdfInputRef = useRef(null)
     const pollRef = useRef(null)
 
-    const accentColor = brand.primary_color || '#6366f1'
+    const primaryColor = brand.primary_color || '#6366f1'
+    const secondaryColor = brand.secondary_color || '#8b5cf6'
 
     const effectiveStatus = polledStatus || status
     const effectiveResults = polledResults || results
     const isFinalized = effectiveStatus.research_finalized
     const isStuckOrFailed = health.state === 'stuck' || health.state === 'failed'
+
+    useEffect(() => {
+        document.documentElement.classList.add('scrollbar-cinematic')
+        return () => document.documentElement.classList.remove('scrollbar-cinematic')
+    }, [])
 
     // Polling
     useEffect(() => {
@@ -183,8 +194,15 @@ export default function Research({
         ].filter(Boolean)
 
         setAnalyzing(true)
-        setRequiresAnalysis(false)
+        setInputsDirty(false)
         setHealth({ state: 'processing', error: null, can_retry: false })
+        setPolledStatus(prev => ({
+            ...prev,
+            pdf_complete: false,
+            snapshot_ready: false,
+            suggestions_ready: false,
+            research_finalized: false,
+        }))
         try {
             await axios.post(route('brands.research.analyze', { brand: brand.id }), {
                 pdf_asset_id: pdfAsset?.id ?? null,
@@ -195,6 +213,7 @@ export default function Research({
             setPolling(true)
         } catch (err) {
             console.error('Analysis trigger failed', err)
+            setHealth({ state: 'failed', error: err?.response?.data?.message || 'Analysis request failed.', can_retry: true })
         } finally {
             setAnalyzing(false)
         }
@@ -202,12 +221,20 @@ export default function Research({
 
     const handleRerun = useCallback(async () => {
         setAnalyzing(true)
+        setHealth({ state: 'processing', error: null, can_retry: false })
+        setPolledStatus(prev => ({
+            ...prev,
+            pdf_complete: false,
+            snapshot_ready: false,
+            suggestions_ready: false,
+            research_finalized: false,
+        }))
         try {
             await axios.post(route('brands.research.rerun', { brand: brand.id }))
-            setHealth({ state: 'processing', error: null, can_retry: false })
             setPolling(true)
         } catch (err) {
             console.error('Re-run failed', err)
+            setHealth({ state: 'failed', error: err?.response?.data?.message || 'Re-run request failed.', can_retry: true })
         } finally {
             setAnalyzing(false)
         }
@@ -216,14 +243,65 @@ export default function Research({
     const handleRetry = useCallback(async () => {
         setAnalyzing(true)
         setHealth({ state: 'processing', error: null, can_retry: false })
+        setPolledStatus(prev => ({
+            ...prev,
+            pdf_complete: false,
+            snapshot_ready: false,
+            suggestions_ready: false,
+            research_finalized: false,
+        }))
         try {
             await axios.post(route('brands.research.rerun', { brand: brand.id }))
             setPolling(true)
         } catch (err) {
             console.error('Retry failed', err)
-            setHealth(prev => ({ ...prev, state: 'failed', error: 'Retry request failed. Please try again.' }))
+            setHealth({ state: 'failed', error: 'Retry request failed. Please try again.', can_retry: true })
         } finally {
             setAnalyzing(false)
+        }
+    }, [brand.id])
+
+    const handlePdfFileDrop = useCallback(async (file) => {
+        if (!file) return
+        setPdfUploading(true)
+        setPdfUploadName(file.name)
+        setPdfUploadError(null)
+        try {
+            const { data: initData } = await axios.post('/app/uploads/initiate', {
+                file_name: file.name,
+                file_size: file.size,
+                mime_type: file.type || 'application/pdf',
+                brand_id: brand.id,
+                builder_staged: true,
+                builder_context: 'guidelines_pdf',
+            })
+
+            await fetch(initData.upload_url, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'application/pdf' },
+                body: file,
+            }).then(r => { if (!r.ok) throw new Error(`Upload failed: ${r.status}`) })
+
+            const { data: finalData } = await axios.post('/app/assets/upload/finalize', {
+                manifest: [{
+                    upload_key: initData.upload_key ?? `temp/uploads/${initData.upload_session_id}/original`,
+                    expected_size: file.size,
+                    resolved_filename: file.name,
+                }],
+            })
+            const assetId = finalData.results?.[0]?.asset_id ?? finalData.results?.[0]?.id
+            if (assetId) {
+                setPdfAsset({ id: assetId, filename: file.name, size_bytes: file.size })
+                setInputsDirty(true)
+            }
+        } catch (err) {
+            const errData = err?.response?.data
+            const msg = errData?.message || err?.message || 'Upload failed. Please try again.'
+            setPdfUploadError(msg)
+            console.error('[Research] PDF upload failed:', errData || err)
+        } finally {
+            setPdfUploading(false)
+            setPdfUploadName('')
         }
     }, [brand.id])
 
@@ -238,7 +316,7 @@ export default function Research({
 
     const handleUrlChange = useCallback((setter) => (e) => {
         setter(e.target.value)
-        setRequiresAnalysis(true)
+        setInputsDirty(true)
     }, [])
 
     const handleSocialUrlChange = useCallback((idx, value) => {
@@ -247,7 +325,7 @@ export default function Research({
             next[idx] = value
             return next
         })
-        setRequiresAnalysis(true)
+        setInputsDirty(true)
     }, [])
 
     const addSocialUrl = useCallback(() => {
@@ -282,30 +360,32 @@ export default function Research({
     }
     const hasExtractedData = Object.values(extracted).some(v => v && (!Array.isArray(v) || v.length > 0))
 
-    const canContinue = isFinalized && !requiresAnalysis && !isStuckOrFailed
+    const inputsChangedAfterAnalysis = inputsDirty && isFinalized
+    const canContinue = isFinalized && !inputsChangedAfterAnalysis && !isStuckOrFailed
     const isProcessing = (polling || analyzing) && !isStuckOrFailed
 
     return (
         <>
             <AppHead title={`Research — ${brand.name}`} />
             <div className="min-h-screen bg-[#0B0B0D] relative">
-                {/* Cinematic background — brand-driven radial gradients */}
+                {/* Cinematic background — matches Brand Overview glow (primary + secondary) */}
                 <div
                     className="fixed inset-0 pointer-events-none"
                     style={{
-                        background: `radial-gradient(ellipse at 20% 0%, ${accentColor}30, transparent 70%), radial-gradient(ellipse at 80% 100%, ${accentColor}20, transparent 60%), #0B0B0D`,
+                        background: `radial-gradient(circle at 20% 20%, ${primaryColor}33, transparent), radial-gradient(circle at 80% 80%, ${secondaryColor}33, transparent), #0B0B0D`,
                     }}
                 />
+                {/* Left column radial accent (brand primary glow) */}
                 <div
                     className="fixed inset-0 pointer-events-none"
                     style={{
-                        background: `radial-gradient(circle at 60% 30%, ${accentColor}12, transparent 50%)`,
+                        background: `radial-gradient(circle at 30% 40%, ${primaryColor}14, transparent 60%)`,
                     }}
                 />
                 {/* Depth overlays */}
                 <div className="fixed inset-0 pointer-events-none">
-                    <div className="absolute inset-0 bg-black/20" />
-                    <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/40" />
+                    <div className="absolute inset-0 bg-black/30" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
                 </div>
                 {/* Film grain */}
                 <div
@@ -343,31 +423,101 @@ export default function Research({
                         {/* Section 1 — Inputs */}
                         <SectionCard title="Research Inputs">
                             <div className="space-y-6">
-                                {/* PDF Upload */}
+                                {/* PDF Upload with drag-and-drop */}
                                 <div>
                                     <label className="block text-sm font-medium text-white/70 mb-2">
                                         Brand Guidelines PDF
                                     </label>
                                     {pdfAsset ? (
-                                        <div className="flex items-center gap-3 p-3 rounded-lg bg-white/[0.03] border border-white/10">
-                                            <svg className="w-5 h-5 text-white/40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                            </svg>
-                                            <span className="text-sm text-white/70 truncate flex-1">{pdfAsset.filename}</span>
-                                            <button
-                                                onClick={() => setShowPdfModal(true)}
-                                                className="text-xs text-white/40 hover:text-white/70 transition"
-                                            >
-                                                Replace
-                                            </button>
+                                        <div>
+                                            <div className="flex items-center gap-3 p-3 rounded-lg bg-white/[0.03] border border-white/10">
+                                                <svg className="w-5 h-5 text-white/40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <span className="text-sm text-white/70 truncate flex-1">{pdfAsset.filename}</span>
+                                                {pdfAsset.size_bytes && (
+                                                    <span className="text-xs text-white/30 flex-shrink-0">
+                                                        {(pdfAsset.size_bytes / 1024 / 1024).toFixed(1)} MB
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => setShowPdfModal(true)}
+                                                    className="text-xs text-white/40 hover:text-white/70 transition"
+                                                >
+                                                    Replace
+                                                </button>
+                                            </div>
+                                            {pdfAsset.size_bytes > 20 * 1024 * 1024 && (
+                                                <p className="text-xs text-amber-300/70 mt-1.5 flex items-center gap-1.5">
+                                                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                    Large file — visual analysis may take a bit longer to process
+                                                </p>
+                                            )}
+                                        </div>
+                                    ) : pdfUploading ? (
+                                        <div className="w-full p-6 rounded-lg border-2 border-dashed border-indigo-400/30 bg-indigo-500/5 flex flex-col items-center gap-3">
+                                            <div className="animate-spin rounded-full h-6 w-6 border-2 border-indigo-400 border-t-transparent" />
+                                            <p className="text-sm text-white/50">Uploading {pdfUploadName}…</p>
                                         </div>
                                     ) : (
-                                        <button
-                                            onClick={() => setShowPdfModal(true)}
-                                            className="w-full p-4 rounded-lg border-2 border-dashed border-white/10 hover:border-white/20 text-white/40 hover:text-white/60 transition text-sm"
+                                        <div
+                                            className={`relative w-full rounded-lg border-2 border-dashed transition-all cursor-pointer ${
+                                                pdfDragOver
+                                                    ? 'border-indigo-400/50 bg-indigo-500/10'
+                                                    : 'border-white/10 hover:border-white/20'
+                                            }`}
+                                            onDragOver={(e) => { e.preventDefault(); setPdfDragOver(true) }}
+                                            onDragEnter={(e) => { e.preventDefault(); setPdfDragOver(true) }}
+                                            onDragLeave={(e) => {
+                                                if (e.currentTarget.contains(e.relatedTarget)) return
+                                                setPdfDragOver(false)
+                                            }}
+                                            onDrop={(e) => {
+                                                e.preventDefault()
+                                                setPdfDragOver(false)
+                                                const file = Array.from(e.dataTransfer.files).find(
+                                                    f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+                                                )
+                                                if (file) handlePdfFileDrop(file)
+                                            }}
+                                            onClick={() => pdfInputRef.current?.click()}
                                         >
-                                            Upload PDF
-                                        </button>
+                                            <input
+                                                ref={pdfInputRef}
+                                                type="file"
+                                                accept=".pdf,application/pdf"
+                                                className="hidden"
+                                                onChange={(e) => {
+                                                    const file = e.target.files?.[0]
+                                                    if (file) handlePdfFileDrop(file)
+                                                    e.target.value = ''
+                                                }}
+                                            />
+                                            <div className="flex flex-col items-center gap-2 py-6 px-4">
+                                                <svg className={`w-8 h-8 transition ${pdfDragOver ? 'text-indigo-400' : 'text-white/20'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                                                </svg>
+                                                <p className={`text-sm transition ${pdfDragOver ? 'text-indigo-300' : 'text-white/40'}`}>
+                                                    {pdfDragOver ? 'Drop PDF here' : 'Drag & drop PDF or click to upload'}
+                                                </p>
+                                                <p className="text-xs text-white/20">or <button type="button" onClick={(e) => { e.stopPropagation(); setShowPdfModal(true) }} className="text-indigo-400/70 hover:text-indigo-400 underline underline-offset-2">browse library</button></p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {pdfUploadError && (
+                                        <div className="mt-2 flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2.5">
+                                            <svg className="w-4 h-4 text-red-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                                            </svg>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-red-300">{pdfUploadError}</p>
+                                            </div>
+                                            <button type="button" onClick={() => setPdfUploadError(null)} className="text-red-400/60 hover:text-red-300 shrink-0">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
 
@@ -428,35 +578,69 @@ export default function Research({
                                     const pdfDone = effectiveStatus.pdf_complete
                                     const snapDone = effectiveStatus.snapshot_ready
                                     const sugDone = effectiveStatus.suggestions_ready
+                                    const hasPdf = !!pdfAsset
+                                    const hasUrls = !!(websiteUrl.trim() || socialUrls.some(u => u.trim().startsWith('http')))
+                                    const hasAnyInput = hasPdf || hasUrls
 
-                                    const pdfStatus = pdfDone ? 'completed'
+                                    const pdfStatus = !hasPdf ? null
+                                        : pdfDone ? 'completed'
                                         : isStuckOrFailed ? health.state
                                         : isProcessing ? 'processing' : 'pending'
 
-                                    const snapStatus = snapDone ? 'completed'
-                                        : !pdfDone ? 'pending'
+                                    const urlStatus = !hasUrls ? null
+                                        : snapDone ? 'completed'
                                         : isStuckOrFailed ? health.state
                                         : isProcessing ? 'processing' : 'pending'
 
-                                    const sugStatus = sugDone ? 'completed'
+                                    const snapStatus = !hasAnyInput ? null
+                                        : snapDone ? 'completed'
+                                        : (hasPdf && !pdfDone) ? 'pending'
+                                        : isStuckOrFailed ? health.state
+                                        : isProcessing ? 'processing' : 'pending'
+
+                                    const sugStatus = !hasAnyInput ? null
+                                        : sugDone ? 'completed'
                                         : !snapDone ? 'pending'
                                         : isStuckOrFailed ? health.state
                                         : isProcessing ? 'processing' : 'pending'
 
+                                    if (!hasAnyInput && !isFinalized) {
+                                        return (
+                                            <div className="py-4 text-center">
+                                                <p className="text-sm text-white/40">Upload a PDF or add a URL above to begin research.</p>
+                                            </div>
+                                        )
+                                    }
+
                                     return (
                                         <>
-                                            <div className="flex items-center justify-between py-2">
-                                                <span className="text-sm text-white/70">PDF Extraction</span>
-                                                <StatusBadge status={pdfStatus} />
-                                            </div>
-                                            <div className="flex items-center justify-between py-2">
-                                                <span className="text-sm text-white/70">Snapshot Generation</span>
-                                                <StatusBadge status={snapStatus} />
-                                            </div>
-                                            <div className="flex items-center justify-between py-2">
-                                                <span className="text-sm text-white/70">AI Analysis</span>
-                                                <StatusBadge status={sugStatus} />
-                                            </div>
+                                            {pdfStatus && (
+                                                <div className="flex items-center justify-between py-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm text-white/70">PDF Extraction</span>
+                                                        <span className="text-xs text-white/30 truncate max-w-[200px]">{pdfAsset?.filename}</span>
+                                                    </div>
+                                                    <StatusBadge status={pdfStatus} />
+                                                </div>
+                                            )}
+                                            {urlStatus && (
+                                                <div className="flex items-center justify-between py-2">
+                                                    <span className="text-sm text-white/70">URL Analysis</span>
+                                                    <StatusBadge status={urlStatus} />
+                                                </div>
+                                            )}
+                                            {snapStatus && (
+                                                <div className="flex items-center justify-between py-2">
+                                                    <span className="text-sm text-white/70">Snapshot Generation</span>
+                                                    <StatusBadge status={snapStatus} />
+                                                </div>
+                                            )}
+                                            {sugStatus && (
+                                                <div className="flex items-center justify-between py-2">
+                                                    <span className="text-sm text-white/70">AI Analysis</span>
+                                                    <StatusBadge status={sugStatus} />
+                                                </div>
+                                            )}
                                         </>
                                     )
                                 })()}
@@ -513,7 +697,7 @@ export default function Research({
                                         <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
                                             <motion.div
                                                 className="h-full rounded-full"
-                                                style={{ backgroundColor: accentColor }}
+                                                style={{ backgroundColor: primaryColor }}
                                                 initial={{ width: '5%' }}
                                                 animate={{
                                                     width: effectiveStatus.suggestions_ready ? '100%'
@@ -609,15 +793,15 @@ export default function Research({
                             </SectionCard>
                         )}
 
-                        {/* Warnings */}
-                        {requiresAnalysis && !isProcessing && (
+                        {/* Warning: only when inputs changed AFTER a previous successful analysis */}
+                        {inputsChangedAfterAnalysis && !isProcessing && (
                             <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 flex items-start gap-3">
                                 <svg className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
                                 </svg>
                                 <div>
-                                    <p className="text-sm text-amber-200 font-medium">URLs changed but not analyzed</p>
-                                    <p className="text-xs text-amber-200/60 mt-0.5">Run analysis to update research results before continuing.</p>
+                                    <p className="text-sm text-amber-200 font-medium">Inputs changed since last analysis</p>
+                                    <p className="text-xs text-amber-200/60 mt-0.5">Re-run analysis to update research results before continuing.</p>
                                 </div>
                             </div>
                         )}
@@ -702,7 +886,7 @@ export default function Research({
                                     onClick={handleRetry}
                                     disabled={analyzing}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
-                                    style={{ backgroundColor: accentColor }}
+                                    style={{ backgroundColor: primaryColor }}
                                 >
                                     {analyzing ? 'Retrying…' : 'Retry Analysis'}
                                 </button>
@@ -711,9 +895,9 @@ export default function Research({
                             {!isFinalized && !isStuckOrFailed && (
                                 <button
                                     onClick={handleAnalyze}
-                                    disabled={analyzing || !brandResearchGate?.allowed}
+                                    disabled={analyzing || !brandResearchGate?.allowed || (!pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')))}
                                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-50"
-                                    style={{ backgroundColor: accentColor }}
+                                    style={{ backgroundColor: primaryColor }}
                                 >
                                     {analyzing ? 'Analyzing…' : 'Run Analysis'}
                                 </button>
@@ -723,11 +907,12 @@ export default function Research({
                                 onClick={handleAdvanceToReview}
                                 disabled={!canContinue}
                                 className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-30"
-                                style={{ backgroundColor: canContinue ? accentColor : undefined }}
+                                style={{ backgroundColor: canContinue ? primaryColor : undefined }}
                             >
                                 {isStuckOrFailed ? 'Pipeline Error — Retry Above'
                                     : isProcessing ? 'Processing…'
-                                    : requiresAnalysis ? 'Analysis Required'
+                                    : inputsChangedAfterAnalysis ? 'Re-run Analysis to Continue'
+                                    : !isFinalized && !pdfAsset && !websiteUrl.trim() && !socialUrls.some(u => u.trim().startsWith('http')) ? 'Add Inputs to Begin'
                                     : 'Continue to Review →'}
                             </button>
                         </div>
@@ -735,20 +920,18 @@ export default function Research({
                 </div>
             </div>
 
-            {showPdfModal && (
-                <BuilderAssetSelectorModal
-                    brandId={brand.id}
-                    context="guidelines_pdf"
-                    accept=".pdf"
-                    title="Upload Brand Guidelines PDF"
-                    onClose={() => setShowPdfModal(false)}
-                    onSelect={(asset) => {
-                        setPdfAsset({ id: asset.id, filename: asset.original_filename })
-                        setShowPdfModal(false)
-                        setRequiresAnalysis(true)
-                    }}
-                />
-            )}
+            <BuilderAssetSelectorModal
+                open={showPdfModal}
+                brandId={brand.id}
+                builderContext="guidelines_pdf"
+                title="Upload Brand Guidelines PDF"
+                onClose={() => setShowPdfModal(false)}
+                onSelect={(asset) => {
+                    setPdfAsset({ id: asset.id, filename: asset.original_filename, size_bytes: asset.size_bytes })
+                    setShowPdfModal(false)
+                    setInputsDirty(true)
+                }}
+            />
         </>
     )
 }

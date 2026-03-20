@@ -12,18 +12,26 @@ const DESTINATION_OPTIONS = [
     { value: 'collections', label: 'Collections' },
 ]
 
-export default function EntryExperience({ data, setData, portalFeatures, brand }) {
+export default function EntryExperience({ data, setData, portalFeatures, brand, onSave }) {
     const canCustomize = portalFeatures?.customization
     const entry = data.portal_settings?.entry || {}
 
-    const updateEntry = (key, value) => {
-        setData('portal_settings', {
+    const updateEntry = (key, value, skipSave = false) => {
+        const newPortalSettings = {
             ...(data.portal_settings || {}),
             entry: {
                 ...entry,
                 [key]: value,
             },
-        })
+        }
+        setData('portal_settings', newPortalSettings)
+        if (!skipSave) {
+            onSave?.({ portal_settings: newPortalSettings })
+        }
+    }
+
+    const saveCurrentEntry = () => {
+        onSave?.({ portal_settings: data.portal_settings })
     }
 
     const primary = brand?.primary_color || '#6366f1'
@@ -118,7 +126,8 @@ export default function EntryExperience({ data, setData, portalFeatures, brand }
                         <input
                             type="text"
                             value={entry.tagline_override || ''}
-                            onChange={(e) => updateEntry('tagline_override', e.target.value || null)}
+                            onChange={(e) => updateEntry('tagline_override', e.target.value || null, true)}
+                            onBlur={saveCurrentEntry}
                             placeholder="e.g. Built for anglers who demand more."
                             className="block w-full max-w-lg rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                             maxLength={255}

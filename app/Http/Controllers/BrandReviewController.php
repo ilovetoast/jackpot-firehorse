@@ -33,6 +33,12 @@ class BrandReviewController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
+        $planName = app(\App\Services\PlanService::class)->getCurrentPlan($tenant);
+        if ($planName === 'free') {
+            return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'strategy'])
+                ->with('warning', 'Brand Review requires a paid plan. You can manually configure your Brand DNA below.');
+        }
+
         $version = $this->versionService->getWorkingVersion($brand);
 
         // If still in research, redirect there

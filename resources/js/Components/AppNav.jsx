@@ -464,7 +464,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                                 type="button"
                                                 onClick={() => setCollectionsDropdownOpen(open => !open)}
                                                 onBlur={() => setTimeout(() => setCollectionsDropdownOpen(false), 150)}
-                                                className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700 focus:outline-none focus:ring-0"
+                                                className="inline-flex items-center border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700 focus:outline-none focus:ring-0"
                                                 style={{
                                                     borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
                                                     color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
@@ -497,7 +497,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                     ) : (
                                         <Link
                                             href={route('collection-invite.landing', { collection: effectiveCollection.id })}
-                                            className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
+                                            className="inline-flex items-center border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
                                             style={{
                                                 borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
                                                 color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
@@ -527,7 +527,7 @@ export default function AppNav({ brand, tenant, variant }) {
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute left-64 xl:left-[18rem]">
                                 <Link
                                     href="/app/overview"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
@@ -542,7 +542,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/assets"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -557,7 +557,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/executions"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -572,7 +572,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/collections"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/collections')
                                             ? textColor
@@ -587,7 +587,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/generative"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/generative')
                                             ? textColor
@@ -605,7 +605,7 @@ export default function AppNav({ brand, tenant, variant }) {
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 sm:ml-6">
                                 <Link
                                     href="/app/overview"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
                                             ? textColor
@@ -620,7 +620,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/assets"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -635,7 +635,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/executions"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/executions')
                                             ? textColor
@@ -650,7 +650,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/collections"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/collections')
                                             ? textColor
@@ -665,7 +665,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 </Link>
                                 <Link
                                     href="/app/generative"
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 pt-1 pb-2 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/generative')
                                             ? textColor

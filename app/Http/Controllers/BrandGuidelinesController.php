@@ -100,6 +100,17 @@ class BrandGuidelinesController extends Controller
         $logoAssets = $this->gatherLogoAssets($brand);
         $visualReferences = $this->gatherVisualReferences($brand, $modelPayload, $activeVersion);
 
+        $logoDarkUrl = null;
+        if ($activeVersion) {
+            $darkAsset = $activeVersion->assetsForContext('logo_on_dark')->first();
+            if ($darkAsset) {
+                $logoDarkUrl = $darkAsset->deliveryUrl(\App\Enums\AssetVariant::ORIGINAL, \App\Enums\DeliveryContext::AUTHENTICATED) ?: null;
+            }
+        }
+        if (! $logoDarkUrl) {
+            $logoDarkUrl = $brand->logo_dark_path;
+        }
+
         return Inertia::render('Brands/BrandGuidelines/Index', [
             'brand' => [
                 'id' => $brand->id,
@@ -108,6 +119,7 @@ class BrandGuidelinesController extends Controller
                 'secondary_color' => $brand->secondary_color,
                 'accent_color' => $brand->accent_color,
                 'logo_url' => $brand->logo_path,
+                'logo_dark_url' => $logoDarkUrl,
             ],
             'logoAssets' => $logoAssets,
             'visualReferences' => $visualReferences,

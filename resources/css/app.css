@@ -80,6 +80,35 @@
         background-color: rgb(156 163 175);
     }
 
+    /* Cinematic scrollbar for dark-themed pages (Builder, Research, Review) */
+    .scrollbar-cinematic,
+    .scrollbar-cinematic body {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    }
+    .scrollbar-cinematic::-webkit-scrollbar,
+    .scrollbar-cinematic body::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    .scrollbar-cinematic::-webkit-scrollbar-track,
+    .scrollbar-cinematic body::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .scrollbar-cinematic::-webkit-scrollbar-thumb,
+    .scrollbar-cinematic body::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 9999px;
+    }
+    .scrollbar-cinematic::-webkit-scrollbar-thumb:hover,
+    .scrollbar-cinematic body::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.25);
+    }
+    .scrollbar-cinematic::-webkit-scrollbar-corner,
+    .scrollbar-cinematic body::-webkit-scrollbar-corner {
+        background: transparent;
+    }
+
     /* Cinematic Experience: fade-in for splash */
     @keyframes fade-in {
         from { opacity: 0; transform: translateY(8px); }

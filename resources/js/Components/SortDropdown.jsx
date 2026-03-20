@@ -132,7 +132,7 @@ export default function SortDropdown({
                         } hover:bg-gray-50`}
                     >
                         <BarsArrowUpIcon className="h-4 w-4 text-gray-500" />
-                        Oldest first
+                        Ascending
                     </button>
                     <button
                         type="button"
@@ -142,7 +142,7 @@ export default function SortDropdown({
                         } hover:bg-gray-50`}
                     >
                         <BarsArrowDownIcon className="h-4 w-4 text-gray-500" />
-                        Newest first
+                        Descending
                     </button>
                 </div>
             )}

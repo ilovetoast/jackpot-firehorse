@@ -10,11 +10,22 @@ const SIZES = {
     '2xl': { container: 'h-20 w-20', text: 'text-2xl', radius: 'rounded-2xl' },
 }
 
+function resolveBackground(style, primary, secondary) {
+    switch (style) {
+        case 'gradient':
+            return `linear-gradient(135deg, ${secondary !== primary ? secondary : primary}, ${primary})`
+        case 'solid':
+            return primary
+        case 'subtle':
+        default:
+            return `linear-gradient(135deg, ${primary}CC, ${primary}55)`
+    }
+}
+
 /**
  * Unified brand icon used across the app — brand selector, settings, overview, etc.
- * Uses a gradient (primary -> secondary) fallback matching the Overview page style.
  *
- * @param {object} brand - Brand object with icon_path, logo_path, primary_color, secondary_color, name
+ * @param {object} brand - Brand object with icon_path, logo_path, primary_color, secondary_color, icon_style, name
  * @param {'xs'|'sm'|'md'|'lg'|'xl'|'2xl'} size - Size preset
  * @param {'gradient'|'circle'} variant - Visual style; gradient uses rounded-xl box, circle uses rounded-full
  * @param {string} className - Additional CSS classes
@@ -24,6 +35,7 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
 
     const primary = brand?.primary_color || '#6366f1'
     const secondary = brand?.secondary_color || '#8b5cf6'
+    const iconStyle = brand?.icon_style || 'subtle'
     const name = brand?.name || ''
     const firstLetter = name.charAt(0).toUpperCase() || 'B'
     const iconPath = brand?.icon_path
@@ -32,10 +44,11 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     const s = SIZES[size] || SIZES.md
     const radius = variant === 'circle' ? 'rounded-full' : s.radius
     const base = `flex items-center justify-center flex-shrink-0 overflow-hidden ${s.container} ${radius} ${className}`
+    const bg = resolveBackground(iconStyle, primary, secondary)
 
     if (iconPath && !imgError) {
         return (
-            <div className={base} style={{ background: `linear-gradient(135deg, ${primary}, ${secondary})` }}>
+            <div className={base} style={{ background: bg }}>
                 <img
                     src={iconPath}
                     alt={name}
@@ -48,7 +61,7 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
 
     if (logoPath && !imgError) {
         return (
-            <div className={base} style={{ background: `linear-gradient(135deg, ${primary}, ${secondary})` }}>
+            <div className={base} style={{ background: bg }}>
                 <img
                     src={logoPath}
                     alt={name}
@@ -63,7 +76,7 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     return (
         <div
             className={base}
-            style={{ background: `linear-gradient(135deg, ${primary}, ${secondary})` }}
+            style={{ background: bg }}
         >
             <span className={`font-bold text-white ${s.text}`}>{firstLetter}</span>
         </div>

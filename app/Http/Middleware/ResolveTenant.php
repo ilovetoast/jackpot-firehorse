@@ -21,7 +21,7 @@ class ResolveTenant
     public function handle(Request $request, Closure $next): Response
     {
         // Skip brand resolution for error pages to prevent redirect loops
-        if ($request->routeIs('errors.no-brand-assignment')) {
+        if ($request->routeIs('errors.no-brand-assignment') || $request->routeIs('errors.brand-disabled')) {
             $tenantId = session('tenant_id');
             if ($tenantId) {
                 $tenant = Tenant::find($tenantId);

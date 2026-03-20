@@ -89,7 +89,7 @@ class DevRerunBrandAnalysisCommand extends Command
             'brand_model_version_id' => $draft->id,
             'asset_id' => $pdfAsset->id,
             'stage' => BrandPipelineRun::STAGE_INIT,
-            'extraction_mode' => BrandPipelineRun::EXTRACTION_MODE_VISION,
+            'extraction_mode' => BrandPipelineRun::resolveExtractionMode($pdfAsset),
             'status' => BrandPipelineRun::STATUS_PENDING,
         ]);
 

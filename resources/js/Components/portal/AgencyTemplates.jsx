@@ -8,19 +8,21 @@ const LOCKABLE_FIELDS = [
     { key: 'invite.background_style', label: 'Invite Background' },
 ]
 
-export default function AgencyTemplates({ data, setData, portalFeatures }) {
+export default function AgencyTemplates({ data, setData, portalFeatures, onSave }) {
     const canAccess = portalFeatures?.agency_templates
     const agency = data.portal_settings?.agency_template || {}
     const lockedFields = agency.locked_fields || []
 
     const updateAgency = (key, value) => {
-        setData('portal_settings', {
+        const newPortalSettings = {
             ...(data.portal_settings || {}),
             agency_template: {
                 ...agency,
                 [key]: value,
             },
-        })
+        }
+        setData('portal_settings', newPortalSettings)
+        onSave?.({ portal_settings: newPortalSettings })
     }
 
     const toggleLockedField = (fieldKey) => {

@@ -35,18 +35,48 @@ export default function PublicCollection({
         setDownloadPanelOpen(true)
     }
 
-    const handleDownloadCollectionSubmit = (e) => {
-        e.preventDefault()
+    const handleDownloadCollection = async () => {
         setDownloadError(null)
         setDownloadSubmitting(true)
-        e.target.submit()
-        setDownloadSubmitting(false)
-        setDownloadPanelOpen(false)
+        try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+            const res = await fetch(
+                `/b/${brand_slug}/collections/${slug}/download`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                }
+            )
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data.message || 'Download failed')
+            }
+            if (data.zip_url) {
+                window.open(data.zip_url, '_blank', 'noopener,noreferrer')
+            }
+            setDownloadPanelOpen(false)
+        } catch (err) {
+            setDownloadError(err.message || 'Failed to prepare download. Please try again.')
+        } finally {
+            setDownloadSubmitting(false)
+        }
     }
 
     const handleAssetClick = (asset) => {
         if (asset.download_url) {
-            window.open(asset.download_url, '_blank', 'noopener,noreferrer')
+            const a = document.createElement('a')
+            a.href = asset.download_url
+            a.download = asset.original_filename || asset.title || 'download'
+            a.style.display = 'none'
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
         }
     }
 
@@ -175,16 +205,9 @@ export default function PublicCollection({
                                         Download collection
                                     </h3>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Download all assets in this collection as a ZIP (generated on the fly; no link is stored).
+                                        Download all assets in this collection as a ZIP file.
                                     </p>
-                                    <form
-                                        onSubmit={handleDownloadCollectionSubmit}
-                                        method="post"
-                                        action={route('public.collections.download', { brand_slug: brand_slug, collection_slug: slug })}
-                                        target="_blank"
-                                        className="mt-4 space-y-4"
-                                    >
-                                        <input type="hidden" name="_token" value={typeof document !== 'undefined' ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '') : ''} />
+                                    <div className="mt-4 space-y-4">
                                         <p className="text-sm text-gray-600">
                                             {assets.length} asset{assets.length !== 1 ? 's' : ''} will be included.
                                         </p>
@@ -193,7 +216,8 @@ export default function PublicCollection({
                                         )}
                                         <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
                                             <button
-                                                type="submit"
+                                                type="button"
+                                                onClick={handleDownloadCollection}
                                                 disabled={downloadSubmitting}
                                                 className="inline-flex w-full justify-center rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-md hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 sm:col-start-2"
                                                 style={{ backgroundColor: accentColor }}
@@ -209,7 +233,7 @@ export default function PublicCollection({
                                                 Cancel
                                             </button>
                                         </div>
-                                    </form>
+                                    </div>
                                 </div>
                             </div>
                         </div>

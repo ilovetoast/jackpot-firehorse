@@ -77,6 +77,7 @@ export default function VersionPanel({
     brandId,
     onSelect,
     selectedVersionId,
+    isFreePlan = false,
 }) {
     if (!versions.length) return null
 
@@ -106,15 +107,22 @@ export default function VersionPanel({
                                 <LifecycleBadge version={v} />
                                 <span className="text-xs text-gray-400">Draft</span>
                             </div>
-                            <Link
-                                href={cta.href}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors flex-shrink-0"
-                            >
-                                {cta.label}
-                                <svg className="ml-1.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                                </svg>
-                            </Link>
+                            {isFreePlan ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500 flex-shrink-0">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                                    Paid Plan
+                                </span>
+                            ) : (
+                                <Link
+                                    href={cta.href}
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors flex-shrink-0"
+                                >
+                                    {cta.label}
+                                    <svg className="ml-1.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                                    </svg>
+                                </Link>
+                            )}
                         </div>
                     </div>
                 )

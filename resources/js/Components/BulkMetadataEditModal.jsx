@@ -15,7 +15,8 @@ import { useState, useEffect } from 'react'
 import { usePage } from '@inertiajs/react'
 import { XMarkIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
-import CollectionSelector from './Collections/CollectionSelector' // C9.2
+import CollectionSelector from './Collections/CollectionSelector'
+import CreateCollectionModal from './Collections/CreateCollectionModal'
 import ConfirmDialog from './ConfirmDialog'
 
 export default function BulkMetadataEditModal({
@@ -36,6 +37,7 @@ export default function BulkMetadataEditModal({
     const [error, setError] = useState(null)
     const [editableFields, setEditableFields] = useState([])
     const [executing, setExecuting] = useState(false)
+    const [executeProgress, setExecuteProgress] = useState(0)
     const [results, setResults] = useState(null)
     /** C9.2: Collections support */
     const [collectionsList, setCollectionsList] = useState([])
@@ -45,6 +47,7 @@ export default function BulkMetadataEditModal({
     const [selectedCollectionIds, setSelectedCollectionIds] = useState([])
     const [showCategoryChangeConfirm, setShowCategoryChangeConfirm] = useState(false)
     const [pendingCategoryField, setPendingCategoryField] = useState(null)
+    const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
 
     const canShowCategoryWarning = () => {
         const brandRole = (auth?.user?.brand_role || auth?.brand_role || '').toLowerCase()
@@ -78,15 +81,32 @@ export default function BulkMetadataEditModal({
         }
     }, [assetIds])
 
-    // C9.2: Check collection field visibility using upload metadata schema (same as Tags)
-    // Collections follow the same visibility resolution path as Tags
+    // Fetch collections list immediately on mount
+    const fetchCollectionsList = () => {
+        setCollectionsListLoading(true)
+        fetch('/app/collections/list', {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionsList(data?.collections ?? [])
+            })
+            .catch(() => setCollectionsList([]))
+            .finally(() => setCollectionsListLoading(false))
+    }
+
+    useEffect(() => {
+        fetchCollectionsList()
+    }, [])
+
+    // Check collection field visibility using upload metadata schema
     useEffect(() => {
         if (!firstAssetCategoryId) {
             setCollectionFieldVisible(false)
             return
         }
 
-        // C9.2: Fetch edit schema so Collection shows when Quick View is checked
         const params = new URLSearchParams({
             category_id: firstAssetCategoryId.toString(),
             asset_type: 'image',
@@ -111,7 +131,6 @@ export default function BulkMetadataEditModal({
                 if (data.error) {
                     throw new Error(data.message || 'Failed to load metadata schema')
                 }
-                // Check if collection field appears in schema (same way Tags are checked)
                 const hasCollectionField = data.groups?.some(group => 
                     (group.fields || []).some(field => field.key === 'collection')
                 ) || false
@@ -120,19 +139,6 @@ export default function BulkMetadataEditModal({
             .catch(() => {
                 setCollectionFieldVisible(false)
             })
-
-        // Fetch collections list
-        setCollectionsListLoading(true)
-        fetch('/app/collections/list', {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-        })
-            .then((r) => r.json())
-            .then((data) => {
-                setCollectionsList(data?.collections ?? [])
-            })
-            .catch(() => setCollectionsList([]))
-            .finally(() => setCollectionsListLoading(false))
     }, [firstAssetCategoryId])
 
     // Fetch editable fields (use first asset's category as reference)
@@ -148,9 +154,9 @@ export default function BulkMetadataEditModal({
             })
             .then((res) => res.json())
             .then((data) => {
-                // Phase B2: Filter out readonly fields from bulk edit
                 const editableOnly = (data.fields || []).filter(
                     field => !(field.readonly || field.population_mode === 'automatic')
+                        && field.field_key !== 'collection'
                 )
                 setEditableFields(editableOnly)
             })
@@ -308,45 +314,72 @@ export default function BulkMetadataEditModal({
 
     // Handle execute
     const handleExecute = async () => {
-        // Phase 11: Bulk metadata backend not yet wired — disable until refactor
-        console.warn('Bulk metadata backend not yet wired. Phase 11 refactor pending.')
-        return
-
-        if (!previewToken) {
-            setError('Preview token missing')
-            return
+        if (selectedField === 'collections') {
+            return handleExecuteCollections()
         }
 
+        // Phase 11: Regular metadata bulk execute not yet wired
+        setError('Bulk metadata editing is not yet available. Collection assignments work — select Collections as the field.')
+    }
+
+    // Execute bulk collection assignment via per-asset sync
+    const handleExecuteCollections = async () => {
         setExecuting(true)
+        setExecuteProgress(0)
         setError(null)
 
-        try {
-            const response = await fetch('/app/assets/metadata/bulk/execute', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    preview_token: previewToken,
-                }),
-            })
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        const collectionIds = operationType === 'clear' ? [] : selectedCollectionIds
+        const successes = []
+        const failures = []
 
-            if (!response.ok) {
-                const data = await response.json()
-                throw new Error(data.message || 'Execution failed')
+        for (let i = 0; i < assetIds.length; i++) {
+            const assetId = assetIds[i]
+            setExecuteProgress(i + 1)
+            try {
+                let idsToSync = collectionIds
+
+                if (operationType === 'add' && collectionIds.length > 0) {
+                    const currentRes = await fetch(`/app/assets/${assetId}/collections`, {
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        credentials: 'same-origin',
+                    })
+                    const currentData = await currentRes.json()
+                    const currentIds = (currentData.collections || []).map((c) => c?.id).filter(Boolean)
+                    const merged = [...new Set([...currentIds, ...collectionIds])]
+                    idsToSync = merged
+                }
+
+                const res = await fetch(`/app/assets/${assetId}/collections`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ collection_ids: idsToSync }),
+                })
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}))
+                    throw new Error(errData.message || `HTTP ${res.status}`)
+                }
+
+                successes.push({ asset_id: assetId })
+            } catch (err) {
+                failures.push({
+                    asset_id: assetId,
+                    asset_title: `Asset ${assetId.substring(0, 8)}…`,
+                    error: err.message || 'Unknown error',
+                })
             }
-
-            const data = await response.json()
-            setResults(data.results)
-            setStep(5)
-        } catch (err) {
-            console.error('[BulkMetadataEditModal] Execute failed', err)
-            setError(err.message || 'Failed to execute changes')
-        } finally {
-            setExecuting(false)
         }
+
+        setResults({ successes, failures })
+        setStep(5)
+        setExecuting(false)
     }
 
     // Format value for display
@@ -442,38 +475,31 @@ export default function BulkMetadataEditModal({
                                         {initialOperation ? 'Cancel' : 'Back'}
                                     </button>
                                 </div>
-                                {(editableFields.length === 0 && !collectionFieldVisible) ? (
-                                    <div className="text-sm text-gray-500">No editable fields available</div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {/* C9.2: Collections field option (if visible) */}
-                                        {collectionFieldVisible && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleFieldSelect('collections')}
-                                                className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                            >
-                                                <div className="font-medium text-gray-900">Collections</div>
-                                                <div className="text-sm text-gray-500">
-                                                    Assign assets to collections (add/remove)
-                                                </div>
-                                            </button>
-                                        )}
-                                        {editableFields.map((field) => (
-                                            <button
-                                                key={field.metadata_field_id}
-                                                type="button"
-                                                onClick={() => handleFieldSelect(field)}
-                                                className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                            >
-                                                <div className="font-medium text-gray-900">{field.display_label}</div>
-                                                <div className="text-sm text-gray-500">
-                                                    {field.type} • Current: {formatValue(field.current_value)}
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
+                                <div className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleFieldSelect('collections')}
+                                        className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                        <div className="font-medium text-gray-900">Collections</div>
+                                        <div className="text-sm text-gray-500">
+                                            Assign assets to collections (add/remove)
+                                        </div>
+                                    </button>
+                                    {editableFields.map((field) => (
+                                        <button
+                                            key={field.metadata_field_id}
+                                            type="button"
+                                            onClick={() => handleFieldSelect(field)}
+                                            className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <div className="font-medium text-gray-900">{field.display_label}</div>
+                                            <div className="text-sm text-gray-500">
+                                                {field.type} • Current: {formatValue(field.current_value)}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -523,7 +549,8 @@ export default function BulkMetadataEditModal({
                                                 onChange={setSelectedCollectionIds}
                                                 disabled={false}
                                                 placeholder="Select collections…"
-                                                showCreateButton={false}
+                                                showCreateButton={true}
+                                                onCreateClick={() => setShowCreateCollectionModal(true)}
                                             />
                                         )}
                                     </div>
@@ -611,13 +638,27 @@ export default function BulkMetadataEditModal({
                                     )}
                                 </div>
 
+                                {executing && (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-xs text-gray-600">
+                                            <span>Processing assets…</span>
+                                            <span>{executeProgress} / {assetIds.length}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                            <div
+                                                className="bg-green-600 h-1.5 rounded-full transition-all duration-200"
+                                                style={{ width: `${(executeProgress / assetIds.length) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                                 <button
                                     type="button"
                                     onClick={handleExecute}
                                     disabled={executing || preview.errors.length > 0}
                                     className="w-full px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    {executing ? 'Executing...' : 'Confirm & Execute'}
+                                    {executing ? `Updating ${executeProgress} of ${assetIds.length}…` : 'Confirm & Execute'}
                                 </button>
                             </div>
                         )}
@@ -678,6 +719,15 @@ export default function BulkMetadataEditModal({
                 confirmText="Continue"
                 cancelText="Cancel"
                 variant="warning"
+            />
+
+            <CreateCollectionModal
+                open={showCreateCollectionModal}
+                onClose={() => setShowCreateCollectionModal(false)}
+                onCreated={(newCollection) => {
+                    fetchCollectionsList()
+                    setSelectedCollectionIds((prev) => [...prev, newCollection.id])
+                }}
             />
         </>
     )

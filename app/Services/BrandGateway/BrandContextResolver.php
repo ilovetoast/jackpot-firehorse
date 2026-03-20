@@ -186,22 +186,34 @@ class BrandContextResolver
         $tenantRole = $user->getRoleForTenant($tenant);
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
 
+        $planService = app(\App\Services\PlanService::class);
+        $brandLimitInfo = $planService->getBrandLimitInfo($tenant);
+        $disabledIds = $brandLimitInfo['disabled'];
+
         if ($isTenantOwnerOrAdmin) {
-            return $tenant->brands()
-                ->where('show_in_selector', '!=', false)
-                ->orWhereNull('show_in_selector')
+            $brands = $tenant->brands()
+                ->where(function ($q) use ($tenant) {
+                    $q->where('show_in_selector', '!=', false)
+                      ->orWhereNull('show_in_selector');
+                })
                 ->where('tenant_id', $tenant->id)
-                ->get()
-                ->map(fn (Brand $b) => $this->serializeBrand($b))
-                ->values()
-                ->toArray();
+                ->orderBy('is_default', 'desc')
+                ->orderBy('name')
+                ->get();
+        } else {
+            $brands = $user->brands()
+                ->where('tenant_id', $tenant->id)
+                ->whereNull('brand_user.removed_at')
+                ->orderBy('is_default', 'desc')
+                ->orderBy('name')
+                ->get();
         }
 
-        return $user->brands()
-            ->where('tenant_id', $tenant->id)
-            ->whereNull('brand_user.removed_at')
-            ->get()
-            ->map(fn (Brand $b) => $this->serializeBrand($b))
+        return $brands
+            ->map(fn (Brand $b) => array_merge(
+                $this->serializeBrand($b),
+                ['is_disabled' => in_array($b->id, $disabledIds)]
+            ))
             ->values()
             ->toArray();
     }
@@ -230,6 +242,7 @@ class BrandContextResolver
             'primary_color' => $defaultBrand?->primary_color,
             'icon' => $defaultBrand?->icon,
             'icon_bg_color' => $defaultBrand?->icon_bg_color,
+            'icon_style' => $defaultBrand?->icon_style ?? 'subtle',
         ];
     }
 
@@ -240,8 +253,11 @@ class BrandContextResolver
             'name' => $brand->name,
             'slug' => $brand->slug,
             'logo_path' => $brand->logo_path,
+            'logo_dark_path' => $brand->logo_dark_path,
+            'icon_path' => $brand->icon_path,
             'icon' => $brand->icon,
             'icon_bg_color' => $brand->icon_bg_color,
+            'icon_style' => $brand->icon_style ?? 'subtle',
             'primary_color' => $brand->primary_color,
             'secondary_color' => $brand->secondary_color,
             'accent_color' => $brand->accent_color,

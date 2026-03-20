@@ -1,19 +1,27 @@
 import { InvitePreview } from './GatewayPreview'
 import PortalGate from './PortalGate'
 
-export default function InviteExperience({ data, setData, portalFeatures, brand }) {
+export default function InviteExperience({ data, setData, portalFeatures, brand, onSave }) {
     const canCustomize = portalFeatures?.customization
     const invite = data.portal_settings?.invite || {}
     const primary = brand?.primary_color || '#6366f1'
 
-    const updateInvite = (key, value) => {
-        setData('portal_settings', {
+    const updateInvite = (key, value, skipSave = false) => {
+        const newPortalSettings = {
             ...(data.portal_settings || {}),
             invite: {
                 ...invite,
                 [key]: value,
             },
-        })
+        }
+        setData('portal_settings', newPortalSettings)
+        if (!skipSave) {
+            onSave?.({ portal_settings: newPortalSettings })
+        }
+    }
+
+    const saveCurrentInvite = () => {
+        onSave?.({ portal_settings: data.portal_settings })
     }
 
     return (
@@ -36,7 +44,8 @@ export default function InviteExperience({ data, setData, portalFeatures, brand 
                         <input
                             type="text"
                             value={invite.headline || ''}
-                            onChange={(e) => updateInvite('headline', e.target.value || null)}
+                            onChange={(e) => updateInvite('headline', e.target.value || null, true)}
+                            onBlur={saveCurrentInvite}
                             placeholder={`Welcome to ${brand?.name || 'Brand'}`}
                             className="block w-full max-w-lg rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                             maxLength={255}
@@ -51,7 +60,8 @@ export default function InviteExperience({ data, setData, portalFeatures, brand 
                         </p>
                         <textarea
                             value={invite.subtext || ''}
-                            onChange={(e) => updateInvite('subtext', e.target.value || null)}
+                            onChange={(e) => updateInvite('subtext', e.target.value || null, true)}
+                            onBlur={saveCurrentInvite}
                             placeholder="Built for anglers who demand more."
                             rows={2}
                             className="block w-full max-w-lg rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
@@ -68,7 +78,8 @@ export default function InviteExperience({ data, setData, portalFeatures, brand 
                         <input
                             type="text"
                             value={invite.cta_label || ''}
-                            onChange={(e) => updateInvite('cta_label', e.target.value || null)}
+                            onChange={(e) => updateInvite('cta_label', e.target.value || null, true)}
+                            onBlur={saveCurrentInvite}
                             placeholder="Accept & Enter"
                             className="block w-full max-w-xs rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                             maxLength={100}

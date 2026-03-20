@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\BrandDNA\Builder\BrandGuidelinesBuilderSteps;
 use App\Jobs\BrandPipelineRunnerJob;
 use App\Jobs\BrandPipelineSnapshotJob;
+use App\Jobs\ExtractPdfTextJob;
 use App\Jobs\RunBrandResearchJob;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -62,6 +63,13 @@ class BrandDNABuilderController extends Controller
         $tenant = app('tenant');
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Plan gate: free plan users get redirected to the Brand Portal settings for DIY mode
+        $planName = app(\App\Services\PlanService::class)->getCurrentPlan($tenant);
+        if ($planName === 'free') {
+            return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'strategy'])
+                ->with('warning', 'The AI-powered Brand Guidelines Builder requires a paid plan. You can manually configure your Brand DNA below.');
         }
 
         // Use existing draft or create one from active version's model_payload
@@ -255,6 +263,25 @@ class BrandDNABuilderController extends Controller
             }
         }
 
+        $buildLogoVariantProp = function (string $context) use ($draft, $brand): ?array {
+            $asset = $draft->assetsForContext($context)->first();
+            if (! $asset) {
+                return null;
+            }
+            $thumbUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null;
+            $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+            return [
+                'id' => $asset->id,
+                'thumbnail_url' => $thumbUrl,
+                'preview_url' => $previewUrl,
+                'original_filename' => $asset->original_filename,
+                'thumbnail_status' => $asset->thumbnail_status ?? 'pending',
+            ];
+        };
+        $logoOnDarkAsset = $buildLogoVariantProp('logo_on_dark');
+        $logoOnLightAsset = $buildLogoVariantProp('logo_on_light');
+        $logoHorizontalAsset = $buildLogoVariantProp('logo_horizontal');
+
         return Inertia::render('BrandGuidelines/Builder', [
             'brand' => [
                 'id' => $brand->id,
@@ -269,10 +296,15 @@ class BrandDNABuilderController extends Controller
                 'original_filename' => $logoOriginalFilename,
                 'thumbnail_status' => ($logoAsset ?? $brandLogoAsset ?? null)?->thumbnail_status ?? 'pending',
             ] : null,
+            'logoOnDarkAsset' => $logoOnDarkAsset,
+            'logoOnLightAsset' => $logoOnLightAsset,
+            'logoHorizontalAsset' => $logoHorizontalAsset,
             'draft' => [
                 'id' => $draft->id,
                 'version_number' => $draft->version_number,
                 'status' => $draft->status,
+                'research_status' => $draft->research_status,
+                'lifecycle_stage' => $draft->lifecycle_stage,
             ],
             'modelPayload' => $draft->model_payload ?? [],
             'steps' => $steps,
@@ -484,14 +516,14 @@ class BrandDNABuilderController extends Controller
         }
         $validated = $request->validate([
             'asset_id' => 'required|string|uuid|exists:assets,id',
-            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf',
+            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal',
         ]);
         $draft = $this->draftService->getWorkingVersion($brand);
         $assetId = $validated['asset_id'];
         $context = $validated['builder_context'];
 
-        // guidelines_pdf and logo_reference: only one per draft — replace any existing
-        if (in_array($context, ['guidelines_pdf', 'logo_reference'])) {
+        // Single-asset contexts: only one per draft — replace any existing
+        if (in_array($context, ['guidelines_pdf', 'logo_reference', 'logo_on_dark', 'logo_on_light', 'logo_horizontal'])) {
             BrandModelVersionAsset::where('brand_model_version_id', $draft->id)
                 ->where('builder_context', $context)
                 ->delete();
@@ -519,6 +551,12 @@ class BrandDNABuilderController extends Controller
             if ($context === 'logo_reference') {
                 $brand->update(['logo_id' => $assetId, 'logo_path' => null]);
             }
+            if ($context === 'logo_on_dark') {
+                $brand->update(['logo_dark_id' => $assetId, 'logo_dark_path' => null]);
+            }
+            if ($context === 'logo_horizontal') {
+                $brand->update(['logo_horizontal_id' => $assetId, 'logo_horizontal_path' => null]);
+            }
         }
 
         $asset = Asset::withoutTrashed()->find($assetId);
@@ -530,17 +568,24 @@ class BrandDNABuilderController extends Controller
         $count = $draft->assetsForContext($context)->count();
 
         $extra = [];
-        if ($context === 'logo_reference' && $asset) {
+        if ($asset && in_array($context, ['logo_reference', 'logo_on_dark', 'logo_on_light', 'logo_horizontal'])) {
             $thumbStatus = $asset->thumbnail_status ?? 'pending';
             $thumbUrl = ($thumbStatus === 'completed')
                 ? ($asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null)
                 : null;
-            $extra['logo_asset'] = [
+            $previewUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
+            $assetData = [
                 'id' => $asset->id,
                 'thumbnail_url' => $thumbUrl,
+                'preview_url' => $previewUrl,
                 'original_filename' => $asset->original_filename,
                 'thumbnail_status' => $thumbStatus,
             ];
+            if ($context === 'logo_reference') {
+                $extra['logo_asset'] = $assetData;
+            } else {
+                $extra['variant_asset'] = $assetData;
+            }
         }
 
         return response()->json(array_merge(['attached' => true, 'count' => $count], $extra));
@@ -558,7 +603,7 @@ class BrandDNABuilderController extends Controller
         }
         $validated = $request->validate([
             'asset_id' => 'required|string|uuid|exists:assets,id',
-            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf',
+            'builder_context' => 'required|string|in:brand_material,visual_reference,typography_reference,logo_reference,guidelines_pdf,logo_on_dark,logo_on_light,logo_horizontal',
         ]);
         $draft = $this->draftService->getWorkingVersion($brand);
         $context = $validated['builder_context'];
@@ -576,6 +621,12 @@ class BrandDNABuilderController extends Controller
             ));
             $payload['visual'] = array_merge($visual, ['approved_references' => $refs]);
             $draft->update(['model_payload' => $payload]);
+        }
+        if ($context === 'logo_on_dark' && $brand->logo_dark_id === $assetId) {
+            $brand->update(['logo_dark_id' => null, 'logo_dark_path' => null]);
+        }
+        if ($context === 'logo_horizontal' && $brand->logo_horizontal_id === $assetId) {
+            $brand->update(['logo_horizontal_id' => null, 'logo_horizontal_path' => null]);
         }
         $count = $draft->assetsForContext($context)->count();
         return response()->json(['detached' => true, 'count' => $count]);
@@ -655,10 +706,184 @@ PROMPT;
         ]]);
     }
 
+    /**
+     * POST /brands/{brand}/brand-dna/builder/suggest-field
+     * On-demand AI suggestion for a single brand field.
+     */
+    public function suggestField(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $usageService = app(\App\Services\AiUsageService::class);
+        try {
+            $usageService->checkUsage($tenant, 'suggestions');
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return response()->json(['error' => 'Monthly AI suggestion limit reached for your plan.'], 429);
+        }
+
+        $validated = $request->validate([
+            'field_path' => 'required|string|max:100',
+        ]);
+
+        $fieldPath = $validated['field_path'];
+        $draft = $this->draftService->getWorkingVersion($brand);
+        $payload = $draft->model_payload ?? [];
+
+        $identity = $payload['identity'] ?? [];
+        $personality = $payload['personality'] ?? [];
+        $scoringRules = $payload['scoring_rules'] ?? [];
+
+        $u = fn ($v) => self::unwrapPayloadValue($v);
+
+        // Safely unwrap array fields that may be wrapped as { value: [...], source: '...' }
+        $unwrapArray = function ($field) use ($u): array {
+            if (is_array($field) && array_key_exists('value', $field) && isset($field['source'])) {
+                $field = $field['value'] ?? [];
+            }
+            if (! is_array($field)) {
+                return $field ? [strval($field)] : [];
+            }
+            return array_map(fn ($item) => $u($item), $field);
+        };
+
+        $brandContext = array_filter([
+            'brand_name' => $brand->name,
+            'industry' => $u($identity['industry'] ?? ''),
+            'target_audience' => $u($identity['target_audience'] ?? ''),
+            'mission' => $u($identity['mission'] ?? ''),
+            'positioning' => $u($identity['positioning'] ?? ''),
+            'tagline' => $u($identity['tagline'] ?? ''),
+            'archetype' => $u($personality['primary_archetype'] ?? ''),
+            'brand_look' => $u($personality['brand_look'] ?? ''),
+            'voice' => $u($personality['voice_description'] ?? ''),
+            'traits' => implode(', ', $unwrapArray($personality['traits'] ?? [])),
+            'tone' => implode(', ', $unwrapArray($scoringRules['tone_keywords'] ?? [])),
+            'beliefs' => implode('; ', $unwrapArray($identity['beliefs'] ?? [])),
+            'values' => implode(', ', $unwrapArray($identity['values'] ?? [])),
+        ]);
+
+        $contextBlock = collect($brandContext)
+            ->map(fn ($v, $k) => ucfirst(str_replace('_', ' ', $k)) . ': ' . $v)
+            ->implode("\n");
+
+        // Pull research snapshot data if available for richer context
+        $researchBlock = '';
+        $latestSnapshot = BrandPipelineSnapshot::where('brand_id', $brand->id)
+            ->where('brand_model_version_id', $draft->id)
+            ->where('status', 'completed')
+            ->latest()
+            ->first();
+
+        if ($latestSnapshot) {
+            $snap = $latestSnapshot->snapshot ?? [];
+            $researchParts = array_filter([
+                !empty($snap['mission']) ? 'Extracted mission: ' . (is_string($snap['mission']) ? $snap['mission'] : json_encode($snap['mission'])) : null,
+                !empty($snap['tone']) ? 'Extracted tone: ' . (is_array($snap['tone']) ? implode(', ', $snap['tone']) : $snap['tone']) : null,
+                !empty($snap['colors']) ? 'Extracted colors: ' . (is_array($snap['colors']) ? implode(', ', $snap['colors']) : $snap['colors']) : null,
+                !empty($snap['fonts']) ? 'Extracted fonts: ' . (is_array($snap['fonts']) ? implode(', ', $snap['fonts']) : $snap['fonts']) : null,
+                !empty($snap['positioning']) ? 'Extracted positioning: ' . (is_string($snap['positioning']) ? $snap['positioning'] : json_encode($snap['positioning'])) : null,
+                !empty($snap['voice']) ? 'Extracted voice: ' . (is_string($snap['voice']) ? $snap['voice'] : json_encode($snap['voice'])) : null,
+                !empty($snap['values']) ? 'Extracted values: ' . (is_array($snap['values']) ? implode(', ', $snap['values']) : $snap['values']) : null,
+            ]);
+            if ($researchParts) {
+                $researchBlock = "\n\nRESEARCH DATA (from website/PDF analysis):\n" . implode("\n", $researchParts);
+            }
+        }
+
+        $fieldLabels = [
+            'identity.mission' => ['label' => 'brand mission (WHY the brand exists)', 'type' => 'string', 'example' => 'We\'re in business to save our home planet'],
+            'identity.positioning' => ['label' => 'brand positioning / value proposition (WHAT it delivers)', 'type' => 'string', 'example' => 'Premium technology that just works'],
+            'identity.industry' => ['label' => 'market industry / sector', 'type' => 'string', 'example' => 'Premium Outdoor Equipment'],
+            'identity.target_audience' => ['label' => 'target audience', 'type' => 'string', 'example' => 'Health-conscious millennials who value sustainability'],
+            'identity.market_category' => ['label' => 'market category', 'type' => 'string', 'example' => 'Premium Consumer Electronics'],
+            'identity.competitive_position' => ['label' => 'competitive position / differentiation', 'type' => 'string', 'example' => 'The only brand that combines precision engineering with accessible pricing'],
+            'identity.tagline' => ['label' => 'brand tagline / slogan', 'type' => 'string', 'example' => 'Just Do It'],
+            'identity.beliefs' => ['label' => 'core brand beliefs', 'type' => 'array', 'example' => '["Quality over quantity", "Innovation drives progress"]'],
+            'identity.values' => ['label' => 'brand values', 'type' => 'array', 'example' => '["Integrity", "Innovation", "Excellence"]'],
+            'personality.voice_description' => ['label' => 'brand voice description (how the brand communicates)', 'type' => 'string', 'example' => 'Bold and direct with a coaching mentality. Uses short, punchy sentences.'],
+            'personality.brand_look' => ['label' => 'brand visual look description', 'type' => 'string', 'example' => 'Clean and geometric with strong contrast. Bold accents against dark backgrounds.'],
+            'personality.traits' => ['label' => 'personality traits (adjectives)', 'type' => 'array', 'example' => '["Bold", "Authentic", "Precise", "Fearless"]'],
+            'scoring_rules.tone_keywords' => ['label' => 'tone of voice keywords', 'type' => 'array', 'example' => '["Confident", "Direct", "Warm", "Expert"]'],
+        ];
+
+        $fieldDef = $fieldLabels[$fieldPath] ?? null;
+        if (! $fieldDef) {
+            return response()->json(['error' => 'Field not supported for suggestions.'], 422);
+        }
+
+        $isArray = $fieldDef['type'] === 'array';
+        $formatInstruction = $isArray
+            ? 'Return ONLY a JSON array of 3-5 short strings. Example: ' . $fieldDef['example']
+            : 'Return ONLY a single string value, no JSON wrapping, no quotes. Example: ' . $fieldDef['example'];
+
+        $prompt = <<<PROMPT
+You are a senior brand strategist advising a client. Based on everything you know about this brand, recommend a {$fieldDef['label']}.
+
+BRAND CONTEXT:
+{$contextBlock}{$researchBlock}
+
+TASK: Suggest a {$fieldDef['label']} for "{$brand->name}".
+{$formatInstruction}
+
+Be specific, strategic, and tailored to this brand. Avoid generic answers. Return ONLY the value.
+PROMPT;
+
+        try {
+            $ai = app(\App\Services\AI\Providers\OpenAIProvider::class);
+            $result = $ai->generateText($prompt, [
+                'model' => 'gpt-4o-mini',
+                'max_tokens' => 300,
+                'temperature' => 0.7,
+            ]);
+            $text = trim($result['text'] ?? '');
+
+            $usageService->trackUsageWithCost(
+                $tenant,
+                'suggestions',
+                1,
+                ($result['tokens_in'] ?? 0) * 0.00000015 + ($result['tokens_out'] ?? 0) * 0.0000006,
+                $result['tokens_in'] ?? null,
+                $result['tokens_out'] ?? null,
+                $result['model'] ?? 'gpt-4o-mini'
+            );
+
+            if ($isArray) {
+                $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
+                $text = preg_replace('/\s*```$/', '', $text);
+                $parsed = json_decode($text, true);
+                if (is_array($parsed)) {
+                    return response()->json(['suggestion' => $parsed, 'type' => 'array']);
+                }
+                $lines = array_filter(array_map('trim', preg_split('/[\n,]+/', $text)));
+
+                return response()->json(['suggestion' => array_values($lines), 'type' => 'array']);
+            }
+
+            $text = trim($text, '"\'');
+
+            return response()->json(['suggestion' => $text, 'type' => 'string']);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return response()->json(['error' => 'AI suggestion limit reached for your plan.'], 429);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json(['error' => 'Failed to generate suggestion. Please try again.'], 500);
+        }
+    }
+
     private static function unwrapPayloadValue(mixed $val): string
     {
         if (is_array($val) && array_key_exists('value', $val) && isset($val['source'])) {
-            return (string) ($val['value'] ?? '');
+            $inner = $val['value'] ?? '';
+            return is_array($inner) ? json_encode($inner) : (string) $inner;
+        }
+
+        if (is_array($val)) {
+            return json_encode($val);
         }
 
         return (string) ($val ?? '');
@@ -1430,13 +1655,7 @@ PROMPT;
         if ($pdfAssetId) {
             $pdfAsset = Asset::find($pdfAssetId);
             if ($pdfAsset && str_contains(strtolower($pdfAsset->mime_type ?? ''), 'pdf')) {
-                try {
-                    $pageCount = app(\App\Services\PdfPageRenderingService::class)->getPdfPageCount($pdfAsset, true);
-                    $extractionMode = $pageCount > 1 ? BrandPipelineRun::EXTRACTION_MODE_VISION : BrandPipelineRun::EXTRACTION_MODE_TEXT;
-                } catch (\Throwable $e) {
-                    $extractionMode = BrandPipelineRun::EXTRACTION_MODE_VISION;
-                    $pageCount = 'error:' . $e->getMessage();
-                }
+                $extractionMode = BrandPipelineRun::resolveExtractionMode($pdfAsset);
             }
         }
         \Illuminate\Support\Facades\Log::channel('pipeline')->info('[triggerIngestion] Pipeline start', [
@@ -1805,5 +2024,24 @@ PROMPT;
         ]);
 
         return response()->json(['retried' => true, 'strategy' => 'full_restart']);
+    }
+
+    protected function ensureTextExtractionStarted(Asset $asset): void
+    {
+        $asset->loadMissing('currentVersion');
+        $versionId = $asset->currentVersion?->id;
+        $existing = $asset->getLatestPdfTextExtractionForVersion($versionId);
+
+        if ($existing && in_array($existing->status, [PdfTextExtraction::STATUS_PENDING, 'processing', 'complete'])) {
+            return;
+        }
+
+        $extraction = $asset->pdfTextExtractions()->create([
+            'asset_version_id' => $versionId,
+            'extraction_source' => null,
+            'status' => PdfTextExtraction::STATUS_PENDING,
+        ]);
+
+        ExtractPdfTextJob::dispatch($asset->id, $extraction->id, $versionId);
     }
 }

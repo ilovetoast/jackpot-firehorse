@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\Collection as CollectionModel;
 use App\Models\StorageBucket;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -11,8 +12,15 @@ use Illuminate\Support\Facades\Log;
 use ZipArchive;
 
 /**
- * Builds a ZIP file from a collection of assets (on-the-fly, no Download record).
- * Used for public collection download so we do not persist a Download.
+ * Builds ZIP files from collections of assets.
+ *
+ * Supports two modes:
+ * 1. On-the-fly (temp file, caller deletes after send)
+ * 2. Cached in S3 (built once, served via signed URL, invalidated on asset changes)
+ *
+ * The cached mode stores the ZIP in the tenant's bucket under a deterministic key.
+ * When collection assets change, Collection::invalidatePublicZip() clears the
+ * cache columns and the old S3 object is cleaned up on next build.
  */
 class CollectionZipBuilderService
 {
@@ -87,6 +95,119 @@ class CollectionZipBuilderService
                 @unlink($tempZipPath);
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Get or build a cached ZIP for a public collection, stored in S3.
+     *
+     * Strategy: lazy rebuild on first request after invalidation.
+     * - If cached ZIP exists in S3 and collection record has a path → return S3 key.
+     * - Otherwise build locally, upload to S3, update collection record, return S3 key.
+     * - Old ZIP objects are overwritten at the same key (deterministic path).
+     *
+     * @return string S3 object key of the cached ZIP
+     */
+    public function getOrBuildCachedZip(
+        CollectionModel $collection,
+        Collection $assets,
+        StorageBucket $bucket,
+        S3Client $s3Client
+    ): string {
+        $s3Key = $this->cachedZipS3Key($collection);
+
+        if ($collection->hasPublicZipCached()) {
+            if ($this->s3ObjectExists($bucket, $s3Key, $s3Client)) {
+                return $s3Key;
+            }
+            Log::info('[CollectionZipBuilderService] Cached ZIP missing from S3, rebuilding', [
+                'collection_id' => $collection->id,
+                's3_key' => $s3Key,
+            ]);
+        }
+
+        $tempPath = $this->buildZipFromAssets($assets, $bucket, $s3Client);
+
+        try {
+            $s3Client->putObject([
+                'Bucket' => $bucket->name,
+                'Key' => $s3Key,
+                'SourceFile' => $tempPath,
+                'ContentType' => 'application/zip',
+                'CacheControl' => 'private, max-age=86400',
+            ]);
+
+            $collection->update([
+                'public_zip_path' => $s3Key,
+                'public_zip_built_at' => now(),
+                'public_zip_asset_count' => $assets->count(),
+            ]);
+
+            Log::info('[CollectionZipBuilderService] Cached ZIP built and uploaded', [
+                'collection_id' => $collection->id,
+                's3_key' => $s3Key,
+                'asset_count' => $assets->count(),
+            ]);
+        } finally {
+            if (file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
+        }
+
+        return $s3Key;
+    }
+
+    /**
+     * Generate a signed download URL for the cached collection ZIP.
+     */
+    public function getSignedZipUrl(StorageBucket $bucket, string $s3Key, S3Client $s3Client, int $ttlMinutes = 30): string
+    {
+        $cmd = $s3Client->getCommand('GetObject', [
+            'Bucket' => $bucket->name,
+            'Key' => $s3Key,
+            'ResponseContentType' => 'application/zip',
+        ]);
+
+        return (string) $s3Client->createPresignedRequest($cmd, "+{$ttlMinutes} minutes")->getUri();
+    }
+
+    /**
+     * Delete the cached ZIP from S3 (e.g. when collection is deleted or made private).
+     */
+    public function deleteCachedZip(CollectionModel $collection, StorageBucket $bucket, S3Client $s3Client): void
+    {
+        $s3Key = $collection->public_zip_path ?? $this->cachedZipS3Key($collection);
+
+        try {
+            $s3Client->deleteObject([
+                'Bucket' => $bucket->name,
+                'Key' => $s3Key,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[CollectionZipBuilderService] Failed to delete cached ZIP from S3', [
+                'collection_id' => $collection->id,
+                's3_key' => $s3Key,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $collection->invalidatePublicZip();
+    }
+
+    /**
+     * Deterministic S3 key for collection ZIP. Overwrites on rebuild.
+     */
+    protected function cachedZipS3Key(CollectionModel $collection): string
+    {
+        return "_system/collection-zips/{$collection->id}/collection-download.zip";
+    }
+
+    protected function s3ObjectExists(StorageBucket $bucket, string $key, S3Client $s3Client): bool
+    {
+        try {
+            return $s3Client->doesObjectExist($bucket->name, $key);
+        } catch (\Throwable) {
+            return false;
         }
     }
 
