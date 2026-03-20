@@ -12,6 +12,7 @@ import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderA
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import { normalizeWebsiteUrl } from '../../utils/websiteUrl'
 import axios from 'axios'
+import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 
 function StatusBadge({ status, elapsed }) {
     const colors = {
@@ -170,6 +171,8 @@ export default function Research({
     const [pdfUploading, setPdfUploading] = useState(false)
     const [pdfUploadName, setPdfUploadName] = useState('')
     const [pdfUploadError, setPdfUploadError] = useState(null)
+    /** Collapsed by default — primary path is Continue / Review; re-run lives inside */
+    const [pipelineRunsExpanded, setPipelineRunsExpanded] = useState(false)
     const pdfInputRef = useRef(null)
     const pollRef = useRef(null)
 
@@ -225,6 +228,27 @@ export default function Research({
         return () => document.documentElement.classList.remove('scrollbar-cinematic')
     }, [])
 
+    /**
+     * Inertia may reuse this page without remounting after "Start over" (new draft).
+     * Reset all derived research UI so we don't show the previous draft's pipeline / results.
+     */
+    useEffect(() => {
+        if (!version?.id) return
+        setPolledStatus(status)
+        setPolledResults(results)
+        setPipelineLive(null)
+        setHealth(initialPipelineHealth || { state: 'idle', error: null, can_retry: false })
+        const shouldPollNow = (initialPipelineHealth?.state === 'processing') && !status.research_finalized
+        setPolling(shouldPollNow)
+        setPendingAdvanceAfterRun(false)
+        setPdfAsset(inputs?.pdf ?? null)
+        setWebsiteUrl(inputs?.website_url ?? '')
+        setInputsDirty(false)
+        setPdfUploadError(null)
+        setAnalyzing(false)
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when draft version changes
+    }, [version.id])
+
     // Hydrate detailed pipeline as soon as the page loads (even before polling interval)
     useEffect(() => {
         if (!brand?.id || status.research_finalized) return
@@ -242,7 +266,7 @@ export default function Research({
                 }
             })
             .catch(() => {})
-    }, [brand.id, status.research_finalized, applyResearchInsights])
+    }, [brand.id, version.id, status.research_finalized, applyResearchInsights])
 
     // Polling
     useEffect(() => {
@@ -259,7 +283,7 @@ export default function Research({
         poll()
         pollRef.current = setInterval(poll, 4000)
         return () => { if (pollRef.current) clearInterval(pollRef.current) }
-    }, [polling, brand.id, applyResearchInsights])
+    }, [polling, brand.id, version.id, applyResearchInsights])
 
     const handleAnalyze = useCallback(async () => {
         if (!brandResearchGate?.allowed) return
@@ -1063,44 +1087,105 @@ export default function Research({
                             </div>
                         )}
 
-                        {/* Pipeline Runs */}
+                        {/* Pipeline Runs — collapsed by default; re-run lives here (not in footer) */}
                         {runs?.length > 0 && (
-                            <SectionCard title="Pipeline Runs">
-                                <div className="space-y-2">
-                                    {runs.map(run => {
-                                        const isRunStuck = run.status === 'processing' && run.updated_at
-                                            && (Date.now() - new Date(run.updated_at).getTime()) > 5 * 60 * 1000
-                                        const displayStatus = isRunStuck ? 'stuck' : run.status
-                                        const elapsed = run.completed_at && run.created_at
-                                            ? formatElapsed(Math.floor((new Date(run.completed_at) - new Date(run.created_at)) / 1000))
-                                            : run.status === 'processing' && run.created_at
-                                                ? formatElapsed(Math.floor((Date.now() - new Date(run.created_at).getTime()) / 1000))
-                                                : null
-                                        return (
-                                            <div key={run.id} className="flex items-center justify-between py-2 text-sm">
-                                                <div className="flex items-center gap-3">
-                                                    <span className="text-white/50 font-mono text-xs">#{run.id}</span>
-                                                    <span className="text-white/60">{run.extraction_mode}</span>
-                                                    {run.pages_total > 0 && run.status === 'processing' && (
-                                                        <span className="text-white/30 text-xs">
-                                                            {run.pages_processed}/{run.pages_total} pages
-                                                        </span>
-                                                    )}
+                            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setPipelineRunsExpanded((e) => !e)}
+                                    className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-white/[0.02] transition"
+                                    aria-expanded={pipelineRunsExpanded}
+                                >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        {pipelineRunsExpanded ? (
+                                            <ChevronDownIcon className="h-5 w-5 text-white/40 flex-shrink-0" aria-hidden />
+                                        ) : (
+                                            <ChevronRightIcon className="h-5 w-5 text-white/40 flex-shrink-0" aria-hidden />
+                                        )}
+                                        <span className="text-lg font-semibold text-white/90">Pipeline Runs</span>
+                                        <span className="text-xs text-white/35 tabular-nums">
+                                            ({runs.length})
+                                        </span>
+                                    </div>
+                                    {!pipelineRunsExpanded && runs.length > 0 && (() => {
+                                        const latest = runs.reduce((best, r) => (!best || r.id > best.id ? r : best), null)
+                                        const short = latest
+                                            ? `#${latest.id} ${latest.extraction_mode || ''}`.trim()
+                                            : ''
+                                        return short ? (
+                                            <span className="text-xs text-white/35 truncate max-w-[55%] hidden sm:inline">
+                                                {short}
+                                            </span>
+                                        ) : null
+                                    })()}
+                                </button>
+                                <AnimatePresence initial={false}>
+                                    {pipelineRunsExpanded && (
+                                        <motion.div
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            exit={{ opacity: 0 }}
+                                            transition={{ duration: 0.15 }}
+                                        >
+                                            <div className="px-6 pb-6 pt-0 border-t border-white/[0.06]">
+                                                <div className="space-y-2 pt-4">
+                                                    {runs.map(run => {
+                                                        const isRunStuck = run.status === 'processing' && run.updated_at
+                                                            && (Date.now() - new Date(run.updated_at).getTime()) > 5 * 60 * 1000
+                                                        const displayStatus = isRunStuck ? 'stuck' : run.status
+                                                        const elapsed = run.completed_at && run.created_at
+                                                            ? formatElapsed(Math.floor((new Date(run.completed_at) - new Date(run.created_at)) / 1000))
+                                                            : run.status === 'processing' && run.created_at
+                                                                ? formatElapsed(Math.floor((Date.now() - new Date(run.created_at).getTime()) / 1000))
+                                                                : null
+                                                        return (
+                                                            <div key={run.id} className="flex items-center justify-between py-2 text-sm">
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="text-white/50 font-mono text-xs">#{run.id}</span>
+                                                                    <span className="text-white/60">{run.extraction_mode}</span>
+                                                                    {run.pages_total > 0 && run.status === 'processing' && (
+                                                                        <span className="text-white/30 text-xs">
+                                                                            {run.pages_processed}/{run.pages_total} pages
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-3">
+                                                                    {elapsed && (
+                                                                        <span className="text-white/30 text-xs">{elapsed}</span>
+                                                                    )}
+                                                                    <span className="text-white/40 text-xs">
+                                                                        {run.created_at ? new Date(run.created_at).toLocaleString() : ''}
+                                                                    </span>
+                                                                    <StatusBadge status={displayStatus} />
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
                                                 </div>
-                                                <div className="flex items-center gap-3">
-                                                    {elapsed && (
-                                                        <span className="text-white/30 text-xs">{elapsed}</span>
-                                                    )}
-                                                    <span className="text-white/40 text-xs">
-                                                        {run.created_at ? new Date(run.created_at).toLocaleString() : ''}
-                                                    </span>
-                                                    <StatusBadge status={displayStatus} />
-                                                </div>
+
+                                                {isFinalized && !isStuckOrFailed && (
+                                                    <div className="mt-4 pt-4 border-t border-white/[0.06]">
+                                                        <p className="text-xs text-white/35 mb-3">
+                                                            Need to refresh research without leaving this step? Re-run replaces the current pipeline run.
+                                                        </p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setPendingAdvanceAfterRun(false)
+                                                                handleRerun()
+                                                            }}
+                                                            disabled={analyzing || polling || pendingAdvanceAfterRun}
+                                                            className="w-full sm:w-auto px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/80 border border-white/10 hover:border-white/20 transition disabled:opacity-50"
+                                                        >
+                                                            {(analyzing || polling) ? 'Re-running…' : 'Re-run only (stay here)'}
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
-                                        )
-                                    })}
-                                </div>
-                            </SectionCard>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -1126,20 +1211,6 @@ export default function Research({
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-3">
-                            {isFinalized && !isStuckOrFailed && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setPendingAdvanceAfterRun(false)
-                                        handleRerun()
-                                    }}
-                                    disabled={analyzing || polling || pendingAdvanceAfterRun}
-                                    className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/80 border border-white/10 hover:border-white/20 transition disabled:opacity-50"
-                                >
-                                    {(analyzing || polling) ? 'Re-running…' : 'Re-run only (stay here)'}
-                                </button>
-                            )}
-
                             {isStuckOrFailed && health.can_retry && (
                                 <button
                                     type="button"
@@ -1181,6 +1252,27 @@ export default function Research({
                     onClose={() => setShowStartOverConfirm(false)}
                     onConfirm={() => {
                         setShowStartOverConfirm(false)
+                        // Clear immediately so stale pipeline UI doesn't persist until Inertia finishes redirect
+                        setPipelineLive(null)
+                        setPolling(false)
+                        setPendingAdvanceAfterRun(false)
+                        setPolledStatus({
+                            pdf_complete: false,
+                            snapshot_ready: false,
+                            suggestions_ready: false,
+                            research_finalized: false,
+                        })
+                        setPolledResults({
+                            snapshot: {},
+                            suggestions: [],
+                            coherence: null,
+                            alignment: null,
+                        })
+                        setHealth({ state: 'idle', error: null, can_retry: false })
+                        setPdfAsset(null)
+                        setWebsiteUrl('')
+                        setInputsDirty(false)
+                        setPdfUploadError(null)
                         router.post(route('brands.brand-dna.builder.start', { brand: brand.id }))
                     }}
                     title="Start over?"
