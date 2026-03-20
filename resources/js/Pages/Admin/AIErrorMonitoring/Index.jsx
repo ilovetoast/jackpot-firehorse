@@ -225,6 +225,7 @@ function IssueRow({ issue, selected, onSelect, onAction, requireConfirmation }) 
 export default function AIErrorMonitoringIndex({ auth, config, issues }) {
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
+    const [pullLoading, setPullLoading] = useState(false)
 
     const data = issues?.data ?? []
     const links = issues?.links ?? []
@@ -261,6 +262,23 @@ export default function AIErrorMonitoringIndex({ auth, config, issues }) {
         }
     }
 
+    const handleManualPull = async () => {
+        setPullLoading(true)
+        try {
+            const { data } = await axios.post(route('admin.ai-error-monitoring.pull'))
+            router.reload()
+            if (data?.pulled > 0 || data?.analyzed > 0) {
+                // Reload shows the new data; optional toast could go here
+            }
+        } catch (e) {
+            console.error(e)
+            const msg = e?.response?.data?.message || e?.message || 'Pull failed.'
+            alert(msg)
+        } finally {
+            setPullLoading(false)
+        }
+    }
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth?.activeBrand} tenant={null} />
@@ -278,7 +296,19 @@ export default function AIErrorMonitoringIndex({ auth, config, issues }) {
 
                     <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
                         <div className="px-4 py-4 sm:px-6 flex items-center justify-between flex-wrap gap-2">
-                            <h2 className="text-lg font-semibold text-gray-900">Sentry Issues</h2>
+                            <div className="flex items-center gap-3">
+                                <h2 className="text-lg font-semibold text-gray-900">Sentry Issues</h2>
+                                <button
+                                    type="button"
+                                    disabled={pullLoading || config?.pull_enabled !== true}
+                                    onClick={handleManualPull}
+                                    className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={config?.pull_enabled ? 'Fetch and group all Sentry issues now' : 'Pull is disabled in config'}
+                                >
+                                    <BoltIcon className="h-4 w-4" />
+                                    {pullLoading ? 'Pulling…' : 'Pull now'}
+                                </button>
+                            </div>
                             {someSelected && (
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm text-gray-600">{selectedIds.size} selected</span>
@@ -306,6 +336,7 @@ export default function AIErrorMonitoringIndex({ auth, config, issues }) {
                                 <div className="p-12 text-center text-gray-500">
                                     <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-gray-400" />
                                     <p className="mt-2">No Sentry issues. Pull runs daily at 2am when enabled.</p>
+                                    <p className="mt-1 text-sm">Use <strong>Pull now</strong> above to fetch issues immediately.</p>
                                 </div>
                             ) : (
                                 <>

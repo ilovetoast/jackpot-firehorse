@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SentryIssue;
 use App\Services\SentryAI\SentryAIAnalyzer;
 use App\Services\SentryAI\SentryAIConfigService;
+use App\Services\SentryAI\SentryPullService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -92,6 +93,41 @@ class SentryAIController extends Controller
                 'last_sync_at' => $lastSyncAt,
             ],
             'issues' => $issues,
+        ]);
+    }
+
+    /**
+     * Manual pull: fetch all Sentry issues and run AI analysis.
+     * Same logic as PullSentryIssuesJob, runs synchronously.
+     */
+    public function pull(SentryPullService $pullService, SentryAIConfigService $config, SentryAIAnalyzer $analyzer): \Illuminate\Http\JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        if (! $config->pullEnabled()) {
+            return response()->json(['ok' => false, 'message' => 'Pull is disabled (SENTRY_PULL_ENABLED or SENTRY_EMERGENCY_DISABLE).'], 400);
+        }
+
+        $result = $pullService->pull();
+        Cache::put('sentry_ai.last_sync_at', now()->toIso8601String(), now()->addDays(7));
+
+        $issues = $result['issues'] ?? [];
+        $analyzed = 0;
+        foreach ($issues as $issue) {
+            if ($issue->ai_summary !== null && trim((string) $issue->ai_summary) !== '') {
+                continue;
+            }
+            if ($analyzer->analyze($issue)) {
+                $analyzed++;
+            }
+        }
+
+        return response()->json([
+            'ok' => true,
+            'pulled' => $result['pulled'],
+            'new' => $result['new'],
+            'updated' => $result['updated'],
+            'analyzed' => $analyzed,
         ]);
     }
 
