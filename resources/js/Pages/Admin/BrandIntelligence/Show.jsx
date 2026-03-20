@@ -25,7 +25,55 @@ function kv(label, value) {
     )
 }
 
-export default function BrandIntelligenceShow({ auth, asset, metadata, score, dna_warnings: dnaWarnings }) {
+function levelToBrandLabel(level) {
+    const l = (level || '').toLowerCase()
+    if (l === 'low') return 'Off Brand'
+    if (l === 'medium') return 'Somewhat On Brand'
+    if (l === 'high') return 'On Brand'
+    return level || '—'
+}
+
+function formatConf(c) {
+    return typeof c === 'number' && !Number.isNaN(c) ? c.toFixed(2) : String(c ?? '—')
+}
+
+function PathRow({ status, title, text }) {
+    const icon =
+        status === 'ok' ? (
+            <span className="text-emerald-600" aria-hidden>
+                ✓
+            </span>
+        ) : status === 'warn' ? (
+            <span className="text-amber-600" aria-hidden>
+                ⚠
+            </span>
+        ) : (
+            <span className="text-slate-400" aria-hidden>
+                ✖
+            </span>
+        )
+    return (
+        <div className="flex gap-3 text-sm py-1.5 border-b border-slate-100 last:border-0">
+            <span className="w-5 shrink-0 pt-0.5 font-mono">{icon}</span>
+            <div>
+                <div className="font-medium text-slate-800">{title}</div>
+                <div className="text-slate-600 text-xs mt-0.5">{text}</div>
+            </div>
+        </div>
+    )
+}
+
+export default function BrandIntelligenceShow({
+    auth,
+    asset,
+    metadata,
+    score,
+    dna_warnings: dnaWarnings,
+    engine_version: engineVersion,
+    scoring_path: scoringPath,
+    ai_explanation: aiExplanation,
+    reference_top_matches: referenceTopMatches,
+}) {
     const [simResult, setSimResult] = useState(null)
     const [simError, setSimError] = useState(null)
     const [simLoading, setSimLoading] = useState(false)
@@ -46,7 +94,10 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                     Accept: 'application/json',
                 },
             })
-            setSimResult(res.data?.payload ?? null)
+            setSimResult({
+                payload: res.data?.payload ?? null,
+                delta: res.data?.delta ?? null,
+            })
         } catch (e) {
             setSimError(e.response?.data?.message || e.message || 'Simulation failed')
             setSimResult(null)
@@ -54,6 +105,9 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
             setSimLoading(false)
         }
     }
+
+    const simPayload = simResult?.payload
+    const simDelta = simResult?.delta
 
     return (
         <div className="min-h-full">
@@ -65,8 +119,18 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                         <Link href="/app/admin/brand-intelligence" className="text-sm font-medium text-slate-500 hover:text-slate-700">
                             ← Brand Intelligence
                         </Link>
-                        <h1 className="mt-2 text-2xl font-bold text-slate-900">Brand Intelligence — Asset</h1>
-                        <p className="mt-1 text-sm text-slate-600 font-mono">{asset.id}</p>
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                            <h1 className="text-2xl font-bold text-slate-900">Brand Intelligence — Asset</h1>
+                            {engineVersion && (
+                                <span
+                                    className="inline-flex items-center rounded-full bg-slate-800 px-3 py-1 text-xs font-mono text-white"
+                                    title="Code engine version (compare with stored row below when debugging regressions)"
+                                >
+                                    Engine: {engineVersion}
+                                </span>
+                            )}
+                        </div>
+                        <p className="mt-2 text-sm text-slate-600 font-mono">{asset.id}</p>
                         <p className="text-sm text-slate-800">{asset.name}</p>
                         {asset.deleted_at && (
                             <span className="mt-2 inline-block rounded bg-amber-100 text-amber-900 text-xs px-2 py-1">Deleted</span>
@@ -84,6 +148,17 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                         </div>
                     )}
 
+                    {scoringPath && (
+                        <div className="mb-6">
+                            <Section title="Scoring path">
+                                <p className="text-xs text-slate-500 mb-3">How this score was produced (aligned with engine gates).</p>
+                                <PathRow {...scoringPath.signals} />
+                                <PathRow {...scoringPath.reference_similarity} />
+                                <PathRow {...scoringPath.ai} />
+                            </Section>
+                        </div>
+                    )}
+
                     {!score && (
                         <p className="text-sm text-slate-600 mb-6">No stored Brand Intelligence score for this asset.</p>
                     )}
@@ -91,9 +166,14 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                     {score ? (
                         <div className="space-y-6 mb-6">
                             <Section title="A. Summary">
-                                {kv('Level', score.level)}
-                                {kv('Confidence', typeof score.confidence === 'number' ? score.confidence.toFixed(3) : score.confidence)}
-                                {kv('Engine version', score.engine_version)}
+                                {kv('Level', `${levelToBrandLabel(score.level)} (${score.level})`)}
+                                {kv('Confidence', formatConf(score.confidence))}
+                                {kv('Stored engine version', score.engine_version ?? '—')}
+                                {score.engine_version && engineVersion && score.engine_version !== engineVersion && (
+                                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mt-2">
+                                        Stored row differs from current code engine — re-score to refresh.
+                                    </p>
+                                )}
                                 {kv('Overall score (raw)', score.overall_score)}
                                 {kv('AI used (stored)', String(score.ai_used))}
                                 {kv('Updated', score.updated_at ? new Date(score.updated_at).toLocaleString() : '—')}
@@ -106,6 +186,30 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                             </Section>
 
                             <Section title="C. Reference similarity">
+                                {referenceTopMatches?.length > 0 && (
+                                    <div className="mb-4">
+                                        <p className="text-xs font-medium text-slate-600 mb-2">Top matches (by embedding cosine)</p>
+                                        <div className="flex flex-wrap gap-3">
+                                            {referenceTopMatches.map((m) => (
+                                                <div key={m.asset_id} className="text-center w-[88px]">
+                                                    {m.thumbnail_url ? (
+                                                        <img
+                                                            src={m.thumbnail_url}
+                                                            alt=""
+                                                            className="w-20 h-20 object-cover rounded border border-slate-200 mx-auto"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-20 h-20 rounded border border-dashed border-slate-200 bg-slate-50 mx-auto text-[10px] text-slate-400 flex items-center justify-center p-1">
+                                                            No thumb
+                                                        </div>
+                                                    )}
+                                                    <div className="text-[10px] text-slate-500 mt-1 font-mono">{m.score_int}%</div>
+                                                    <div className="text-[10px] text-slate-400 font-mono">cos {m.cosine}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 {kv('used', String(refs.used ?? '—'))}
                                 {kv('score', refs.score != null ? String(refs.score) : '—')}
                                 {kv('confidence', refs.confidence != null ? String(refs.confidence) : '—')}
@@ -114,6 +218,20 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                             </Section>
 
                             <Section title="D. AI insight (stored)">
+                                {aiExplanation && (
+                                    <div className="mb-4 rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
+                                        <p className="text-xs font-semibold text-slate-700 mb-1">{aiExplanation.heading}</p>
+                                        {aiExplanation.lines?.length ? (
+                                            <ul className="list-disc list-inside text-sm text-slate-800 space-y-0.5">
+                                                {aiExplanation.lines.map((line, i) => (
+                                                    <li key={i}>{line}</li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <p className="text-sm text-slate-500">—</p>
+                                        )}
+                                    </div>
+                                )}
                                 {breakdown.ai_insight?.text ? (
                                     <pre className="text-sm text-slate-800 whitespace-pre-wrap">{breakdown.ai_insight.text}</pre>
                                 ) : (
@@ -185,10 +303,57 @@ export default function BrandIntelligenceShow({ auth, asset, metadata, score, dn
                             {simLoading ? 'Running…' : 'Re-run scoring (no save)'}
                         </button>
                         {simError && <p className="mt-3 text-sm text-red-600">{simError}</p>}
-                        {simResult && (
-                            <div className="mt-4 text-xs overflow-auto max-h-[40rem] border border-slate-100 rounded p-2 bg-slate-50">
-                                <JsonView value={simResult} collapsed={2} />
-                            </div>
+                        {simPayload && (
+                            <>
+                                {simDelta ? (
+                                    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/80 p-4">
+                                        <h3 className="text-sm font-semibold text-emerald-900 mb-3">Delta (stored vs simulated)</h3>
+                                        <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                                            <div className="rounded border border-emerald-100 bg-white p-3">
+                                                <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Current (stored)</div>
+                                                <div className="space-y-1 text-slate-800">
+                                                    <div>
+                                                        <span className="text-slate-500">Score label: </span>
+                                                        {levelToBrandLabel(simDelta.current?.level)} ({formatConf(simDelta.current?.confidence)})
+                                                    </div>
+                                                    <div className="text-xs text-slate-600 font-mono">
+                                                        level={simDelta.current?.level} · conf={formatConf(simDelta.current?.confidence)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="rounded border border-emerald-200 bg-white p-3">
+                                                <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Simulated</div>
+                                                <div className="space-y-1 text-slate-800">
+                                                    <div>
+                                                        <span className="text-slate-500">Score label: </span>
+                                                        {levelToBrandLabel(simDelta.simulated?.level)} ({formatConf(simDelta.simulated?.confidence)})
+                                                    </div>
+                                                    <div className="text-xs text-slate-600 font-mono">
+                                                        level={simDelta.simulated?.level} · conf={formatConf(simDelta.simulated?.confidence)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {simDelta.changes?.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-emerald-200">
+                                                <div className="text-xs font-medium text-slate-600 mb-1">Changes</div>
+                                                <ul className="list-disc list-inside text-sm text-emerald-900 space-y-0.5">
+                                                    {simDelta.changes.map((c, i) => (
+                                                        <li key={i}>{c}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="mt-4 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded px-3 py-2">
+                                        No stored Brand Intelligence row to compare — run a full score first, or compare numbers in the raw JSON below.
+                                    </p>
+                                )}
+                                <div className="mt-4 text-xs overflow-auto max-h-[40rem] border border-slate-100 rounded p-2 bg-slate-50">
+                                    <JsonView value={simPayload} collapsed={2} />
+                                </div>
+                            </>
                         )}
                     </div>
                 </div>

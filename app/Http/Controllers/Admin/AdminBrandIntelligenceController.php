@@ -7,10 +7,14 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceScore;
 use App\Models\BrandVisualReference;
+use App\Services\AssetUrlService;
+use App\Services\BrandIntelligence\BrandIntelligenceAdminPresenter;
 use App\Services\BrandIntelligence\BrandIntelligenceEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -20,7 +24,8 @@ use Inertia\Response;
 class AdminBrandIntelligenceController extends Controller
 {
     public function __construct(
-        protected BrandIntelligenceEngine $brandIntelligenceEngine
+        protected BrandIntelligenceEngine $brandIntelligenceEngine,
+        protected AssetUrlService $assetUrlService,
     ) {}
 
     protected function authorizeAdmin(): void
@@ -100,6 +105,41 @@ class AdminBrandIntelligenceController extends Controller
 
         $score = $assetModel->latestBrandIntelligenceScore;
         $breakdown = $score?->breakdown_json ?? [];
+        $mime = $assetModel->mime_type;
+
+        $scoringPath = $score
+            ? BrandIntelligenceAdminPresenter::scoringPath(
+                is_array($breakdown) ? $breakdown : [],
+                (float) $score->confidence,
+                (string) $score->level,
+                (bool) $score->ai_used,
+                is_string($mime) ? $mime : null,
+            )
+            : null;
+
+        $aiExplanation = $score
+            ? BrandIntelligenceAdminPresenter::aiExplanation(
+                is_array($breakdown) ? $breakdown : [],
+                (float) $score->confidence,
+                (string) $score->level,
+                (bool) $score->ai_used,
+                is_string($mime) ? $mime : null,
+            )
+            : null;
+
+        $referenceTopMatches = [];
+        foreach ($this->brandIntelligenceEngine->topReferenceMatchesForAdmin($assetModel, 3) as $row) {
+            $refAsset = Asset::withTrashed()->find($row['reference_asset_id']);
+            if (! $refAsset) {
+                continue;
+            }
+            $referenceTopMatches[] = [
+                'asset_id' => $row['reference_asset_id'],
+                'cosine' => round((float) $row['cosine'], 4),
+                'score_int' => $row['score_int'],
+                'thumbnail_url' => $this->adminThumbnailSignedUrl($refAsset),
+            ];
+        }
 
         return Inertia::render('Admin/BrandIntelligence/Show', [
             'asset' => [
@@ -110,6 +150,10 @@ class AdminBrandIntelligenceController extends Controller
                 'deleted_at' => $assetModel->deleted_at?->toIso8601String(),
             ],
             'metadata' => $assetModel->metadata ?? [],
+            'engine_version' => BrandIntelligenceEngine::ENGINE_VERSION,
+            'scoring_path' => $scoringPath,
+            'ai_explanation' => $aiExplanation,
+            'reference_top_matches' => $referenceTopMatches,
             'score' => $score ? [
                 'level' => $score->level,
                 'confidence' => $score->confidence,
@@ -131,15 +175,54 @@ class AdminBrandIntelligenceController extends Controller
         $this->authorizeAdmin();
 
         $assetModel = Asset::withTrashed()
-            ->with('brand')
+            ->with(['brand', 'latestBrandIntelligenceScore'])
             ->findOrFail($asset);
 
         $payload = $this->brandIntelligenceEngine->scoreAsset($assetModel, dryRun: true);
 
+        $stored = $assetModel->latestBrandIntelligenceScore;
+        $delta = null;
+        if ($stored && is_array($payload)) {
+            $storedProps = [
+                'level' => $stored->level,
+                'confidence' => (float) $stored->confidence,
+                'overall_score' => $stored->overall_score,
+                'breakdown_json' => $stored->breakdown_json ?? [],
+            ];
+            $delta = BrandIntelligenceAdminPresenter::simulateDelta($storedProps, $payload);
+        }
+
         return response()->json([
             'ok' => true,
             'payload' => $payload,
+            'delta' => $delta,
         ]);
+    }
+
+    /**
+     * Signed CloudFront URL for admin grid thumbnail (aligned with {@see AdminAssetController::adminThumbnailSignedUrl}).
+     */
+    protected function adminThumbnailSignedUrl(Asset $asset): ?string
+    {
+        $path = $this->assetUrlService->getAdminThumbnailPath($asset);
+        if (! $path) {
+            return null;
+        }
+
+        try {
+            $cacheKey = 'admin:signed_url:'.$asset->id.':'.($asset->updated_at?->timestamp ?? 0);
+
+            return Cache::remember($cacheKey, 240, function () use ($path) {
+                return $this->assetUrlService->getSignedCloudFrontUrl($path);
+            });
+        } catch (\Throwable $e) {
+            Log::warning('[AdminBrandIntelligence] Failed to generate signed thumbnail URL', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**

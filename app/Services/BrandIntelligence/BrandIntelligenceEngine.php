@@ -682,4 +682,59 @@ class BrandIntelligenceEngine
 
         return 'high';
     }
+
+    /**
+     * Top reference image matches by cosine similarity (admin thumbnails / tuning UI).
+     *
+     * @return list<array{reference_asset_id: string, cosine: float, score_int: int}>
+     */
+    public function topReferenceMatchesForAdmin(Asset $asset, int $limit = 3): array
+    {
+        $asset->loadMissing('brand');
+        $brand = $asset->brand;
+        if (! $brand) {
+            return [];
+        }
+
+        $refs = BrandVisualReference::query()
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector')
+            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
+            ->get();
+
+        $assetEmbedding = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
+        $assetVec = array_values($assetEmbedding?->embedding_vector ?? []);
+        if ($assetVec === []) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($refs as $ref) {
+            if ($ref->asset_id === null || $ref->asset_id === '') {
+                continue;
+            }
+            $refVec = array_values($ref->embedding_vector ?? []);
+            if ($refVec === [] || count($refVec) !== count($assetVec)) {
+                continue;
+            }
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            $rows[] = [
+                'reference_asset_id' => (string) $ref->asset_id,
+                'cosine' => $sim,
+                'score_int' => (int) round(max(0.0, min(1.0, $sim)) * 100),
+            ];
+        }
+
+        $dedup = [];
+        foreach ($rows as $row) {
+            $id = $row['reference_asset_id'];
+            if (! isset($dedup[$id]) || $row['cosine'] > $dedup[$id]['cosine']) {
+                $dedup[$id] = $row;
+            }
+        }
+        $rows = array_values($dedup);
+        usort($rows, fn ($a, $b) => $b['cosine'] <=> $a['cosine']);
+
+        return array_slice($rows, 0, max(1, $limit));
+    }
 }
