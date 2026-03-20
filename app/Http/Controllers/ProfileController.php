@@ -225,8 +225,14 @@ class ProfileController extends Controller
             return null;
         }
 
+        // Legacy /storage/ paths only work in local dev (symlinked public disk).
+        // On staging/production they 403 — return null so the UI falls back to initials.
         if (! str_starts_with($url, 's3://')) {
-            return $url;
+            if (app()->environment('local', 'testing')) {
+                return $url;
+            }
+
+            return null;
         }
 
         $key = substr($url, 5);
