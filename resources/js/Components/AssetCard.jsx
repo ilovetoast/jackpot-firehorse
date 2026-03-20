@@ -100,6 +100,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     const touchStartRef = useRef(null)
     const touchHandledRef = useRef(false)
+    const lastTapRef = useRef(0)
+    const lastTapAssetIdRef = useRef(null)
     
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures memoized components re-render when thumbnail availability changes
@@ -189,7 +191,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     
     // UX invariant: Click on card always opens drawer. Only the checkbox adds/removes from download bucket.
     // Mobile: tap = toggle selection, long-press = open detail (best practice for grid selection)
+    // Double-tap = open details (works regardless of selection; prevents context menu on long-press)
     const LONG_PRESS_MS = 400
+    const DOUBLE_TAP_MS = 350
     const hasSelection = Boolean(onBulkSelect || (selection || onBucketToggle))
     const handleTouchStart = () => {
         if (!isMobile || !hasSelection || !onClick) return
@@ -200,9 +204,23 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         touchStartRef.current = null
     }
     const handleTouchEnd = (e) => {
-        if (!isMobile || !hasSelection || !onClick || !touchStartRef.current) return
+        if (!isMobile || !touchStartRef.current) return
         const duration = Date.now() - touchStartRef.current
         touchStartRef.current = null
+
+        // Double-tap: open details (works on mobile regardless of selection mode)
+        const now = Date.now()
+        const isDoubleTap = asset.id === lastTapAssetIdRef.current && (now - lastTapRef.current) <= DOUBLE_TAP_MS
+        lastTapRef.current = now
+        lastTapAssetIdRef.current = asset.id
+
+        if (isDoubleTap && onClick) {
+            touchHandledRef.current = true
+            onClick(asset, e)
+            return
+        }
+
+        if (!hasSelection || !onClick) return
         if (duration >= LONG_PRESS_MS) {
             touchHandledRef.current = true
             onClick(asset, e)
@@ -233,6 +251,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         if (onClick) {
             onClick(asset, e)
         }
+    }
+    const handleContextMenu = (e) => {
+        if (isMobile) e.preventDefault()
     }
 
     // Convert hex color to RGB for shadow opacity
@@ -277,6 +298,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchCancel={handleTouchCancel}
+            onContextMenu={handleContextMenu}
             onMouseEnter={() => setIsCardHovering(true)}
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
@@ -483,11 +505,11 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                 )
             )}
             
-            {/* Mobile: subtle hint when selected — long-press opens details */}
+            {/* Mobile: subtle hint when selected — long-press or double-tap opens details */}
             {isMobile && hasSelection && onClick && (selection ? selection.isSelected(asset.id) : isBulkSelected || isInBucket) && (
                 <div className="absolute bottom-0 left-0 right-0 py-1.5 px-2 flex justify-center pointer-events-none md:hidden">
                     <span className="inline-flex items-center gap-1 rounded-full bg-black/50 backdrop-blur-sm px-2.5 py-1 text-[10px] font-medium text-white/90">
-                        Hold for details
+                        Hold or double-tap for details
                     </span>
                 </div>
             )}
