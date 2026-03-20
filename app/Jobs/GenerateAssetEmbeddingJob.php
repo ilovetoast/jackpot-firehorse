@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
-use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\BrandVisualReference;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -101,7 +100,7 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             // 4. When embedding saved: set analysis_status = 'scoring'
             $asset->update(['analysis_status' => 'scoring']);
             \App\Services\AnalysisStatusLogger::log($asset, 'generating_embedding', 'scoring', 'GenerateAssetEmbeddingJob');
-            ScoreAssetComplianceJob::dispatch($asset->id);
+            ScoreAssetBrandIntelligenceJob::dispatch($asset);
         }
 
         if ($this->brandVisualReferenceId) {

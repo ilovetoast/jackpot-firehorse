@@ -97,6 +97,7 @@ class Category extends Model
         'system_version',
         'upgrade_available',
         'deletion_available',
+        'settings',
     ];
 
     /**
@@ -116,7 +117,33 @@ class Category extends Model
             'upgrade_available' => 'boolean',
             'deletion_available' => 'boolean',
             'sort_order' => 'integer',
+            'settings' => 'array',
         ];
+    }
+
+    /**
+     * EBI: whether scoring runs for executions in this category (default: true).
+     * When `settings` is null, defaults apply.
+     */
+    public function isExecutionScoringEnabled(): bool
+    {
+        return (bool) data_get($this->settings, 'ebi_execution_scoring_enabled', true);
+    }
+
+    /**
+     * EBI: whether scoring runs for assets in this category (default: true).
+     */
+    public function isAssetScoringEnabled(): bool
+    {
+        return (bool) data_get($this->settings, 'ebi_asset_scoring_enabled', true);
+    }
+
+    /**
+     * Optional profile key for future capability presets (default: "default").
+     */
+    public function getScoringProfile(): string
+    {
+        return (string) data_get($this->settings, 'ebi_profile', 'default');
     }
 
     /**

@@ -5,8 +5,6 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\Tenant;
 use App\Services\AI\Contracts\AIProviderInterface;
-use App\Services\MetadataVisibilityResolver;
-use App\Services\TenantBucketService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -28,16 +26,19 @@ use Illuminate\Support\Facades\Log;
 class AiMetadataGenerationService
 {
     protected AIProviderInterface $provider;
+
     protected string $defaultModel;
+
     protected MetadataVisibilityResolver $visibilityResolver;
+
     protected TenantBucketService $bucketService;
 
     /**
      * Create a new service instance.
      *
-     * @param AIProviderInterface|null $provider Provider instance (resolved from container if not provided)
-     * @param MetadataVisibilityResolver|null $visibilityResolver Visibility resolver (resolved from container if not provided)
-     * @param TenantBucketService|null $bucketService Bucket service for S3 fetch (resolved from container if not provided)
+     * @param  AIProviderInterface|null  $provider  Provider instance (resolved from container if not provided)
+     * @param  MetadataVisibilityResolver|null  $visibilityResolver  Visibility resolver (resolved from container if not provided)
+     * @param  TenantBucketService|null  $bucketService  Bucket service for S3 fetch (resolved from container if not provided)
      */
     public function __construct(?AIProviderInterface $provider = null, ?MetadataVisibilityResolver $visibilityResolver = null, ?TenantBucketService $bucketService = null)
     {
@@ -52,19 +53,20 @@ class AiMetadataGenerationService
     /**
      * Generate AI metadata candidates for an asset.
      *
-     * @param Asset $asset
      * @return array Results: ['candidates_created' => int, 'cost' => float, 'fields_processed' => array, 'tokens_in' => int, 'tokens_out' => int]
+     *
      * @throws \Exception If API call fails (caller should handle gracefully)
      */
     public function generateMetadata(Asset $asset): array
     {
         // Get eligible fields
         $fields = $this->getEligibleFields($asset);
-        
+
         if (empty($fields)) {
             Log::info('[AiMetadataGenerationService] No eligible fields', [
                 'asset_id' => $asset->id,
             ]);
+
             return [
                 'candidates_created' => 0,
                 'cost' => 0.0,
@@ -79,7 +81,7 @@ class AiMetadataGenerationService
 
         // Fetch image bytes internally via S3/IAM (never pass presigned URLs to AI providers)
         $imageBase64DataUrl = $this->fetchThumbnailAsBase64DataUrl($asset);
-        if (!$imageBase64DataUrl) {
+        if (! $imageBase64DataUrl) {
             Log::error('[AiMetadataGenerationService] AI image fetch failed before provider call', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
@@ -98,10 +100,10 @@ class AiMetadataGenerationService
         $parsed = $this->parseResponse($response, $asset, $fields);
         $candidates = $parsed['candidates'] ?? [];
         $tags = $parsed['tags'] ?? [];
-        
+
         // Create candidates in database
         $candidatesCreated = $this->createCandidates($asset, $candidates);
-        
+
         // Create tags in database
         $tagsCreated = $this->createTags($asset, $tags);
 
@@ -139,14 +141,13 @@ class AiMetadataGenerationService
      * Determines which metadata fields need AI inference using deterministic DB logic.
      * This is a read-only planning step that does NOT call AI or write metadata.
      *
-     * @param Asset $asset
      * @return array Plan structure: ['fields' => [['key' => string, 'label' => string, 'type' => string, 'allowed_values' => array]]]
      */
     public function buildAiInferencePlan(Asset $asset): array
     {
         // Get category
         $categoryId = $asset->metadata['category_id'] ?? null;
-        if (!$categoryId) {
+        if (! $categoryId) {
             return ['fields' => []];
         }
 
@@ -166,7 +167,7 @@ class AiMetadataGenerationService
         $planFields = [];
         foreach ($fields as $field) {
             // Check if field is enabled for category
-            if (!$this->isFieldEnabledForCategory($asset, $field->id, $categoryId)) {
+            if (! $this->isFieldEnabledForCategory($asset, $field->id, $categoryId)) {
                 continue;
             }
 
@@ -208,14 +209,13 @@ class AiMetadataGenerationService
     /**
      * Get ai_eligible fields for asset's category.
      *
-     * @param Asset $asset
      * @return array Array of field definitions with options
      */
     protected function getEligibleFields(Asset $asset): array
     {
         // Get category
         $categoryId = $asset->metadata['category_id'] ?? null;
-        if (!$categoryId) {
+        if (! $categoryId) {
             return [];
         }
 
@@ -235,7 +235,7 @@ class AiMetadataGenerationService
         $enabledFields = [];
         foreach ($fields as $field) {
             // Check if field is enabled for category
-            if (!$this->isFieldEnabledForCategory($asset, $field->id, $categoryId)) {
+            if (! $this->isFieldEnabledForCategory($asset, $field->id, $categoryId)) {
                 continue;
             }
 
@@ -279,29 +279,24 @@ class AiMetadataGenerationService
      *
      * CRITICAL: Uses MetadataVisibilityResolver to check tenant/brand/category-specific visibility.
      * This ensures AI suggestions respect category-specific field enablement settings.
-     *
-     * @param Asset $asset
-     * @param int $fieldId
-     * @param int $categoryId
-     * @return bool
      */
     protected function isFieldEnabledForCategory(Asset $asset, int $fieldId, int $categoryId): bool
     {
         $field = DB::table('metadata_fields')->where('id', $fieldId)->first();
-        if (!$field) {
+        if (! $field) {
             return false;
         }
 
         // Get the category
         $category = \App\Models\Category::find($categoryId);
-        if (!$category) {
+        if (! $category) {
             // Category doesn't exist - field is enabled by default
             return true;
         }
 
         // Get tenant for visibility check
         $tenant = \App\Models\Tenant::find($asset->tenant_id);
-        if (!$tenant) {
+        if (! $tenant) {
             // Tenant doesn't exist - field is enabled by default
             return true;
         }
@@ -317,6 +312,16 @@ class AiMetadataGenerationService
     }
 
     /**
+     * Shared vision pipeline: same S3 fetch rules as AI metadata (no presigned URLs to providers).
+     *
+     * @return string|null Base64 data URL (data:image/webp;base64,...) or null on failure
+     */
+    public function fetchThumbnailForVisionAnalysis(Asset $asset): ?string
+    {
+        return $this->fetchThumbnailAsBase64DataUrl($asset);
+    }
+
+    /**
      * Fetch medium thumbnail from S3/MinIO and return as base64 data URL.
      * Uses IAM role (worker) or configured credentials; never exposes S3 URLs to AI providers.
      *
@@ -325,15 +330,16 @@ class AiMetadataGenerationService
     protected function fetchThumbnailAsBase64DataUrl(Asset $asset): ?string
     {
         $thumbnailPath = $this->resolveThumbnailPath($asset);
-        if (!$thumbnailPath) {
+        if (! $thumbnailPath) {
             return null;
         }
 
         $bucket = $asset->storageBucket;
-        if (!$bucket) {
+        if (! $bucket) {
             Log::warning('[AiMetadataGenerationService] Asset missing storage bucket', [
                 'asset_id' => $asset->id,
             ]);
+
             return null;
         }
 
@@ -346,6 +352,7 @@ class AiMetadataGenerationService
                 'bucket' => $bucket->name,
                 'error' => $e->getMessage(),
             ]);
+
             return null;
         }
 
@@ -354,6 +361,7 @@ class AiMetadataGenerationService
                 'asset_id' => $asset->id,
                 'thumbnail_path' => $thumbnailPath,
             ]);
+
             return null;
         }
 
@@ -378,6 +386,7 @@ class AiMetadataGenerationService
                 if (str_starts_with($path, 'temp/uploads/') && $asset->thumbnail_status !== \App\Enums\ThumbnailStatus::COMPLETED) {
                     return null;
                 }
+
                 return $path;
             }
         }
@@ -411,8 +420,7 @@ class AiMetadataGenerationService
      *
      * Uses ONE Vision API call to infer both structured field values and general descriptive tags.
      *
-     * @param Asset $asset
-     * @param array $fields Field definitions
+     * @param  array  $fields  Field definitions
      * @return string Prompt text
      */
     protected function buildPrompt(Asset $asset, array $fields): string
@@ -435,12 +443,12 @@ class AiMetadataGenerationService
         $prompt .= "STRUCTURED FIELDS:\n";
         $prompt .= "For each field below, select ONLY from the provided allowed values.\n";
         $prompt .= "Fields to analyze:\n";
-        $prompt .= json_encode($fieldsJson, JSON_PRETTY_PRINT) . "\n\n";
-        
+        $prompt .= json_encode($fieldsJson, JSON_PRETTY_PRINT)."\n\n";
+
         $prompt .= "GENERAL TAGS:\n";
         $prompt .= "Also provide descriptive tags that capture the content, style, mood, or subject matter of the image.\n";
         $prompt .= "Tags should be: lowercase, singular form, no punctuation, descriptive keywords.\n\n";
-        
+
         $prompt .= "REQUIREMENTS:\n";
         $prompt .= "- Only return fields/tags where you have high confidence (>= 0.90)\n";
         $prompt .= "- Include confidence score for each value/tag\n";
@@ -457,20 +465,18 @@ class AiMetadataGenerationService
         $prompt .= "    {\"value\": \"dramatic\", \"confidence\": 0.88}\n";
         $prompt .= "  ]\n";
         $prompt .= "}\n\n";
-        $prompt .= "Response:";
+        $prompt .= 'Response:';
 
         return $prompt;
     }
-
 
     /**
      * Parse AI provider response into candidates and tags.
      *
      * Handles unified response with both 'fields' and 'tags' sections from ONE Vision API call.
      *
-     * @param array $response Provider response (from AIProviderInterface::analyzeImage)
-     * @param Asset $asset
-     * @param array $fields Field definitions
+     * @param  array  $response  Provider response (from AIProviderInterface::analyzeImage)
+     * @param  array  $fields  Field definitions
      * @return array ['candidates' => array, 'tags' => array] Candidates and tags ready for database insertion
      */
     protected function parseResponse(array $response, Asset $asset, array $fields): array
@@ -481,11 +487,12 @@ class AiMetadataGenerationService
 
         try {
             $data = json_decode($text, true);
-            if (!is_array($data)) {
+            if (! is_array($data)) {
                 Log::warning('[AiMetadataGenerationService] Invalid JSON response', [
                     'asset_id' => $asset->id,
                     'response' => $text,
                 ]);
+
                 return ['candidates' => [], 'tags' => []];
             }
 
@@ -493,7 +500,7 @@ class AiMetadataGenerationService
             $fieldsData = $data['fields'] ?? [];
             if (is_array($fieldsData)) {
                 foreach ($fieldsData as $fieldKey => $fieldData) {
-                    if (!is_array($fieldData)) {
+                    if (! is_array($fieldData)) {
                         continue;
                     }
 
@@ -501,12 +508,13 @@ class AiMetadataGenerationService
                     $confidence = $fieldData['confidence'] ?? null;
 
                     // Validate confidence (must be >= 0.90)
-                    if (!is_numeric($confidence) || (float) $confidence < 0.90) {
+                    if (! is_numeric($confidence) || (float) $confidence < 0.90) {
                         Log::debug('[AiMetadataGenerationService] Low confidence field skipped', [
                             'asset_id' => $asset->id,
                             'field_key' => $fieldKey,
                             'confidence' => $confidence,
                         ]);
+
                         continue;
                     }
 
@@ -519,17 +527,18 @@ class AiMetadataGenerationService
                         }
                     }
 
-                    if (!$field) {
+                    if (! $field) {
                         continue;
                     }
 
                     // Validate value is in allowed options
-                    if (!$this->isValueAllowed($value, $field)) {
+                    if (! $this->isValueAllowed($value, $field)) {
                         Log::debug('[AiMetadataGenerationService] Invalid value skipped', [
                             'asset_id' => $asset->id,
                             'field_key' => $fieldKey,
                             'value' => $value,
                         ]);
+
                         continue;
                     }
 
@@ -544,7 +553,7 @@ class AiMetadataGenerationService
             $tagsData = $data['tags'] ?? [];
             if (is_array($tagsData)) {
                 foreach ($tagsData as $tagData) {
-                    if (!is_array($tagData)) {
+                    if (! is_array($tagData)) {
                         // Handle case where tags might be simple strings
                         if (is_string($tagData)) {
                             $tagData = ['value' => $tagData, 'confidence' => 0.90];
@@ -556,17 +565,18 @@ class AiMetadataGenerationService
                     $tagValue = $tagData['value'] ?? null;
                     $confidence = $tagData['confidence'] ?? null;
 
-                    if (empty($tagValue) || !is_string($tagValue)) {
+                    if (empty($tagValue) || ! is_string($tagValue)) {
                         continue;
                     }
 
                     // Validate confidence (must be >= 0.90)
-                    if (!is_numeric($confidence) || (float) $confidence < 0.90) {
+                    if (! is_numeric($confidence) || (float) $confidence < 0.90) {
                         Log::debug('[AiMetadataGenerationService] Low confidence tag skipped', [
                             'asset_id' => $asset->id,
                             'tag' => $tagValue,
                             'confidence' => $confidence,
                         ]);
+
                         continue;
                     }
 
@@ -599,51 +609,50 @@ class AiMetadataGenerationService
     /**
      * Normalize tag: lowercase, singular, no punctuation.
      *
-     * @param string $tag
      * @return string Normalized tag
      */
     protected function normalizeTag(string $tag): string
     {
         // Convert to lowercase
         $tag = strtolower(trim($tag));
-        
+
         // Remove punctuation (keep alphanumeric and spaces)
         $tag = preg_replace('/[^a-z0-9\s]/', '', $tag);
-        
+
         // Convert to singular (basic plural removal - could be enhanced)
         // Remove trailing 's' if word is plural (simple heuristic)
         if (strlen($tag) > 1 && substr($tag, -1) === 's' && substr($tag, -2, 1) !== 's') {
             $tag = substr($tag, 0, -1);
         }
-        
+
         // Remove extra spaces and trim
         $tag = preg_replace('/\s+/', ' ', $tag);
         $tag = trim($tag);
-        
+
         return $tag;
     }
 
     /**
      * Check if value is allowed (in field options).
      *
-     * @param mixed $value
-     * @param array $field Field definition
-     * @return bool
+     * @param  mixed  $value
+     * @param  array  $field  Field definition
      */
     protected function isValueAllowed($value, array $field): bool
     {
         $options = $field['options'] ?? [];
-        
+
         if ($field['type'] === 'multiselect') {
-            if (!is_array($value)) {
+            if (! is_array($value)) {
                 return false;
             }
             // All values must be in options
             foreach ($value as $v) {
-                if (!in_array($v, $options, true)) {
+                if (! in_array($v, $options, true)) {
                     return false;
                 }
             }
+
             return true;
         }
 
@@ -657,8 +666,7 @@ class AiMetadataGenerationService
      * Stores AI-generated field values as candidates (not approved data).
      * Candidates must be reviewed and approved before being applied to the asset.
      *
-     * @param Asset $asset
-     * @param array $candidates Array of field candidates: ['field_key' => ['value' => mixed, 'confidence' => float]]
+     * @param  array  $candidates  Array of field candidates: ['field_key' => ['value' => mixed, 'confidence' => float]]
      * @return int Number of candidates created
      */
     protected function createCandidates(Asset $asset, array $candidates): int
@@ -681,7 +689,7 @@ class AiMetadataGenerationService
                 })
                 ->first();
 
-            if (!$field) {
+            if (! $field) {
                 continue;
             }
 
@@ -730,8 +738,7 @@ class AiMetadataGenerationService
      * Stores AI-generated tags as candidates (not approved data).
      * Tags must be reviewed and approved before being applied to the asset.
      *
-     * @param Asset $asset
-     * @param array $tags Array of ['value' => string, 'confidence' => float]
+     * @param  array  $tags  Array of ['value' => string, 'confidence' => float]
      * @return int Number of tag candidates created
      */
     protected function createTags(Asset $asset, array $tags): int
@@ -747,7 +754,7 @@ class AiMetadataGenerationService
             $tagValue = $tagData['value'] ?? null;
             $confidence = $tagData['confidence'] ?? null;
 
-            if (empty($tagValue) || !is_string($tagValue)) {
+            if (empty($tagValue) || ! is_string($tagValue)) {
                 continue;
             }
 
@@ -802,6 +809,7 @@ class AiMetadataGenerationService
                         ]);
                     $created++;
                 }
+
                 continue;
             }
 
@@ -821,5 +829,4 @@ class AiMetadataGenerationService
 
         return $created;
     }
-
 }

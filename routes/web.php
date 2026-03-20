@@ -303,6 +303,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/system-status', [\App\Http\Controllers\Admin\SystemStatusController::class, 'index'])->name('admin.system-status');
     Route::get('/admin/performance', [\App\Http\Controllers\Admin\PerformanceController::class, 'index'])->name('admin.performance.index');
     Route::get('/admin/performance/api', [\App\Http\Controllers\Admin\PerformanceController::class, 'api'])->name('admin.performance.api');
+    Route::get('/admin/brand-intelligence', [\App\Http\Controllers\Admin\AdminBrandIntelligenceController::class, 'index'])->name('admin.brand-intelligence.index');
+    Route::post('/admin/brand-intelligence/assets/{asset}/simulate', [\App\Http\Controllers\Admin\AdminBrandIntelligenceController::class, 'simulate'])->name('admin.brand-intelligence.assets.simulate');
+    Route::get('/admin/brand-intelligence/assets/{asset}', [\App\Http\Controllers\Admin\AdminBrandIntelligenceController::class, 'show'])->name('admin.brand-intelligence.assets.show');
     Route::get('/admin/assets', [\App\Http\Controllers\Admin\AdminAssetController::class, 'index'])->name('admin.assets.index');
     Route::post('/admin/assets/bulk-action', [\App\Http\Controllers\Admin\AdminAssetController::class, 'bulkAction'])->name('admin.assets.bulk-action');
     Route::post('/admin/assets/recover-category-id', [\App\Http\Controllers\Admin\AdminAssetController::class, 'recoverCategoryId'])->name('admin.assets.recover-category-id');
@@ -541,6 +544,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');
 
             // Asset metadata manual editing (Phase 2 – Step 6)
+            Route::get('/assets/{asset}/brand-intelligence', [\App\Http\Controllers\AssetMetadataController::class, 'brandIntelligence'])->name('assets.brand-intelligence');
             Route::post('/assets/{asset}/rescore', [\App\Http\Controllers\AssetMetadataController::class, 'rescore'])->name('assets.rescore');
             Route::post('/assets/{asset}/reanalyze', [\App\Http\Controllers\AssetMetadataController::class, 'reanalyze'])->name('assets.reanalyze');
             Route::get('/assets/{asset}/incidents', [\App\Http\Controllers\AssetMetadataController::class, 'getIncidents'])->name('assets.incidents');
@@ -785,6 +789,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('brands.categories.upgrade.apply');
             Route::post('/brands/{brand}/categories/{category}/accept-deletion', [\App\Http\Controllers\CategoryController::class, 'acceptDeletion'])->name('brands.categories.accept-deletion');
             Route::patch('/brands/{brand}/categories/{category}/fields/reorder', [\App\Http\Controllers\CategoryController::class, 'reorderFields'])->name('brands.categories.fields.reorder');
+
+            // Executions (Deliverables) — Brand Intelligence scoring pipeline
+            Route::post('/brands/{brand}/executions', [\App\Http\Controllers\ExecutionController::class, 'store'])->name('brands.executions.store');
+            Route::post('/brands/{brand}/executions/{execution}/finalize', [\App\Http\Controllers\ExecutionController::class, 'finalize'])->name('brands.executions.finalize');
+            Route::post('/brands/{brand}/executions/{execution}/score', [\App\Http\Controllers\ExecutionController::class, 'scoreNow'])->name('brands.executions.score');
 
             // Support ticket routes (tenant-scoped)
             Route::resource('support/tickets', \App\Http\Controllers\TenantTicketController::class)->only(['index', 'create', 'store', 'show'])->names('support.tickets');

@@ -21,15 +21,17 @@ return new class extends Migration
                 ->constrained('executions')
                 ->cascadeOnDelete();
 
-            $table->uuid('asset_id')->nullable()->index();
+            $table->uuid('asset_id')->nullable();
 
             $table->integer('overall_score')->nullable();
 
             $table->float('confidence')->nullable();
 
-            $table->enum('level', ['low', 'medium', 'high'])->nullable();
+            $table->string('level')->nullable();
 
             $table->json('breakdown_json')->nullable();
+
+            $table->string('engine_version')->nullable();
 
             $table->boolean('ai_used')->default(false);
 
@@ -39,6 +41,7 @@ return new class extends Migration
                 ->references('id')
                 ->on('assets')
                 ->cascadeOnDelete();
+            // brand_id, execution_id, asset_id indexed via foreign keys (InnoDB).
         });
     }
 

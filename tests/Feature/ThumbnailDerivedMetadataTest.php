@@ -8,18 +8,15 @@ use App\Enums\StorageBucketStatus;
 use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Models\Asset;
 use App\Models\Brand;
-use App\Models\BrandModel;
-use App\Models\BrandModelVersion;
 use App\Models\Category;
 use App\Models\StorageBucket;
+use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
-use App\Jobs\PopulateAutomaticMetadataJob;
-use App\Models\SystemIncident;
-use App\Services\BrandDNA\BrandComplianceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -35,9 +32,13 @@ class ThumbnailDerivedMetadataTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected User $user;
+
     protected StorageBucket $bucket;
+
     protected Category $category;
 
     protected function setUp(): void
@@ -94,13 +95,13 @@ class ThumbnailDerivedMetadataTest extends TestCase
             'status' => AssetStatus::VISIBLE,
             'mime_type' => $mimeType,
             'original_filename' => $filename,
-            'storage_root_path' => 'temp/' . $filename,
+            'storage_root_path' => 'temp/'.$filename,
             'size_bytes' => 1024,
             'thumbnail_status' => ThumbnailStatus::COMPLETED,
             'metadata' => array_merge([
                 'category_id' => $this->category->id,
                 'thumbnails' => [
-                    'medium' => ['path' => 'assets/thumbnails/medium/' . $filename],
+                    'medium' => ['path' => 'assets/thumbnails/medium/'.$filename],
                 ],
                 'thumbnail_dimensions' => [
                     'medium' => ['width' => 800, 'height' => 600],
@@ -235,31 +236,6 @@ class ThumbnailDerivedMetadataTest extends TestCase
         // Metadata not populated (no dominant colors)
         $dominantColors = $asset->metadata['dominant_colors'] ?? null;
         $this->assertEmpty($dominantColors, 'Metadata should not be populated when thumbnail dimensions missing');
-
-        // BrandCompliance marks incomplete (use existing BrandModel from Brand::created event)
-        $brandModel = $this->brand->brandModel ?? BrandModel::create([
-            'brand_id' => $this->brand->id,
-            'is_enabled' => false,
-        ]);
-        $brandModel->update(['is_enabled' => true]);
-        $version = BrandModelVersion::create([
-            'brand_model_id' => $brandModel->id,
-            'version_number' => 1,
-            'source_type' => 'manual',
-            'model_payload' => [
-                'scoring_rules' => ['allowed_color_palette' => [['hex' => '#003388']]],
-                'scoring_config' => ['color_weight' => 1.0, 'typography_weight' => 0, 'tone_weight' => 0, 'imagery_weight' => 0],
-            ],
-            'status' => 'active',
-        ]);
-        $brandModel->update(['active_version_id' => $version->id]);
-
-        $complianceService = app(BrandComplianceService::class);
-        $complianceService->scoreAsset($asset, $this->brand);
-
-        $score = \App\Models\BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
-        $this->assertNotNull($score);
-        $this->assertSame('incomplete', $score->evaluation_status);
 
         // Incident created for expected visual metadata missing
         $incident = SystemIncident::where('source_type', 'asset')

@@ -11,15 +11,14 @@ use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
-use App\Jobs\PromoteAssetJob;
 use App\Models\ActivityEvent;
-use App\Models\AssetEmbedding;
-use App\Models\BrandComplianceScore;
 use App\Models\Asset;
+use App\Models\AssetEmbedding;
+use App\Models\Brand;
+use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
-use App\Models\Brand;
 use App\Services\Assets\AssetStateReconciliationService;
 use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
@@ -28,7 +27,6 @@ use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
@@ -36,6 +34,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 /**
  * Enterprise Asset Operations Console.
@@ -56,7 +55,7 @@ class AdminAssetController extends Controller
     protected function authorizeAdmin(): void
     {
         $user = Auth::user();
-        if (!$user) {
+        if (! $user) {
             abort(403);
         }
         $siteRoles = $user->getSiteRoles();
@@ -65,7 +64,7 @@ class AdminAssetController extends Controller
         $isSiteEngineering = in_array('site_engineering', $siteRoles);
         $canRegenerate = $user->can('assets.regenerate_thumbnails_admin');
 
-        if (!$isSiteOwner && !$isSiteAdmin && !$isSiteEngineering && !$canRegenerate) {
+        if (! $isSiteOwner && ! $isSiteAdmin && ! $isSiteEngineering && ! $canRegenerate) {
             abort(403, 'Only site owners, site admins, site engineering, or users with assets.regenerate_thumbnails_admin can access this page.');
         }
     }
@@ -74,6 +73,7 @@ class AdminAssetController extends Controller
     {
         $user = Auth::user();
         $siteRoles = $user->getSiteRoles();
+
         return $user->id === 1
             || in_array('site_owner', $siteRoles)
             || in_array('site_engineering', $siteRoles);
@@ -124,6 +124,7 @@ class AdminAssetController extends Controller
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString(),
                 ]);
+
                 return $this->formatAssetForListFallback($a);
             }
         });
@@ -213,10 +214,10 @@ class AdminAssetController extends Controller
         $visibility = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
         // Infer thumbnails_generated when flag missing (legacy/race): thumbnail_status=completed + thumbnails/thumbnail_dimensions
         $thumbnailsGenerated = (bool) ($metadata['thumbnails_generated'] ?? false);
-        if (!$thumbnailsGenerated && $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
-            $thumbnailsGenerated = !empty($metadata['thumbnails_generated_at'])
-                || !empty($metadata['thumbnails'])
-                || !empty($metadata['thumbnail_dimensions']['medium'] ?? []);
+        if (! $thumbnailsGenerated && $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+            $thumbnailsGenerated = ! empty($metadata['thumbnails_generated_at'])
+                || ! empty($metadata['thumbnails'])
+                || ! empty($metadata['thumbnail_dimensions']['medium'] ?? []);
         }
         $pipelineFlags = [
             'visible_in_grid' => $visibility['visible'],
@@ -225,13 +226,13 @@ class AdminAssetController extends Controller
             'metadata_extracted' => (bool) ($metadata['metadata_extracted'] ?? false),
             'thumbnails_generated' => $thumbnailsGenerated,
             'thumbnail_timeout' => (bool) ($metadata['thumbnail_timeout'] ?? false),
-            'stuck_state_detected' => ($asset->analysis_status ?? '') === 'uploading' && !empty($metadata['metadata_extracted']),
+            'stuck_state_detected' => ($asset->analysis_status ?? '') === 'uploading' && ! empty($metadata['metadata_extracted']),
             'auto_recover_attempted' => (bool) ($metadata['auto_recover_attempted'] ?? false),
         ];
 
         $assetIdStr = (string) $asset->id;
         $failedJobs = \DB::table('failed_jobs')
-            ->where('payload', 'like', '%' . $assetIdStr . '%')
+            ->where('payload', 'like', '%'.$assetIdStr.'%')
             ->orderByDesc('failed_at')
             ->limit(20)
             ->get(['id', 'uuid', 'queue', 'payload', 'exception', 'failed_at'])
@@ -294,7 +295,7 @@ class AdminAssetController extends Controller
             ? \App\Models\AssetVersion::where('asset_id', $asset->id)->where('id', $versionId)->firstOrFail()
             : \App\Models\AssetVersion::where('asset_id', $asset->id)->where('version_number', (int) $versionId)->firstOrFail();
 
-        if (!app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant)) {
+        if (! app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant)) {
             return response()->json(['error' => 'Versioning not enabled for this tenant.'], 403);
         }
 
@@ -329,7 +330,7 @@ class AdminAssetController extends Controller
             $validActions[] = 'delete';
         }
 
-        if (!in_array($action, $validActions, true)) {
+        if (! in_array($action, $validActions, true)) {
             return response()->json(['error' => 'Invalid action'], 400);
         }
 
@@ -353,8 +354,9 @@ class AdminAssetController extends Controller
         $results = [];
         foreach ($assetIds as $id) {
             $asset = Asset::withTrashed()->find($id);
-            if (!$asset) {
+            if (! $asset) {
                 $results[] = ['id' => $id, 'ok' => false, 'error' => 'Asset not found'];
+
                 continue;
             }
             try {
@@ -371,6 +373,7 @@ class AdminAssetController extends Controller
         }
 
         $successCount = count(array_filter($results, fn ($r) => $r['ok']));
+
         return response()->json([
             'results' => $results,
             'success_count' => $successCount,
@@ -411,12 +414,12 @@ class AdminAssetController extends Controller
         $this->authorizeAdmin();
 
         $categoryId = (int) $request->input('category_id');
-        if (!$categoryId) {
+        if (! $categoryId) {
             return response()->json(['error' => 'category_id is required'], 422);
         }
 
         $category = Category::with('brand')->find($categoryId);
-        if (!$category) {
+        if (! $category) {
             return response()->json(['error' => 'Category not found'], 404);
         }
 
@@ -453,7 +456,7 @@ class AdminAssetController extends Controller
         $this->authorizeAdmin();
 
         $model = Asset::withTrashed()->with(['storageBucket', 'tenant'])->findOrFail($asset);
-        if (!$model->storage_root_path) {
+        if (! $model->storage_root_path) {
             abort(404, 'Source file path not available.');
         }
 
@@ -477,11 +480,11 @@ class AdminAssetController extends Controller
         $filename = $model->original_filename ?? basename($model->storage_root_path);
         $contentType = $result['ContentType'] ?? 'application/octet-stream';
         $contentLength = $result['ContentLength'] ?? 0;
-        $disposition = 'attachment; filename="' . addcslashes($filename, '"\\') . '"';
+        $disposition = 'attachment; filename="'.addcslashes($filename, '"\\').'"';
 
         return response()->stream(function () use ($result) {
             $body = $result['Body'];
-            while (!$body->eof()) {
+            while (! $body->eof()) {
                 echo $body->read(8192);
                 flush();
             }
@@ -519,7 +522,7 @@ class AdminAssetController extends Controller
 
         $asset = Asset::withTrashed()->findOrFail($asset);
         $canRetry = $this->thumbnailRetryService->canRetry($asset);
-        if (!$canRetry['allowed']) {
+        if (! $canRetry['allowed']) {
             return response()->json(['error' => $canRetry['reason'] ?? 'Retry not allowed'], 400);
         }
 
@@ -584,7 +587,10 @@ class AdminAssetController extends Controller
 
         $asset = Asset::withTrashed()->findOrFail($assetId);
 
-        BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $asset->brand_id)->delete();
+        BrandIntelligenceScore::where('asset_id', $asset->id)
+            ->where('brand_id', $asset->brand_id)
+            ->whereNull('execution_id')
+            ->delete();
         $asset->update([
             'analysis_status' => 'generating_thumbnails',
             'thumbnail_status' => ThumbnailStatus::PENDING,
@@ -672,7 +678,7 @@ class AdminAssetController extends Controller
 
     protected function parseBoolParam(Request $request, string $key): ?bool
     {
-        if (!$request->has($key)) {
+        if (! $request->has($key)) {
             return null;
         }
         $val = $request->get($key);
@@ -685,6 +691,7 @@ class AdminAssetController extends Controller
         if (in_array(strtolower((string) $val), ['false', '0', 'no'], true)) {
             return false;
         }
+
         return null;
     }
 
@@ -758,14 +765,14 @@ class AdminAssetController extends Controller
     {
         $query = Asset::query()->withTrashed();
 
-        if (!empty($filters['asset_id'])) {
+        if (! empty($filters['asset_id'])) {
             $query->where('assets.id', $filters['asset_id']);
         }
 
-        if (!empty($filters['search'])) {
+        if (! empty($filters['search'])) {
             $q = $filters['search'];
             $like = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
-            $pattern = '%' . addcslashes($q, '%_\\') . '%';
+            $pattern = '%'.addcslashes($q, '%_\\').'%';
             if (preg_match('/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i', str_replace('-', '', $q))) {
                 $query->where('assets.id', $q);
             } else {
@@ -784,22 +791,22 @@ class AdminAssetController extends Controller
             }
         }
 
-        if (!empty($filters['tenant_id'])) {
+        if (! empty($filters['tenant_id'])) {
             $query->where('tenant_id', $filters['tenant_id']);
         }
-        if (!empty($filters['brand_id'])) {
+        if (! empty($filters['brand_id'])) {
             $query->where('brand_id', $filters['brand_id']);
         }
-        if (!empty($filters['brand_slug'])) {
-            $query->whereHas('brand', fn ($q) => $q->where('name', 'like', '%' . $filters['brand_slug'] . '%'));
+        if (! empty($filters['brand_slug'])) {
+            $query->whereHas('brand', fn ($q) => $q->where('name', 'like', '%'.$filters['brand_slug'].'%'));
         }
-        if (!empty($filters['category_id'])) {
+        if (! empty($filters['category_id'])) {
             $query->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.category_id')) = ?", [(string) $filters['category_id']]);
         }
-        if (!empty($filters['created_by'])) {
+        if (! empty($filters['created_by'])) {
             $query->where('user_id', $filters['created_by']);
         }
-        if (!empty($filters['tag'])) {
+        if (! empty($filters['tag'])) {
             $query->whereExists(function ($sub) use ($filters) {
                 $sub->select(DB::raw(1))
                     ->from('asset_tags')
@@ -807,10 +814,10 @@ class AdminAssetController extends Controller
                     ->where('asset_tags.tag', $filters['tag']);
             });
         }
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
-        if (!empty($filters['asset_type'])) {
+        if (! empty($filters['asset_type'])) {
             $query->where('type', $filters['asset_type']);
         }
         if (($filters['visible_in_grid'] ?? null) === true) {
@@ -818,10 +825,10 @@ class AdminAssetController extends Controller
         } elseif (($filters['visible_in_grid'] ?? null) === false) {
             $query->notVisibleInGrid();
         }
-        if (!empty($filters['analysis_status'])) {
+        if (! empty($filters['analysis_status'])) {
             $query->where('analysis_status', $filters['analysis_status']);
         }
-        if (!empty($filters['thumbnail_status'])) {
+        if (! empty($filters['thumbnail_status'])) {
             $query->where('thumbnail_status', $filters['thumbnail_status']);
         }
         if (($filters['storage_missing'] ?? null) === true) {
@@ -836,10 +843,10 @@ class AdminAssetController extends Controller
                     ->whereNull('system_incidents.resolved_at');
             });
         }
-        if (!empty($filters['date_from'])) {
+        if (! empty($filters['date_from'])) {
             $query->whereDate('created_at', '>=', $filters['date_from']);
         }
-        if (!empty($filters['date_to'])) {
+        if (! empty($filters['date_to'])) {
             $query->whereDate('created_at', '<=', $filters['date_to']);
         }
         if (($filters['deleted'] ?? null) === true || $filters['deleted'] === '1') {
@@ -925,7 +932,7 @@ class AdminAssetController extends Controller
                 }
                 break;
             case 'delete':
-                if (!$this->canDestructive()) {
+                if (! $this->canDestructive()) {
                     throw new \RuntimeException('Not authorized for delete');
                 }
                 $asset->forceDelete();
@@ -950,7 +957,7 @@ class AdminAssetController extends Controller
         }
 
         try {
-            $cacheKey = 'admin:signed_url:' . $asset->id . ':' . ($asset->updated_at?->timestamp ?? 0);
+            $cacheKey = 'admin:signed_url:'.$asset->id.':'.($asset->updated_at?->timestamp ?? 0);
 
             $signedUrl = Cache::remember($cacheKey, 240, function () use ($path) {
                 return $this->assetUrlService->getSignedCloudFrontUrl($path);
@@ -996,7 +1003,7 @@ class AdminAssetController extends Controller
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
             'storage_missing' => $asset->isStorageMissing(),
             'incident_count' => $incidentCount,
-            'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
+            'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name.' '.$asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
             'builder_staged' => (bool) ($asset->builder_staged ?? false),
@@ -1037,7 +1044,7 @@ class AdminAssetController extends Controller
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
             'storage_missing' => $asset->isStorageMissing(),
             'incident_count' => $incidentCount,
-            'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
+            'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name.' '.$asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
             'builder_staged' => (bool) ($asset->builder_staged ?? false),

@@ -2,21 +2,20 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
-use App\Support\AssetVariant;
-use App\Support\DeliveryContext;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\AiMetadataConfidenceService;
-use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,8 +35,7 @@ class DeliverableController extends Controller
         protected LifecycleResolver $lifecycleResolver,
         protected AssetSearchService $assetSearchService,
         protected AssetSortService $assetSortService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of deliverables.
@@ -50,7 +48,7 @@ class DeliverableController extends Controller
         $brand = app('brand');
         $user = $request->user();
 
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             return Inertia::render('Deliverables/Index', [
                 'categories' => [],
                 'total_asset_count' => 0,
@@ -77,11 +75,11 @@ class DeliverableController extends Controller
         // Don't filter hidden categories here - we need them to check template existence
         // Hidden categories will be filtered in the response building below
         $allCategoriesIncludingHidden = $query->get();
-        
+
         // Filter out hidden categories for users without 'manage categories' permission
         // This is for the final response, but we keep allCategoriesIncludingHidden for template checking
         if (! $user || ! $user->can('manage categories')) {
-            $categories = $allCategoriesIncludingHidden->filter(fn($cat) => !$cat->is_hidden)->values();
+            $categories = $allCategoriesIncludingHidden->filter(fn ($cat) => ! $cat->is_hidden)->values();
         } else {
             $categories = $allCategoriesIncludingHidden;
         }
@@ -117,23 +115,24 @@ class DeliverableController extends Controller
         foreach ($categories as $category) {
             // Find matching system template to get sort_order
             $matchingTemplate = $systemTemplates->first(function ($template) use ($category) {
-                return $category->slug === $template->slug && 
+                return $category->slug === $template->slug &&
                        $category->asset_type->value === $template->asset_type->value;
             });
-            
+
             // Get access rules for private categories
             $accessRules = [];
-            if ($category->is_private && !$category->is_system) {
+            if ($category->is_private && ! $category->is_system) {
                 $accessRules = $category->accessRules()->get()->map(function ($rule) {
                     if ($rule->access_type === 'role') {
                         return ['type' => 'role', 'role' => $rule->role];
                     } elseif ($rule->access_type === 'user') {
                         return ['type' => 'user', 'user_id' => $rule->user_id];
                     }
+
                     return null;
                 })->filter()->values()->toArray();
             }
-            
+
             $allCategories->push([
                 'id' => $category->id,
                 'name' => $category->name,
@@ -216,6 +215,7 @@ class DeliverableController extends Controller
             $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
                 ? $assetCounts[$category['id']]
                 : 0;
+
             return $category;
         });
 
@@ -252,7 +252,7 @@ class DeliverableController extends Controller
             $user->hasPermissionForTenant($tenant, 'asset.archive') ||
             ($brand && $user->hasPermissionForBrand($brand, 'asset.archive'))
         );
-        
+
         // For backward compatibility and default visibility: users with asset.publish can see unpublished
         // But unpublished filter specifically requires metadata.bypass_approval (full viewing privileges)
         $canSeeUnpublished = $canPublish || $canBypassApproval;
@@ -267,7 +267,7 @@ class DeliverableController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->first();
-            
+
             if ($category) {
                 $categoryId = $category->id;
             }
@@ -320,7 +320,7 @@ class DeliverableController extends Controller
         $complianceFilter = $request->input('compliance_filter');
         if (in_array($complianceFilter, ['superb', 'strong', 'needs_review', 'failing', 'unscored'], true)) {
             if ($complianceFilter === 'superb') {
-                $assetsQuery->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 90);
+                $assetsQuery->withCompliance()->where('bis_scope.overall_score', '>=', 90);
             } elseif ($complianceFilter === 'strong') {
                 $assetsQuery->strong();
             } elseif ($complianceFilter === 'needs_review') {
@@ -388,14 +388,14 @@ class DeliverableController extends Controller
 
         // Paginate: server-driven pagination (36 per page); next_page_url built from request query so filters/category/sort preserved (match AssetController)
         $perPage = 36;
-        $paginator = $assetsQuery->paginate($perPage);
+        $paginator = $assetsQuery->with(['latestBrandIntelligenceScore'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
         $t1 = microtime(true);
 
         $nextPageUrl = null;
         if ($paginator->hasMorePages()) {
             $query = array_merge($request->query(), ['page' => $paginator->currentPage() + 1]);
-            $nextPageUrl = $request->url() . '?' . http_build_query($query);
+            $nextPageUrl = $request->url().'?'.http_build_query($query);
         }
 
         // HARD TERMINAL STATE: Check for stuck assets and repair them
@@ -408,7 +408,7 @@ class DeliverableController extends Controller
                 $asset->refresh();
             }
         }
-        
+
         // Enhanced logging for debugging missing assets
         if ($assetModels->count() === 0) {
             $totalDeliverables = Asset::where('tenant_id', $tenant->id)
@@ -416,21 +416,21 @@ class DeliverableController extends Controller
                 ->where('type', AssetType::DELIVERABLE)
                 ->whereNull('deleted_at')
                 ->count();
-            
+
             $visibleDeliverables = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::DELIVERABLE)
                 ->where('status', AssetStatus::VISIBLE)
                 ->whereNull('deleted_at')
                 ->count();
-            
+
             $mostRecentDeliverable = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::DELIVERABLE)
                 ->whereNull('deleted_at')
                 ->latest('created_at')
                 ->first();
-            
+
             \Illuminate\Support\Facades\Log::info('[DELIVERABLE_QUERY_AUDIT] DeliverableController::index() query results (empty)', [
                 'query_tenant_id' => $tenant->id,
                 'query_brand_id' => $brand->id,
@@ -475,11 +475,11 @@ class DeliverableController extends Controller
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
                     $ext = pathinfo($asset->original_filename, PATHINFO_EXTENSION);
                     // Normalize extension (lowercase, remove leading dot if any)
-                    if ($ext && !empty(trim($ext))) {
+                    if ($ext && ! empty(trim($ext))) {
                         $fileExtension = strtolower(trim($ext, '.'));
                     }
                 }
-                
+
                 // Fallback to deriving from mime_type if extension not found or filename is "unknown"
                 if (empty($fileExtension) && $asset->mime_type) {
                     $mimeToExt = [
@@ -504,7 +504,7 @@ class DeliverableController extends Controller
                     ];
                     $mimeTypeLower = strtolower(trim($asset->mime_type));
                     $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
-                    
+
                     // If not in map, try extracting from mime type subtype (e.g., "image/jpeg" -> "jpeg")
                     if (empty($fileExtension) && strpos($mimeTypeLower, '/') !== false) {
                         $mimeParts = explode('/', $mimeTypeLower);
@@ -589,7 +589,7 @@ class DeliverableController extends Controller
                         $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                         // Do NOT append ?v= to presigned URLs — invalidates S3 signature
                         if ($thumbnailVersion && $finalThumbnailUrl && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                            $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                            $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                         }
                     } else {
                         \Illuminate\Support\Facades\Log::warning('Deliverable marked as completed but thumbnail path missing', [
@@ -606,7 +606,7 @@ class DeliverableController extends Controller
                     'original_filename' => $asset->original_filename,
                     'mime_type' => $asset->mime_type,
                     'file_extension' => $fileExtension,
-                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status, // AssetStatus enum value
+                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status, // AssetStatus enum value
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
                     'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
@@ -640,6 +640,7 @@ class DeliverableController extends Controller
                     'url' => null, // Reserved for future download endpoint
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
+                    'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
                 ];
                 if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     Log::info('ASSET API RESPONSE URL', [
@@ -687,6 +688,7 @@ class DeliverableController extends Controller
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
             $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
                 $key = $field['field_key'] ?? $field['key'] ?? null;
+
                 return $key && in_array($key, $keysWithValues, true);
             }));
         }
@@ -696,13 +698,13 @@ class DeliverableController extends Controller
         // Compute distinct metadata values for the current asset grid result set
         $availableValues = [];
         $hueGroupToDisplayHex = []; // cluster key -> display_hex from HueClusterService
-        
+
         // When page > 1, use first page's asset IDs for filter options so dropdowns stay consistent
         $assetIdsForAvailableValues = $assetModels->pluck('id')->toArray();
-        if (!empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
+        if (! empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
             // Get asset IDs from the current grid result set (or first page when loading page > 1)
             $assetIds = $assetIdsForAvailableValues;
-            
+
             // Build map of filterable field keys for quick lookup
             // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
             // so we don't need to check is_filterable - all fields in the array are filterable
@@ -713,34 +715,34 @@ class DeliverableController extends Controller
                     $filterableFieldKeys[$fieldKey] = true;
                 }
             }
-            
-            if (!empty($filterableFieldKeys)) {
+
+            if (! empty($filterableFieldKeys)) {
                 // Source 1: Query asset_metadata table (Phase G.4 structure)
                 // This is the authoritative source for approved metadata values
                 // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
                 // They should be included in available_values regardless of approved_at
-                
+
                 // Get automatic field IDs (fields with population_mode = 'automatic')
                 $automaticFieldIds = \DB::table('metadata_fields')
                     ->where('population_mode', 'automatic')
                     ->pluck('id')
                     ->toArray();
-                
+
                 // Build query: Include automatic fields regardless of approved_at, require approved_at for others
                 $assetMetadataValues = \DB::table('asset_metadata')
                     ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                     ->whereIn('asset_metadata.asset_id', $assetIds)
                     ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
                     ->whereNotNull('asset_metadata.value_json')
-                    ->where(function($query) use ($automaticFieldIds) {
+                    ->where(function ($query) use ($automaticFieldIds) {
                         // Automatic fields: include if value exists (no approval required)
-                        if (!empty($automaticFieldIds)) {
+                        if (! empty($automaticFieldIds)) {
                             $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                                  ->orWhere(function($q) use ($automaticFieldIds) {
-                                      // Non-automatic fields require approval
-                                      $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                ->orWhere(function ($q) use ($automaticFieldIds) {
+                                    // Non-automatic fields require approval
+                                    $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
                                         ->whereNotNull('asset_metadata.approved_at');
-                                  });
+                                });
                         } else {
                             // No automatic fields, require approval for all
                             $query->whereNotNull('asset_metadata.approved_at');
@@ -749,43 +751,43 @@ class DeliverableController extends Controller
                     ->select('metadata_fields.key', 'metadata_fields.population_mode', 'asset_metadata.value_json', 'asset_metadata.confidence')
                     ->distinct()
                     ->get();
-                
+
                 // Group values by field key (with confidence filtering for AI metadata)
                 foreach ($assetMetadataValues as $row) {
                     $fieldKey = $row->key;
                     $confidence = $row->confidence !== null ? (float) $row->confidence : null;
                     $populationMode = $row->population_mode ?? 'manual';
-                    
+
                     // CRITICAL: Confidence suppression applies ONLY to AI fields
                     // Automatic/system fields are never suppressed (they are authoritative)
                     $isAiField = $populationMode === 'ai';
                     if ($isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
                         continue; // Skip this value - treat as if it doesn't exist
                     }
-                    
+
                     $value = json_decode($row->value_json, true);
-                    
+
                     // Skip null values
                     if ($value !== null) {
-                        if (!isset($availableValues[$fieldKey])) {
+                        if (! isset($availableValues[$fieldKey])) {
                             $availableValues[$fieldKey] = [];
                         }
-                        
+
                         // Handle arrays (multiselect fields) and scalar values
                         if (is_array($value)) {
                             foreach ($value as $item) {
-                                if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                if ($item !== null && ! in_array($item, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $item;
                                 }
                             }
                         } else {
-                            if (!in_array($value, $availableValues[$fieldKey], true)) {
+                            if (! in_array($value, $availableValues[$fieldKey], true)) {
                                 $availableValues[$fieldKey][] = $value;
                             }
                         }
                     }
                 }
-                
+
                 // Source 2a: dominant_hue_group from assets.dominant_hue_group column
                 if (isset($filterableFieldKeys['dominant_hue_group'])) {
                     $hueGroupValues = \DB::table('assets')
@@ -795,7 +797,7 @@ class DeliverableController extends Controller
                         ->distinct()
                         ->pluck('dominant_hue_group')
                         ->all();
-                    if (!empty($hueGroupValues)) {
+                    if (! empty($hueGroupValues)) {
                         $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
                             $availableValues['dominant_hue_group'] ?? [],
                             $hueGroupValues
@@ -806,29 +808,29 @@ class DeliverableController extends Controller
                 // Source 2: Query metadata JSON column (legacy/fallback)
                 // Extract values from metadata->fields structure for assets not in asset_metadata
                 $assetsWithMetadata = $assets->filter(function ($asset) {
-                    return !empty($asset->metadata) && isset($asset->metadata['fields']);
+                    return ! empty($asset->metadata) && isset($asset->metadata['fields']);
                 });
-                
+
                 foreach ($assetsWithMetadata as $asset) {
                     $fields = $asset->metadata['fields'] ?? [];
                     foreach ($fields as $fieldKey => $value) {
                         // Only include if field is filterable
                         if (isset($filterableFieldKeys[$fieldKey]) && $value !== null) {
                             // Initialize array if field doesn't exist yet
-                            if (!isset($availableValues[$fieldKey])) {
+                            if (! isset($availableValues[$fieldKey])) {
                                 $availableValues[$fieldKey] = [];
                             }
-                            
+
                             // Handle arrays (multiselect fields) and scalar values
                             // Deduplicate values (values from asset_metadata are authoritative)
                             if (is_array($value)) {
                                 foreach ($value as $item) {
-                                    if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                    if ($item !== null && ! in_array($item, $availableValues[$fieldKey], true)) {
                                         $availableValues[$fieldKey][] = $item;
                                     }
                                 }
                             } else {
-                                if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                if (! in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
                                 // dominant_hue_group: swatch from HueClusterService (handled below)
@@ -848,7 +850,7 @@ class DeliverableController extends Controller
                         ->unique()
                         ->values()
                         ->all();
-                    if (!empty($collectionIds)) {
+                    if (! empty($collectionIds)) {
                         $availableValues['collection'] = array_values(array_unique(array_merge(
                             $availableValues['collection'] ?? [],
                             $collectionIds
@@ -866,7 +868,7 @@ class DeliverableController extends Controller
                         ->filter()
                         ->values()
                         ->all();
-                    if (!empty($tagValues)) {
+                    if (! empty($tagValues)) {
                         $availableValues['tags'] = array_values(array_unique(array_merge(
                             $availableValues['tags'] ?? [],
                             $tagValues
@@ -879,12 +881,12 @@ class DeliverableController extends Controller
                 foreach ($filterableSchema as $field) {
                     $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
                     $isPrimary = ($field['is_primary'] ?? false) === true;
-                    if (!$fieldKey || !$isPrimary || !isset($filterableFieldKeys[$fieldKey])) {
+                    if (! $fieldKey || ! $isPrimary || ! isset($filterableFieldKeys[$fieldKey])) {
                         continue;
                     }
                     $optionValues = [];
                     $options = $field['options'] ?? [];
-                    if (!empty($options)) {
+                    if (! empty($options)) {
                         foreach ($options as $opt) {
                             $v = is_array($opt) ? ($opt['value'] ?? $opt['id'] ?? null) : $opt;
                             if ($v !== null && $v !== '') {
@@ -896,7 +898,7 @@ class DeliverableController extends Controller
                     if (empty($optionValues) && ($field['type'] ?? '') === 'rating') {
                         $optionValues = [1, 2, 3, 4, 5];
                     }
-                    if (!empty($optionValues)) {
+                    if (! empty($optionValues)) {
                         $availableValues[$fieldKey] = array_values(array_unique(array_merge(
                             $availableValues[$fieldKey] ?? [],
                             $optionValues
@@ -904,12 +906,12 @@ class DeliverableController extends Controller
                         sort($availableValues[$fieldKey]);
                     }
                 }
-                
+
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
-                    return !empty($values);
+                    return ! empty($values);
                 });
-                
+
                 // Sort values for consistent output
                 foreach ($availableValues as $fieldKey => $values) {
                     sort($availableValues[$fieldKey]);
@@ -928,12 +930,13 @@ class DeliverableController extends Controller
                     $label = $meta['label'] ?? (string) $clusterKey;
                     $threshold = $meta['threshold_deltaE'] ?? 18;
                     $count = $hueClusterCounts[(string) $clusterKey] ?? 0;
+
                     return [
                         'value' => (string) $clusterKey,
                         'label' => $label,
                         'swatch' => $meta['display_hex'] ?? '#999999',
                         'row_group' => $meta['row_group'] ?? 4,
-                        'tooltip' => $label . "\nTypical ΔE threshold: " . $threshold,
+                        'tooltip' => $label."\nTypical ΔE threshold: ".$threshold,
                         'count' => $count,
                     ];
                 }, $hueValues));
@@ -985,7 +988,7 @@ class DeliverableController extends Controller
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
             'total_asset_count' => $totalDeliverableCount, // Total count for "All" and sidebar parity with Assets
-            'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
+            'selected_category' => $categoryId ? (int) $categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'assets' => $mappedAssets,

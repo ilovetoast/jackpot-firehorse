@@ -2,27 +2,25 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ApprovalStatus;
-use App\Enums\AssetType;
 use App\Enums\AssetStatus;
-use App\Support\AssetVariant;
-use App\Support\DeliveryContext;
+use App\Enums\AssetType;
+use App\Enums\DownloadStatus;
 use App\Enums\EventType;
+use App\Enums\MetricType;
 use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
-use App\Models\AssetEvent;
 use App\Models\AssetMetric;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Download;
-use App\Enums\DownloadStatus;
-use App\Enums\MetricType;
 use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\BrandInsightEngine;
 use App\Services\PlanService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -35,8 +33,7 @@ class DashboardController extends Controller
     public function __construct(
         protected PlanService $planService,
         protected AiUsageService $aiUsageService
-    ) {
-    }
+    ) {}
 
     /**
      * Display the cinematic brand overview.
@@ -58,63 +55,63 @@ class DashboardController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
-        
-        if (!$tenant || !$brand) {
+
+        if (! $tenant || ! $brand) {
             abort(403, 'Tenant and brand must be selected.');
         }
-        
+
         // Get current plan name
         $planName = $this->planService->getCurrentPlan($tenant);
         $planConfig = config("plans.{$planName}", config('plans.free'));
         $planDisplayName = $planConfig['name'] ?? ucfirst($planName);
-        
+
         // Check if user is owner or admin
         $user = Auth::user();
         $isOwner = $tenant->isOwner($user);
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
         $canSeePlanBadge = $isOwner || $isAdmin;
-        
+
         // Get plan limits for storage and downloads
         $planLimits = $this->planService->getPlanLimits($tenant);
         $maxStorageMB = $planLimits['max_storage_mb'] ?? null;
         $maxDownloadsPerMonth = $planLimits['max_downloads_per_month'] ?? null;
-        
+
         // Get current period (this month)
         $now = now();
         $startOfMonth = $now->copy()->startOfMonth();
         $endOfMonth = $now->copy()->endOfMonth();
-        
+
         // Get previous period (last month)
         $startOfLastMonth = $now->copy()->subMonth()->startOfMonth();
         $endOfLastMonth = $now->copy()->subMonth()->endOfMonth();
-        
+
         // Total Assets: Count assets with completed processing pipeline
         // Query by processing state (thumbnail_status + metadata flags), not status
         $totalAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->count();
-            
+
         // Total Assets last month
         $totalAssetsLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->where('created_at', '<=', $endOfLastMonth)
             ->count();
-            
+
         // Calculate percentage change for total assets
         $totalAssetsChange = $totalAssetsLastMonth > 0
             ? round((($totalAssets - $totalAssetsLastMonth) / $totalAssetsLastMonth) * 100, 2)
             : ($totalAssets > 0 ? 100 : 0);
-        
+
         // Storage Size: Sum of size_bytes for completed assets (in MB)
         $storageBytes = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->sum('size_bytes');
         $storageMB = round($storageBytes / 1024 / 1024, 2);
-        
+
         // Storage Size last month
         $storageBytesLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->where('created_at', '<=', $endOfLastMonth)
             ->sum('size_bytes');
         $storageMBLastMonth = round($storageBytesLastMonth / 1024 / 1024, 2);
-        
+
         // AUDIT: Log query results and sample asset brand_ids for comparison
         $sampleAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->limit(5)
@@ -126,7 +123,7 @@ class DashboardController extends Controller
                 'query_brand_id' => $brand->id,
                 'total_assets_count' => $totalAssets,
                 'sample_asset_brand_ids' => $sampleAssetBrandIds,
-                'brand_id_mismatch_count' => $sampleAssets->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                'brand_id_mismatch_count' => $sampleAssets->filter(fn ($a) => $a->brand_id != $brand->id)->count(),
                 'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
             ]);
         } else {
@@ -137,12 +134,12 @@ class DashboardController extends Controller
                 'note' => 'No assets found - cannot compare brand_ids',
             ]);
         }
-        
+
         // Calculate percentage change for storage
         $storageChange = $storageMBLastMonth > 0
             ? round((($storageMB - $storageMBLastMonth) / $storageMBLastMonth) * 100, 2)
             : ($storageMB > 0 ? 100 : 0);
-        
+
         // Download Links: Count Download model records (download groups/ZIP files) for this brand
         // Only count downloads that have assets from this brand and are ready/completed
         $downloadLinksThisMonth = Download::where('tenant_id', $tenant->id)
@@ -152,7 +149,7 @@ class DashboardController extends Controller
                 $query->where('brand_id', $brand->id);
             })
             ->count();
-            
+
         // Download Links last month period (for percentage calculation)
         $downloadLinksLastMonthPeriod = Download::where('tenant_id', $tenant->id)
             ->where('status', DownloadStatus::READY)
@@ -161,12 +158,12 @@ class DashboardController extends Controller
                 $query->where('brand_id', $brand->id);
             })
             ->count();
-            
+
         // Calculate percentage change for download links (this month vs last month)
         $downloadLinksChange = $downloadLinksLastMonthPeriod > 0
             ? round((($downloadLinksThisMonth - $downloadLinksLastMonthPeriod) / $downloadLinksLastMonthPeriod) * 100, 2)
             : ($downloadLinksThisMonth > 0 ? 100 : 0);
-        
+
         $collectionsCount = Collection::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->count();
@@ -203,7 +200,7 @@ class DashboardController extends Controller
                 ],
             ];
         }
-        
+
         // Get most viewed assets (top 6) - only visible, non-deleted assets
         // Filter by category permissions to respect protected categories
         $mostViewedAssetIds = AssetMetric::where('asset_metrics.tenant_id', $tenant->id)
@@ -228,51 +225,52 @@ class DashboardController extends Controller
             ->orderByDesc('view_count')
             ->limit(25) // Get more to filter by permissions and allow up to 15 displayed
             ->pluck('view_count', 'id');
-        
+
         $mostViewedAssets = collect();
         if ($mostViewedAssetIds->isNotEmpty()) {
             $assets = Asset::whereIn('id', $mostViewedAssetIds->keys())
                 ->get()
                 ->keyBy('id');
-            
+
             // Eager load categories to avoid N+1 queries
             // Extract category IDs from asset metadata
             $categoryIds = $assets->map(function ($asset) {
                 $metadata = $asset->metadata;
-                if (!is_array($metadata)) {
+                if (! is_array($metadata)) {
                     return null;
                 }
+
                 return $metadata['category_id'] ?? null;
             })->filter()->unique()->values()->all();
-            
+
             $categories = collect();
-            if (!empty($categoryIds)) {
+            if (! empty($categoryIds)) {
                 $categories = Category::with('tenant')->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
                     ->keyBy('id');
             }
-            
+
             $mostViewedAssets = $mostViewedAssetIds->map(function ($viewCount, $assetId) use ($assets, $categories, $user) {
                 $asset = $assets->get($assetId);
-                if (!$asset) {
+                if (! $asset) {
                     return null;
                 }
-                
+
                 // Get category from eager-loaded collection
                 $metadata = $asset->metadata;
                 $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
                 $category = $categoryId ? $categories->get($categoryId) : null;
-                
+
                 // Check if user can view the asset's category (respects protected categories)
                 if ($category) {
                     $canViewCategory = $user->can('view', $category);
-                    if (!$canViewCategory) {
+                    if (! $canViewCategory) {
                         return null; // Skip assets in protected categories user can't access
                     }
                 }
-                
+
                 // Generate thumbnail URLs (CDN URLs from Asset model)
                 $metadata = $asset->metadata ?? [];
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
@@ -285,11 +283,11 @@ class DashboardController extends Controller
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                     }
                 }
 
@@ -310,7 +308,7 @@ class DashboardController extends Controller
                 ];
             })->filter()->take(15)->values(); // Take top 15 after filtering
         }
-        
+
         // Get most downloaded assets (top 6) - only visible, non-deleted assets
         // Filter by category permissions to respect protected categories
         $mostDownloadedAssetIds = AssetMetric::where('asset_metrics.tenant_id', $tenant->id)
@@ -335,51 +333,52 @@ class DashboardController extends Controller
             ->orderByDesc('download_count')
             ->limit(25) // Get more to filter by permissions and allow up to 15 displayed
             ->pluck('download_count', 'id');
-        
+
         $mostDownloadedAssets = collect();
         if ($mostDownloadedAssetIds->isNotEmpty()) {
             $assets = Asset::whereIn('id', $mostDownloadedAssetIds->keys())
                 ->get()
                 ->keyBy('id');
-            
+
             // Eager load categories to avoid N+1 queries
             // Extract category IDs from asset metadata
             $categoryIds = $assets->map(function ($asset) {
                 $metadata = $asset->metadata;
-                if (!is_array($metadata)) {
+                if (! is_array($metadata)) {
                     return null;
                 }
+
                 return $metadata['category_id'] ?? null;
             })->filter()->unique()->values()->all();
-            
+
             $categories = collect();
-            if (!empty($categoryIds)) {
+            if (! empty($categoryIds)) {
                 $categories = Category::with('tenant')->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
                     ->keyBy('id');
             }
-            
-            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets, $categories, $user, $tenant, $brand) {
+
+            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets, $categories, $user) {
                 $asset = $assets->get($assetId);
-                if (!$asset) {
+                if (! $asset) {
                     return null;
                 }
-                
+
                 // Get category from eager-loaded collection
                 $metadata = $asset->metadata;
                 $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
                 $category = $categoryId ? $categories->get($categoryId) : null;
-                
+
                 // Check if user can view the asset's category (respects protected categories)
                 if ($category) {
                     $canViewCategory = $user->can('view', $category);
-                    if (!$canViewCategory) {
+                    if (! $canViewCategory) {
                         return null; // Skip assets in protected categories user can't access
                     }
                 }
-                
+
                 // Generate thumbnail URLs (CDN URLs from Asset model)
                 $metadata = $asset->metadata ?? [];
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
@@ -392,11 +391,11 @@ class DashboardController extends Controller
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                     }
                 }
 
@@ -422,8 +421,8 @@ class DashboardController extends Controller
         $cutoff = now()->subDays(14)->toDateTimeString();
         $driver = DB::connection()->getDriverName();
         $decayExpr = $driver === 'pgsql'
-            ? "SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))"
-            : "SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))";
+            ? 'SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))'
+            : 'SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))';
 
         $trendingSub = DB::table('asset_metrics')
             ->select('asset_id', DB::raw("{$decayExpr} as trending_score"))
@@ -463,7 +462,7 @@ class DashboardController extends Controller
                 ->filter()->unique()->values()->all();
 
             $categories = collect();
-            if (!empty($categoryIds)) {
+            if (! empty($categoryIds)) {
                 $categories = Category::with('tenant')->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
@@ -473,7 +472,7 @@ class DashboardController extends Controller
 
             $mostTrendingAssets = $mostTrendingAssetIds->map(function ($trendingScore, $assetId) use ($assets, $categories, $user) {
                 $asset = $assets->get($assetId);
-                if (!$asset) {
+                if (! $asset) {
                     return null;
                 }
 
@@ -482,7 +481,7 @@ class DashboardController extends Controller
                 $category = $categoryId ? $categories->get($categoryId) : null;
 
                 if ($category) {
-                    if (!$user->can('view', $category)) {
+                    if (! $user->can('view', $category)) {
                         return null;
                     }
                 }
@@ -494,12 +493,12 @@ class DashboardController extends Controller
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    if ($finalThumbnailUrl && $thumbnailVersion && !str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                     }
                 }
 
@@ -516,7 +515,7 @@ class DashboardController extends Controller
                 ];
             })->filter()->take(15)->values();
         }
-        
+
         // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
         // Metadata approval is asset-centric and inline - no separate queue
         // Only count items for assets in the current brand
@@ -528,7 +527,7 @@ class DashboardController extends Controller
             ->whereNull('asset_metadata_candidates.dismissed_at')
             ->where('asset_metadata_candidates.producer', 'ai') // Phase M-1: Only AI candidates
             ->count();
-            
+
         $pendingTagCount = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
             ->where('assets.tenant_id', $tenant->id)
@@ -537,18 +536,18 @@ class DashboardController extends Controller
             ->whereNull('asset_tag_candidates.resolved_at')
             ->whereNull('asset_tag_candidates.dismissed_at')
             ->count();
-            
+
         // Phase M-1: Exclude asset_metadata.approved_at IS NULL from pending count
         // Metadata is reviewed inline during asset review, not as separate suggestions
         $totalPendingCount = $pendingMetadataCount + $pendingTagCount;
-        
+
         // Count pending metadata approvals (from asset_metadata table, not candidates)
         // Only show to users who can approve metadata
         // TASK 2: Use same query logic as getAllPendingMetadataApprovals() API endpoint for consistency
         // Only count fields where there's NO approved row (matches AssetMetadataStateResolver logic)
         $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
         $canApprove = $approvalResolver->canApprove($user, $tenant);
-        
+
         // Base query for pending metadata (field-based, not asset-based)
         $pendingMetadataBaseQuery = DB::table('asset_metadata')
             ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
@@ -568,7 +567,7 @@ class DashboardController extends Controller
                     ->whereNotNull('approved_metadata.approved_at')
                     ->whereNotIn('approved_metadata.source', ['user_rejected', 'ai_rejected']);
             });
-        
+
         // Only calculate count for approvers - contributors cannot approve, so they shouldn't see this tile
         // Contributors can see their own pending count in the notification bell instead
         $pendingMetadataApprovalsCount = 0;
@@ -576,7 +575,7 @@ class DashboardController extends Controller
             $pendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
                 ->count('asset_metadata.id');
         }
-        
+
         // Phase L.5.1: Count unpublished assets (waiting to be published)
         // Only visible to users with metadata.bypass_approval (full viewing privileges)
         $unpublishedAssetsCount = 0;
@@ -589,25 +588,25 @@ class DashboardController extends Controller
                 ->whereNull('deleted_at') // Not deleted
                 ->count();
         }
-        
+
         // Phase J: Count pending assets for approval workflow
         // Approvers (Admin/Owner/Brand Manager) see all pending/rejected assets
         // Contributors see only their own pending/rejected assets
         $userRole = $user->getRoleForTenant($tenant);
         $isTenantOwnerOrAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
-        
+
         // Check if user is a brand manager
         $isBrandManager = false;
         $membership = $user->activeBrandMembership($brand);
         $isBrandManager = $membership && ($membership['role'] ?? null) === 'brand_manager';
-        
+
         // Check if user is a contributor
         $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
-        
+
         $pendingAssetsCount = 0;
         $contributorPendingCount = 0;
         $contributorRejectedCount = 0;
-        
+
         if ($isTenantOwnerOrAdmin || $isBrandManager) {
             // Approvers: Count all pending/rejected assets in brand
             $pendingAssetsCount = Asset::where('tenant_id', $tenant->id)
@@ -615,7 +614,7 @@ class DashboardController extends Controller
                 ->where('type', \App\Enums\AssetType::ASSET)
                 ->where(function ($query) {
                     $query->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
-                          ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
+                        ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
                 })
                 ->whereNull('deleted_at')
                 ->count();
@@ -628,7 +627,7 @@ class DashboardController extends Controller
                 ->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
                 ->whereNull('deleted_at')
                 ->count();
-                
+
             $contributorRejectedCount = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', \App\Enums\AssetType::ASSET)
@@ -636,10 +635,10 @@ class DashboardController extends Controller
                 ->where('approval_status', \App\Enums\ApprovalStatus::REJECTED)
                 ->whereNull('deleted_at')
                 ->count();
-                
+
             $pendingAssetsCount = $contributorPendingCount + $contributorRejectedCount;
         }
-        
+
         // Get recent company activity (last 5) - only if user has permission
         $recentActivity = null;
         if ($user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
@@ -651,7 +650,7 @@ class DashboardController extends Controller
                 \App\Models\Brand::class,
                 \App\Models\Category::class,
             ];
-            
+
             // Do not eager load 'actor': actor_type can be 'system'/'api'/'guest' (no model class).
             // Use getActorModel() in the map for user actors to avoid MorphTo "Class system not found".
             $activityQuery = ActivityEvent::where('tenant_id', $tenant->id)
@@ -668,11 +667,11 @@ class DashboardController extends Controller
                 ->limit(5)
                 ->with(['brand', 'subject'])
                 ->get();
-            
+
             $recentActivity = $activityEvents->map(function ($event) use ($tenant) {
                 // Format event type display name
                 $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
-                
+
                 // Get actor name and avatar/company for display (use getActorModel() for user; string types have no model)
                 $actorName = 'System';
                 $actorAvatarUrl = null;
@@ -687,29 +686,29 @@ class DashboardController extends Controller
                     $actorFirstName = $actor->first_name ?? null;
                     $actorLastName = $actor->last_name ?? null;
                     $actorEmail = $actor->email ?? null;
-                } elseif (!empty($event->metadata['actor_name'])) {
+                } elseif (! empty($event->metadata['actor_name'])) {
                     $actorName = $event->metadata['actor_name'];
                 }
                 // When actor is system/api/guest, show company (tenant) name
                 if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
                     $companyName = $tenant->name ?? 'System';
                 }
-                
+
                 // Get subject name and optional asset thumbnail URL
                 $subjectName = 'Unknown';
                 $subjectThumbnailUrl = null;
                 if ($event->subject) {
-                    if (method_exists($event->subject, 'title') && !empty($event->subject->title)) {
+                    if (method_exists($event->subject, 'title') && ! empty($event->subject->title)) {
                         $subjectName = $event->subject->title;
-                    } elseif (method_exists($event->subject, 'original_filename') && !empty($event->subject->original_filename)) {
+                    } elseif (method_exists($event->subject, 'original_filename') && ! empty($event->subject->original_filename)) {
                         $subjectName = $event->subject->original_filename;
-                    } elseif (method_exists($event->subject, 'name') && !empty($event->subject->name)) {
+                    } elseif (method_exists($event->subject, 'name') && ! empty($event->subject->name)) {
                         $subjectName = $event->subject->name;
                     } elseif (method_exists($event->subject, 'id')) {
                         if ($event->subject_type === \App\Models\Asset::class) {
-                            $subjectName = 'Asset #' . substr((string) $event->subject->id, 0, 8);
+                            $subjectName = 'Asset #'.substr((string) $event->subject->id, 0, 8);
                         } else {
-                            $subjectName = 'Item #' . substr((string) $event->subject->id, 0, 8);
+                            $subjectName = 'Item #'.substr((string) $event->subject->id, 0, 8);
                         }
                     }
                     // Asset subject: build thumbnail URL (thumb style for small activity icon)
@@ -723,18 +722,18 @@ class DashboardController extends Controller
                             $version = $meta['thumbnails_generated_at'] ?? null;
                             $subjectThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
                             if ($subjectThumbnailUrl && $version) {
-                                $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($version);
+                                $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($version);
                             }
                         }
                     }
-                } elseif (!empty($event->metadata['subject_name'])) {
+                } elseif (! empty($event->metadata['subject_name'])) {
                     $subjectName = $event->metadata['subject_name'];
-                } elseif (!empty($event->metadata['asset_title'])) {
+                } elseif (! empty($event->metadata['asset_title'])) {
                     $subjectName = $event->metadata['asset_title'];
-                } elseif (!empty($event->metadata['asset_filename'])) {
+                } elseif (! empty($event->metadata['asset_filename'])) {
                     $subjectName = $event->metadata['asset_filename'];
                 }
-                
+
                 // Brand: include avatar fields for BrandAvatar
                 $brandPayload = null;
                 if ($event->brand) {
@@ -750,7 +749,7 @@ class DashboardController extends Controller
                         'primary_color' => $b->primary_color ?? '#4f46e5',
                     ];
                 }
-                
+
                 return [
                     'id' => $event->id,
                     'event_type' => $event->event_type,
@@ -778,10 +777,10 @@ class DashboardController extends Controller
                 ];
             });
         }
-        
+
         // Get widget visibility configuration from tenant settings
         $widgetConfig = $tenant->settings['dashboard_widgets'] ?? [];
-        
+
         // Default widget visibility: company widgets visible to owner/admin/brand_manager, hidden for contributor/viewer
         // Widget config format: { role: { widget_name: true/false } }
         // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'most_trending', 'pending_ai_suggestions', 'pending_metadata_approvals'
@@ -842,7 +841,7 @@ class DashboardController extends Controller
                 'pending_asset_approvals' => false, // Phase J.3.1: Viewers don't see approval widgets
             ],
         ];
-        
+
         // Merge user config with defaults (user config overrides defaults)
         $roleWidgetVisibility = [];
         foreach ($defaultWidgetVisibility as $role => $widgets) {
@@ -851,11 +850,11 @@ class DashboardController extends Controller
                 $widgetConfig[$role] ?? []
             );
         }
-        
+
         // Determine current user's widget visibility
         $userRole = strtolower($userRole ?? 'viewer');
         $userWidgetVisibility = $roleWidgetVisibility[$userRole] ?? $roleWidgetVisibility['viewer'];
-        
+
         // Admin preview hook: ?as=viewer|contributor overrides permission flags for UX testing
         // Not enforced on backend routes — purely cosmetic for dashboard tile visibility
         $previewRole = $isAdmin ? $request->query('as') : null;
@@ -902,13 +901,15 @@ class DashboardController extends Controller
                 $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
             })
             ->where('assets.type', AssetType::ASSET->value)
-            ->leftJoin('brand_compliance_scores', function ($join) {
-                $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
-                    ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+            ->leftJoin('brand_intelligence_scores as bis_dash', function ($join) {
+                $join->on('bis_dash.asset_id', '=', 'assets.id')
+                    ->whereColumn('bis_dash.brand_id', 'assets.brand_id')
+                    ->whereNull('bis_dash.execution_id')
+                    ->whereRaw('bis_dash.id = (SELECT MAX(b2.id) FROM brand_intelligence_scores b2 WHERE b2.asset_id = assets.id AND b2.brand_id = assets.brand_id AND b2.execution_id IS NULL)');
             })
-            ->leftJoin(DB::raw('(SELECT asset_id, COUNT(*) as view_count FROM asset_metrics WHERE metric_type = \'' . MetricType::VIEW->value . '\' GROUP BY asset_id) as views'), 'assets.id', '=', 'views.asset_id')
+            ->leftJoin(DB::raw('(SELECT asset_id, COUNT(*) as view_count FROM asset_metrics WHERE metric_type = \''.MetricType::VIEW->value.'\' GROUP BY asset_id) as views'), 'assets.id', '=', 'views.asset_id')
             ->select('assets.*')
-            ->orderByRaw('COALESCE(brand_compliance_scores.overall_score, 0) DESC')
+            ->orderByRaw('COALESCE(bis_dash.overall_score, 0) DESC')
             ->orderByRaw('COALESCE(views.view_count, 0) DESC')
             ->limit(8)
             ->get()
@@ -922,12 +923,12 @@ class DashboardController extends Controller
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (!empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    if ($finalThumbnailUrl && $thumbnailVersion && !str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                     }
                 }
 
@@ -999,13 +1000,13 @@ class DashboardController extends Controller
 
     /**
      * Get query for assets with completed processing pipeline.
-     * 
+     *
      * Completion criteria (matches AssetCompletionService):
      * - thumbnail_status === COMPLETED
      * - metadata['ai_tagging_completed'] === true
      * - metadata['metadata_extracted'] === true
      * - metadata['preview_generated'] === true (optional - if key exists, must be true)
-     * 
+     *
      * Asset.status represents VISIBILITY only, so we query VISIBLE assets
      * and filter by processing state.
      */
@@ -1021,7 +1022,7 @@ class DashboardController extends Controller
             ->where(function ($query) {
                 // Preview generated is optional - if key exists, must be true; if doesn't exist, allow
                 $query->where('metadata->preview_generated', true)
-                      ->orWhereNull('metadata->preview_generated');
+                    ->orWhereNull('metadata->preview_generated');
             })
             ->whereNull('deleted_at')
             ->whereNotNull('published_at')
@@ -1030,12 +1031,9 @@ class DashboardController extends Controller
             ->excludeBuilderStaged()
             ->where('type', AssetType::ASSET);
     }
-    
+
     /**
      * Format event type constant into a readable display name.
-     * 
-     * @param string $eventType
-     * @return string
      */
     protected function formatEventTypeLabel(string $eventType): string
     {
@@ -1046,9 +1044,10 @@ class DashboardController extends Controller
             $formatted = ucfirst(str_replace('_', ' ', $part));
             // Handle common abbreviations
             $formatted = str_replace('Ai ', 'AI ', $formatted);
+
             return $formatted;
         }, $parts);
-        
+
         return implode(' ', $formatted);
     }
 }

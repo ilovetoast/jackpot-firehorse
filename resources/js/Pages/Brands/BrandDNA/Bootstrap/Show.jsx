@@ -143,16 +143,7 @@ export default function BrandBootstrapShow({ brand, run }) {
         }))
     }
 
-    const weightTotal = Math.round(
-        ((payload.scoring_config?.color_weight ?? 30) +
-        (payload.scoring_config?.typography_weight ?? 20) +
-        (payload.scoring_config?.tone_weight ?? 30) +
-        (payload.scoring_config?.imagery_weight ?? 20))
-    )
-    const weightsValid = weightTotal === 100
-
     const handleApprove = () => {
-        if (!weightsValid) return
         const cfg = payload.scoring_config || {}
         const modelPayload = {
             ...payload,
@@ -610,42 +601,9 @@ export default function BrandBootstrapShow({ brand, run }) {
                                             {renderTagArrayField('photography_attributes', 'Photography Attributes', '')}
                                         </div>
                                     </section>
-                                    <section>
-                                        <h3 className="text-xs font-semibold text-gray-500 mb-2">Scoring Weights (must total 100%)</h3>
-                                        {[
-                                            { key: 'color_weight', label: 'Color' },
-                                            { key: 'typography_weight', label: 'Typography' },
-                                            { key: 'tone_weight', label: 'Tone' },
-                                            { key: 'imagery_weight', label: 'Imagery' },
-                                        ].map(({ key, label }) => {
-                                            const raw = payload.scoring_config?.[key]
-                                            const val = typeof raw === 'number' ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw)) : 25
-                                            return (
-                                                <div key={key} className="flex items-center gap-3 mb-2">
-                                                    <label className="w-24 text-xs text-gray-600">{label}</label>
-                                                    <input
-                                                        type="range"
-                                                        min={0}
-                                                        max={100}
-                                                        value={val}
-                                                        onChange={(e) => setPayload((prev) => ({
-                                                            ...prev,
-                                                            scoring_config: { ...prev.scoring_config, [key]: Number(e.target.value) },
-                                                        }))}
-                                                        className="flex-1 h-2 rounded-lg accent-indigo-600"
-                                                    />
-                                                    <span className="w-8 text-xs font-medium text-gray-700">{val}%</span>
-                                                </div>
-                                            )
-                                        })}
-                                        <p className={`mt-1 text-xs font-medium ${weightsValid ? 'text-green-600' : 'text-amber-600'}`}>
-                                            Total: {weightTotal}% {!weightsValid && '— Must equal 100%'}
-                                        </p>
-                                    </section>
                                     <button
                                         type="button"
                                         onClick={handleApprove}
-                                        disabled={!weightsValid}
                                         className="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         Create Draft from This

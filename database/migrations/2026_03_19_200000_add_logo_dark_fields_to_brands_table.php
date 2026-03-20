@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::table('brands', function (Blueprint $table) {
             $table->string('logo_dark_path')->nullable()->after('logo_id');
-            $table->unsignedBigInteger('logo_dark_id')->nullable()->after('logo_dark_path');
+            $table->uuid('logo_dark_id')->nullable()->after('logo_dark_path');
         });
     }
 

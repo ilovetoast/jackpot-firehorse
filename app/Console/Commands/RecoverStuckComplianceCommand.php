@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\ProcessAssetJob;
-use App\Jobs\ScoreAssetComplianceJob;
+use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\Asset;
 use App\Services\AnalysisStatusLogger;
 use Illuminate\Console\Command;
@@ -67,7 +67,8 @@ class RecoverStuckComplianceCommand extends Command
             $this->line("  - Asset {$asset->id} ({$asset->title}): status={$status}, stuck ~{$minutesStuck} min");
 
             if ($this->option('dry-run')) {
-                $this->comment("    [DRY RUN] Would reset and requeue");
+                $this->comment('    [DRY RUN] Would reset and requeue');
+
                 continue;
             }
 
@@ -96,11 +97,11 @@ class RecoverStuckComplianceCommand extends Command
                 break;
             case 'generating_embedding':
                 GenerateAssetEmbeddingJob::dispatch($asset->id);
-                $this->line("    ✓ Requeued GenerateAssetEmbeddingJob");
+                $this->line('    ✓ Requeued GenerateAssetEmbeddingJob');
                 break;
             case 'scoring':
-                ScoreAssetComplianceJob::dispatch($asset->id);
-                $this->line("    ✓ Requeued ScoreAssetComplianceJob");
+                ScoreAssetBrandIntelligenceJob::dispatch($asset);
+                $this->line('    ✓ Requeued ScoreAssetBrandIntelligenceJob');
                 break;
             default:
                 $this->warn("    Unknown status: {$status}");
@@ -120,6 +121,6 @@ class RecoverStuckComplianceCommand extends Command
         AnalysisStatusLogger::log($asset, $previousStatus, 'uploading', 'RecoverStuckComplianceCommand');
 
         ProcessAssetJob::dispatch($asset->id);
-        $this->line("    ✓ Reset to uploading, requeued ProcessAssetJob");
+        $this->line('    ✓ Reset to uploading, requeued ProcessAssetJob');
     }
 }

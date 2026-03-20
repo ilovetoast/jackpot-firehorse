@@ -461,15 +461,17 @@ class BrandController extends Controller
         $topExecutions = [];
         $bottomExecutions = [];
         if (! empty($deliverableCategoryIds)) {
-            $topScores = \App\Models\BrandComplianceScore::where('brand_id', $brand->id)
-                ->where('evaluation_status', 'evaluated')
+            $topScores = \App\Models\BrandIntelligenceScore::where('brand_id', $brand->id)
+                ->whereNull('execution_id')
+                ->whereNotNull('asset_id')
                 ->whereNotNull('overall_score')
                 ->with('asset:id,title,metadata')
                 ->orderByDesc('overall_score')
                 ->limit(3)
                 ->get();
-            $bottomScores = \App\Models\BrandComplianceScore::where('brand_id', $brand->id)
-                ->where('evaluation_status', 'evaluated')
+            $bottomScores = \App\Models\BrandIntelligenceScore::where('brand_id', $brand->id)
+                ->whereNull('execution_id')
+                ->whereNotNull('asset_id')
                 ->whereNotNull('overall_score')
                 ->with('asset:id,title,metadata')
                 ->orderBy('overall_score')

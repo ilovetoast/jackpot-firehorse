@@ -573,6 +573,18 @@ This is acceptable. This index reflects documented phases only.
 
 ---
 
+## Brand Intelligence (Execution-Based)
+
+**Status:** IN PROGRESS (engineering + product)
+
+**Docs (canonical):**
+- [BRAND_INTELLIGENCE.md](BRAND_INTELLIGENCE.md) — EBI goals, Phase 1 schema, implementation log
+- [BRAND_INTELLIGENCE_LEGACY_DEPRECATION.md](BRAND_INTELLIGENCE_LEGACY_DEPRECATION.md) — legacy asset “brand compliance” code/DB to remove after cutover
+
+This area is **additive** to Brand DNA research/coherence ([BRAND_RESEARCH_FLOW.md](BRAND_RESEARCH_FLOW.md)); it targets **executions/deliverables** and optional asset scoring.
+
+---
+
 ## Summary
 
 **Current System State:**
@@ -587,6 +599,7 @@ This is acceptable. This index reflects documented phases only.
 - 🔨 Support & Ticketing: IN PROGRESS
 - 📋 Tenant AI: FUTURE (design only)
 - 📋 Metadata UX Filter Improvements: FUTURE (Phase H)
+- 🔨 Brand Intelligence (EBI): IN PROGRESS — see [BRAND_INTELLIGENCE.md](BRAND_INTELLIGENCE.md)
 
 **For Future Agents:**
 - Always check this index before modifying locked areas

@@ -1587,13 +1587,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         )
     }
 
-    const weightTotal = Math.round(
-        ((modelPayload.scoring_config?.color_weight ?? 0.1) +
-        (modelPayload.scoring_config?.typography_weight ?? 0.2) +
-        (modelPayload.scoring_config?.tone_weight ?? 0.2) +
-        (modelPayload.scoring_config?.imagery_weight ?? 0.5)) * 100
-    )
-
     const autoSaveBrandField = (overrides) => {
         const payload = { ...data, ...overrides }
         router.put(`/app/brands/${brand.id}`, payload, {
@@ -2595,51 +2588,19 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-2">
-                                    <h2 className="text-xl font-semibold text-gray-900">Scoring Rules</h2>
+                                    <h2 className="text-xl font-semibold text-gray-900">Brand DNA rules</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Define rules for deterministic compliance scoring. Used when Brand DNA is enabled.
+                                        Configure fonts, colors, and keywords used by analysis. Asset scores use Brand Intelligence (EBI), not legacy dimension weights.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
-                                    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-4">
-                                        <h3 className="text-sm font-medium text-gray-700 mb-3">Scoring Weights (must total 100%)</h3>
-                                        {[
-                                            { key: 'color_weight', label: 'Color Weight' },
-                                            { key: 'typography_weight', label: 'Typography Weight' },
-                                            { key: 'tone_weight', label: 'Tone Weight' },
-                                            { key: 'imagery_weight', label: 'Imagery Weight' },
-                                        ].map(({ key, label }) => {
-                                            const val = Math.round((modelPayload.scoring_config?.[key] ?? 0.2) * 100)
-                                            return (
-                                                <div key={key} className="flex items-center gap-3 mb-3">
-                                                    <label className="w-40 text-sm text-gray-700">{label}</label>
-                                                    <input
-                                                        type="range"
-                                                        min={0}
-                                                        max={100}
-                                                        value={val}
-                                                        onChange={(e) => {
-                                                            const v = Number(e.target.value) / 100
-                                                            setModelPayloadField(`scoring_config.${key}`, v)
-                                                        }}
-                                                        className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 accent-indigo-600"
-                                                    />
-                                                    <span className="w-10 text-sm font-medium text-gray-700">{val}%</span>
-                                                </div>
-                                            )
-                                        })}
-                                        <div className={`mt-2 text-sm font-medium ${weightTotal === 100 ? 'text-green-600' : 'text-red-600'}`}>
-                                            Total: {weightTotal}% {weightTotal !== 100 && '— Must equal 100% to save'}
-                                        </div>
-                                    </div>
-
                                     {renderTagArrayField('allowed_fonts', 'Allowed Fonts', 'e.g. Helvetica, Inter')}
                                     {renderTagArrayField('banned_colors', 'Banned Colors', 'Colors to penalize')}
                                     {renderTagArrayField('tone_keywords', 'Tone Keywords', 'Words that match brand tone')}
                                     {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
                                     {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
 
-                                    <button type="submit" disabled={dnaSaving || weightTotal !== 100} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>

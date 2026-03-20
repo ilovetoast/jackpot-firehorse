@@ -56,6 +56,7 @@ import ThumbnailPreview from './ThumbnailPreview'
 import ReplaceFileModal from './ReplaceFileModal'
 import AssetDetailPanel from './AssetDetailPanel'
 import CollapsibleSection from './CollapsibleSection'
+import AssetBrandIntelligenceBlock from './AssetBrandIntelligenceBlock'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
 import PDFViewer from './PDFViewer'
@@ -2488,6 +2489,10 @@ export default function AssetDrawer({
                 {/* AI Tag Suggestions */}
                 {displayAsset?.id && (
                     <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} primaryColor={brandPrimary} />
+                )}
+
+                {displayAsset?.id && (
+                    <AssetBrandIntelligenceBlock asset={displayAsset} onAssetUpdate={onAssetUpdate} />
                 )}
 
                 {/* Tags and Metadata */}

@@ -32,6 +32,9 @@ return new class extends Migration
                 ->cascadeOnDelete();
 
             $table->index(['execution_id', 'sort_order']);
+            $table->index('execution_id');
+            $table->index('asset_id');
+            $table->unique(['execution_id', 'asset_id']);
         });
     }
 

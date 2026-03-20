@@ -33,3 +33,4 @@ Public collections allow shareable, read-only views of a collection via a URL. N
 
 - [Features & Value Proposition](FEATURES_AND_VALUE_PROPOSITION.md) — marketing overview
 - [Technical Overview](TECHNICAL_OVERVIEW.md) — architecture and stack
+- [Brand Intelligence (EBI)](BRAND_INTELLIGENCE.md) — execution-based scoring (in progress); [legacy compliance deprecation checklist](BRAND_INTELLIGENCE_LEGACY_DEPRECATION.md)

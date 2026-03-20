@@ -15,6 +15,7 @@ import {
     BuildingOffice2Icon,
     CogIcon,
     BoltIcon,
+    SparklesIcon,
     CreditCardIcon,
     DocumentTextIcon,
     ArrowDownTrayIcon,
@@ -129,6 +130,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const operationsItems = [
         { name: 'Operations Center', description: `Critical: ${incidents.critical ?? 0} | Errors: ${incidents.error ?? 0}`, href: '/app/admin/operations-center', icon: ExclamationTriangleIcon },
         { name: 'Asset Operations', description: 'Cross-tenant asset search, repair, restore', href: '/app/admin/assets', icon: FolderIcon },
+        { name: 'Brand Intelligence', description: 'EBI scores, breakdown, simulate (dev)', href: '/app/admin/brand-intelligence', icon: SparklesIcon },
         { name: 'System Status', description: 'Monitor system health', href: '/app/admin/system-status', icon: CogIcon },
         { name: 'Performance', description: 'Response timing, slow routes', href: '/app/admin/performance', icon: ClockIcon },
         { name: 'Logs', description: 'Web & worker logs', href: '/app/admin/logs', icon: DocumentTextIcon },

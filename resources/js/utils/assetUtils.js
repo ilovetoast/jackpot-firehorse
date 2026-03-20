@@ -55,7 +55,9 @@ export function mergeAsset(prev, incoming) {
     
     // HARD STABILIZATION: Stop re-merging identical assets
     // Prevents useless object replacement → prevents re-renders
+    // Never short-circuit when Brand Intelligence (or other non-thumbnail) fields update.
     if (
+        incoming.brand_intelligence === undefined &&
         prev.preview_thumbnail_url === incoming.preview_thumbnail_url &&
         prev.final_thumbnail_url === incoming.final_thumbnail_url &&
         prev.thumbnail_version === incoming.thumbnail_version &&
@@ -71,7 +73,7 @@ export function mergeAsset(prev, incoming) {
     // This ensures polling updates immediately replace UI state
     return {
         ...prev, // Preserve all previous fields
-        ...incoming, // Overwrite with incoming data
+        ...incoming, // Overwrite with incoming data (e.g. brand_intelligence)
         // Explicitly ensure thumbnail fields come from incoming (authoritative)
         preview_thumbnail_url: incoming.preview_thumbnail_url ?? null,
         final_thumbnail_url: incoming.final_thumbnail_url ?? null,

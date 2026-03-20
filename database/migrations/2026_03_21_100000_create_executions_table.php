@@ -24,11 +24,11 @@ return new class extends Migration
 
             $table->string('name');
 
-            $table->enum('status', ['draft', 'finalized', 'archived'])->default('draft');
+            $table->string('status')->default('draft');
 
             $table->json('context_json')->nullable();
 
-            $table->uuid('primary_asset_id')->nullable()->index();
+            $table->uuid('primary_asset_id')->nullable();
 
             $table->timestamp('finalized_at')->nullable();
 
@@ -38,6 +38,10 @@ return new class extends Migration
                 ->references('id')
                 ->on('assets')
                 ->nullOnDelete();
+
+            $table->index(['tenant_id', 'brand_id']);
+            $table->index('category_id');
+            $table->index(['status', 'finalized_at']);
         });
     }
 

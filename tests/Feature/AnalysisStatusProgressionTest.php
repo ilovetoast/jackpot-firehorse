@@ -12,21 +12,21 @@ use App\Enums\UploadType;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
+use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandVisualReference;
-use App\Models\BrandModel;
-use App\Models\BrandModelVersion;
 use App\Models\Category;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\AiMetadataGenerationService;
 use App\Services\Automation\ColorAnalysisService;
-use App\Services\BrandDNA\BrandComplianceService;
+use App\Services\BrandIntelligence\BrandIntelligenceEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -40,9 +40,13 @@ class AnalysisStatusProgressionTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected Category $category;
+
     protected User $user;
+
     protected StorageBucket $bucket;
 
     protected function setUp(): void
@@ -79,6 +83,14 @@ class AnalysisStatusProgressionTest extends TestCase
         ]);
 
         $this->seed(\Database\Seeders\MetadataFieldsSeeder::class);
+
+        $meta = $this->createMock(AiMetadataGenerationService::class);
+        $meta->method('fetchThumbnailForVisionAnalysis')->willReturn(null);
+        $this->app->instance(AiMetadataGenerationService::class, $meta);
+
+        $ai = $this->createMock(AIProviderInterface::class);
+        $ai->expects($this->never())->method('analyzeImage');
+        $this->app->instance(AIProviderInterface::class, $ai);
     }
 
     protected function createImageAsset(array $overrides = []): Asset
@@ -179,17 +191,13 @@ class AnalysisStatusProgressionTest extends TestCase
         $asset->refresh();
         $this->assertSame('scoring', $asset->analysis_status, 'GenerateAssetEmbeddingJob should set scoring');
 
-        // 5. BrandComplianceService::scoreAsset: scoring finishes → complete
+        // 5. ScoreAssetBrandIntelligenceJob: scoring finishes → complete
         // Ensure asset meets completion criteria (thumbnail_status, ai_tagging_completed, metadata_extracted)
         $metadata = $asset->metadata ?? [];
         $metadata['ai_tagging_completed'] = true;
         $metadata['metadata_extracted'] = true;
         $asset->update(['metadata' => $metadata]);
 
-        $brandModel = BrandModel::firstOrCreate(
-            ['brand_id' => $this->brand->id],
-            ['is_enabled' => false]
-        );
         $vec = array_fill(0, 64, 0.5);
         $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $vec)));
         $vec = array_map(fn ($x) => $x / $norm, $vec);
@@ -199,30 +207,12 @@ class AnalysisStatusProgressionTest extends TestCase
             'embedding_vector' => $vec,
             'type' => BrandVisualReference::TYPE_LOGO,
         ]);
-        $version = BrandModelVersion::firstOrCreate(
-            ['brand_model_id' => $brandModel->id, 'version_number' => 1],
-            [
-                'source_type' => 'manual',
-                'model_payload' => [
-                    'scoring_rules' => [],
-                    'scoring_config' => [
-                        'color_weight' => 0,
-                        'typography_weight' => 0,
-                        'tone_weight' => 0,
-                        'imagery_weight' => 1.0,
-                    ],
-                ],
-                'status' => 'active',
-            ]
-        );
-        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
-        $service = app(BrandComplianceService::class);
-        $result = $service->scoreAsset($asset, $this->brand);
+        $job = new ScoreAssetBrandIntelligenceJob($asset, true);
+        $job->handle(app(BrandIntelligenceEngine::class));
         $asset->refresh();
 
-        $this->assertNotNull($result, 'Scoring should succeed when analysis_status is scoring');
-        $this->assertSame('complete', $asset->analysis_status, 'BrandComplianceService should set complete when scoring finishes');
+        $this->assertSame('complete', $asset->analysis_status, 'ScoreAssetBrandIntelligenceJob should set complete when scoring finishes');
     }
 
     /**
@@ -281,7 +271,7 @@ class AnalysisStatusProgressionTest extends TestCase
         $mockVector = array_fill(0, 64, 0.5);
         $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $mockVector)));
         $mockVector = array_map(fn ($x) => $x / $norm, $mockVector);
-        $this->mock(ImageEmbeddingServiceInterface::class, function ($mock) use ($mockVector) {
+        $this->mock(ImageEmbeddingServiceInterface::class, function ($mock) {
             $mock->shouldReceive('embedAsset')->never();
         });
 

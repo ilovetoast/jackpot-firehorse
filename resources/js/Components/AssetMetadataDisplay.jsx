@@ -5,9 +5,8 @@
  * Uses WidgetResolver for centralized widget rendering logic.
  */
 
-import { useState, useEffect, useRef } from 'react'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline'
-import { Activity } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
@@ -25,13 +24,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [overridingFieldId, setOverridingFieldId] = useState(null)
     const [revertingFieldId, setRevertingFieldId] = useState(null)
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
-    const [complianceScore, setComplianceScore] = useState(null)
-    const [complianceBreakdown, setComplianceBreakdown] = useState(null)
-    const [evaluationStatus, setEvaluationStatus] = useState('pending')
-    const [alignmentConfidence, setAlignmentConfidence] = useState('low')
-    const [complianceExpanded, setComplianceExpanded] = useState(false)
-    const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
-    const [rescoreLoading, setRescoreLoading] = useState(false)
     const [metadataHealth, setMetadataHealth] = useState(null)
     const [analysisStatus, setAnalysisStatus] = useState('uploading')
     const [thumbnailStatus, setThumbnailStatus] = useState('pending')
@@ -57,11 +49,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setFields(data.fields || [])
                 const count = data.pending_metadata_count || 0
                 setPendingMetadataCount(count)
-                setComplianceScore(data.compliance_score ?? null)
-                setComplianceBreakdown(data.compliance_breakdown ?? null)
-                setEvaluationStatus(data.evaluation_status ?? 'pending')
-                setAlignmentConfidence(data.alignment_confidence ?? 'low')
-                setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 setMetadataHealth(data.metadata_health ?? null)
                 setAnalysisStatus(data.analysis_status ?? 'uploading')
                 setThumbnailStatus(data.thumbnail_status ?? 'pending')
@@ -91,26 +78,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         }
     }, [assetId])
 
-    // Brand Compliance: Poll when evaluation_status === 'pending' so UI refreshes after job completes.
-    // Do NOT poll for pending_processing (asset not ready); only poll when job is running.
-    const pollIntervalRef = useRef(null)
-    useEffect(() => {
-        if (evaluationStatus !== 'pending' || !assetId) {
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current)
-                pollIntervalRef.current = null
-            }
-            return
-        }
-        pollIntervalRef.current = setInterval(() => fetchMetadata(true), 2000)
-        return () => {
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current)
-                pollIntervalRef.current = null
-            }
-        }
-    }, [evaluationStatus, assetId])
-
     // Refresh after edit
     const handleEditComplete = () => {
         setEditingFieldId(null)
@@ -128,11 +95,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 .then((res) => res.json())
                 .then((data) => {
                     setFields(data.fields || [])
-                    setComplianceScore(data.compliance_score ?? null)
-                    setComplianceBreakdown(data.compliance_breakdown ?? null)
-                    setEvaluationStatus(data.evaluation_status ?? 'pending')
-                    setAlignmentConfidence(data.alignment_confidence ?? 'low')
-                    setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                     setMetadataHealth(data.metadata_health ?? null)
                     setAnalysisStatus(data.analysis_status ?? 'uploading')
                     setThumbnailStatus(data.thumbnail_status ?? 'pending')
@@ -215,14 +177,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         )
     }
 
-    // Compliance badge color: >=80 green, 60-79 amber, 40-59 neutral, <40 red
-    const getComplianceBadgeClass = (score) => {
-        if (score >= 80) return 'bg-green-50 text-green-700 ring-green-600/20'
-        if (score >= 60) return 'bg-amber-50 text-amber-700 ring-amber-600/20'
-        if (score >= 40) return 'bg-gray-50 text-gray-700 ring-gray-600/20'
-        return 'bg-red-50 text-red-700 ring-red-600/20'
-    }
-
     const handleReanalyze = async () => {
         if (!assetId || reanalyzeLoading) return
         setReanalyzeLoading(true)
@@ -279,13 +233,12 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
-            {/* Dev-only: surface pipeline state for debugging rerun/guard mismatches */}
-            {import.meta.env.DEV && (
+            {/* Local diagnostics only — never shipped in production builds (Vite sets import.meta.env.PROD). */}
+            {!import.meta.env.PROD && (
                 <div className="mb-3 rounded border border-amber-300 bg-amber-50/80 p-3 font-mono text-xs text-amber-900">
                     <div className="font-semibold mb-1">Pipeline state (dev)</div>
                     <pre className="whitespace-pre-wrap break-all">
                         analysis_status: {analysisStatus}
-                        evaluation_status: {evaluationStatus}
                         thumbnail_status: {thumbnailStatus}
                         metadata_health: {metadataHealth ? JSON.stringify(metadataHealth) : 'null'}
                     </pre>
@@ -312,258 +265,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                     Dominant colors, embeddings, or thumbnails may not have completed. Re-run analysis will be available once the pipeline finishes.
                                 </div>
                             </>
-                        )}
-                    </div>
-                )}
-                {!suppressAnalysisRunningBanner && evaluationStatus === 'evaluated' && analysisStatus !== 'complete' && (
-                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-sm font-medium text-amber-800">System inconsistency detected</p>
-                        <p className="text-xs text-amber-700 mt-1">The compliance score may be stale. Re-run analysis will be available once the pipeline completes.</p>
-                    </div>
-                )}
-                {!suppressAnalysisRunningBanner && analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic mb-2">Compliance will run once asset processing is complete.</p>
-                        <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs space-y-2">
-                            {['color', 'typography', 'tone', 'imagery'].map((key) => {
-                                const label = key.charAt(0).toUpperCase() + key.slice(1)
-                                return (
-                                    <div key={key}>
-                                        <span className="font-medium text-gray-700">{label}: Analysis pending</span>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    </div>
-                )}
-                {!suppressAnalysisRunningBanner && analysisStatus === 'complete' && evaluationStatus === 'pending' && (
-                    <div className="mb-3 flex items-center gap-2">
-                        <Activity className="h-4 w-4 text-indigo-500 animate-pulse" aria-hidden />
-                        <p className="text-xs text-gray-500 italic">Analyzing brand alignment...</p>
-                        {brandDnaEnabled && (
-                            <button
-                                type="button"
-                                onClick={async () => {
-                                    if (!assetId || rescoreLoading) return
-                                    setRescoreLoading(true)
-                                    try {
-                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                'Accept': 'application/json',
-                                            },
-                                            credentials: 'same-origin',
-                                        })
-                                        const data = await res.json()
-                                        if (data.status === 'queued') {
-                                            setEvaluationStatus('pending')
-                                        }
-                                    } finally {
-                                        setRescoreLoading(false)
-                                    }
-                                }}
-                                disabled={rescoreLoading}
-                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                            >
-                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
-                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                            </button>
-                        )}
-                    </div>
-                )}
-                {analysisStatus === 'complete' && evaluationStatus === 'file_type_unsupported' && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Brand alignment not available for this file type.</p>
-                    </div>
-                )}
-                {analysisStatus === 'complete' && (evaluationStatus === 'not_applicable' || evaluationStatus === 'not_configured') && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Brand DNA not configured.</p>
-                        {brandDnaEnabled && (
-                            <button
-                                type="button"
-                                onClick={async () => {
-                                    if (!assetId || rescoreLoading) return
-                                    setRescoreLoading(true)
-                                    try {
-                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                'Accept': 'application/json',
-                                            },
-                                            credentials: 'same-origin',
-                                        })
-                                        const data = await res.json()
-                                        if (data.status === 'queued') {
-                                            setEvaluationStatus('pending')
-                                        }
-                                    } finally {
-                                        setRescoreLoading(false)
-                                    }
-                                }}
-                                disabled={rescoreLoading}
-                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                            >
-                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
-                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                            </button>
-                        )}
-                    </div>
-                )}
-                {analysisStatus === 'complete' && evaluationStatus === 'incomplete' && (
-                    <div className="mb-3">
-                        <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
-                        <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
-                        {metadataHealth && !metadataHealth.is_complete && (
-                            <div className="mt-2 rounded border border-amber-200 bg-amber-50/80 p-2 text-[11px] text-amber-800">
-                                <p className="font-medium mb-1">Missing for scoring:</p>
-                                <ul className="list-disc list-inside space-y-0.5">
-                                    {!metadataHealth.dominant_colors && <li>Dominant colors</li>}
-                                    {!metadataHealth.embedding && <li>Visual embedding</li>}
-                                    {!metadataHealth.thumbnails && <li>Thumbnails</li>}
-                                    {!metadataHealth.ai_tagging_completed && <li>AI tagging</li>}
-                                    {!metadataHealth.metadata_extracted && <li>Metadata extraction</li>}
-                                    {metadataHealth.preview_generated === false && <li>Preview generation</li>}
-                                </ul>
-                                <p className="mt-2 text-amber-700">Re-run Analysis regenerates this data. Recalculate Score alone will not fix it.</p>
-                            </div>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-2">
-                            {!metadataHealth?.is_complete && (
-                                <button
-                                    type="button"
-                                    onClick={handleReanalyze}
-                                    disabled={reanalyzeLoading}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                                >
-                                    {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
-                                </button>
-                            )}
-                            {brandDnaEnabled && (
-                                <button
-                                    type="button"
-                                    onClick={async () => {
-                                        if (!assetId || rescoreLoading) return
-                                        setRescoreLoading(true)
-                                        try {
-                                            const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                                method: 'POST',
-                                                headers: {
-                                                    'Content-Type': 'application/json',
-                                                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                    'Accept': 'application/json',
-                                                },
-                                                credentials: 'same-origin',
-                                            })
-                                            const data = await res.json()
-                                            if (data.status === 'queued') {
-                                                setEvaluationStatus('pending')
-                                            }
-                                        } finally {
-                                            setRescoreLoading(false)
-                                        }
-                                    }}
-                                    disabled={rescoreLoading}
-                                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                                >
-                                    <ArrowPathRoundedSquareIcon className="h-3 w-3" />
-                                    {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                )}
-                {analysisStatus === 'complete' && evaluationStatus === 'evaluated' && complianceScore != null && (
-                    <div className="mb-3">
-                        <button
-                            type="button"
-                            onClick={() => setComplianceExpanded(!complianceExpanded)}
-                            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset cursor-pointer hover:opacity-90 ${getComplianceBadgeClass(complianceScore)}`}
-                        >
-                            On-Brand Score: {complianceScore}%
-                            <span className="text-[10px] opacity-75">{complianceExpanded ? '▼' : '▶'}</span>
-                        </button>
-                        <div className="mt-1 flex items-center gap-2">
-                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                                alignmentConfidence === 'high' ? 'bg-green-100 text-green-800' :
-                                alignmentConfidence === 'medium' ? 'bg-amber-100 text-amber-800' :
-                                'bg-gray-100 text-gray-600'
-                            }`}>
-                                Confidence: {alignmentConfidence.charAt(0).toUpperCase() + alignmentConfidence.slice(1)}
-                            </span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-gray-500">
-                            This score reflects how well this execution aligns with your active Brand DNA scoring rules.
-                            {complianceBreakdown && (() => {
-                                const evaluated = ['color', 'typography', 'tone', 'imagery'].filter((k) => complianceBreakdown[k]?.status === 'scored')
-                                if (evaluated.length === 1) return ` Based on ${evaluated[0].charAt(0).toUpperCase() + evaluated[0].slice(1)} only.`
-                                if (evaluated.length > 1) return ` Based on ${evaluated.map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join(', ')}.`
-                                return ''
-                            })()}
-                        </p>
-                        {complianceExpanded && complianceBreakdown && (
-                            <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs space-y-2">
-                                {['color', 'typography', 'tone', 'imagery'].map((key) => {
-                                    const item = complianceBreakdown[key]
-                                    if (!item) return null
-                                    const status = item.status ?? 'scored'
-                                    const score = item.score ?? item
-                                    const label = key.charAt(0).toUpperCase() + key.slice(1)
-                                    const isPending = status === 'pending_processing' || status === 'not_configured'
-                                    const pendingLabels = {
-                                        imagery: 'Analysis pending',
-                                        typography: 'Analysis pending',
-                                        tone: 'Analysis pending',
-                                        color: 'Analysis pending',
-                                    }
-                                    const displayValue = isPending && pendingLabels[key]
-                                        ? pendingLabels[key]
-                                        : `${score}%`
-                                    return (
-                                        <div key={key}>
-                                            <span className="font-medium text-gray-700">{label}: {displayValue}</span>
-                                            {item.reason && !isPending && <p className="mt-0.5 text-gray-600">{item.reason}</p>}
-                                        </div>
-                                    )
-                                })}
-                                {brandDnaEnabled && (
-                                    <div className="pt-2 border-t border-gray-200">
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                if (!assetId || rescoreLoading) return
-                                                setRescoreLoading(true)
-                                                try {
-                                                    const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Content-Type': 'application/json',
-                                                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                            'Accept': 'application/json',
-                                                        },
-                                                        credentials: 'same-origin',
-                                                    })
-                                                    const data = await res.json()
-                                                    if (data.status === 'queued') {
-                                                        setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
-                                                    }
-                                                } finally {
-                                                    setRescoreLoading(false)
-                                                }
-                                            }}
-                                            disabled={rescoreLoading}
-                                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                                        >
-                                            <ArrowPathRoundedSquareIcon className="h-3.5 w-3.5" />
-                                            {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
                         )}
                     </div>
                 )}
@@ -631,7 +332,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
 
                             const renderField = (field) => {
                                 const fieldHasValue = hasValue(field.current_value)
-                            const widget = resolve(field, CONTEXT.DISPLAY)
+                                const widget = resolve(field, CONTEXT.DISPLAY)
                             const isRating = widget === WIDGET.RATING
                             const isDominantColors = widget === WIDGET.DOMINANT_COLORS
                             // For dominant_colors, check if we have a valid array

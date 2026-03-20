@@ -7,7 +7,7 @@ namespace App\Services\Color;
  *
  * Provides perceptual hue clusters for color filtering.
  * Max 18 clusters. Assignment via ΔE to LAB centroids.
- * Used for filtering only; BrandComplianceService scoring remains LAB ΔE based.
+ * Used for filtering and UI facets; EBI does not use hue clusters for numeric scoring.
  */
 class HueClusterService
 {
@@ -50,7 +50,7 @@ class HueClusterService
     /**
      * Assign cluster from hex. Converts hex → LAB, computes ΔE to each centroid, returns key if within threshold.
      *
-     * @param string $hex Hex color (#RRGGBB or RRGGBB)
+     * @param  string  $hex  Hex color (#RRGGBB or RRGGBB)
      * @return string|null Cluster key or null if no match within threshold
      */
     public function assignClusterFromHex(string $hex): ?string
@@ -66,7 +66,7 @@ class HueClusterService
     /**
      * Assign cluster from LAB. Computes ΔE to each centroid, returns key if within threshold.
      *
-     * @param array{0: float, 1: float, 2: float} $lab [L, a, b]
+     * @param  array{0: float, 1: float, 2: float}  $lab  [L, a, b]
      * @return string|null Cluster key or null if no match within threshold
      */
     public function assignClusterFromLab(array $lab): ?string
@@ -95,7 +95,7 @@ class HueClusterService
     /**
      * Get cluster metadata by key.
      *
-     * @param string $key Cluster key
+     * @param  string  $key  Cluster key
      * @return array{key: string, label: string, lab_centroid: array, display_hex: string, threshold_deltaE: int}|null
      */
     public function getClusterMeta(string $key): ?array
@@ -134,7 +134,7 @@ class HueClusterService
     {
         $hex = ltrim(trim($hex), '#');
         if (strlen($hex) === 3) {
-            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+            $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
         }
         if (strlen($hex) !== 6 || ! ctype_xdigit($hex)) {
             return null;

@@ -13,6 +13,7 @@
  */
 import { useState } from 'react'
 import JsonView from '@uiw/react-json-view'
+import { Link } from '@inertiajs/react'
 import {
     XMarkIcon,
     ArrowPathIcon,
@@ -20,6 +21,7 @@ import {
     WrenchScrewdriverIcon,
     ArrowDownTrayIcon,
     InformationCircleIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
@@ -179,6 +181,15 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         <span className="text-slate-600">{versions?.length ?? 0} version(s)</span>
                                     </div>
                                 )}
+                            </div>
+                            <div className="pt-2">
+                                <Link
+                                    href={`/app/admin/brand-intelligence/assets/${asset?.id}`}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100"
+                                >
+                                    <SparklesIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                    Brand Intelligence
+                                </Link>
                             </div>
                             <div className="flex flex-wrap gap-2 pt-4">
                                 <button

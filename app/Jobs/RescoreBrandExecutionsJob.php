@@ -6,7 +6,7 @@ use App\Enums\AssetType;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandComplianceAggregate;
-use App\Services\BrandDNA\BrandComplianceService;
+use App\Services\BrandIntelligence\BrandIntelligenceEngine;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,6 +23,7 @@ class RescoreBrandExecutionsJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     private const HIGH_SCORE_THRESHOLD = 85;
+
     private const LOW_SCORE_THRESHOLD = 60;
 
     protected int $brandId;
@@ -32,7 +33,7 @@ class RescoreBrandExecutionsJob implements ShouldQueue
         $this->brandId = $brandId;
     }
 
-    public function handle(BrandComplianceService $complianceService): void
+    public function handle(BrandIntelligenceEngine $intelligenceEngine): void
     {
         $brand = Brand::with('brandModel')->find($this->brandId);
         if (! $brand) {
@@ -45,6 +46,7 @@ class RescoreBrandExecutionsJob implements ShouldQueue
         $brandModel = $brand->brandModel;
         if (! $brandModel || ! $brandModel->is_enabled || ! $brandModel->activeVersion) {
             Log::info('[RescoreBrandExecutionsJob] Brand model not ready for scoring', ['brand_id' => $this->brandId]);
+
             return;
         }
 
@@ -55,6 +57,7 @@ class RescoreBrandExecutionsJob implements ShouldQueue
 
         if (empty($deliverableCategoryIds)) {
             $this->updateAggregates($brand, []);
+
             return;
         }
 
@@ -65,7 +68,7 @@ class RescoreBrandExecutionsJob implements ShouldQueue
             if (! $categoryId || ! in_array((int) $categoryId, $deliverableCategoryIds, true)) {
                 continue;
             }
-            $result = $complianceService->scoreAsset($asset, $brand);
+            $result = $intelligenceEngine->scoreAsset($asset);
             if ($result !== null) {
                 $scores[] = $result['overall_score'];
             }

@@ -25,32 +25,43 @@ use Illuminate\Support\Facades\DB;
 class AssetSortService
 {
     public const SORT_FEATURED = 'featured';
+
     public const SORT_CREATED = 'created';
+
     public const SORT_QUALITY = 'quality';
+
     public const SORT_MODIFIED = 'modified';
+
     public const SORT_ALPHABETICAL = 'alphabetical';
+
     public const SORT_MOST_DOWNLOADED = 'most_downloaded';
+
     public const SORT_MOST_VIEWED = 'most_viewed';
+
     public const SORT_TRENDING = 'trending';
+
     public const SORT_COMPLIANCE_HIGH = 'compliance_high';
+
     public const SORT_COMPLIANCE_LOW = 'compliance_low';
 
     /** @deprecated Use SORT_FEATURED; normalized from request for backward compatibility */
     public const SORT_STARRED = 'starred';
 
     public const DIRECTION_ASC = 'asc';
+
     public const DIRECTION_DESC = 'desc';
 
     /** Default sort when none specified. Use everywhere (controllers, UI, reset) so they never drift. */
     public const DEFAULT_SORT = self::SORT_FEATURED;
+
     public const DEFAULT_DIRECTION = self::DIRECTION_DESC;
 
     /**
      * Apply sort to the asset query. Call after scoping, search, and filters; before pagination.
      *
-     * @param Builder $query Asset query (assets table; metadata JSON column)
-     * @param string $sort One of: featured, created, quality, modified, alphabetical (starred normalized to featured)
-     * @param string $sortDirection asc | desc; applies to primary sort for created/modified, secondary for featured/quality
+     * @param  Builder  $query  Asset query (assets table; metadata JSON column)
+     * @param  string  $sort  One of: featured, created, quality, modified, alphabetical (starred normalized to featured)
+     * @param  string  $sortDirection  asc | desc; applies to primary sort for created/modified, secondary for featured/quality
      */
     public function applySort(Builder $query, string $sort, string $sortDirection = self::DIRECTION_DESC): void
     {
@@ -59,46 +70,55 @@ class AssetSortService
 
         if ($sort === self::SORT_FEATURED) {
             $this->applyFeaturedSort($query, $direction, $driver);
+
             return;
         }
 
         if ($sort === self::SORT_QUALITY) {
             $this->applyQualitySort($query, $direction, $driver);
+
             return;
         }
 
         if ($sort === self::SORT_MODIFIED) {
             $this->applyModifiedSort($query, $direction);
+
             return;
         }
 
         if ($sort === self::SORT_ALPHABETICAL) {
             $this->applyAlphabeticalSort($query, $direction);
+
             return;
         }
 
         if ($sort === self::SORT_COMPLIANCE_HIGH) {
             $this->applyComplianceSort($query, self::DIRECTION_DESC);
+
             return;
         }
 
         if ($sort === self::SORT_COMPLIANCE_LOW) {
             $this->applyComplianceSort($query, self::DIRECTION_ASC);
+
             return;
         }
 
         if ($sort === self::SORT_MOST_DOWNLOADED) {
             $this->applyMetricCountSort($query, MetricType::DOWNLOAD, $direction);
+
             return;
         }
 
         if ($sort === self::SORT_MOST_VIEWED) {
             $this->applyMetricCountSort($query, MetricType::VIEW, $direction);
+
             return;
         }
 
         if ($sort === self::SORT_TRENDING) {
             $this->applyTrendingSort($query, $direction);
+
             return;
         }
 
@@ -111,7 +131,7 @@ class AssetSortService
      */
     private function applyMetricCountSort(Builder $query, MetricType $metricType, string $direction): void
     {
-        $alias = 'am_' . $metricType->value . '_sort';
+        $alias = 'am_'.$metricType->value.'_sort';
         $query->leftJoinSub(
             DB::table('asset_metrics')
                 ->select('asset_id', DB::raw('COUNT(*) as metric_count'))
@@ -138,9 +158,9 @@ class AssetSortService
         $cutoff = now()->subDays(14)->toDateTimeString();
 
         if ($driver === 'pgsql') {
-            $decayExpr = "SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))";
+            $decayExpr = 'SUM(EXP(-0.1 * EXTRACT(EPOCH FROM (NOW() - asset_metrics.created_at)) / 86400))';
         } else {
-            $decayExpr = "SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))";
+            $decayExpr = 'SUM(EXP(-0.1 * DATEDIFF(NOW(), asset_metrics.created_at)))';
         }
 
         $query->leftJoinSub(
@@ -158,21 +178,22 @@ class AssetSortService
     }
 
     /**
-     * Compliance: sort by brand_compliance_scores.overall_score. Requires left join.
-     * Skips join if already present (e.g. from compliance filter scope).
+     * Brand alignment sort: latest {@see \App\Models\BrandIntelligenceScore} per asset (execution_id null).
      */
     private function applyComplianceSort(Builder $query, string $direction): void
     {
         $joins = $query->getQuery()->joins ?? [];
-        $hasBcs = collect($joins)->contains(fn ($j) => ($j->table ?? '') === 'brand_compliance_scores');
-        if (!$hasBcs) {
-            $query->leftJoin('brand_compliance_scores', function ($join) {
-                $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
-                    ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+        $hasBis = collect($joins)->contains(fn ($j) => str_contains((string) ($j->table ?? ''), 'brand_intelligence_scores'));
+        if (! $hasBis) {
+            $query->leftJoin('brand_intelligence_scores as bis_sort', function ($join) {
+                $join->on('bis_sort.asset_id', '=', 'assets.id')
+                    ->whereColumn('bis_sort.brand_id', 'assets.brand_id')
+                    ->whereNull('bis_sort.execution_id')
+                    ->whereRaw('bis_sort.id = (SELECT MAX(bis2.id) FROM brand_intelligence_scores bis2 WHERE bis2.asset_id = assets.id AND bis2.brand_id = assets.brand_id AND bis2.execution_id IS NULL)');
             });
         }
-        $query->orderByRaw('brand_compliance_scores.overall_score IS NULL ' . ($direction === self::DIRECTION_DESC ? 'ASC' : 'DESC'));
-        $query->orderBy('brand_compliance_scores.overall_score', $direction);
+        $query->orderByRaw('bis_sort.overall_score IS NULL '.($direction === self::DIRECTION_DESC ? 'ASC' : 'DESC'));
+        $query->orderBy('bis_sort.overall_score', $direction);
         $query->orderBy('assets.created_at', $direction);
     }
 
@@ -199,11 +220,13 @@ class AssetSortService
         if ($driver === 'pgsql') {
             $fromMeta = "(metadata->>'starred')::text IN ('true', '1', 'yes')";
             $fallback = "(SELECT CASE WHEN (am.value_json)::text IN ('true', 't', '1') OR LOWER(TRIM((am.value_json)::text, '\"')) IN ('true', '1', 'yes') THEN 1 ELSE 0 END FROM asset_metadata am INNER JOIN metadata_fields mf ON {$joinWhere} {$order})";
+
             return "CASE WHEN {$fromMeta} OR ({$fallback}) = 1 THEN 1 ELSE 0 END DESC";
         }
 
         $fromMeta = "JSON_EXTRACT(assets.metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(assets.metadata, '$.starred')) IN ('true', '1', 'yes')";
         $fallback = "(SELECT CASE WHEN JSON_UNQUOTE(am.value_json) IN ('true', '1', 'yes') THEN 1 ELSE 0 END FROM asset_metadata am INNER JOIN metadata_fields mf ON {$joinWhere} {$order})";
+
         return "CASE WHEN {$fromMeta} OR {$fallback} = 1 THEN 1 ELSE 0 END DESC";
     }
 
@@ -263,6 +286,7 @@ class AssetSortService
         if ($sort === self::SORT_STARRED) {
             return self::SORT_FEATURED;
         }
+
         return in_array($sort, $allowed, true) ? $sort : self::DEFAULT_SORT;
     }
 
@@ -272,6 +296,7 @@ class AssetSortService
     public function normalizeSortDirection(?string $sortDirection): string
     {
         $d = $sortDirection ? strtolower(trim($sortDirection)) : '';
+
         return $d === self::DIRECTION_ASC ? self::DIRECTION_ASC : self::DEFAULT_DIRECTION;
     }
 }

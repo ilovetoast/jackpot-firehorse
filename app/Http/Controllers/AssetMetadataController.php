@@ -20,11 +20,11 @@ use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
-use App\Jobs\ScoreAssetComplianceJob;
+use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
-use App\Models\BrandComplianceScore;
+use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
@@ -263,7 +263,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset);
 
         return response()->json(['message' => 'Suggestion approved']);
     }
@@ -400,7 +400,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset);
 
         return response()->json(['message' => 'Suggestion edited and accepted']);
     }
@@ -1031,28 +1031,7 @@ class AssetMetadataController extends Controller
         // Calculate pending metadata count (unique fields with pending metadata)
         $pendingMetadataCount = count($pendingFieldIds);
 
-        // Brand Compliance score (if Brand DNA enabled)
-        $complianceScore = null;
-        $complianceBreakdown = null;
-        $evaluationStatus = 'pending';
-        $brandDnaEnabled = false;
-        $alignmentConfidence = 'low';
-        if ($asset->brand_id) {
-            $brandModel = $brand->brandModel;
-            $brandDnaEnabled = $brandModel && $brandModel->is_enabled && $brandModel->activeVersion !== null;
-            $score = \App\Models\BrandComplianceScore::where('brand_id', $asset->brand_id)
-                ->where('asset_id', $asset->id)
-                ->first();
-            if ($score) {
-                $complianceScore = $score->overall_score;
-                $complianceBreakdown = $score->breakdown_payload;
-                $evaluationStatus = $score->evaluation_status ?? 'pending';
-                $alignmentConfidence = $score->alignment_confidence ?? 'low';
-            } elseif (! $brandDnaEnabled) {
-                // No score row and Brand DNA disabled: nothing to evaluate
-                $evaluationStatus = 'not_applicable';
-            }
-        }
+        $brandDnaEnabled = $asset->brand_id && $brand->brandModel && $brand->brandModel->is_enabled && $brand->brandModel->activeVersion !== null;
 
         // Metadata health: surface missing system metadata for recovery UI
         $metadata = $asset->metadata ?? [];
@@ -1075,7 +1054,7 @@ class AssetMetadataController extends Controller
             'metadata_extracted' => $hasMetadataExtracted,
             'preview_generated' => $hasPreviewGenerated,
         ];
-        // Matches BrandComplianceService::isImageAnalysisReady — dominant_hue_group is a filter facet, not a scoring gate
+        // dominant_hue_group is a filter facet, not a scoring gate
         $metadataHealth['is_complete'] = $hasDominantColors && $hasEmbedding
             && $thumbnailComplete && $hasAiTaggingCompleted && $hasMetadataExtracted && $hasPreviewGenerated;
 
@@ -1097,10 +1076,6 @@ class AssetMetadataController extends Controller
             'approval_required' => $approvalRequired,
             'approver_capable' => $approverCapable,
             'pending_metadata_count' => $pendingMetadataCount,
-            'compliance_score' => $complianceScore,
-            'compliance_breakdown' => $complianceBreakdown,
-            'evaluation_status' => $evaluationStatus,
-            'alignment_confidence' => $alignmentConfidence,
             'brand_dna_enabled' => $brandDnaEnabled,
             'metadata_health' => $metadataHealth,
             'analysis_status' => $asset->analysis_status ?? 'uploading',
@@ -1121,6 +1096,14 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
+        $this->authorize('view', $asset);
+
+        // Clear idempotent rows so re-score always runs; forceRun bypasses category EBI-off for manual runs.
+        BrandIntelligenceScore::where('asset_id', $asset->id)
+            ->where('brand_id', $asset->brand_id)
+            ->whereNull('execution_id')
+            ->delete();
+
         try {
             ActivityRecorder::logAsset(
                 $asset,
@@ -1135,9 +1118,34 @@ class AssetMetadataController extends Controller
             ]);
         }
 
-        ScoreAssetComplianceJob::dispatch($asset->id);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset, true);
 
         return response()->json(['status' => 'queued']);
+    }
+
+    /**
+     * Latest Brand Intelligence payload for the asset drawer (poll after rescore without full page reload).
+     * GET /assets/{asset}/brand-intelligence
+     */
+    public function brandIntelligence(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $fresh = Asset::query()
+            ->whereKey($asset->id)
+            ->with('latestBrandIntelligenceScore')
+            ->firstOrFail();
+
+        return response()->json([
+            'brand_intelligence' => $fresh->brandIntelligencePayloadForFrontend(),
+        ]);
     }
 
     /**
@@ -1159,9 +1167,12 @@ class AssetMetadataController extends Controller
         $this->authorize('view', $asset);
 
         // Reset analysis_status so pipeline chain runs from the start
-        // Clear existing BrandComplianceScore (and debug_snapshot)
+        // Clear existing Brand Intelligence asset score rows (legacy compliance table retired)
         // Reset thumbnail_status so GenerateThumbnailsJob will run (it skips when COMPLETED)
-        BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $asset->brand_id)->delete();
+        BrandIntelligenceScore::where('asset_id', $asset->id)
+            ->where('brand_id', $asset->brand_id)
+            ->whereNull('execution_id')
+            ->delete();
         $asset->update([
             'analysis_status' => 'generating_thumbnails',
             'thumbnail_status' => ThumbnailStatus::PENDING,
@@ -2263,7 +2274,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset);
 
         return response()->json(['message' => 'Metadata updated']);
     }

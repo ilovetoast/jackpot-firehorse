@@ -3,12 +3,10 @@
 namespace App\Jobs;
 
 use App\Enums\ThumbnailStatus;
-use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetCompletionService;
 use App\Services\AssetProcessingFailureService;
-use App\Services\BrandDNA\BrandComplianceService;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -74,6 +72,7 @@ class FinalizeAssetJob implements ShouldQueue
                 \App\Services\UploadDiagnosticLogger::jobSkip('FinalizeAssetJob', $asset->id, 'pipeline_not_complete', [
                     'pipeline_status' => $currentVersion->pipeline_status,
                 ]);
+
                 return;
             }
 
@@ -91,7 +90,7 @@ class FinalizeAssetJob implements ShouldQueue
             $preservedKeys = ['category_id', 'metadata_extracted', 'preview_generated', 'approval_status'];
             foreach ($preservedKeys as $key) {
                 $assetVal = $assetMetadata[$key] ?? null;
-                if ($assetVal !== null && $assetVal !== '' && !(is_string($assetVal) && strtolower(trim($assetVal)) === 'null')) {
+                if ($assetVal !== null && $assetVal !== '' && ! (is_string($assetVal) && strtolower(trim($assetVal)) === 'null')) {
                     $metadata[$key] = $assetVal;
                 }
             }
@@ -105,7 +104,7 @@ class FinalizeAssetJob implements ShouldQueue
                 'height' => $currentVersion->height,
             ];
 
-            if (!ImageEmbeddingService::isImageMimeType($currentVersion->mime_type)) {
+            if (! ImageEmbeddingService::isImageMimeType($currentVersion->mime_type)) {
                 $updates['analysis_status'] = 'complete';
             }
 
@@ -114,7 +113,7 @@ class FinalizeAssetJob implements ShouldQueue
         } else {
             // Legacy (Starter): no version - use AssetCompletionService
             $completionService = app(AssetCompletionService::class);
-            if (!$completionService->isComplete($asset)) {
+            if (! $completionService->isComplete($asset)) {
                 Log::warning('[FinalizeAssetJob] Asset completion skipped - criteria not met', [
                     'asset_id' => $asset->id,
                     'status' => $asset->status->value,
@@ -123,13 +122,14 @@ class FinalizeAssetJob implements ShouldQueue
                 \App\Services\UploadDiagnosticLogger::jobSkip('FinalizeAssetJob', $asset->id, 'completion_criteria_not_met', [
                     'status' => $asset->status->value,
                 ]);
+
                 return;
             }
 
             $metadata = $asset->metadata ?? [];
             $metadata['pipeline_completed_at'] = now()->toIso8601String();
             $updates = ['metadata' => $metadata];
-            if (!ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+            if (! ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
                 $updates['analysis_status'] = 'complete';
             }
             $asset->update($updates);
@@ -156,13 +156,7 @@ class FinalizeAssetJob implements ShouldQueue
             ? $asset->thumbnail_status
             : null;
 
-        if ($thumbnailStatus === ThumbnailStatus::SKIPPED) {
-            // File type does not support thumbnails — skip embedding, create clear compliance state
-            $brand = $asset->brand;
-            if ($brand) {
-                app(BrandComplianceService::class)->upsertFileTypeUnsupported($asset, $brand);
-            }
-        } elseif (ImageEmbeddingService::isImageMimeType($mimeForEmbedding)) {
+        if ($thumbnailStatus !== ThumbnailStatus::SKIPPED && ImageEmbeddingService::isImageMimeType($mimeForEmbedding)) {
             GenerateAssetEmbeddingJob::dispatch($asset->id);
         }
     }

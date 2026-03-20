@@ -11,8 +11,8 @@ use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
-use App\Models\BrandComplianceScore;
 use App\Models\Brand;
+use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
@@ -30,10 +30,15 @@ class MetadataHealthAndReanalyzeTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected Category $category;
+
     protected User $user;
+
     protected StorageBucket $bucket;
+
     protected UploadSession $uploadSession;
 
     protected function setUp(): void
@@ -169,7 +174,7 @@ class MetadataHealthAndReanalyzeTest extends TestCase
     }
 
     /**
-     * Re-run analysis clears previous BrandComplianceScore and debug_snapshot.
+     * Re-run analysis clears previous Brand Intelligence asset score rows.
      */
     public function test_reanalysis_clears_previous_score_and_snapshot(): void
     {
@@ -196,27 +201,22 @@ class MetadataHealthAndReanalyzeTest extends TestCase
             ],
         ]);
 
-        BrandComplianceScore::create([
+        BrandIntelligenceScore::create([
             'brand_id' => $this->brand->id,
             'asset_id' => $asset->id,
             'overall_score' => 75,
-            'color_score' => 80,
-            'typography_score' => 70,
-            'tone_score' => 75,
-            'imagery_score' => 72,
-            'evaluation_status' => 'evaluated',
-            'debug_snapshot' => [
-                'analysis_status' => 'complete',
-                'overall_score' => 75,
-                'applicable_dimensions' => ['color' => true, 'imagery' => true],
-            ],
+            'confidence' => 0.8,
+            'level' => 'medium',
+            'breakdown_json' => [],
+            'ai_used' => false,
+            'engine_version' => 'v1_test',
         ]);
 
         $this->actingAs($this->user)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
             ->postJson("/app/assets/{$asset->id}/reanalyze");
 
-        $this->assertDatabaseMissing('brand_compliance_scores', [
+        $this->assertDatabaseMissing('brand_intelligence_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
         ]);

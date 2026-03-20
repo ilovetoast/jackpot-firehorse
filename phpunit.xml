@@ -30,5 +30,6 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="BRAND_INTELLIGENCE_ONLY_MODE" value="false"/>
     </php>
 </phpunit>

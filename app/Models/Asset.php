@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -114,7 +115,7 @@ class Asset extends Model
 
         static::updating(function ($asset) {
             // Only trigger when status is dirty
-            if (!$asset->isDirty('status')) {
+            if (! $asset->isDirty('status')) {
                 return;
             }
 
@@ -124,19 +125,20 @@ class Asset extends Model
 
             // Skip Laravel internal frames, find first userland class
             foreach ($trace as $frame) {
-                if (isset($frame['class']) && !str_starts_with($frame['class'], 'Illuminate\\')) {
+                if (isset($frame['class']) && ! str_starts_with($frame['class'], 'Illuminate\\')) {
                     $callingClass = $frame['class'];
                     break;
                 }
             }
 
-            if (!$callingClass) {
+            if (! $callingClass) {
                 // Couldn't determine calling class - allow but log warning
                 Log::warning('[Asset Status Guard] Could not determine calling class for status mutation', [
                     'asset_id' => $asset->id,
                     'old_status' => $asset->getOriginal('status')?->value ?? 'null',
                     'new_status' => $asset->status->value ?? 'null',
                 ]);
+
                 return;
             }
 
@@ -166,10 +168,10 @@ class Asset extends Model
                 ]);
 
                 throw new \RuntimeException(
-                    "Job class '{$callingClass}' is not authorized to mutate Asset.status. " .
-                    "Asset.status represents visibility only (VISIBLE/HIDDEN/FAILED), not processing progress. " .
-                    "Processing jobs must track progress via thumbnail_status, metadata flags, and pipeline_completed_at. " .
-                    "Only AssetProcessingFailureService is authorized to change Asset.status."
+                    "Job class '{$callingClass}' is not authorized to mutate Asset.status. ".
+                    'Asset.status represents visibility only (VISIBLE/HIDDEN/FAILED), not processing progress. '.
+                    'Processing jobs must track progress via thumbnail_status, metadata flags, and pipeline_completed_at. '.
+                    'Only AssetProcessingFailureService is authorized to change Asset.status.'
                 );
             }
 
@@ -186,7 +188,7 @@ class Asset extends Model
          */
         if (app()->environment(['local', 'testing'])) {
             static::updating(function ($asset) {
-                if (!$asset->isDirty('status')) {
+                if (! $asset->isDirty('status')) {
                     return;
                 }
 
@@ -199,7 +201,7 @@ class Asset extends Model
                 $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 15);
                 $callingClass = null;
                 foreach ($trace as $frame) {
-                    if (isset($frame['class']) && !str_starts_with($frame['class'], 'Illuminate\\')) {
+                    if (isset($frame['class']) && ! str_starts_with($frame['class'], 'Illuminate\\')) {
                         $callingClass = $frame['class'];
                         break;
                     }
@@ -328,9 +330,9 @@ class Asset extends Model
      * All asset URLs flow through AssetDeliveryService. The model delegates only;
      * no URL logic, Storage, CdnUrl, or path construction exists here.
      *
-     * @param string|\App\Support\AssetVariant $variant AssetVariant enum or value
-     * @param string|\App\Support\DeliveryContext $context DeliveryContext enum or value
-     * @param array $options Optional (e.g. ['page' => 1] for PDF_PAGE, ['download' => Download] for PUBLIC_DOWNLOAD)
+     * @param  string|\App\Support\AssetVariant  $variant  AssetVariant enum or value
+     * @param  string|\App\Support\DeliveryContext  $context  DeliveryContext enum or value
+     * @param  array  $options  Optional (e.g. ['page' => 1] for PDF_PAGE, ['download' => Download] for PUBLIC_DOWNLOAD)
      * @return string CDN URL (plain or signed depending on context)
      */
     public function deliveryUrl(string|\App\Support\AssetVariant $variant, string|\App\Support\DeliveryContext $context, array $options = []): string
@@ -363,6 +365,7 @@ class Asset extends Model
     public function getIsCompleteAttribute(): bool
     {
         $completionService = app(\App\Services\AssetCompletionService::class);
+
         return $completionService->isComplete($this);
     }
 
@@ -522,6 +525,7 @@ class Asset extends Model
         if ($driver === 'pgsql') {
             return "metadata->>'category_id'";
         }
+
         return "json_extract(metadata, '$.category_id')";
     }
 
@@ -585,7 +589,7 @@ class Asset extends Model
 
     /**
      * Get the user who approved this asset.
-     * 
+     *
      * Phase AF-1: Asset approval workflow.
      */
     public function approvedBy(): BelongsTo
@@ -634,6 +638,35 @@ class Asset extends Model
     }
 
     /**
+     * Latest Execution-Based Brand Intelligence score for this asset (asset-targeted rows only).
+     */
+    public function latestBrandIntelligenceScore(): HasOne
+    {
+        return $this->hasOne(BrandIntelligenceScore::class)
+            ->whereNull('execution_id')
+            ->latestOfMany('updated_at');
+    }
+
+    /**
+     * Brand Intelligence fields for the asset drawer / grid (excludes raw numeric overall score).
+     *
+     * @return array{level: string|null, confidence: float|null, breakdown_json: array}|null
+     */
+    public function brandIntelligencePayloadForFrontend(): ?array
+    {
+        $row = $this->latestBrandIntelligenceScore;
+        if (! $row) {
+            return null;
+        }
+
+        return [
+            'level' => $row->level,
+            'confidence' => $row->confidence,
+            'breakdown_json' => $row->breakdown_json ?? [],
+        ];
+    }
+
+    /**
      * Get the events for this asset.
      */
     public function events(): HasMany
@@ -670,7 +703,7 @@ class Asset extends Model
      * Get the latest PDF text extraction for this asset for a specific file version.
      * Prevents re-using OCR from an outdated PDF after replacement.
      *
-     * @param string|null $versionId asset_version_id (e.g. currentVersion->id); null = legacy/no version
+     * @param  string|null  $versionId  asset_version_id (e.g. currentVersion->id); null = legacy/no version
      */
     public function getLatestPdfTextExtractionForVersion(?string $versionId = null): ?PdfTextExtraction
     {
@@ -689,7 +722,7 @@ class Asset extends Model
 
     /**
      * Get the download groups that include this asset.
-     * 
+     *
      * Phase 3.1 — Downloader Foundations
      */
     public function downloads(): BelongsToMany
@@ -709,48 +742,51 @@ class Asset extends Model
     }
 
     /**
-     * Scope: join with brand_compliance_scores for compliance-based filtering/sorting.
+     * Scope: join latest Brand Intelligence score row per asset for filtering/sorting.
      */
     public function scopeWithCompliance(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->leftJoin('brand_compliance_scores', function ($join) {
-            $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
-                ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+        $query->leftJoin('brand_intelligence_scores as bis_scope', function ($join) {
+            $join->on('bis_scope.asset_id', '=', 'assets.id')
+                ->whereColumn('bis_scope.brand_id', 'assets.brand_id')
+                ->whereNull('bis_scope.execution_id')
+                ->whereRaw('bis_scope.id = (SELECT MAX(bis2.id) FROM brand_intelligence_scores bis2 WHERE bis2.asset_id = assets.id AND bis2.brand_id = assets.brand_id AND bis2.execution_id IS NULL)');
         });
     }
 
     /** Scope: overall_score >= 85 */
     public function scopeHighAlignment(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 85);
+        $query->withCompliance()->where('bis_scope.overall_score', '>=', 85);
     }
 
     /** Scope: overall_score >= 75 */
     public function scopeStrong(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 75);
+        $query->withCompliance()->where('bis_scope.overall_score', '>=', 75);
     }
 
     /** Scope: overall_score < 60 */
     public function scopeNeedsReview(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->withCompliance()->where('brand_compliance_scores.overall_score', '<', 60);
+        $query->withCompliance()->where('bis_scope.overall_score', '<', 60);
     }
 
     /** Scope: overall_score < 40 */
     public function scopeFailing(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->withCompliance()->where('brand_compliance_scores.overall_score', '<', 40);
+        $query->withCompliance()->where('bis_scope.overall_score', '<', 40);
     }
 
-    /** Scope: no compliance score row */
+    /** Scope: no Brand Intelligence score row */
     public function scopeUnscored(\Illuminate\Database\Eloquent\Builder $query): void
     {
         $query->whereNotExists(function ($q) {
             $q->select(DB::raw(1))
-                ->from('brand_compliance_scores')
-                ->whereColumn('brand_compliance_scores.asset_id', 'assets.id')
-                ->whereColumn('brand_compliance_scores.brand_id', 'assets.brand_id');
+                ->from('brand_intelligence_scores')
+                ->whereColumn('brand_intelligence_scores.asset_id', 'assets.id')
+                ->whereColumn('brand_intelligence_scores.brand_id', 'assets.brand_id')
+                ->whereNull('brand_intelligence_scores.execution_id');
         });
     }
 
@@ -785,6 +821,7 @@ class Asset extends Model
 
     /**
      * Scope: only builder-staged assets (Brand Guidelines reference materials).
+     *
      * @deprecated Prefer scopeReferenceMaterialsOnly for new code.
      */
     public function scopeBuilderStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void
@@ -839,8 +876,6 @@ class Asset extends Model
      * Used for capability-based logic: orientation, resolution_class, dominant_colors
      * can be derived from thumbnails for these types. Does NOT treat PDF/video as true images.
      * AI/EPS (Illustrator, Encapsulated PostScript) produce raster thumbnails via Imagick.
-     *
-     * @return bool
      */
     public function hasRasterThumbnail(): bool
     {
@@ -854,9 +889,7 @@ class Asset extends Model
      * Check if asset supports thumbnail-derived metadata (orientation, resolution_class, dominant_colors).
      *
      * Requires: hasRasterThumbnail() AND thumbnail_status === COMPLETED AND medium thumbnail path exists.
-     * Used by ComputedMetadataService, ColorAnalysisService, DominantColorsExtractor, BrandComplianceService.
-     *
-     * @return bool
+     * Used by ComputedMetadataService, ColorAnalysisService, DominantColorsExtractor.
      */
     public function supportsThumbnailMetadata(): bool
     {
@@ -868,7 +901,7 @@ class Asset extends Model
     /**
      * Get persisted thumbnail dimensions for a style (from metadata, no S3 download).
      *
-     * @param string $style Thumbnail style (e.g. 'medium')
+     * @param  string  $style  Thumbnail style (e.g. 'medium')
      * @return array{width: int|null, height: int|null}|null
      */
     public function thumbnailDimensions(string $style = 'medium'): ?array
@@ -876,14 +909,14 @@ class Asset extends Model
         $dimensions = $this->metadata['thumbnail_dimensions'][$style] ?? null;
 
         // Fallback: check current version metadata (version-aware uploads)
-        if ((!is_array($dimensions) || !isset($dimensions['width'], $dimensions['height'])) && $this->relationLoaded('currentVersion')) {
+        if ((! is_array($dimensions) || ! isset($dimensions['width'], $dimensions['height'])) && $this->relationLoaded('currentVersion')) {
             $version = $this->currentVersion;
             if ($version) {
                 $dimensions = ($version->metadata ?? [])['thumbnail_dimensions'][$style] ?? null;
             }
         }
 
-        if (!is_array($dimensions) || !isset($dimensions['width'], $dimensions['height'])) {
+        if (! is_array($dimensions) || ! isset($dimensions['width'], $dimensions['height'])) {
             return null;
         }
 
@@ -898,12 +931,10 @@ class Asset extends Model
      *
      * Consolidates: supportsThumbnailMetadata, thumbnail_timeout, thumbnail_dimensions.
      * Use this instead of scattered checks to prevent drift.
-     *
-     * @return bool
      */
     public function visualMetadataReady(): bool
     {
-        if (!$this->supportsThumbnailMetadata()) {
+        if (! $this->supportsThumbnailMetadata()) {
             return false;
         }
 
@@ -932,7 +963,7 @@ class Asset extends Model
      * Compute asset health status for Ops/support visibility.
      * Derived from: storage_missing (DEAD), open incidents, visualMetadataReady(), thumbnail_status.
      *
-     * @param string|null $worstIncidentSeverity 'critical'|'error'|'warning' from unresolved incidents
+     * @param  string|null  $worstIncidentSeverity  'critical'|'error'|'warning' from unresolved incidents
      * @return 'healthy'|'warning'|'critical'
      */
     public function computeHealthStatus(?string $worstIncidentSeverity): string
@@ -965,13 +996,13 @@ class Asset extends Model
      * Retrieves the thumbnail path from asset metadata.
      * Thumbnail paths are stored as: metadata['thumbnails'][$style]['path']
      *
-     * @param string $style Thumbnail style (thumb, medium, large)
+     * @param  string  $style  Thumbnail style (thumb, medium, large)
      * @return string|null S3 key path to thumbnail, or null if not found
      */
     public function thumbnailPathForStyle(string $style): ?string
     {
         $metadata = $this->metadata ?? [];
-        
+
         if (isset($metadata['thumbnails'][$style]['path'])) {
             return $metadata['thumbnails'][$style]['path'];
         }
@@ -993,18 +1024,16 @@ class Asset extends Model
      *
      * Categories are stored in asset metadata as category_id (JSON field).
      * This accessor looks up the category based on the ID stored in metadata.
-     *
-     * @return Category|null
      */
     public function getCategoryAttribute(): ?Category
     {
         $metadata = $this->metadata ?? [];
         $categoryId = $metadata['category_id'] ?? null;
-        
-        if (!$categoryId) {
+
+        if (! $categoryId) {
             return null;
         }
-        
+
         // Look up category by ID, scoped to the asset's tenant and brand
         return Category::where('id', $categoryId)
             ->where('tenant_id', $this->tenant_id)
@@ -1026,7 +1055,7 @@ class Asset extends Model
             ? strtolower(pathinfo($version->file_path, PATHINFO_EXTENSION))
             : '';
         $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
-        if (!$isPdf) {
+        if (! $isPdf) {
             return false;
         }
 
@@ -1046,5 +1075,4 @@ class Asset extends Model
 
         return true;
     }
-
 }

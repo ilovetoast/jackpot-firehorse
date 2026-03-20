@@ -13,15 +13,15 @@ use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
-use App\Models\BrandModel;
-use App\Models\BrandModelVersion;
 use App\Models\BrandVisualReference;
 use App\Models\Category;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
-use App\Services\BrandDNA\BrandComplianceService;
+use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\AiMetadataGenerationService;
+use App\Services\BrandIntelligence\BrandIntelligenceEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -32,9 +32,13 @@ class AssetEmbeddingTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected Category $category;
+
     protected User $user;
+
     protected StorageBucket $bucket;
 
     protected function setUp(): void
@@ -77,6 +81,14 @@ class AssetEmbeddingTest extends TestCase
             'status' => StorageBucketStatus::ACTIVE,
             'region' => 'us-east-1',
         ]);
+
+        $meta = $this->createMock(AiMetadataGenerationService::class);
+        $meta->method('fetchThumbnailForVisionAnalysis')->willReturn(null);
+        $this->app->instance(AiMetadataGenerationService::class, $meta);
+
+        $ai = $this->createMock(AIProviderInterface::class);
+        $ai->expects($this->never())->method('analyzeImage');
+        $this->app->instance(AIProviderInterface::class, $ai);
     }
 
     protected function createImageAsset(): Asset
@@ -145,7 +157,7 @@ class AssetEmbeddingTest extends TestCase
     }
 
     /**
-     * Cosine similarity returns expected range (tested via scoreImagerySimilarity).
+     * Cosine similarity maps to reference similarity score (0–100) via Brand Intelligence.
      */
     public function test_cosine_similarity_returns_expected_range(): void
     {
@@ -166,31 +178,13 @@ class AssetEmbeddingTest extends TestCase
             'type' => BrandVisualReference::TYPE_LOGO,
         ]);
 
-        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
-        $version = BrandModelVersion::create([
-            'brand_model_id' => $brandModel->id,
-            'version_number' => 1,
-            'source_type' => 'manual',
-            'model_payload' => [
-                'scoring_rules' => [],
-                'scoring_config' => [
-                    'color_weight' => 0,
-                    'typography_weight' => 0,
-                    'tone_weight' => 0,
-                    'imagery_weight' => 1.0,
-                ],
-            ],
-            'status' => 'active',
-        ]);
-        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
-
-        $service = app(BrandComplianceService::class);
-        $result = $service->scoreAsset($asset, $this->brand);
+        $engine = app(BrandIntelligenceEngine::class);
+        $result = $engine->scoreAsset($asset->fresh());
 
         $this->assertNotNull($result);
-        $imagery = $result['breakdown_payload']['imagery'] ?? null;
-        $this->assertSame('scored', $imagery['status'] ?? null);
-        $this->assertSame(100, $imagery['score'] ?? 0);
+        $ref = $result['breakdown_json']['reference_similarity'] ?? [];
+        $this->assertTrue($ref['used'] ?? false);
+        $this->assertSame(100, $ref['score'] ?? 0);
     }
 
     /**
@@ -216,31 +210,14 @@ class AssetEmbeddingTest extends TestCase
             'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
         ]);
 
-        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
-        $version = BrandModelVersion::create([
-            'brand_model_id' => $brandModel->id,
-            'version_number' => 1,
-            'source_type' => 'manual',
-            'model_payload' => [
-                'scoring_rules' => [],
-                'scoring_config' => [
-                    'color_weight' => 0,
-                    'typography_weight' => 0,
-                    'tone_weight' => 0,
-                    'imagery_weight' => 1.0,
-                ],
-            ],
-            'status' => 'active',
-        ]);
-        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
-
-        $service = app(BrandComplianceService::class);
-        $result = $service->scoreAsset($asset, $this->brand);
+        $engine = app(BrandIntelligenceEngine::class);
+        $result = $engine->scoreAsset($asset->fresh());
 
         $this->assertNotNull($result);
-        $this->assertSame('scored', $result['breakdown_payload']['imagery']['status'] ?? null);
-        $this->assertGreaterThanOrEqual(0, $result['breakdown_payload']['imagery']['score'] ?? -1);
-        $this->assertLessThanOrEqual(100, $result['breakdown_payload']['imagery']['score'] ?? 101);
+        $ref = $result['breakdown_json']['reference_similarity'] ?? [];
+        $this->assertTrue($ref['used'] ?? false);
+        $this->assertGreaterThanOrEqual(0, $ref['score'] ?? -1);
+        $this->assertLessThanOrEqual(100, $ref['score'] ?? 101);
     }
 
     /**
@@ -273,32 +250,13 @@ class AssetEmbeddingTest extends TestCase
             'model' => 'test',
         ]);
 
-        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
-        $version = BrandModelVersion::create([
-            'brand_model_id' => $brandModel->id,
-            'version_number' => 1,
-            'source_type' => 'manual',
-            'model_payload' => [
-                'scoring_rules' => [],
-                'scoring_config' => [
-                    'color_weight' => 0,
-                    'typography_weight' => 0,
-                    'tone_weight' => 0,
-                    'imagery_weight' => 1.0,
-                ],
-            ],
-            'status' => 'active',
-        ]);
-        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
-
-        $service = app(BrandComplianceService::class);
-        $result = $service->scoreAsset($asset, $this->brand);
+        $engine = app(BrandIntelligenceEngine::class);
+        $result = $engine->scoreAsset($asset->fresh());
 
         $this->assertNotNull($result);
-        $imagery = $result['breakdown_payload']['imagery'] ?? null;
-        $this->assertSame('scored', $imagery['status'] ?? null);
-        $this->assertSame(100, $imagery['score'] ?? 0, 'Asset equal to centroid should score 100');
-        $this->assertSame('Visual similarity to brand centroid', $imagery['reason'] ?? null);
+        $ref = $result['breakdown_json']['reference_similarity'] ?? [];
+        $this->assertTrue($ref['used'] ?? false);
+        $this->assertSame(100, $ref['score'] ?? 0);
     }
 
     /**
@@ -335,37 +293,18 @@ class AssetEmbeddingTest extends TestCase
             'model' => 'test',
         ]);
 
-        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
-        $version = BrandModelVersion::create([
-            'brand_model_id' => $brandModel->id,
-            'version_number' => 1,
-            'source_type' => 'manual',
-            'model_payload' => [
-                'scoring_rules' => [],
-                'scoring_config' => [
-                    'color_weight' => 0,
-                    'typography_weight' => 0,
-                    'tone_weight' => 0,
-                    'imagery_weight' => 1.0,
-                ],
-            ],
-            'status' => 'active',
-        ]);
-        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+        $engine = app(BrandIntelligenceEngine::class);
+        $resultTwoRefs = $engine->scoreAsset($asset->fresh());
 
-        $service = app(BrandComplianceService::class);
-        $resultTwoRefs = $service->scoreAsset($asset, $this->brand);
-
-        // Single ref: centroid = ref1, asset = ref1 -> score 100
         BrandVisualReference::where('brand_id', $this->brand->id)
             ->where('type', BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE)
             ->delete();
-        $resultOneRef = $service->scoreAsset($asset, $this->brand);
+        $resultOneRef = $engine->scoreAsset($asset->fresh());
 
         $this->assertNotNull($resultTwoRefs);
         $this->assertNotNull($resultOneRef);
-        $scoreTwoRefs = $resultTwoRefs['breakdown_payload']['imagery']['score'] ?? -1;
-        $scoreOneRef = $resultOneRef['breakdown_payload']['imagery']['score'] ?? -1;
-        $this->assertNotEquals($scoreOneRef, $scoreTwoRefs, 'Centroid of 2 refs should differ from single ref');
+        $scoreTwoRefs = $resultTwoRefs['breakdown_json']['reference_similarity']['score'] ?? -1;
+        $scoreOneRef = $resultOneRef['breakdown_json']['reference_similarity']['score'] ?? -1;
+        $this->assertNotEquals($scoreOneRef, $scoreTwoRefs, 'Reference pool size should change similarity');
     }
 }

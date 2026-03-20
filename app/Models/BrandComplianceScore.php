@@ -6,8 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Brand Compliance Score — deterministic scoring against Brand DNA rules.
- * One row per brand + asset. Upserted on metadata update / AI tagging completion.
+ * @deprecated Table `brand_compliance_scores` is frozen for audit/migration only — do not read or write in application code.
+ *             Use {@see BrandIntelligenceScore} / {@see \App\Services\BrandIntelligence\BrandIntelligenceEngine}.
  */
 class BrandComplianceScore extends Model
 {
