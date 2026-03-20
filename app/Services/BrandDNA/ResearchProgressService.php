@@ -65,6 +65,16 @@ class ResearchProgressService
         $researchFinalized = (bool) ($pipeline['research_finalized'] ?? false);
 
         $runFailed = $pipelineRun && ($pipelineRun->status ?? null) === 'failed';
+
+        // Fresh draft / after "Start over": no PDF, no pipeline run, no snapshot yet — avoid
+        // PipelineFinalizationService default flags showing "Preparing document" complete + fake analyzing.
+        if (! $researchFinalized && ! $hasPdf && ! $pipelineRun && ! $snapshotPersisted) {
+            return [
+                ['key' => 'text_extraction', 'label' => 'Preparing document', 'status' => 'pending', 'percent' => 0],
+                ['key' => 'analyzing', 'label' => 'Analyzing with AI', 'status' => 'pending', 'percent' => 0],
+                ['key' => 'finalizing', 'label' => 'Finalizing insights', 'status' => 'pending', 'percent' => 0],
+            ];
+        }
         $runError = $runFailed ? ($pipelineRun->error_message ?? null) : null;
 
         if ($researchFinalized) {

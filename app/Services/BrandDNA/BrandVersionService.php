@@ -6,6 +6,7 @@ use App\BrandDNA\Builder\BrandGuidelinesBuilderSteps;
 use App\Models\Brand;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
+use App\Models\BrandPipelineRun;
 use App\Support\WebsiteUrlNormalizer;
 use Illuminate\Support\Facades\DB;
 
@@ -89,6 +90,19 @@ class BrandVersionService
     protected function deleteDraftVersionsForModel(BrandModel $brandModel): int
     {
         $drafts = $brandModel->versions()->where('status', 'draft')->get();
+        if ($drafts->isEmpty()) {
+            return 0;
+        }
+
+        $draftIds = $drafts->pluck('id')->all();
+        BrandPipelineRun::whereIn('brand_model_version_id', $draftIds)
+            ->whereIn('status', [BrandPipelineRun::STATUS_PENDING, BrandPipelineRun::STATUS_PROCESSING])
+            ->update([
+                'status' => BrandPipelineRun::STATUS_FAILED,
+                'stage' => BrandPipelineRun::STAGE_FAILED,
+                'error_message' => 'Cancelled (draft reset)',
+            ]);
+
         $count = 0;
         foreach ($drafts as $draft) {
             $draft->delete();

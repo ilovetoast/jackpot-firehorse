@@ -53,6 +53,7 @@ class AnalyticsOverviewController extends Controller
             'ai_effectiveness' => $data['ai_effectiveness'],
             'rights_risk' => $data['rights_risk'],
             'plan' => $data['plan'],
+            'brand_guidelines' => $data['brand_guidelines'],
         ]);
     }
 
@@ -121,7 +122,25 @@ class AnalyticsOverviewController extends Controller
             $aiUsageData = ['tagging' => $usageStatus['tagging'] ?? [], 'suggestions' => $usageStatus['suggestions'] ?? []];
         }
         $metadataAnalytics = $this->metadataAnalytics->getAnalytics($tenant->id, $brand->id, null, null, null, false);
+
+        $brand->loadMissing('brandModel.activeVersion');
+        $brandModel = $brand->brandModel;
+        $hasPublishedGuidelines = $brandModel
+            && $brandModel->is_enabled
+            && $brandModel->active_version_id
+            && $brandModel->activeVersion !== null;
+        $scoringEnabled = (bool) ($brandModel?->brand_dna_scoring_enabled ?? false);
+        $dnaReady = $hasPublishedGuidelines && $scoringEnabled;
+
         return [
+            'brand_guidelines' => [
+                'dna_ready' => $dnaReady,
+                'has_published_guidelines' => $hasPublishedGuidelines,
+                'scoring_enabled' => $scoringEnabled,
+                'research_url' => route('brands.research.show', ['brand' => $brand->id]),
+                'guidelines_url' => route('brands.guidelines.index', ['brand' => $brand->id]),
+                'brand_settings_url' => route('brands.edit', ['brand' => $brand->id]).'?tab=strategy',
+            ],
             'total_assets' => $totalAssets,
             'storage_mb' => $storageMB,
             'max_storage_mb' => $maxStorageMB,

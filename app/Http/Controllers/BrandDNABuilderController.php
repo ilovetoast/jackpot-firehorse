@@ -1067,24 +1067,26 @@ PROMPT;
         $pipelineProcessing = $pipelineRuns->contains(fn ($r) => $r->status === BrandPipelineRun::STATUS_PROCESSING);
 
         $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
-        $latestRun = null;
+        /** Latest run for this draft (PDF-only, website-only, or mixed) — used for progress + errors */
+        $latestRunForDraft = $pipelineRuns->first();
+        $pdfScopedRun = null;
         $pdfState = ['status' => 'pending'];
         if ($guidelinesPdfAsset) {
-            $latestRun = BrandPipelineRun::where('asset_id', $guidelinesPdfAsset->id)
+            $pdfScopedRun = BrandPipelineRun::where('asset_id', $guidelinesPdfAsset->id)
                 ->where('brand_id', $brand->id)
                 ->where('brand_model_version_id', $draft->id)
                 ->latest()
                 ->first();
-            if ($latestRun) {
+            if ($pdfScopedRun) {
                 $pdfState = [
-                    'status' => $latestRun->status,
-                    'run_id' => $latestRun->id,
-                    'stage' => $latestRun->stage,
-                    'extraction_mode' => $latestRun->extraction_mode,
-                    'pages_processed' => (int) ($latestRun->pages_processed ?? 0),
-                    'pages_total' => (int) ($latestRun->pages_total ?? 0),
-                    'progress_percent' => $latestRun->progress_percent,
-                    'error_message' => $latestRun->error_message,
+                    'status' => $pdfScopedRun->status,
+                    'run_id' => $pdfScopedRun->id,
+                    'stage' => $pdfScopedRun->stage,
+                    'extraction_mode' => $pdfScopedRun->extraction_mode,
+                    'pages_processed' => (int) ($pdfScopedRun->pages_processed ?? 0),
+                    'pages_total' => (int) ($pdfScopedRun->pages_total ?? 0),
+                    'progress_percent' => $pdfScopedRun->progress_percent,
+                    'error_message' => $pdfScopedRun->error_message,
                 ];
             } else {
                 $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
@@ -1106,8 +1108,8 @@ PROMPT;
 
         $pdfComplete = ! $hasPdf;
         if ($hasPdf && $guidelinesPdfAsset) {
-            if ($latestRun) {
-                $pdfComplete = in_array($latestRun->status, [BrandPipelineRun::STATUS_COMPLETED, BrandPipelineRun::STATUS_FAILED]);
+            if ($pdfScopedRun) {
+                $pdfComplete = in_array($pdfScopedRun->status, [BrandPipelineRun::STATUS_COMPLETED, BrandPipelineRun::STATUS_FAILED]);
             } else {
                 $extraction = $guidelinesPdfAsset->getLatestPdfTextExtractionForVersion($guidelinesPdfAsset->currentVersion?->id);
                 $pdfComplete = $extraction && ! in_array($extraction->status, ['pending', 'processing']);
@@ -1123,7 +1125,7 @@ PROMPT;
 
         $allSourcesComplete = $pdfComplete && $websiteComplete && $materialsComplete;
         $overallStatus = $allSourcesComplete ? 'completed' : 'processing';
-        if ($latestRun?->status === BrandPipelineRun::STATUS_FAILED) {
+        if ($latestRunForDraft?->status === BrandPipelineRun::STATUS_FAILED) {
             $overallStatus = 'failed';
         }
 
@@ -1145,7 +1147,7 @@ PROMPT;
         $hasWebsiteForState = ! empty(trim((string) $websiteUrlForState));
         $websiteStatusForState = 'pending';
         if ($hasWebsiteForState) {
-            if ($runningSnapshot !== null || ($latestRun && $latestRun->status === BrandPipelineRun::STATUS_PROCESSING)) {
+            if ($runningSnapshot !== null || ($latestRunForDraft && $latestRunForDraft->status === BrandPipelineRun::STATUS_PROCESSING)) {
                 $websiteStatusForState = 'processing';
             } elseif ($latestCompletedSnapshot) {
                 $websiteStatusForState = 'completed';
@@ -1185,11 +1187,11 @@ PROMPT;
                 'pipeline_status' => $finalization['pipeline_status'],
                 'pdf' => $pdfState,
             ],
-            $latestRun,
+            $latestRunForDraft,
             $guidelinesPdfAsset
         );
 
-        [$pipelineError, $pipelineErrorKind, $canRetry] = $this->detectPipelineError($latestRun);
+        [$pipelineError, $pipelineErrorKind, $canRetry] = $this->detectPipelineError($latestRunForDraft);
 
         return response()->json([
             'processing_progress' => $processingProgress,

@@ -10,10 +10,10 @@ import {
     BoltIcon,
     SparklesIcon,
     ChartBarIcon,
-    CheckCircleIcon,
     ExclamationTriangleIcon,
     ShieldCheckIcon,
     ArrowRightIcon,
+    DocumentTextIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AnalyticsOverview({
@@ -24,6 +24,7 @@ export default function AnalyticsOverview({
     ai_effectiveness = {},
     rights_risk = {},
     plan = {},
+    brand_guidelines = {},
 }) {
     const [suggestionsModalOpen, setSuggestionsModalOpen] = useState(false)
 
@@ -101,9 +102,104 @@ export default function AnalyticsOverview({
     const coverage = metadata_coverage
     const lowestCoverage = coverage?.lowest_coverage_fields?.slice(0, 5) ?? []
 
+    const g = brand_guidelines || {}
+    const dnaReady = Boolean(g.dna_ready)
+    const hasPublished = Boolean(g.has_published_guidelines)
+    const scoringOn = Boolean(g.scoring_enabled)
+
     return (
         <InsightsLayout title="Insights Overview" activeSection="overview">
             <div className="space-y-8 animate-fadeInUp-d1">
+                {/* Brand guidelines — always surface: scoring + generative AI depend on published DNA */}
+                <section
+                    className={`rounded-xl border p-4 sm:p-5 ${
+                        dnaReady
+                            ? 'border-emerald-200 bg-emerald-50/60'
+                            : 'border-amber-200 bg-amber-50/90'
+                    }`}
+                    aria-labelledby="insights-brand-guidelines-heading"
+                >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3 min-w-0">
+                            <div
+                                className={`flex-shrink-0 rounded-lg p-2.5 ${
+                                    dnaReady ? 'bg-emerald-100' : 'bg-amber-100'
+                                }`}
+                            >
+                                <DocumentTextIcon
+                                    className={`h-6 w-6 ${dnaReady ? 'text-emerald-700' : 'text-amber-800'}`}
+                                    aria-hidden
+                                />
+                            </div>
+                            <div className="min-w-0">
+                                <h2
+                                    id="insights-brand-guidelines-heading"
+                                    className="text-base font-semibold text-gray-900"
+                                >
+                                    {dnaReady ? 'Brand guidelines are active' : 'Set up brand guidelines for full Insights'}
+                                </h2>
+                                <p className="mt-1.5 text-sm text-gray-700 leading-relaxed">
+                                    {dnaReady ? (
+                                        <>
+                                            Your published brand DNA powers{' '}
+                                            <span className="font-medium">brand scoring</span>,{' '}
+                                            <span className="font-medium">generative AI</span> (tagging &amp; suggestions),
+                                            and alignment features. Keep guidelines up to date as your brand evolves.
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="font-medium">Brand scoring</span> and{' '}
+                                            <span className="font-medium">generative AI</span> need a completed, published
+                                            brand guidelines model. Finish research → review → build → publish so we can
+                                            score assets and personalize AI to your brand.
+                                        </>
+                                    )}
+                                </p>
+                                {!dnaReady && hasPublished && !scoringOn && (
+                                    <p className="mt-2 text-sm text-amber-900/90">
+                                        Published guidelines found, but{' '}
+                                        <span className="font-medium">brand DNA scoring is off</span>. Turn it on in
+                                        Brand Settings (Strategy) so scoring and AI can use your DNA.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2 sm:flex-shrink-0 w-full sm:w-auto">
+                            {!dnaReady && (
+                                <Link
+                                    href={g.research_url || '#'}
+                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                >
+                                    <SparklesIcon className="h-5 w-5" aria-hidden />
+                                    {hasPublished ? 'Update brand guidelines' : 'Start brand guidelines'}
+                                    <ArrowRightIcon className="h-4 w-4" aria-hidden />
+                                </Link>
+                            )}
+                            {(dnaReady || hasPublished) && g.guidelines_url && (
+                                <Link
+                                    href={g.guidelines_url}
+                                    className={`inline-flex justify-center items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm ${
+                                        dnaReady
+                                            ? 'bg-white text-indigo-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-50'
+                                            : 'bg-white/80 text-gray-800 ring-1 ring-inset ring-amber-200 hover:bg-white'
+                                    }`}
+                                >
+                                    View guidelines
+                                    <ArrowRightIcon className="h-4 w-4" aria-hidden />
+                                </Link>
+                            )}
+                            {!dnaReady && hasPublished && !scoringOn && g.brand_settings_url && (
+                                <Link
+                                    href={g.brand_settings_url}
+                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-amber-300 hover:bg-amber-50"
+                                >
+                                    Brand settings (Strategy)
+                                </Link>
+                            )}
+                        </div>
+                    </div>
+                </section>
+
                 {/* Top metric cards */}
                 <section>
                     <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">

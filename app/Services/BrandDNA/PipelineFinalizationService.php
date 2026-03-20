@@ -23,8 +23,9 @@ class PipelineFinalizationService
         bool $hasSocialUrls,
         int $brandMaterialCount
     ): array {
+        // Default false: no PDF / no run yet must not imply "text extraction done" (breaks ResearchProgressService UI).
         $status = [
-            'text_extraction_complete' => true,
+            'text_extraction_complete' => false,
             'snapshot_persisted' => false,
             'suggestions_ready' => false,
             'coherence_ready' => false,
@@ -110,6 +111,11 @@ class PipelineFinalizationService
             && $runningSnapshot === null;
 
         $status['research_finalized'] = $researchFinalized;
+
+        // No PDF: document-prep step is N/A — mark complete once we have any snapshot (e.g. website-only).
+        if (! $guidelinesPdfAsset && ($status['snapshot_persisted'] ?? false)) {
+            $status['text_extraction_complete'] = true;
+        }
 
         Log::channel('pipeline')->info('[PipelineFinalizationService] Progression gate', [
             'event' => $researchFinalized ? 'GATE_ALLOW' : 'GATE_BLOCK',

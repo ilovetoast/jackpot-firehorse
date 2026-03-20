@@ -849,8 +849,9 @@ export default function Research({
                                     )
                                 })()}
 
-                                {/* Live pipeline (stages + enrichment) from research-insights */}
-                                {!isFinalized && pipelineLive?.processing_progress?.stages?.length > 0 && (
+                                {/* Live pipeline — hide when all stages still pending (idle / after Start over) */}
+                                {!isFinalized && pipelineLive?.processing_progress?.stages?.length > 0
+                                    && pipelineLive.processing_progress.stages.some((s) => s.status !== 'pending') && (
                                     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
                                         <div className="flex items-center justify-between gap-2">
                                             <p className="text-xs font-medium text-white/50 uppercase tracking-wider">Live pipeline</p>
