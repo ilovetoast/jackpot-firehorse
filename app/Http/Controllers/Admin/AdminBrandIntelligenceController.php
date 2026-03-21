@@ -176,7 +176,7 @@ class AdminBrandIntelligenceController extends Controller
         $this->authorizeAdmin();
 
         $assetModel = Asset::withTrashed()
-            ->with(['brand', 'category', 'latestBrandIntelligenceScore'])
+            ->with(['brand', 'latestBrandIntelligenceScore'])
             ->findOrFail($asset);
 
         if (! $request->boolean('bypass_category_ebi')) {

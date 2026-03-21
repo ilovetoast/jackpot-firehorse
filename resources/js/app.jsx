@@ -1,4 +1,5 @@
 import './bootstrap'
+import './inertiaGlobalErrorHandling'
 import '../css/app.css'
 import { initPerformanceTracking } from './utils/performanceTracking'
 
@@ -6,9 +7,8 @@ initPerformanceTracking()
 
 import { createInertiaApp, router } from '@inertiajs/react'
 import { removeWorkspaceSwitchingOverlay } from './utils/workspaceSwitchOverlay'
-import { parsePermissionDeniedHtml } from './utils/parsePermissionDeniedHtml'
-import { resolvePermissionTheme } from './utils/resolvePermissionTheme'
 import PermissionDeniedHost from './Components/PermissionDeniedHost'
+import GlobalErrorDialog from './Components/GlobalErrorDialog'
 
 // Grid timing: record visit start for navigation-to-render diagnostic
 router.on('start', () => {
@@ -22,49 +22,7 @@ router.on('finish', () => {
     removeWorkspaceSwitchingOverlay()
 })
 
-// Logged-in 403 (HTML/JSON non-Inertia response): show in-app modal instead of Inertia's full-screen error
-if (typeof document !== 'undefined') {
-    document.addEventListener('inertia:invalid', (event) => {
-        const res = event.detail.response
-        if (!res || res.status !== 403) return
-
-        let user = null
-        try {
-            user = router.page?.props?.auth?.user
-        } catch {
-            /* ignore */
-        }
-        if (!user) return
-
-        event.preventDefault()
-
-        const raw = res.data
-        let title = 'Access denied'
-        let message = 'You do not have permission to perform this action.'
-
-        if (typeof raw === 'string' && raw.includes('<')) {
-            const parsed = parsePermissionDeniedHtml(raw)
-            title = parsed.title
-            message = parsed.message
-        } else if (raw && typeof raw === 'object') {
-            if (raw.message) message = String(raw.message)
-            if (raw.title) title = String(raw.title)
-        } else if (typeof raw === 'string' && raw.trim().length) {
-            message = raw.trim()
-        }
-
-        const theme = resolvePermissionTheme(
-            router.page?.url || '',
-            router.page?.props?.auth?.activeBrand
-        )
-
-        window.dispatchEvent(
-            new CustomEvent('jackpot:permission-denied', {
-                detail: { title, message, theme, source: 'inertia' },
-            })
-        )
-    })
-}
+// Logged-in 403 on inertia:invalid is handled in inertiaGlobalErrorHandling.js
 
 // Full page reload: `finish` may not run on first paint — hide overlay after shell is interactive (fallback if still visible)
 if (typeof document !== 'undefined') {
@@ -139,6 +97,7 @@ createInertiaApp({
             return (props) => (
                 <>
                     <PageComponent {...props} />
+                    <GlobalErrorDialog />
                     <PermissionDeniedHost />
                 </>
             )
@@ -155,6 +114,7 @@ createInertiaApp({
                 <FlashMessage />
                 <AssetProcessingTray />
                 {false && <DownloadBucketBarGlobal />}
+                <GlobalErrorDialog />
                 <PermissionDeniedHost />
             </>
         )

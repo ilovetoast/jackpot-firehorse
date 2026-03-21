@@ -30,6 +30,7 @@
         "react-dom": "^19.2.3",
         "react-easy-crop": "^5.5.6",
         "recharts": "^3.7.0",
-        "ziggy-js": "^2.6.0"
+        "ziggy-js": "^2.6.0",
+        "zustand": "^5.0.12"
     }
 }

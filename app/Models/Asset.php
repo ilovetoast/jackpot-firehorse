@@ -1008,7 +1008,9 @@ class Asset extends Model
         }
 
         // Fallback: check current version metadata (version-aware uploads store thumbnails on version first)
-        $version = $this->currentVersion;
+        $version = $this->relationLoaded('currentVersion')
+            ? $this->currentVersion
+            : $this->currentVersion()->first();
         if ($version) {
             $versionMeta = $version->metadata ?? [];
             if (isset($versionMeta['thumbnails'][$style]['path'])) {

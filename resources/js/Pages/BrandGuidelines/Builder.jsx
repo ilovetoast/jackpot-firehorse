@@ -2712,14 +2712,23 @@ export default function BrandGuidelinesBuilder({
                 setIngestionPolling(true)
                 await triggerIngestion({})
             } else if (context === 'visual_reference') {
-                setVisualReferences((prev) => [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }])
-                setPayload((prev) => ({
-                    ...prev,
-                    visual: {
-                        ...(prev.visual || {}),
-                        approved_references: [...(prev.visual?.approved_references || []), { asset_id: assetId, kind: 'photo_reference' }],
-                    },
-                }))
+                setVisualReferences((prev) => {
+                    if (prev.some((x) => x.id === assetId)) return prev
+                    return [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }]
+                })
+                setPayload((prev) => {
+                    const refs = prev.visual?.approved_references || []
+                    if (refs.some((r) => (typeof r === 'object' && r?.asset_id ? r.asset_id : r) === assetId)) {
+                        return prev
+                    }
+                    return {
+                        ...prev,
+                        visual: {
+                            ...(prev.visual || {}),
+                            approved_references: [...refs, { asset_id: assetId, kind: 'photo_reference' }],
+                        },
+                    }
+                })
             } else if (context === 'logo_reference') {
                 const serverLogo = res.data?.logo_asset
                 const logoData = {
@@ -4650,7 +4659,8 @@ export default function BrandGuidelinesBuilder({
                     brandId={brand.id}
                     builderContext="visual_reference"
                     onSelect={(asset) => handleAssetAttach(asset, 'visual_reference')}
-                    title="Select Visual Reference"
+                    title="Select Visual References"
+                    multiSelect
                 />
                 <BuilderAssetSelectorModal
                     open={assetSelectorOpen === 'brand_material'}

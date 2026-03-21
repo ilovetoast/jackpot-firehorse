@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { showGlobalErrorFromAxios } from './stores/errorStore';
+
 window.axios = axios;
 
 window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
@@ -54,6 +56,14 @@ window.axios.interceptors.response.use(
             }
         }
 
+        return Promise.reject(error);
+    }
+);
+
+window.axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        showGlobalErrorFromAxios(error);
         return Promise.reject(error);
     }
 );

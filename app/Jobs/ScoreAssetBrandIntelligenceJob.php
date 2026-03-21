@@ -24,8 +24,9 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
 
     public function handle(BrandIntelligenceEngine $engine): void
     {
+        // category is a metadata accessor on Asset, not a relationship — cannot use with('category').
         $asset = Asset::query()
-            ->with(['brand', 'category'])
+            ->with(['brand'])
             ->find($this->asset->getKey());
 
         if (! $asset || ! $asset->brand_id) {

@@ -94,4 +94,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return redirect()->route('assets.index')->with('warning', $msg);
         });
+
+        // Inertia SPA: JSON error payload so the client can show a modal instead of a full-page HTML exception.
+        $exceptions->render(function (\Throwable $e, Request $request) {
+            return \App\Exceptions\Handler::renderJsonForInertia($e, $request);
+        });
     })->create();
