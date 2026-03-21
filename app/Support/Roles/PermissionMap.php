@@ -53,6 +53,7 @@ class PermissionMap
         // - brand_settings.manage: Brands Settings
         $companyPermissions = [
             'company.view', // Company page (aggregated metrics across brands) — admin/owner only
+            'view brand', // Brand-level surfaces (guidelines, policies) — tenant-wide roles + brand roles
             'billing.view',
             'billing.manage',
             'company_settings.view',
@@ -176,6 +177,7 @@ class PermissionMap
             // Agency Partner: Retained access after company transfer
             // Phase AG-5: Can view/upload/download assets, cannot manage billing/team/settings
             'agency_partner' => array_merge(
+                ['view brand'],
                 $assetPermissions,
                 $tagPermissions,
                 [
@@ -249,6 +251,7 @@ class PermissionMap
 
         // Brand management permissions
         $brandManagementPermissions = [
+            'view brand',
             'brand_settings.manage',
             'brand_categories.manage',
             'billing.view',
@@ -289,6 +292,7 @@ class PermissionMap
 
             // Contributor: Upload/edit assets (cannot approve)
             'contributor' => array_merge(
+                ['view brand'],
                 $assetPermissions,
                 $tagPermissions,
                 [
@@ -305,6 +309,7 @@ class PermissionMap
 
             // Viewer: Read-only access
             'viewer' => [
+                'view brand',
                 'asset.view',
                 'asset.download',
                 'tickets.create',

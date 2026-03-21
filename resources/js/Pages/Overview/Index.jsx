@@ -232,7 +232,6 @@ export default function Overview({
                             <ManagedCompaniesTeaser
                                 count={managedAgencyClients.length}
                                 brandColor={brandColor}
-                                agencyName={authFromPage?.activeCompany?.name ?? ''}
                             />
                         )}
 

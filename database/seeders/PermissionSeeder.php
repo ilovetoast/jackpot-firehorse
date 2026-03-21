@@ -21,6 +21,7 @@ class PermissionSeeder extends Seeder
         // view_tag_quality = Tag Quality | ownership_transfer/delete_company = owner only
         $companyPermissions = [
             'company.view',
+            'view brand',
             'billing.view',
             'billing.manage',
             'company_settings.view',

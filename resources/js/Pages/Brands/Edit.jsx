@@ -32,6 +32,18 @@ import AgencyTemplates from '../../Components/portal/AgencyTemplates'
 // Phase 1: Categories and Metadata sections hidden from Brand Identity page (will be re-homed later)
 const SHOW_CATEGORIES_AND_METADATA = false
 
+/** Normalize to #RRGGBB for <input type="color">, or null when unset / invalid */
+function hexForColorInput(value) {
+    if (value == null || typeof value !== 'string') return null
+    const s = value.trim()
+    if (/^#[0-9A-Fa-f]{6}$/i.test(s)) return s
+    if (/^#[0-9A-Fa-f]{3}$/i.test(s)) {
+        const r = s[1], g = s[2], b = s[3]
+        return `#${r}${r}${g}${g}${b}${b}`.toLowerCase()
+    }
+    return null
+}
+
 // CategoryCard component matching Categories/Index clean design
 function CategoryCard({ category, brandId, brand_users, brand_roles, private_category_limits, can_edit_system_categories, onUpgradeClick, editingId, setEditingId, onEditStart, onEditSave, onEditCancel }) {
     const [deleteProcessing, setDeleteProcessing] = useState(false)
@@ -1411,9 +1423,9 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         icon_bg_color: brand.icon_bg_color || brand.primary_color || '#6366f1',
         icon_style: brand.icon_style || 'subtle',
         show_in_selector: brand.show_in_selector !== undefined ? brand.show_in_selector : true,
-        primary_color: brand.primary_color_user_defined ? (brand.primary_color || '#6366f1') : '#6366f1',
-        secondary_color: brand.secondary_color_user_defined ? (brand.secondary_color || '#8b5cf6') : '#8b5cf6',
-        accent_color: brand.accent_color_user_defined ? (brand.accent_color || '') : '',
+        primary_color: brand.primary_color ?? '',
+        secondary_color: brand.secondary_color ?? '',
+        accent_color: brand.accent_color ?? '',
         nav_color: brand.nav_color || brand.primary_color || '',
         workspace_button_style: brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary',
         logo_filter: brand.logo_filter || 'none',
@@ -3075,19 +3087,26 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         Primary Color
                                     </label>
                                     <div className="mt-2 flex gap-2">
-                                        <input
-                                            type="color"
-                                            id="primary_color_picker"
-                                            value={data.primary_color || '#6366f1'}
-                                            onChange={(e) => {
-                                                setData('primary_color', e.target.value)
-                                                // Auto-update nav_color if it's empty or matches old primary
-                                                if (!data.nav_color || data.nav_color === data.primary_color) {
-                                                    setData('nav_color', e.target.value)
-                                                }
-                                            }}
-                                            className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                        />
+                                        {hexForColorInput(data.primary_color) ? (
+                                            <input
+                                                type="color"
+                                                id="primary_color_picker"
+                                                value={hexForColorInput(data.primary_color)}
+                                                onChange={(e) => {
+                                                    setData('primary_color', e.target.value)
+                                                    if (!data.nav_color || data.nav_color === data.primary_color) {
+                                                        setData('nav_color', e.target.value)
+                                                    }
+                                                }}
+                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
+                                            />
+                                        ) : (
+                                            <div
+                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
+                                                title="No primary color"
+                                                aria-hidden
+                                            />
+                                        )}
                                         <input
                                             type="text"
                                             name="primary_color"
@@ -3095,14 +3114,13 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             value={data.primary_color}
                                             onChange={(e) => {
                                                 setData('primary_color', e.target.value)
-                                                // Auto-update nav_color if it's empty or matches old primary
                                                 if (!data.nav_color || data.nav_color === data.primary_color) {
                                                     setData('nav_color', e.target.value)
                                                 }
                                             }}
                                             className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="#6366f1"
-                                            pattern="^#[0-9A-Fa-f]{6}$"
+                                            placeholder="e.g. #502c6d"
+                                            autoComplete="off"
                                         />
                                     </div>
                                             {errors.primary_color && <p className="mt-2 text-sm text-red-600">{errors.primary_color}</p>}
@@ -3113,13 +3131,21 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         Secondary Color
                                     </label>
                                     <div className="mt-2 flex gap-2">
-                                        <input
-                                            type="color"
-                                            id="secondary_color_picker"
-                                            value={data.secondary_color || '#8b5cf6'}
-                                            onChange={(e) => setData('secondary_color', e.target.value)}
-                                            className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                        />
+                                        {hexForColorInput(data.secondary_color) ? (
+                                            <input
+                                                type="color"
+                                                id="secondary_color_picker"
+                                                value={hexForColorInput(data.secondary_color)}
+                                                onChange={(e) => setData('secondary_color', e.target.value)}
+                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
+                                            />
+                                        ) : (
+                                            <div
+                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
+                                                title="No secondary color"
+                                                aria-hidden
+                                            />
+                                        )}
                                         <input
                                             type="text"
                                             name="secondary_color"
@@ -3127,8 +3153,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             value={data.secondary_color}
                                             onChange={(e) => setData('secondary_color', e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="#8b5cf6"
-                                            pattern="^#[0-9A-Fa-f]{6}$"
+                                            placeholder="e.g. #ffffff"
+                                            autoComplete="off"
                                         />
                                     </div>
                                             {errors.secondary_color && <p className="mt-2 text-sm text-red-600">{errors.secondary_color}</p>}
@@ -3139,13 +3165,21 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         Accent Color
                                     </label>
                                     <div className="mt-2 flex gap-2">
-                                        <input
-                                            type="color"
-                                            id="accent_color_picker"
-                                            value={data.accent_color || '#ec4899'}
-                                            onChange={(e) => setData('accent_color', e.target.value)}
-                                            className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                        />
+                                        {hexForColorInput(data.accent_color) ? (
+                                            <input
+                                                type="color"
+                                                id="accent_color_picker"
+                                                value={hexForColorInput(data.accent_color)}
+                                                onChange={(e) => setData('accent_color', e.target.value)}
+                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
+                                            />
+                                        ) : (
+                                            <div
+                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
+                                                title="No accent color"
+                                                aria-hidden
+                                            />
+                                        )}
                                         <input
                                             type="text"
                                             name="accent_color"
@@ -3153,8 +3187,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             value={data.accent_color}
                                             onChange={(e) => setData('accent_color', e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="#ec4899"
-                                            pattern="^#[0-9A-Fa-f]{6}$"
+                                            placeholder="Optional"
+                                            autoComplete="off"
                                         />
                                     </div>
                                             {errors.accent_color && <p className="mt-2 text-sm text-red-600">{errors.accent_color}</p>}
@@ -3766,7 +3800,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         </p>
                                         <div className="flex gap-2">
                                             {['primary', 'secondary', 'accent'].map((style) => {
-                                                const hex = style === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : style === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                                const hex = style === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : style === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || data.primary_color || brand.primary_color || '#6366f1')
                                                 return (
                                                     <button
                                                         key={style}
@@ -3884,7 +3918,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     const sidebarColor = data.nav_color || data.primary_color || brand.primary_color || '#6366f1'
                                     const sidebarTextColor = getContrastTextColor(sidebarColor)
                                     const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
-                                    const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                    const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || data.primary_color || brand.primary_color || '#6366f1')
                                     const previewLogoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
                                     const previewNavMode = data.settings?.nav_display_mode || 'logo'
                                     const previewFilterValue = data.logo_filter || 'none'

@@ -121,11 +121,13 @@ export default function AssetSidebar({
     const isStagedView = source === 'staged'
 
     const [systemCollapsed, setSystemCollapsed] = useState(() => {
-        if (typeof window === 'undefined') return false
+        if (typeof window === 'undefined') return true
         try {
-            return localStorage.getItem(STORAGE_KEY) === 'true'
+            const stored = localStorage.getItem(STORAGE_KEY)
+            if (stored === null) return true
+            return stored === 'true'
         } catch {
-            return false
+            return true
         }
     })
 

@@ -65,10 +65,10 @@ export default function BrandThemeProvider({ children, initialPage }) {
             secondaryColor = defaultSecondary
             accentColor = defaultAccent
         } else {
-            // Content pages use brand colors
+            // Content pages use brand colors; unset secondary/accent inherit primary before app defaults
             primaryColor = brand?.primary_color || defaultPrimary
-            secondaryColor = brand?.secondary_color || defaultSecondary
-            accentColor = brand?.accent_color || defaultAccent
+            secondaryColor = brand?.secondary_color || brand?.primary_color || defaultSecondary
+            accentColor = brand?.accent_color || brand?.primary_color || defaultPrimary
         }
         
         root.style.setProperty('--primary', primaryColor)

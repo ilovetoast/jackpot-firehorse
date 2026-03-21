@@ -39,6 +39,22 @@ final class DashboardLinks
     }
 
     /**
+     * Cinematic brand overview (/app/overview) for the active brand workspace.
+     */
+    public static function brandOverviewHref(User $user, Tenant $tenant, ?Brand $brand): ?string
+    {
+        if (! $brand) {
+            return null;
+        }
+
+        if (! $user->hasPermissionForBrand($brand, 'asset.view')) {
+            return null;
+        }
+
+        return '/app/overview';
+    }
+
+    /**
      * Company Portal: link to Agency dashboard when the user belongs to an agency — either already on that agency tenant,
      * or switching from a linked client workspace.
      *

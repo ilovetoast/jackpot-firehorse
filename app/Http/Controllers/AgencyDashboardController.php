@@ -193,7 +193,7 @@ class AgencyDashboardController extends Controller
         $dashboardLinks = [
             'company' => DashboardLinks::companyOverviewHref($user, $tenant),
             'agency_switch_tenant_id' => null,
-            'brand' => DashboardLinks::brandPortalHref($user, $tenant, $brandForLinks),
+            'brand' => DashboardLinks::brandOverviewHref($user, $tenant, $brandForLinks),
         ];
 
         $managedAgency = [

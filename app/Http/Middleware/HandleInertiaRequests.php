@@ -285,6 +285,15 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
+        // App nav: Brand Guidelines link — show when published (any brand user) or when user can set up DNA/builder
+        $showBrandGuidelinesNav = false;
+        if ($user && $activeBrand && $tenant && ! (app()->bound('collection_only') && app('collection_only'))) {
+            $activeBrand->loadMissing('brandModel');
+            $hasPublishedGuidelines = $activeBrand->brandModel?->active_version_id !== null;
+            $canSetupBrandGuidelines = $user->hasPermissionForBrand($activeBrand, 'brand_settings.manage');
+            $showBrandGuidelinesNav = $hasPublishedGuidelines || $canSetupBrandGuidelines;
+        }
+
         $parentShared = parent::share($request);
 
         // Manually ensure 'old' input is included if it exists in session but not in parent shared
@@ -438,6 +447,8 @@ class HandleInertiaRequests extends Middleware
                         || in_array('metadata.bulk_edit', $effectivePermissions, true),
                     // Company overview: tenant-level permission (admin/owner via company.view)
                     'can_view_company_overview' => $tenant && in_array('company.view', $effectivePermissions, true),
+                    // Nav: show Brand Guidelines when DNA is published for everyone, or unpublished only for brand_settings.manage
+                    'show_brand_guidelines_nav' => $showBrandGuidelinesNav,
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

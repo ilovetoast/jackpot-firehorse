@@ -132,7 +132,9 @@ class CompanyBrandSeeder extends Seeder
                 'show_in_selector' => true,
                 'primary_color' => '#502c6d',
                 'secondary_color' => '#ffffff',
-                'accent_color' => '#8000ff',
+                'accent_color' => null,
+                'accent_color_user_defined' => false,
+                'icon_style' => 'solid',
             ]);
         }
 
@@ -181,7 +183,8 @@ class CompanyBrandSeeder extends Seeder
                 ->update(['removed_at' => now(), 'updated_at' => now()]);
         }
 
-        // Create a secondary user for testing/development (will be user ID 2+ if user 1 exists)
+        // John Doe: owner of each seeded client company (St. Croix, Augusta, ACG, Victory).
+        // msteele (user 1) is owner only on company 1 (Velvet Hammer).
         // NOTE: This user should NEVER have site_owner role - only user ID 1 can be site_owner
         $secondaryUser = User::firstOrCreate(
             ['email' => 'johndoe@example.com'],
@@ -226,12 +229,6 @@ class CompanyBrandSeeder extends Seeder
                 'incubated_by_agency_id' => $initialCompany->id,
                 'manual_plan_override' => $plan,
             ]);
-
-            // Secondary dev user
-            $secondaryUser->setRoleForTenant($tenant, 'member');
-            foreach ($tenant->brands as $brand) {
-                $secondaryUser->setRoleForBrand($brand, 'viewer');
-            }
 
             // Get the first brand name we want
             $firstBrandName = $brandNames[0];
@@ -294,8 +291,14 @@ class CompanyBrandSeeder extends Seeder
                 );
             }
 
-            // Velvet Hammer (agency) → client tenant: explicit RBAC via tenant_agencies + agency-managed pivots
+            // John Doe: owner of each seeded client company (msteele is owner only on company 1 / Velvet Hammer)
             $tenant->load('brands');
+            $secondaryUser->setRoleForTenant($tenant, 'owner', true);
+            foreach ($tenant->brands as $brand) {
+                $secondaryUser->setRoleForBrand($brand, 'admin');
+            }
+
+            // Velvet Hammer (agency) → client tenant: explicit RBAC via tenant_agencies + agency-managed pivots
             $brandAssignments = $tenant->brands->map(fn (Brand $b) => [
                 'brand_id' => $b->id,
                 'role' => 'admin',

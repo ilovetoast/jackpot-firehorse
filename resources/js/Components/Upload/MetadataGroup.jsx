@@ -37,7 +37,7 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
         }
     }, [autoExpand, hasErrors, isExpanded])
 
-    // Starred is rendered as a toggle on the uploader section — exclude from metadata groups
+    // Starred is not shown in the uploader (only in asset drawer / detail). Exclude so it never appears in grouped fields here.
     // Collection is rendered inside General group when group_key is general (seeder)
     const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'starred')
 

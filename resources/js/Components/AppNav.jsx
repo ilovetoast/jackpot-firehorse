@@ -22,6 +22,7 @@ import {
 export default function AppNav({ brand, tenant, variant }) {
     const page = usePage()
     const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
+    const showBrandGuidelinesNav = auth?.permissions?.show_brand_guidelines_nav === true
     const { post } = useForm()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false)
@@ -725,8 +726,8 @@ export default function AppNav({ brand, tenant, variant }) {
                                 Collection access
                             </Link>
                         )}
-                        {/* Right-side nav: Brand Guidelines, Downloads — text hidden below lg for responsive scaling */}
-                        {isAppPage && (
+                        {/* Right-side nav: Brand Guidelines (only when published, or user can set up DNA), Downloads */}
+                        {isAppPage && showBrandGuidelinesNav && (
                             <Link
                                 href="/app/brand-guidelines"
                                 className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
@@ -753,19 +754,21 @@ export default function AppNav({ brand, tenant, variant }) {
                                     <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                                     <span className="hidden lg:inline">Downloads</span>
                                 </Link>
-                                <Link
-                                    href="/app/brand-guidelines"
-                                    className={`lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
-                                    style={{
-                                        color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
-                                            ? (activeBrand?.primary_color || '#4f46e5')
-                                            : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
-                                    }}
-                                    aria-label="Brand Guidelines"
-                                    title="Guides"
-                                >
-                                    <BookOpenIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                                </Link>
+                                {showBrandGuidelinesNav && (
+                                    <Link
+                                        href="/app/brand-guidelines"
+                                        className={`lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
+                                        style={{
+                                            color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
+                                                ? (activeBrand?.primary_color || '#4f46e5')
+                                                : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
+                                        }}
+                                        aria-label="Brand Guidelines"
+                                        title="Guides"
+                                    >
+                                        <BookOpenIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                                    </Link>
+                                )}
                             </>
                         )}
                         

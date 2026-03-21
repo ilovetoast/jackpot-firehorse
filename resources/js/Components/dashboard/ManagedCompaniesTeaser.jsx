@@ -8,7 +8,6 @@ import { ArrowRightIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline
 export default function ManagedCompaniesTeaser({
     count = 0,
     brandColor = '#6366f1',
-    agencyName = '',
 }) {
     if (count < 1) {
         return null
@@ -39,9 +38,6 @@ export default function ManagedCompaniesTeaser({
                         <div className="min-w-0 flex-1 space-y-2">
                             <p className="text-base font-semibold leading-snug tracking-tight text-white sm:text-lg">
                                 {count} client {count === 1 ? 'company' : 'companies'}
-                                {agencyName ? (
-                                    <span className="font-medium text-white/55"> · via {agencyName}</span>
-                                ) : null}
                             </p>
                             <p className="max-w-xl text-sm leading-relaxed text-white/50">
                                 Open client workspaces, partner tier, and program details.
