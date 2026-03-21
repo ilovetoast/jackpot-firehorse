@@ -11,19 +11,19 @@ namespace App\Support\Roles;
  *
  * Maps roles to permissions explicitly.
  * This is the single source of truth for role-to-permission mappings.
- * 
+ *
  * IMPORTANT:
  * This map applies ONLY to tenant-level and brand-level roles.
- * 
+ *
  * Site-wide roles (site_owner, site_admin, site_support, etc.)
  * are intentionally excluded and managed separately.
- * 
+ *
  * STRICT RULES:
  * - Only reference roles from RoleRegistry
  * - Do NOT rename existing permissions
  * - Do NOT delete permissions
  * - Do NOT change locked-phase behavior
- * 
+ *
  * USAGE:
  * - PermissionSeeder reads from this map
  * - API endpoints expose this map
@@ -34,9 +34,9 @@ class PermissionMap
 {
     /**
      * Get tenant role permissions.
-     * 
+     *
      * Maps tenant roles (from RoleRegistry) to their permissions.
-     * 
+     *
      * @return array<string, array<string>> Role name => array of permission strings
      */
     public static function tenantPermissions(): array
@@ -46,7 +46,6 @@ class PermissionMap
         // - company_settings.view: View Company Settings page
         // - company_settings.edit: Company Information (name, slug, timezone, etc.)
         // - company_settings.manage_download_policy: Enterprise Download Policy
-        // - company_settings.manage_dashboard_widgets: Dashboard Widgets
         // - company_settings.manage_ai_settings: AI Settings
         // - company_settings.view_tag_quality: Tag Quality
         // - team.manage: Team Members
@@ -59,7 +58,6 @@ class PermissionMap
             'company_settings.view',
             'company_settings.edit',
             'company_settings.manage_download_policy',
-            'company_settings.manage_dashboard_widgets',
             'company_settings.manage_ai_settings',
             'company_settings.view_tag_quality',
             'team.manage',
@@ -190,16 +188,31 @@ class PermissionMap
                 ],
                 $ticketPermissions
             ),
+
+            // Agency admin: explicit client-granted access for linked agency tenants (same capability as admin)
+            'agency_admin' => array_merge(
+                $companyPermissions,
+                $assetPermissions,
+                ['assets.delete'],
+                $metadataPermissions,
+                $tagPermissions,
+                $governancePermissions,
+                $ticketPermissions,
+                [
+                    'ai.usage.view',
+                    'assets.ai_metadata.regenerate',
+                ]
+            ),
         ];
     }
 
     /**
      * Get brand role permissions.
-     * 
+     *
      * Maps brand roles (from RoleRegistry) to their permissions.
      * Note: Brand roles are stored as strings in brand_user.role, not Spatie roles.
      * Some brand roles also exist as Spatie roles for backward compatibility.
-     * 
+     *
      * @return array<string, array<string>> Role name => array of permission strings
      */
     public static function brandPermissions(): array
@@ -303,12 +316,12 @@ class PermissionMap
 
     /**
      * Check if a brand role can approve assets.
-     * 
+     *
      * Approval rules:
      * - admin and brand_manager can approve assets
      * - contributor and viewer cannot approve
-     * 
-     * @param string $role Brand role name
+     *
+     * @param  string  $role  Brand role name
      * @return bool True if role can approve assets
      */
     public static function canApproveAssets(string $role): bool
@@ -318,25 +331,27 @@ class PermissionMap
 
     /**
      * Get all permissions for a tenant role.
-     * 
-     * @param string $role Tenant role name
+     *
+     * @param  string  $role  Tenant role name
      * @return array<string> Array of permission strings
      */
     public static function getTenantRolePermissions(string $role): array
     {
         $permissions = self::tenantPermissions();
+
         return $permissions[strtolower($role)] ?? [];
     }
 
     /**
      * Get all permissions for a brand role.
      *
-     * @param string $role Brand role name
+     * @param  string  $role  Brand role name
      * @return array<string> Array of permission strings
      */
     public static function getBrandRolePermissions(string $role): array
     {
         $permissions = self::brandPermissions();
+
         return $permissions[strtolower($role)] ?? [];
     }
 

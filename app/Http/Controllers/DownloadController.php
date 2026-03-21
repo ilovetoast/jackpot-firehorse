@@ -3,35 +3,31 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DownloadAccessMode;
-use App\Enums\DownloadStatus;
 use App\Enums\DownloadSource;
+use App\Enums\DownloadStatus;
 use App\Enums\DownloadType;
+use App\Enums\EventType;
 use App\Enums\ZipStatus;
 use App\Jobs\BuildDownloadZipJob;
+use App\Mail\DownloadShareEmail;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
-use App\Services\AssetDeliveryService;
-use App\Services\AssetUrlService;
-use App\Services\DownloadBucketService;
-use App\Services\TenantBucketService;
-use App\Services\DownloadEventEmitter;
-use App\Services\DownloadExpirationPolicy;
-use App\Services\DownloadPublicPageBrandingResolver;
-use App\Services\EnterpriseDownloadPolicy;
-use App\Services\DownloadManagementService;
-use App\Services\DownloadZipEstimateService;
 use App\Services\ActivityRecorder;
 use App\Services\AssetDownloadMetricService;
+use App\Services\AssetUrlService;
+use App\Services\DownloadBucketService;
+use App\Services\DownloadEventEmitter;
+use App\Services\DownloadExpirationPolicy;
+use App\Services\DownloadManagementService;
 use App\Services\DownloadNameResolver;
+use App\Services\DownloadPublicPageBrandingResolver;
+use App\Services\DownloadZipEstimateService;
+use App\Services\EnterpriseDownloadPolicy;
 use App\Services\PlanService;
 use App\Services\StreamingZipService;
-use App\Enums\EventType;
-use App\Mail\DownloadShareEmail;
-use App\Support\AssetVariant;
-use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -47,7 +43,7 @@ use Inertia\Response;
 
 /**
  * 🔒 Phase 3.1 — Downloader System (LOCKED)
- * 
+ *
  * Do not refactor or change behavior.
  * Future phases may consume outputs only.
  */
@@ -180,7 +176,7 @@ class DownloadController extends Controller
                             'id' => $u->id,
                             'first_name' => $u->first_name,
                             'last_name' => $u->last_name,
-                            'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->email,
+                            'name' => trim($u->first_name.' '.$u->last_name) ?: $u->email,
                             'email' => $u->email,
                             'avatar_url' => $u->avatar_url ?? null,
                         ])
@@ -266,7 +262,7 @@ class DownloadController extends Controller
         $createdBy = $download->createdBy
             ? [
                 'id' => $download->createdBy->id,
-                'name' => trim($download->createdBy->first_name . ' ' . $download->createdBy->last_name) ?: $download->createdBy->email,
+                'name' => trim($download->createdBy->first_name.' '.$download->createdBy->last_name) ?: $download->createdBy->email,
             ]
             : null;
 
@@ -416,6 +412,7 @@ class DownloadController extends Controller
             if (request()->expectsJson()) {
                 return response()->json(['message' => 'Unauthorized.'], 403);
             }
+
             return redirect()->route('login');
         }
         if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
@@ -436,6 +433,7 @@ class DownloadController extends Controller
             if (request()->expectsJson()) {
                 return response()->json(['message' => 'Your organization requires downloads to be packaged.'], 403);
             }
+
             return redirect()->back()->withErrors(['download' => 'Your organization requires downloads to be packaged.']);
         }
 
@@ -443,6 +441,7 @@ class DownloadController extends Controller
             if (request()->expectsJson()) {
                 return response()->json(['message' => 'This asset is not available for download.'], 403);
             }
+
             return redirect()->back()->withErrors(['download' => 'This asset is not available for download.']);
         }
 
@@ -456,7 +455,7 @@ class DownloadController extends Controller
             $expiresAt = now()->addDays($forceDays);
         }
 
-        $download = new Download();
+        $download = new Download;
         $download->tenant_id = $tenant->id;
         $download->brand_id = $asset->brand_id;
         $download->created_by_user_id = $user->id;
@@ -569,7 +568,7 @@ class DownloadController extends Controller
         $brandId = $firstAsset?->brand_id;
 
         $expirationPolicy = app(DownloadExpirationPolicy::class);
-        $download = new Download();
+        $download = new Download;
         $download->tenant_id = $tenant->id;
         $download->brand_id = $brandId;
         $download->created_by_user_id = $user->id;
@@ -657,6 +656,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Unauthorized.'], 403);
             }
+
             return redirect()->route('downloads.index')->withErrors(['message' => 'Unauthorized.']);
         }
 
@@ -664,6 +664,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Download not found.'], 404);
             }
+
             return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
         }
 
@@ -674,6 +675,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'You cannot manage downloads.'], 403);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'regenerate')
                 ->with('download_action_id', $download->id)
@@ -685,6 +687,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Regenerate is not available on your plan.'], 403);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'regenerate')
                 ->with('download_action_id', $download->id)
@@ -700,6 +703,7 @@ class DownloadController extends Controller
                     'errors' => $e->errors(),
                 ], 422);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'regenerate')
                 ->with('download_action_id', $download->id)
@@ -709,6 +713,7 @@ class DownloadController extends Controller
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Download regeneration started.']);
         }
+
         return redirect()->route('downloads.index')
             ->with('success', 'Download regeneration started.')
             ->with('download_action', 'regenerate')
@@ -726,6 +731,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Unauthorized.'], 403);
             }
+
             return redirect()->route('downloads.index')->withErrors(['message' => 'Unauthorized.']);
         }
 
@@ -733,6 +739,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Download not found.'], 404);
             }
+
             return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
         }
 
@@ -743,6 +750,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'You cannot revoke this download.'], 403);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'revoke')
                 ->with('download_action_id', $download->id)
@@ -754,6 +762,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Revoke is not available on your plan.'], 403);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'revoke')
                 ->with('download_action_id', $download->id)
@@ -764,6 +773,7 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Download is already revoked.'], 422);
             }
+
             return redirect()->route('downloads.index')
                 ->with('download_action', 'revoke')
                 ->with('download_action_id', $download->id)
@@ -775,6 +785,7 @@ class DownloadController extends Controller
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Download revoked.']);
         }
+
         return redirect()->route('downloads.index')
             ->with('success', 'Download revoked.')
             ->with('download_action', 'revoke')
@@ -829,12 +840,14 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
             }
+
             return redirect()->route('downloads.index')->withErrors($e->errors());
         }
 
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Settings updated.']);
         }
+
         return redirect()->route('downloads.index')->with('success', 'Download settings updated.');
     }
 
@@ -869,12 +882,14 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
             }
+
             return redirect()->route('downloads.index')->withErrors($e->errors());
         }
 
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Access updated.']);
         }
+
         return redirect()->route('downloads.index')->with('success', 'Download access updated.');
     }
 
@@ -912,12 +927,14 @@ class DownloadController extends Controller
             if ($request->expectsJson()) {
                 return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
             }
+
             return redirect()->route('downloads.index')->withErrors($e->errors());
         }
 
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Expiration extended.']);
         }
+
         return redirect()->route('downloads.index')->with('success', 'Download expiration extended.');
     }
 
@@ -942,7 +959,7 @@ class DownloadController extends Controller
                 'id' => $u->id,
                 'first_name' => $u->first_name,
                 'last_name' => $u->last_name,
-                'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->email,
+                'name' => trim($u->first_name.' '.$u->last_name) ?: $u->email,
                 'email' => $u->email,
             ])
             ->values()
@@ -1006,6 +1023,7 @@ class DownloadController extends Controller
             return Crypt::decryptString($download->password_encrypted);
         } catch (\Throwable $e) {
             Log::debug('[DownloadController] Failed to decrypt password', ['download_id' => $download->id]);
+
             return null;
         }
     }
@@ -1018,6 +1036,7 @@ class DownloadController extends Controller
         if ($request->expectsJson()) {
             return response()->json(['message' => $message], $status);
         }
+
         return redirect()->route('downloads.index')->withErrors(['message' => $message]);
     }
 
@@ -1083,7 +1102,7 @@ class DownloadController extends Controller
 
         // Password-protected: show landing page (HTML) until session is unlocked; never redirect to ZIP until then.
         $requiresPassword = $download->requiresPassword();
-        $isUnlocked = session('download_unlocked.' . $download->id) === true;
+        $isUnlocked = session('download_unlocked.'.$download->id) === true;
         if ($requiresPassword && ! $isUnlocked) {
             $this->recordLandingPageView($download);
 
@@ -1142,6 +1161,7 @@ class DownloadController extends Controller
 
         if (! $download->zip_path) {
             Log::error('[DownloadController] Download ZIP path is missing', ['download_id' => $download->id]);
+
             return $this->publicPage($download, 'failed', 'ZIP file not available');
         }
 
@@ -1223,7 +1243,7 @@ class DownloadController extends Controller
                 ->withErrors(['password' => 'The password is incorrect.']);
         }
 
-        session()->put('download_unlocked.' . $download->id, true);
+        session()->put('download_unlocked.'.$download->id, true);
 
         return redirect()->route('downloads.public', ['download' => $download->id]);
     }
@@ -1344,7 +1364,7 @@ class DownloadController extends Controller
         }
 
         $requiresPassword = $download->requiresPassword();
-        $isUnlocked = session('download_unlocked.' . $download->id) === true;
+        $isUnlocked = session('download_unlocked.'.$download->id) === true;
         if ($requiresPassword && ! $isUnlocked) {
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
@@ -1367,6 +1387,7 @@ class DownloadController extends Controller
             if ($streamingEnabled && $estimatedBytes > $streamingThreshold && $download->zip_status === ZipStatus::NONE) {
                 return $this->streamZipResponse($download);
             }
+
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
@@ -1385,8 +1406,7 @@ class DownloadController extends Controller
 
     /**
      * Validate access to download based on access_mode.
-     * 
-     * @param Download $download
+     *
      * @return bool True if access is allowed
      */
     protected function validateAccess(Download $download): bool
@@ -1407,6 +1427,7 @@ class DownloadController extends Controller
 
                 // Verify user belongs to the download's tenant (tenant is bound above or by ResolveTenant)
                 $tenant = app('tenant');
+
                 return $tenant && $download->tenant_id === $tenant->id;
 
             case DownloadAccessMode::BRAND:
@@ -1423,7 +1444,7 @@ class DownloadController extends Controller
                     return true;
                 }
 
-                return $user->brands()->where('brands.id', $download->brand_id)->exists();
+                return $user->isAssignedToBrandId($download->brand_id);
 
             case DownloadAccessMode::USERS:
             case DownloadAccessMode::RESTRICTED:
@@ -1448,15 +1469,13 @@ class DownloadController extends Controller
                     'download_id' => $download->id,
                     'access_mode' => $download->access_mode?->value ?? 'null',
                 ]);
+
                 return false;
         }
     }
 
     /**
      * Get error message for download status.
-     * 
-     * @param DownloadStatus $status
-     * @return string
      */
     protected function getStatusErrorMessage(DownloadStatus $status): string
     {
@@ -1486,7 +1505,7 @@ class DownloadController extends Controller
             $service->stream($download, $filename);
         }, 200, [
             'Content-Type' => 'application/zip',
-            'Content-Disposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
+            'Content-Disposition' => 'attachment; filename="'.addcslashes($filename, '"\\').'"',
         ]);
     }
 
@@ -1503,7 +1522,7 @@ class DownloadController extends Controller
         $base = $resolver->resolve($template, $tenant, $brand, now());
         $safe = preg_replace('/[\r\n"\\\\]/', '', $base);
 
-        return (($safe !== null && $safe !== '') ? $safe : 'download') . '.zip';
+        return (($safe !== null && $safe !== '') ? $safe : 'download').'.zip';
     }
 
     /**
@@ -1530,9 +1549,6 @@ class DownloadController extends Controller
 
     /**
      * Get error message for ZIP status.
-     *
-     * @param ZipStatus $zipStatus
-     * @return string
      */
     protected function getZipStatusErrorMessage(ZipStatus $zipStatus): string
     {

@@ -7,8 +7,6 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class ResolveTenant
@@ -29,6 +27,7 @@ class ResolveTenant
                     app()->instance('tenant', $tenant);
                 }
             }
+
             return $next($request);
         }
 
@@ -38,12 +37,12 @@ class ResolveTenant
             // Redirect to companies page instead of showing 404
             // This happens when user hasn't selected a company/tenant yet
             $user = $request->user();
-            
+
             // If user has no tenants at all, redirect to error page
             if ($user && $user->tenants()->count() === 0) {
                 return redirect()->route('errors.no-companies');
             }
-            
+
             // User has tenants but none selected - redirect to selection page
             return redirect()->route('companies.index');
         }
@@ -69,26 +68,26 @@ class ResolveTenant
         // Resolve active brand ($user already set above when verifying tenant membership)
         $user = $user ?? $request->user();
         $brandId = session('brand_id');
-        
+
         // Get user's tenant role to determine access
         $tenantRole = null;
         $isTenantOwnerOrAdmin = false;
         if ($user) {
             $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
         }
-        
+
         if ($brandId) {
             $brand = Brand::where('id', $brandId)
                 ->where('tenant_id', $tenant->id)
                 ->first();
-            
+
             if ($brand && $user) {
                 // Phase MI-1: Verify user has active brand membership (unless owner/admin)
                 if (! $isTenantOwnerOrAdmin) {
                     $membership = $user->activeBrandMembership($brand);
                     $hasBrandAccess = $membership !== null;
-                    
+
                     \Log::info('ResolveTenant - Active membership check', [
                         'user_id' => $user->id,
                         'user_email' => $user->email,
@@ -97,7 +96,7 @@ class ResolveTenant
                         'has_active_membership' => $hasBrandAccess,
                         'tenant_role' => $tenantRole,
                     ]);
-                    
+
                     if (! $hasBrandAccess) {
                         \Log::warning('ResolveTenant - User does not have brand access, resetting', [
                             'user_id' => $user->id,
@@ -113,7 +112,7 @@ class ResolveTenant
                                 break;
                             }
                         }
-                        
+
                         if ($userBrand) {
                             $brand = $userBrand;
                             // Update session with accessible brand
@@ -128,16 +127,18 @@ class ResolveTenant
                                 if ($collection && $user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
                                     app()->instance('collection_only', true);
                                     app()->instance('collection', $collection);
+
                                     return $next($request);
                                 }
                             }
                             session()->forget('brand_id');
+
                             return redirect()->route('errors.no-brand-assignment');
                         }
                     }
                 }
             }
-            
+
             if (! $brand) {
                 // Brand doesn't exist or doesn't belong to tenant, use default
                 $brand = $tenant->defaultBrand;
@@ -155,7 +156,7 @@ class ResolveTenant
                         break;
                     }
                 }
-                
+
                 if ($userBrand) {
                     $brand = $userBrand;
                     session(['brand_id' => $brand->id]);
@@ -169,10 +170,12 @@ class ResolveTenant
                         if ($collection && $user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
                             app()->instance('collection_only', true);
                             app()->instance('collection', $collection);
+
                             return $next($request);
                         }
                     }
                     session()->forget('brand_id');
+
                     return redirect()->route('errors.no-brand-assignment');
                 }
             } else {
@@ -192,20 +195,20 @@ class ResolveTenant
         // This prevents access even if session has a stale brand_id
         if ($user && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-            
-            if (!$isTenantOwnerOrAdmin) {
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
+
+            if (! $isTenantOwnerOrAdmin) {
                 $hasBrandAccess = $user->brands()
                     ->where('brands.id', $brand->id)
                     ->where('tenant_id', $tenant->id)
                     ->exists();
-                
-                if (!$hasBrandAccess) {
+
+                if (! $hasBrandAccess) {
                     // User doesn't have access - find a brand they do have access to
                     $userBrand = $user->brands()
                         ->where('tenant_id', $tenant->id)
                         ->first();
-                    
+
                     if ($userBrand) {
                         $brand = $userBrand;
                         session(['brand_id' => $brand->id]);
@@ -213,6 +216,7 @@ class ResolveTenant
                         // No accessible brand - redirect to error page
                         // Clear the brand_id from session to prevent loop
                         session()->forget('brand_id');
+
                         return redirect()->route('errors.no-brand-assignment');
                     }
                 }

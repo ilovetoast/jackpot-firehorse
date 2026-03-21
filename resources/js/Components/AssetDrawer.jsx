@@ -2492,7 +2492,7 @@ export default function AssetDrawer({
                 )}
 
                 {displayAsset?.id && (
-                    <AssetBrandIntelligenceBlock asset={displayAsset} onAssetUpdate={onAssetUpdate} />
+                    <AssetBrandIntelligenceBlock asset={displayAsset} onAssetUpdate={onAssetUpdate} primaryColor={brandPrimary} />
                 )}
 
                 {/* Tags and Metadata */}

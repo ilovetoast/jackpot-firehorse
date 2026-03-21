@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Brand;
+use App\Models\TenantAgency;
 use App\Models\User;
 use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\JsonResponse;
@@ -40,6 +41,8 @@ class CompanyTeamApiController extends Controller
         $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
         $firstUserId = $tenant->users()->orderBy('created_at')->first()?->id;
 
+        $perPage = min(200, max(1, (int) $request->get('per_page', 25)));
+
         $query = $tenant->users()
             ->with([
                 'brands' => fn ($q) => $q->whereIn('brands.id', $tenantBrandIds)->wherePivotNull('removed_at'),
@@ -55,16 +58,24 @@ class CompanyTeamApiController extends Controller
             ->when($request->filled('brand_id'), function ($q) use ($request) {
                 $q->whereHas('brands', fn ($b) => $b->where('brands.id', $request->brand_id)->wherePivotNull('removed_at'));
             })
-            ->when($request->filled('role'), function ($q) use ($request, $tenant) {
+            ->when($request->filled('role'), function ($q) use ($request) {
                 $role = strtolower($request->role);
                 if ($role === 'owner' || $role === 'admin' || $role === 'member') {
                     $q->wherePivot('role', $role);
                 }
-            });
+            })
+            ->orderByRaw('CASE WHEN COALESCE(tenant_user.is_agency_managed, 0) = 1 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN tenant_user.agency_tenant_id IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('tenant_user.agency_tenant_id')
+            ->orderBy('users.created_at');
 
-        $paginator = $query->orderBy('users.created_at')->paginate(25);
+        $paginator = $query->paginate($perPage);
 
-        $data = $paginator->getCollection()->map(function ($member) use ($tenant, $firstUserId, $tenantBrandIds) {
+        $collection = $paginator->getCollection();
+        $agencyIds = $collection->pluck('pivot.agency_tenant_id')->filter()->unique()->values();
+        $agencyNames = \App\Models\Tenant::whereIn('id', $agencyIds)->pluck('name', 'id');
+
+        $data = $collection->map(function ($member) use ($firstUserId, $agencyNames) {
             $role = $member->pivot->role ?? null;
             if (empty($role)) {
                 $role = ($firstUserId && $firstUserId === $member->id) ? 'owner' : 'member';
@@ -78,6 +89,8 @@ class CompanyTeamApiController extends Controller
                 ];
             })->values()->toArray();
 
+            $agencyTenantId = $member->pivot->agency_tenant_id ? (int) $member->pivot->agency_tenant_id : null;
+
             return [
                 'id' => $member->id,
                 'name' => $member->name,
@@ -88,11 +101,24 @@ class CompanyTeamApiController extends Controller
                 'company_role' => strtolower($role),
                 'brand_roles' => $brandRoles,
                 'joined_at' => $member->pivot->created_at ?? $member->created_at,
+                'is_agency_managed' => (bool) ($member->pivot->is_agency_managed ?? false),
+                'agency_tenant_id' => $agencyTenantId,
+                'agency_tenant_name' => $agencyTenantId ? ($agencyNames[$agencyTenantId] ?? null) : null,
             ];
         });
 
+        $linkedAgencies = TenantAgency::query()
+            ->where('tenant_id', $tenant->id)
+            ->with(['agencyTenant:id,name,slug,is_agency'])
+            ->orderBy('created_at')
+            ->get()
+            ->map(fn (TenantAgency $row) => $row->toApiArray())
+            ->values()
+            ->all();
+
         return response()->json([
             'data' => $data,
+            'linked_agencies' => $linkedAgencies,
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'last_page' => $paginator->lastPage(),
@@ -119,9 +145,16 @@ class CompanyTeamApiController extends Controller
 
         $tenant->users()->where('users.id', $user->id)->firstOrFail();
 
+        if ($user->isAgencyManagedMemberOf($tenant)) {
+            return response()->json([
+                'error' => 'This user is managed by an agency link. Change access in Company Settings → Agencies, or remove the agency.',
+                'code' => 'agency_managed_user',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'brand_id' => 'required|exists:brands,id',
-            'role' => 'required|string|in:' . implode(',', RoleRegistry::brandRoles()),
+            'role' => 'required|string|in:'.implode(',', RoleRegistry::brandRoles()),
         ]);
 
         $brand = Brand::findOrFail($validated['brand_id']);

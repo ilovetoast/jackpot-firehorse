@@ -30,9 +30,6 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
 
     /**
      * Handle the event.
-     *
-     * @param AssetPendingApproval $event
-     * @return void
      */
     public function handle(AssetPendingApproval $event): void
     {
@@ -45,10 +42,11 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
             $tenant = $asset->tenant;
             $brand = $asset->brand;
 
-            if (!$tenant) {
+            if (! $tenant) {
                 Log::warning('[SendAssetPendingApprovalNotification] Asset missing tenant', [
                     'asset_id' => $asset->id,
                 ]);
+
                 return;
             }
 
@@ -65,7 +63,7 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
             // - Have asset.publish permission
             $approvers = $tenantUsers->filter(function ($user) use ($tenant, $brand) {
                 // Check if user has asset.publish permission
-                if (!$user->hasPermissionForTenant($tenant, 'asset.publish')) {
+                if (! $user->hasPermissionForTenant($tenant, 'asset.publish')) {
                     return false;
                 }
 
@@ -73,12 +71,13 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
                 if ($brand) {
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantAdmin = in_array($tenantRole, ['admin', 'owner']);
-                    $isBrandAssigned = $user->brands()->where('brands.id', $brand->id)->exists();
-                    
+                    $isBrandAssigned = $user->isAssignedToBrandId($brand->id);
+
                     return $isTenantAdmin || $isBrandAssigned;
                 } else {
                     // No brand - only tenant admins/owners
                     $tenantRole = $user->getRoleForTenant($tenant);
+
                     return in_array($tenantRole, ['admin', 'owner']);
                 }
             });
@@ -97,6 +96,7 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
                     'tenant_id' => $tenant->id,
                     'brand_id' => $brand?->id,
                 ]);
+
                 return;
             }
 

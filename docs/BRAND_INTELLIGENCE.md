@@ -27,7 +27,8 @@ This doc tracks the **new** Brand Intelligence system (product language: *Execut
 | `execution_assets` | Pivot: assets attached to an execution (`sort_order`, `role`) |
 | `brand_intelligence_scores` | Scores: optional `execution_id` and/or `asset_id`, `overall_score`, `confidence`, `level`, `breakdown_json`, `engine_version`, `ai_used` |
 | `ai_usage_logs` | AI usage rows (`tenant_id`, optional `brand_id`, `type`, `created_at`). EBI vision insight uses `type = brand_intelligence_ai`. |
-| `categories.settings` | Nullable JSON for per-category EBI toggles / future profile hints |
+| `categories.settings` | Nullable JSON; **`ebi_enabled`** (bool) gates pipeline `ScoreAssetBrandIntelligenceJob` (manual rescore uses `forceRun` to bypass; admin simulate supports `?bypass_category_ebi=1`) |
+| `brand_intelligence_feedback` | Thumbs up/down on AI insight (`type`, `rating`, `asset_id`, `tenant_id`, `brand_id`) |
 
 ---
 
@@ -45,6 +46,8 @@ This doc tracks the **new** Brand Intelligence system (product language: *Execut
 | 2026-03-21 | `BrandIntelligenceEngine`: per-asset `signals` (has_text, has_typography, has_visual) + aggregate `signals` + `per_asset` (`tone_applicable` / `typography_applicable`); no change to compliance math or `BrandComplianceService`. |
 | 2026-03-20 | `breakdown_json.scoring_basis`: `single_asset` \| `multi_asset` (constants on `BrandIntelligenceEngine`); persisted `engine_version` / idempotency use `BrandIntelligenceEngine::ENGINE_VERSION` only. |
 | 2026-03-20 | `BrandIntelligenceEngine`: `breakdown_json.reference_similarity` from `BrandVisualReference` + `AssetEmbedding` (cosine, mean of top 3); fields `normalized`, `used`; optional ±5 on `overall_score` when `confidence` > 0.5 and normalized similarity is above 0.8 or below 0.4 (`ENGINE_VERSION` bump). |
+| 2026-03-23 | **Category EBI gate:** `categories.settings.ebi_enabled` (defaults by system slug via migration + `Category::defaultEbiEnabledForSystemSlug`). `ScoreAssetBrandIntelligenceJob` requires `isEbiEnabled()` unless `forceRun`. Metadata registry: PATCH `brands.categories.ebi-enabled`. Feedback: `POST /assets/{asset}/brand-intelligence/feedback`. |
+| 2026-03-21 | **Auto + debounced EBI:** `FinalizeAssetJob` calls `BrandIntelligenceScheduleService::dispatchAfterPipelineComplete` when embeddings are not generated (non-images / skipped thumbnails); image path still scores from `GenerateAssetEmbeddingJob`. Tag/metadata/tag-suggestion edits use `scheduleDebouncedRescoreAfterUserEdit` (2 min delay, version token; last edit wins). |
 
 ---
 

@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OwnershipTransferStatus;
 use App\Models\AgencyPartnerReferral;
 use App\Models\AgencyPartnerReward;
 use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
-use App\Enums\OwnershipTransferStatus;
+use App\Support\DashboardLinks;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -15,14 +16,14 @@ use Inertia\Response;
 
 /**
  * Agency Dashboard Controller
- * 
+ *
  * Phase AG-7 — Agency Dashboard & Credits Visibility
  * Phase AG-8 — UX Polish & Transfer Nudges (Non-Blocking)
  * Phase AG-10 — Partner Marketing & Referral Attribution (Foundational)
- * 
+ *
  * Provides read-only visibility into agency partner program status.
  * Only accessible to tenants with is_agency = true.
- * 
+ *
  * AG-8: Added computed flags for UI nudges (informational only, no enforcement).
  * AG-10: Added referral tracking (attribution only, no rewards).
  */
@@ -30,29 +31,29 @@ class AgencyDashboardController extends Controller
 {
     /**
      * Display the agency dashboard.
-     * 
+     *
      * READ-ONLY: No mutation actions allowed.
      */
     public function index(Request $request): Response
     {
         $tenant = app('tenant');
         $user = Auth::user();
-        
-        if (!$tenant) {
+
+        if (! $tenant) {
             abort(403, 'Tenant must be selected.');
         }
-        
+
         // Only allow access to agency tenants
-        if (!$tenant->is_agency) {
+        if (! $tenant->is_agency) {
             abort(403, 'This page is only available to agency partners.');
         }
-        
+
         // Get agency tier info
         $agencyTier = $tenant->agencyTier;
         $tierName = $agencyTier?->name ?? 'None';
         $tierOrder = $agencyTier?->tier_order ?? 0;
         $activatedCount = $tenant->activated_client_count ?? 0;
-        
+
         // Get next tier threshold
         $nextTier = null;
         $nextTierThreshold = null;
@@ -61,7 +62,7 @@ class AgencyDashboardController extends Controller
             $nextTier = AgencyTier::where('tier_order', '>', $agencyTier->tier_order)
                 ->orderBy('tier_order', 'asc')
                 ->first();
-            
+
             if ($nextTier) {
                 $nextTierThreshold = $nextTier->activation_threshold ?? null;
                 // Phase AG-8: Compute activations needed for tier progress nudge
@@ -70,10 +71,10 @@ class AgencyDashboardController extends Controller
                 }
             }
         }
-        
+
         // Phase AG-8: Get incubation window from agency tier (informational only)
         $incubationWindowDays = $agencyTier?->incubation_window_days;
-        
+
         // Get reward ledger (all rewards for this agency)
         $rewards = AgencyPartnerReward::where('agency_tenant_id', $tenant->id)
             ->with(['clientTenant'])
@@ -89,16 +90,16 @@ class AgencyDashboardController extends Controller
                     'created_at_human' => $reward->created_at->diffForHumans(),
                 ];
             });
-        
+
         // Get incubated clients (tenants incubated by this agency)
         $incubatedClients = Tenant::where('incubated_by_agency_id', $tenant->id)
             ->whereNull('incubated_at') // Not yet transferred/activated
             ->orWhere(function ($query) use ($tenant) {
                 $query->where('incubated_by_agency_id', $tenant->id)
-                      ->whereNotNull('incubated_at')
-                      ->whereDoesntHave('ownershipTransfers', function ($q) {
-                          $q->where('status', OwnershipTransferStatus::COMPLETED);
-                      });
+                    ->whereNotNull('incubated_at')
+                    ->whereDoesntHave('ownershipTransfers', function ($q) {
+                        $q->where('status', OwnershipTransferStatus::COMPLETED);
+                    });
             })
             ->get(['id', 'name', 'slug', 'incubated_at', 'incubation_expires_at'])
             ->map(function ($client) {
@@ -110,7 +111,7 @@ class AgencyDashboardController extends Controller
                     // Negative means already expired, but we don't enforce - just show warning
                     $expiringsSoon = $daysRemaining >= 0 && $daysRemaining < 7;
                 }
-                
+
                 return [
                     'id' => $client->id,
                     'name' => $client->name,
@@ -122,7 +123,7 @@ class AgencyDashboardController extends Controller
                     'expiring_soon' => $expiringsSoon,
                 ];
             });
-        
+
         // Get activated clients (clients with completed transfers)
         $activatedClients = AgencyPartnerReward::where('agency_tenant_id', $tenant->id)
             ->with(['clientTenant'])
@@ -137,11 +138,11 @@ class AgencyDashboardController extends Controller
                     'activated_at_human' => $reward->created_at->diffForHumans(),
                 ];
             });
-        
+
         // Get pending transfers (waiting for billing)
         $pendingTransfers = OwnershipTransfer::whereHas('tenant', function ($query) use ($tenant) {
-                $query->where('incubated_by_agency_id', $tenant->id);
-            })
+            $query->where('incubated_by_agency_id', $tenant->id);
+        })
             ->where('status', OwnershipTransferStatus::PENDING_BILLING)
             ->with(['tenant'])
             ->orderBy('accepted_at', 'desc')
@@ -155,7 +156,7 @@ class AgencyDashboardController extends Controller
                     'accepted_at_human' => $transfer->accepted_at?->diffForHumans(),
                 ];
             });
-        
+
         // Phase AG-10: Get referrals (separate from incubation)
         $referrals = AgencyPartnerReferral::where('agency_tenant_id', $tenant->id)
             ->with(['clientTenant'])
@@ -174,11 +175,36 @@ class AgencyDashboardController extends Controller
                     'created_at_human' => $referral->created_at->diffForHumans(),
                 ];
             });
-        
+
         // Separate activated and pending referrals
         $activatedReferrals = $referrals->where('is_activated', true)->values();
         $pendingReferrals = $referrals->where('is_activated', false)->values();
-        
+
+        $companyController = app(CompanyController::class);
+        $managedClients = $companyController->managedAgencyClientsForUser($user, $tenant);
+
+        $tenant->loadMissing('defaultBrand');
+        $defaultBrand = $tenant->defaultBrand;
+        $brandForLinks = app()->bound('brand') ? app('brand') : null;
+        if (! $brandForLinks && $defaultBrand) {
+            $brandForLinks = $defaultBrand;
+        }
+
+        $dashboardLinks = [
+            'company' => DashboardLinks::companyOverviewHref($user, $tenant),
+            'agency_switch_tenant_id' => null,
+            'brand' => DashboardLinks::brandPortalHref($user, $tenant, $brandForLinks),
+        ];
+
+        $managedAgency = [
+            'id' => $tenant->id,
+            'name' => $tenant->name,
+            'default_brand' => $defaultBrand ? [
+                'id' => $defaultBrand->id,
+                'name' => $defaultBrand->name,
+            ] : null,
+        ];
+
         return Inertia::render('Agency/Dashboard', [
             'tenant' => $tenant,
             'agency' => [
@@ -193,8 +219,8 @@ class AgencyDashboardController extends Controller
                 'next_tier' => $nextTier ? [
                     'name' => $nextTier->name,
                     'threshold' => $nextTierThreshold,
-                    'progress_percentage' => $nextTierThreshold 
-                        ? min(($activatedCount / $nextTierThreshold) * 100, 100) 
+                    'progress_percentage' => $nextTierThreshold
+                        ? min(($activatedCount / $nextTierThreshold) * 100, 100)
                         : 100,
                     // Phase AG-8: Computed activations needed for tier progress nudge
                     'activations_to_next_tier' => $activationsToNextTier,
@@ -212,6 +238,9 @@ class AgencyDashboardController extends Controller
                 'activated' => $activatedReferrals,
                 'pending' => $pendingReferrals,
             ],
+            'managed_clients' => $managedClients,
+            'managed_agency' => $managedAgency,
+            'dashboard_links' => $dashboardLinks,
         ]);
     }
 }

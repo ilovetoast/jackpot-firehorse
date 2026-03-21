@@ -29,6 +29,7 @@ return [
             'max_ai_tagging_per_month' => 5,
             'max_ai_suggestions_per_month' => 10,
             'max_ai_brand_research_per_month' => 0, // Brand research requires a paid plan
+            'max_ai_insights_per_month' => 15, // Metadata insight sync runs (value/field suggestions)
         ],
         'features' => [
             'basic_asset_types',
@@ -93,6 +94,7 @@ return [
             'max_ai_tagging_per_month' => 50,
             'max_ai_suggestions_per_month' => 100,
             'max_ai_brand_research_per_month' => 3, // ~$0.16/call = ~$0.48/mo max
+            'max_ai_insights_per_month' => 40,
         ],
         'features' => [
             'all_asset_types',
@@ -160,6 +162,7 @@ return [
             'max_ai_tagging_per_month' => 500,
             'max_ai_suggestions_per_month' => 1000,
             'max_ai_brand_research_per_month' => 10, // ~$0.16/call = ~$1.60/mo max
+            'max_ai_insights_per_month' => 100,
         ],
         'features' => [
             'all_asset_types',
@@ -231,6 +234,7 @@ return [
             'max_ai_tagging_per_month' => 10000,
             'max_ai_suggestions_per_month' => 10000,
             'max_ai_brand_research_per_month' => 50, // ~$0.16/call = ~$8.00/mo max
+            'max_ai_insights_per_month' => 500,
         ],
         'features' => [
             'all_asset_types',
@@ -310,6 +314,7 @@ return [
             'max_ai_tagging_per_month' => 999999,
             'max_ai_suggestions_per_month' => 999999,
             'max_ai_brand_research_per_month' => 999999,
+            'max_ai_insights_per_month' => 999999,
         ],
         'features' => [
             'all_asset_types',

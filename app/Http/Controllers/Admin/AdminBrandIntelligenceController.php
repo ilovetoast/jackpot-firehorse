@@ -169,14 +169,27 @@ class AdminBrandIntelligenceController extends Controller
 
     /**
      * POST /app/admin/brand-intelligence/assets/{asset}/simulate — score in-process, no DB write.
+     * Query: bypass_category_ebi=1 to score regardless of category settings.ebi_enabled (engineering/debug).
      */
-    public function simulate(string $asset): JsonResponse
+    public function simulate(Request $request, string $asset): JsonResponse
     {
         $this->authorizeAdmin();
 
         $assetModel = Asset::withTrashed()
-            ->with(['brand', 'latestBrandIntelligenceScore'])
+            ->with(['brand', 'category', 'latestBrandIntelligenceScore'])
             ->findOrFail($asset);
+
+        if (! $request->boolean('bypass_category_ebi')) {
+            $category = $assetModel->category;
+            if (! $category || ! $category->isEbiEnabled()) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'Brand Intelligence is disabled for this asset\'s category.',
+                    'payload' => null,
+                    'delta' => null,
+                ], 422);
+            }
+        }
 
         $payload = $this->brandIntelligenceEngine->scoreAsset($assetModel, dryRun: true);
 

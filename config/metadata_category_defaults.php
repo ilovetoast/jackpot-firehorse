@@ -112,6 +112,13 @@ return [
         'model_3d_type' => [
             'model-3d' => ['enabled' => true, 'is_primary' => true],
         ],
+        // Legal: only Photography by default; secondary filters (collapsed "More") via is_primary false
+        'usage_rights' => [
+            'photography' => ['enabled' => true, 'is_primary' => false],
+        ],
+        'expiration_date' => [
+            'photography' => ['enabled' => true, 'is_primary' => false],
+        ],
     ],
 
     /*
@@ -138,6 +145,20 @@ return [
         'template_type',
         'audio_type',
         'model_3d_type',
+        'usage_rights',
+        'expiration_date',
+    ],
+
+    /*
+     * Starred: enabled for the category but not exposed in grid / More filters by default;
+     * remains visible in drawer / quick view (is_edit_hidden false).
+     */
+    'starred_default_visibility' => [
+        'is_hidden' => false,
+        'is_upload_hidden' => false,
+        'is_filter_hidden' => true,
+        'is_primary' => false,
+        'is_edit_hidden' => false,
     ],
 
     /*

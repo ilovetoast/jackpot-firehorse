@@ -5,8 +5,9 @@ namespace Database\Seeders;
 use App\Models\AgencyTier;
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Models\User;
-use App\Support\Roles\RoleRegistry;
+use App\Services\TenantAgencyService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -22,16 +23,16 @@ class CompanyBrandSeeder extends Seeder
     {
         // CRITICAL: Ensure msteele@velvethammerbranding.com is ALWAYS user ID 1
         DB::statement('SET FOREIGN_KEY_CHECKS=0');
-        
+
         // Check if user with email already exists
         $existingUser = DB::table('users')->where('email', 'msteele@velvethammerbranding.com')->first();
-        
+
         if ($existingUser) {
             // User exists - check if it's already ID 1
             if ($existingUser->id !== 1) {
                 // User exists but not as ID 1 - need to swap IDs
                 $oldId = $existingUser->id;
-                
+
                 // Check if ID 1 is already taken by another user
                 $userAtId1 = DB::table('users')->where('id', 1)->first();
                 if ($userAtId1 && $userAtId1->id === 1 && $userAtId1->email !== 'msteele@velvethammerbranding.com') {
@@ -40,12 +41,12 @@ class CompanyBrandSeeder extends Seeder
                     $this->updateUserReferences(1, $tempId);
                     DB::table('users')->where('id', 1)->update(['id' => $tempId]);
                 }
-                
+
                 // Now update msteele's ID from oldId to 1
                 $this->updateUserReferences($oldId, 1);
                 DB::table('users')->where('id', $oldId)->update(['id' => 1]);
             }
-            
+
             // Update user attributes to ensure they're correct
             DB::table('users')->where('id', 1)->update([
                 'first_name' => 'Michael',
@@ -62,7 +63,7 @@ class CompanyBrandSeeder extends Seeder
                 $this->updateUserReferences(1, $newId);
                 DB::table('users')->where('id', 1)->update(['id' => $newId]);
             }
-            
+
             // Now insert the new user with ID 1
             DB::table('users')->insert([
                 'id' => 1,
@@ -74,9 +75,9 @@ class CompanyBrandSeeder extends Seeder
                 'updated_at' => now(),
             ]);
         }
-        
+
         DB::statement('SET FOREIGN_KEY_CHECKS=1');
-        
+
         // Get the user as Eloquent model
         $initialUser = User::find(1);
 
@@ -108,7 +109,7 @@ class CompanyBrandSeeder extends Seeder
         if (! $initialDefaultBrand) {
             // Check if tenant has any brands at all
             $anyBrand = $initialCompany->brands()->first();
-            
+
             if ($anyBrand) {
                 // Mark the first brand as default
                 $anyBrand->update(['is_default' => true]);
@@ -123,7 +124,7 @@ class CompanyBrandSeeder extends Seeder
                 ]);
             }
         }
-        
+
         // Update the brand with styling - brand name matches company name
         if ($initialDefaultBrand) {
             $initialDefaultBrand->update([
@@ -157,6 +158,29 @@ class CompanyBrandSeeder extends Seeder
             $bill->assignRole('site_admin');
         }
 
+        $tenantAgencyService = app(TenantAgencyService::class);
+
+        // Drop prior agency links (VH → clients) so pivots can be recreated idempotently
+        foreach (TenantAgency::where('agency_tenant_id', $initialCompany->id)->get() as $link) {
+            $tenantAgencyService->detach($link);
+        }
+
+        // msteele + brempe: only direct membership on Velvet Hammer (tenant 1 / primary agency).
+        // Remove direct tenant_user and brand_user on all other companies; access comes from agency link below.
+        DB::table('tenant_user')
+            ->whereIn('user_id', [$initialUser->id, $bill->id])
+            ->where('tenant_id', '!=', $initialCompany->id)
+            ->delete();
+
+        $nonAgencyBrandIds = Brand::where('tenant_id', '!=', $initialCompany->id)->pluck('id');
+        if ($nonAgencyBrandIds->isNotEmpty()) {
+            DB::table('brand_user')
+                ->whereIn('user_id', [$initialUser->id, $bill->id])
+                ->whereIn('brand_id', $nonAgencyBrandIds)
+                ->whereNull('removed_at')
+                ->update(['removed_at' => now(), 'updated_at' => now()]);
+        }
+
         // Create a secondary user for testing/development (will be user ID 2+ if user 1 exists)
         // NOTE: This user should NEVER have site_owner role - only user ID 1 can be site_owner
         $secondaryUser = User::firstOrCreate(
@@ -185,7 +209,7 @@ class CompanyBrandSeeder extends Seeder
             $brandNames = $companyConfig['brands'];
             $plan = $companyConfig['plan'];
             $companySlug = Str::slug($companyName);
-            
+
             // Create or get tenant - the boot() method will auto-create a default brand
             $tenant = Tenant::firstOrCreate(
                 ['slug' => $companySlug],
@@ -203,14 +227,6 @@ class CompanyBrandSeeder extends Seeder
                 'manual_plan_override' => $plan,
             ]);
 
-            // msteele and brempe: members of all seeded tenants and brands
-            $initialUser->setRoleForTenant($tenant, 'member');
-            $bill->setRoleForTenant($tenant, 'member');
-            foreach ($tenant->brands as $brand) {
-                $initialUser->setRoleForBrand($brand, 'viewer');
-                $bill->setRoleForBrand($brand, 'viewer');
-            }
-
             // Secondary dev user
             $secondaryUser->setRoleForTenant($tenant, 'member');
             foreach ($tenant->brands as $brand) {
@@ -220,10 +236,10 @@ class CompanyBrandSeeder extends Seeder
             // Get the first brand name we want
             $firstBrandName = $brandNames[0];
             $firstBrandSlug = Str::slug($firstBrandName);
-            
+
             // Get the auto-created default brand (created by Tenant boot method)
             $defaultBrand = $tenant->defaultBrand;
-            
+
             if ($defaultBrand) {
                 // If the default brand's slug matches what we want, update it
                 if ($defaultBrand->slug === $firstBrandSlug) {
@@ -263,7 +279,7 @@ class CompanyBrandSeeder extends Seeder
             // Create any additional brands (skip the first one since we already handled it)
             foreach (array_slice($brandNames, 1) as $brandName) {
                 $brandSlug = Str::slug($brandName);
-                
+
                 Brand::firstOrCreate(
                     ['tenant_id' => $tenant->id, 'slug' => $brandSlug],
                     [
@@ -277,19 +293,24 @@ class CompanyBrandSeeder extends Seeder
                     ]
                 );
             }
-        }
 
-        // Ensure msteele and brempe are on every seeded brand (including those created above)
-        $allSeededBrands = Brand::whereHas('tenant', function ($q) use ($initialCompany, $companiesData) {
-            $slugs = array_merge([$initialCompany->slug], array_map(fn ($n) => Str::slug($n), array_keys($companiesData)));
-            $q->whereIn('slug', $slugs);
-        })->get();
-        foreach ($allSeededBrands as $brand) {
-            $initialUser->setRoleForBrand($brand, $brand->tenant_id === $initialCompany->id ? 'admin' : 'viewer');
-            $bill->setRoleForBrand($brand, $brand->tenant_id === $initialCompany->id ? 'admin' : 'viewer');
+            // Velvet Hammer (agency) → client tenant: explicit RBAC via tenant_agencies + agency-managed pivots
+            $tenant->load('brands');
+            $brandAssignments = $tenant->brands->map(fn (Brand $b) => [
+                'brand_id' => $b->id,
+                'role' => 'admin',
+            ])->all();
+
+            $tenantAgencyService->attach(
+                $tenant,
+                $initialCompany,
+                'agency_admin',
+                $brandAssignments,
+                $initialUser
+            );
         }
     }
-    
+
     /**
      * Helper method to update all foreign key references when changing user ID
      */
@@ -315,7 +336,7 @@ class CompanyBrandSeeder extends Seeder
             'ai_budget_overrides' => ['created_by_user_id', 'updated_by_user_id'],
             'frontend_errors' => ['user_id'],
         ];
-        
+
         foreach ($tablesWithUserId as $table => $columns) {
             foreach ($columns as $column) {
                 try {
@@ -325,7 +346,7 @@ class CompanyBrandSeeder extends Seeder
                 }
             }
         }
-        
+
         // Handle activity_events separately (uses actor_id with actor_type)
         try {
             DB::table('activity_events')

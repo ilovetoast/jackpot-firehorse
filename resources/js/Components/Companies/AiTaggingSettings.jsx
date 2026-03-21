@@ -1,21 +1,33 @@
 /**
- * AiTaggingSettings Component
- * 
- * Phase J.2.5: AI Tagging settings panel for Company Settings
- * 
- * Features:
- * - Master toggle for AI tagging
- * - AI tag suggestions toggle
- * - Auto-apply toggle (OFF by default)
- * - Quantity control with mode selector
- * - Debounced API updates
- * - Optimistic UI with error recovery
- * - Permission-based editing
+ * AiTaggingSettings — Tags (keywords) vs Asset Fields (structured registry ideas).
+ * API keys unchanged (disable_ai_tagging, ai_insights_enabled, etc.).
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
+
+/** @param {string | null | undefined} iso */
+function formatRelativeTime(iso) {
+    if (!iso) return null
+    const then = new Date(iso).getTime()
+    if (Number.isNaN(then)) return null
+    const diffSec = Math.round((then - Date.now()) / 1000)
+    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+    const abs = Math.abs(diffSec)
+    if (abs < 60) return rtf.format(diffSec, 'second')
+    const diffMin = Math.round(diffSec / 60)
+    if (Math.abs(diffMin) < 60) return rtf.format(diffMin, 'minute')
+    const diffHr = Math.round(diffSec / 3600)
+    if (Math.abs(diffHr) < 24) return rtf.format(diffHr, 'hour')
+    const diffDay = Math.round(diffSec / 86400)
+    if (Math.abs(diffDay) < 7) return rtf.format(diffDay, 'day')
+    const diffWk = Math.round(diffSec / 604800)
+    if (Math.abs(diffWk) < 4) return rtf.format(diffWk, 'week')
+    const diffMo = Math.round(diffSec / 2629800)
+    if (Math.abs(diffMo) < 12) return rtf.format(diffMo, 'month')
+    return rtf.format(Math.round(diffSec / 31557600), 'year')
+}
 
 // Custom Toggle Switch component (replaces Headless UI Switch)
 function Toggle({ checked, onChange, disabled = false, className = "" }) {
@@ -52,6 +64,7 @@ export default function AiTaggingSettings({
     const [error, setError] = useState(null)
     const [saving, setSaving] = useState(false)
     const [lastSaved, setLastSaved] = useState(null)
+    const [runInsightsLoading, setRunInsightsLoading] = useState(false)
     
     // Get plan tag limits
     const planLimits = {
@@ -163,6 +176,23 @@ export default function AiTaggingSettings({
         }, 800), // Slightly longer debounce for number input
         [settings, debouncedUpdateSettings, maxTagsPerAsset]
     )
+
+    const runInsightsNow = async () => {
+        if (!canEdit || !settings?.ai_insights_enabled) return
+        try {
+            setRunInsightsLoading(true)
+            setError(null)
+            const response = await window.axios.post('/app/api/companies/ai-settings/run-insights')
+            if (response.data?.settings) {
+                setSettings(response.data.settings)
+            }
+        } catch (err) {
+            console.error('[AiTaggingSettings] Run insights failed:', err)
+            setError(err.response?.data?.error || err.message || 'Could not queue insights sync')
+        } finally {
+            setRunInsightsLoading(false)
+        }
+    }
     
     // Handle tag limit input changes
     const handleTagLimitChange = (e) => {
@@ -269,110 +299,158 @@ export default function AiTaggingSettings({
                 </div>
             )}
 
-            {/* Master Toggle - Disable AI Tagging */}
-            <div className="flex items-center justify-between">
-                <div className="flex-1">
-                    <label className="text-base font-medium text-gray-900">
-                        AI Tagging
-                    </label>
-                    <p className="text-sm text-gray-500">
-                        {isAiDisabled 
-                            ? 'AI tagging is completely disabled. No AI calls will be made, no costs incurred.'
-                            : 'Allow AI to generate tag suggestions for assets.'
-                        }
-                    </p>
-                </div>
-                <Toggle
-                    checked={!isAiDisabled}
-                    onChange={(enabled) => updateSetting('disable_ai_tagging', !enabled)}
-                    disabled={!canEdit}
-                />
-            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5 shadow-sm">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Tags</h3>
+                <p className="mt-1 text-xs text-gray-500">Quick keywords — separate from asset fields below.</p>
 
-            {/* AI Disabled Notice */}
-            {isAiDisabled && (
-                <div className="rounded-md bg-gray-50 p-4">
-                    <div className="flex">
-                        <div className="flex-shrink-0">
-                            <InformationCircleIcon className="h-5 w-5 text-gray-400" />
-                        </div>
-                        <div className="ml-3">
-                            <p className="text-sm text-gray-600">
-                                All AI tagging features are disabled. Enable AI Tagging above to configure individual features.
+                <div className="mt-5 space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div className="flex-1 pr-4">
+                            <label className="text-base font-medium text-gray-900">
+                                AI tag suggestions
+                            </label>
+                            <p className="text-sm text-gray-500">
+                                Let AI suggest tags for assets.
                             </p>
                         </div>
+                        <Toggle
+                            checked={!isAiDisabled}
+                            onChange={(enabled) => updateSetting('disable_ai_tagging', !enabled)}
+                            disabled={!canEdit}
+                        />
                     </div>
-                </div>
-            )}
 
-            {/* Child Settings (disabled when AI is off) */}
-            <div className={`space-y-6 ${isAiDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                
-                {/* AI Tag Suggestions Toggle */}
-                <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                        <label className="text-base font-medium text-gray-900">
-                            AI Tag Suggestions
-                        </label>
-                        <p className="text-sm text-gray-500">
-                            Show AI-generated tag suggestions to users for manual acceptance.
-                        </p>
-                    </div>
-                    <Toggle
-                        checked={settings.enable_ai_tag_suggestions}
-                        onChange={(enabled) => updateSetting('enable_ai_tag_suggestions', enabled)}
-                        disabled={!canEdit || isAiDisabled}
-                    />
-                </div>
-
-                {/* Auto-Apply Toggle */}
-                <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                        <label className="text-base font-medium text-gray-900">
-                            Auto-Apply AI Tags
-                        </label>
-                        <p className="text-sm text-gray-500">
-                            Automatically apply high-confidence AI tags without user intervention. 
-                            <span className="font-medium text-orange-600"> (Off by default - use carefully)</span>
-                        </p>
-                    </div>
-                    <Toggle
-                        checked={isAutoApplyEnabled}
-                        onChange={(enabled) => updateSetting('enable_ai_tag_auto_apply', enabled)}
-                        disabled={!canEdit || isAiDisabled}
-                    />
-                </div>
-
-                {/* Quantity Control (shown when AI is enabled) */}
-                {!isAiDisabled && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                        <label className="text-base font-medium text-gray-900">
-                            Auto-Apply Tag Limit
-                        </label>
-                        <p className="text-sm text-gray-500 mb-4">
-                            Configure how many tags AI can suggest or auto-apply per asset.
-                        </p>
-
-                        <div className="flex items-center space-x-3">
-                            <label className="text-sm font-medium text-gray-700">Limit:</label>
-                            <input
-                                type="number"
-                                min="1"
-                                max={maxTagsPerAsset}
-                                value={localTagLimit}
-                                onChange={handleTagLimitChange}
-                                disabled={!canEdit || isAiDisabled}
-                                className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
-                                placeholder={String(Math.min(5, maxTagsPerAsset))}
-                            />
-                            <span className="text-sm text-gray-700">tags per asset</span>
+                    {isAiDisabled && (
+                        <div className="rounded-md bg-white/80 p-4 ring-1 ring-gray-100">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <InformationCircleIcon className="h-5 w-5 text-gray-400" />
+                                </div>
+                                <div className="ml-3">
+                                    <p className="text-sm text-gray-600">
+                                        Turn on <span className="font-medium">AI tag suggestions</span> to use the options below.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
-                        <p className="mt-2 text-sm text-gray-500">
-                            Range: 1-{maxTagsPerAsset} tags ({planLimit.name} plan limit). <strong>{Math.min(5, maxTagsPerAsset)} is recommended</strong> for balanced quality and coverage. Higher limits may reduce tag quality.
-                        </p>
-                    </div>
-                )}
+                    )}
 
+                    <div className={`space-y-6 ${isAiDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <div className="flex items-center justify-between">
+                            <div className="flex-1 pr-4">
+                                <label className="text-base font-medium text-gray-900">
+                                    Show tag suggestions on assets
+                                </label>
+                                <p className="text-sm text-gray-500">
+                                    Display suggestions when viewing an asset.
+                                </p>
+                            </div>
+                            <Toggle
+                                checked={settings.enable_ai_tag_suggestions}
+                                onChange={(enabled) => updateSetting('enable_ai_tag_suggestions', enabled)}
+                                disabled={!canEdit || isAiDisabled}
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                            <div className="flex-1 pr-4">
+                                <label className="text-base font-medium text-gray-900">
+                                    Auto-apply tags
+                                </label>
+                                <p className="text-sm text-gray-500">
+                                    Automatically add tags when confidence is high.
+                                </p>
+                            </div>
+                            <Toggle
+                                checked={isAutoApplyEnabled}
+                                onChange={(enabled) => updateSetting('enable_ai_tag_auto_apply', enabled)}
+                                disabled={!canEdit || isAiDisabled}
+                            />
+                        </div>
+
+                        {!isAiDisabled && (
+                            <div className="rounded-lg bg-white p-4 ring-1 ring-gray-100">
+                                <label className="text-base font-medium text-gray-900">
+                                    Max tags per asset
+                                </label>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Limit how many tags AI suggests or applies.
+                                </p>
+
+                                <div className="flex items-center space-x-3">
+                                    <label className="text-sm font-medium text-gray-700">Limit:</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={maxTagsPerAsset}
+                                        value={localTagLimit}
+                                        onChange={handleTagLimitChange}
+                                        disabled={!canEdit || isAiDisabled}
+                                        className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                                        placeholder={String(Math.min(5, maxTagsPerAsset))}
+                                    />
+                                    <span className="text-sm text-gray-700">per asset</span>
+                                </div>
+                                <p className="mt-2 text-sm text-gray-500">
+                                    1–{maxTagsPerAsset} ({planLimit.name}). <strong>{Math.min(5, maxTagsPerAsset)} recommended.</strong>
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="my-6 flex items-center gap-3" aria-hidden="true">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
+            </div>
+
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5 shadow-sm">
+                <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-indigo-900/70">
+                        Asset fields
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-600">Structured data — not the Tags section above.</p>
+                    <p className="mt-3 text-base font-medium text-gray-900">Suggest structured fields</p>
+                    <p className="mt-1 text-sm text-gray-600">
+                        AI analyzes your assets to suggest new fields and field values.
+                    </p>
+                </div>
+                <div className="mt-5 flex items-center justify-between">
+                    <div className="flex-1 pr-4">
+                        <label className="text-base font-medium text-gray-900">Enable Asset Field Intelligence</label>
+                    </div>
+                    <Toggle
+                        checked={!!settings.ai_insights_enabled}
+                        onChange={(enabled) => updateSetting('ai_insights_enabled', enabled)}
+                        disabled={!canEdit}
+                    />
+                </div>
+                <div className="mt-4 rounded-lg border border-indigo-100/80 bg-white/80 px-4 py-3 shadow-sm">
+                    <div className="flex flex-col gap-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                            <p>
+                                <span className="font-medium text-gray-900">Last run:</span>{' '}
+                                {settings.last_insights_run_at
+                                    ? formatRelativeTime(settings.last_insights_run_at) ?? '—'
+                                    : 'Never'}
+                            </p>
+                            <p>
+                                <span className="font-medium text-gray-900">New suggestions:</span>{' '}
+                                {typeof settings.insights_pending_suggestions_count === 'number'
+                                    ? settings.insights_pending_suggestions_count
+                                    : '—'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={runInsightsNow}
+                            disabled={!canEdit || !settings.ai_insights_enabled || runInsightsLoading}
+                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {runInsightsLoading ? 'Queueing…' : 'Run now'}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* Permission Notice */}

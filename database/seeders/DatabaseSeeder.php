@@ -15,7 +15,6 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        
 
         $this->call([
             RoleSeeder::class, // Creates Spatie roles (tenant-level and legacy)
@@ -28,6 +27,7 @@ class DatabaseSeeder extends Seeder
             EnsureDefaultBrandsSeeder::class, // Ensure all tenants have default brands
             TenantAiTagSettingsSeeder::class, // Initialize AI tagging settings for all tenants
             CategorySeeder::class,
+            EbiCategoryDefaultSettingsSeeder::class,
             MetadataFieldPermissionSeeder::class, // Seed metadata field permissions (owner/admin can edit all fields)
             MetadataFieldsSeeder::class, // Create and configure all metadata fields with category-specific settings
         ]);

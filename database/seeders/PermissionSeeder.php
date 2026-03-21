@@ -17,7 +17,7 @@ class PermissionSeeder extends Seeder
     {
         // Company permissions (tenant-scoped) - aligned with Company Settings sections
         // company_settings.edit = Company Information | manage_download_policy = Enterprise Download Policy
-        // manage_dashboard_widgets = Dashboard Widgets | manage_ai_settings = AI Settings
+        // manage_ai_settings = AI Settings
         // view_tag_quality = Tag Quality | ownership_transfer/delete_company = owner only
         $companyPermissions = [
             'company.view',
@@ -26,7 +26,6 @@ class PermissionSeeder extends Seeder
             'company_settings.view',
             'company_settings.edit',
             'company_settings.manage_download_policy',
-            'company_settings.manage_dashboard_widgets',
             'company_settings.manage_ai_settings',
             'company_settings.view_tag_quality',
             'team.manage',
@@ -152,7 +151,7 @@ class PermissionSeeder extends Seeder
         // Create and assign permissions to company roles
         // Use PermissionMap for canonical roles from RoleRegistry
         $tenantPermissions = PermissionMap::tenantPermissions();
-        
+
         // Owner: ALL permissions (full access) - from PermissionMap
         $owner = Role::firstOrCreate(['name' => 'owner', 'guard_name' => 'web']);
         $owner->syncPermissions($tenantPermissions['owner']);
@@ -164,6 +163,12 @@ class PermissionSeeder extends Seeder
         // Member: Basic company membership - from PermissionMap
         $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']);
         $member->syncPermissions($tenantPermissions['member']);
+
+        // Agency partner / agency admin (tenant-level) — from PermissionMap
+        $agencyPartner = Role::firstOrCreate(['name' => 'agency_partner', 'guard_name' => 'web']);
+        $agencyPartner->syncPermissions($tenantPermissions['agency_partner']);
+        $agencyAdmin = Role::firstOrCreate(['name' => 'agency_admin', 'guard_name' => 'web']);
+        $agencyAdmin->syncPermissions($tenantPermissions['agency_admin']);
 
         // Legacy roles (kept for backward compatibility, not in RoleRegistry)
         $manager = Role::firstOrCreate(['name' => 'manager', 'guard_name' => 'web']);
@@ -228,9 +233,9 @@ class PermissionSeeder extends Seeder
 
         // Site Owner has all site permissions by default
         $siteOwner->syncPermissions($sitePermissions);
-        
+
         // Note: metadata.registry.view is included in $sitePermissions, so site_owner gets it automatically
-        
+
         // Assign default ticket permissions to other roles based on their typical access
         // Site Admin: Full ticket access + AI Dashboard manage + AI Budgets manage + thumbnail regeneration + metadata registry + metadata visibility management
         $siteAdmin->syncPermissions([
@@ -250,7 +255,7 @@ class PermissionSeeder extends Seeder
             'metadata.system.visibility.manage',
             'assets.regenerate_thumbnails_admin',
         ]);
-        
+
         // Site Support: Can manage tenant tickets and add internal notes + thumbnail regeneration for troubleshooting
         $siteSupport->syncPermissions([
             'tickets.view_staff',
@@ -259,7 +264,7 @@ class PermissionSeeder extends Seeder
             'tickets.view_sla',
             'assets.regenerate_thumbnails_admin',
         ]);
-        
+
         // Site Engineering: Can view and manage internal tickets + thumbnail regeneration for troubleshooting
         $siteEngineering->syncPermissions([
             'tickets.view_staff',
@@ -270,7 +275,7 @@ class PermissionSeeder extends Seeder
             'tickets.view_sla',
             'assets.regenerate_thumbnails_admin',
         ]);
-        
+
         // Site Compliance: View-only access (including AI Dashboard, AI Budgets, and Metadata Registry view-only)
         $siteCompliance->syncPermissions([
             'tickets.view_staff',

@@ -7,7 +7,6 @@ import CompanyTabs from '../../Components/Company/CompanyTabs'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
 import TagQuality from '../../Components/Companies/TagQuality'
-import DashboardWidgetSettings from '../../Components/Companies/DashboardWidgetSettings'
 import { usePermission } from '../../hooks/usePermission'
 import { debounce } from 'lodash-es'
 
@@ -18,7 +17,21 @@ const DEFAULT_DOWNLOAD_POLICY = {
     disallow_non_expiring: false,
 }
 
-export default function CompanySettings({ tenant, company_url_domain = 'jackpot.local', billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null, can_use_require_landing_page: canUseRequireLandingPage = false }) {
+export default function CompanySettings({
+    tenant,
+    company_url_domain = 'jackpot.local',
+    billing,
+    team_members_count,
+    brands_count,
+    is_current_user_owner,
+    tenant_users = [],
+    pending_transfer = null,
+    enterprise_download_policy: enterpriseDownloadPolicy = null,
+    can_use_require_landing_page: canUseRequireLandingPage = false,
+    settings_brands = [],
+    linked_agencies = [],
+    can_manage_agencies = false,
+}) {
     const page = usePage()
     const { auth, errors: pageErrors = {}, flash = {} } = page.props
     const { can } = usePermission()
@@ -26,13 +39,128 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
     const canEditViaPermission = can('company_settings.edit')
     // Company owners should always be able to edit settings
     const canEditCompanySettings = is_current_user_owner || canEditViaPermission
-    const canManageDashboardWidgets = is_current_user_owner || can('company_settings.manage_dashboard_widgets')
     const canManageAiSettings = is_current_user_owner || can('company_settings.manage_ai_settings')
     const canViewTagQuality = is_current_user_owner || can('company_settings.view_tag_quality')
     const canManageDownloadPolicy = is_current_user_owner || can('company_settings.manage_download_policy')
     const canOwnershipTransfer = is_current_user_owner
     const canDeleteCompany = is_current_user_owner
     const canViewMetadata = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
+    const [agencySearch, setAgencySearch] = useState('')
+    const [agencySearchResults, setAgencySearchResults] = useState([])
+    const [agencySearchLoading, setAgencySearchLoading] = useState(false)
+    const [selectedAgencyTenantId, setSelectedAgencyTenantId] = useState(null)
+    const [agencyTenantRole, setAgencyTenantRole] = useState('agency_admin')
+    const [agencyBrandRole, setAgencyBrandRole] = useState('contributor')
+    const [agencySelectedBrandIds, setAgencySelectedBrandIds] = useState(() => new Set())
+    const [agencySaving, setAgencySaving] = useState(false)
+    const [agencyError, setAgencyError] = useState(null)
+
+    const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+
+    useEffect(() => {
+        if (!can_manage_agencies || agencySearch.trim().length < 2) {
+            setAgencySearchResults([])
+            return
+        }
+        const t = setTimeout(() => {
+            setAgencySearchLoading(true)
+            fetch(`/app/api/tenant/agencies/search?q=${encodeURIComponent(agencySearch.trim())}`, {
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            })
+                .then((r) => r.json())
+                .then((d) => setAgencySearchResults(d.tenants || []))
+                .catch(() => setAgencySearchResults([]))
+                .finally(() => setAgencySearchLoading(false))
+        }, 300)
+        return () => clearTimeout(t)
+    }, [agencySearch, can_manage_agencies])
+
+    const toggleAgencyBrand = (id) => {
+        setAgencySelectedBrandIds((prev) => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
+    const submitAgencyLink = async () => {
+        if (!selectedAgencyTenantId) {
+            setAgencyError('Select an agency company.')
+            return
+        }
+        setAgencyError(null)
+        setAgencySaving(true)
+        const brand_assignments =
+            agencySelectedBrandIds.size > 0
+                ? Array.from(agencySelectedBrandIds).map((id) => ({
+                      brand_id: Number(id),
+                      role: agencyBrandRole,
+                  }))
+                : []
+        try {
+            const res = await fetch('/app/api/tenant/agencies', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrf(),
+                },
+                body: JSON.stringify({
+                    agency_tenant_id: selectedAgencyTenantId,
+                    role: agencyTenantRole,
+                    brand_assignments,
+                }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                setAgencyError(data.message || data.errors?.agency_tenant_id?.[0] || 'Could not link agency.')
+                setAgencySaving(false)
+                return
+            }
+            setSelectedAgencyTenantId(null)
+            setAgencySearch('')
+            setAgencySearchResults([])
+            setAgencySelectedBrandIds(new Set())
+            router.reload({ only: ['linked_agencies'] })
+        } catch {
+            setAgencyError('Network error.')
+        } finally {
+            setAgencySaving(false)
+        }
+    }
+
+    const removeAgencyLink = async (id) => {
+        if (!confirm('Remove this agency and revoke access for its users that were granted via this link?')) return
+        setAgencySaving(true)
+        setAgencyError(null)
+        try {
+            const res = await fetch(`/app/api/tenant/agencies/${id}`, {
+                method: 'DELETE',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrf(),
+                },
+            })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                setAgencyError(data.message || 'Could not remove agency.')
+                setAgencySaving(false)
+                return
+            }
+            router.reload({ only: ['linked_agencies'] })
+        } catch {
+            setAgencyError('Network error.')
+        } finally {
+            setAgencySaving(false)
+        }
+    }
+
     const [activeSection, setActiveSection] = useState('company-information')
     const hasDownloadPolicyAccess = ['premium', 'enterprise'].includes(billing?.current_plan)
     const [downloadPolicy, setDownloadPolicy] = useState(() => ({
@@ -297,21 +425,47 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
         return statusMap[status] || status
     }
 
-    // Nav items: sections that appear in sidebar (always show link; content may be blurred for non-access)
-    const navItems = [
-        { id: 'company-information', label: 'Company Information', canAccess: canEditCompanySettings },
-        { id: 'plan-billing', label: 'Plan & Billing', canAccess: true },
-        { id: 'team-members', label: 'Team Members', canAccess: true },
-        { id: 'brands-settings', label: 'Brands Settings', canAccess: true },
-        { id: 'enterprise-download-policy', label: 'Enterprise Download Policy', canAccess: true },
-        { id: 'metadata-settings', label: 'Metadata', canAccess: canViewMetadata },
-        { id: 'dashboard-widgets', label: 'Dashboard Widgets', canAccess: canManageDashboardWidgets },
-        { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
-        { id: 'tag-quality', label: 'Tag Quality', canAccess: canViewTagQuality },
-        { id: 'ai-usage', label: 'AI Usage', canAccess: canViewAiUsage },
-        { id: 'ownership-transfer', label: 'Ownership Transfer', canAccess: canOwnershipTransfer, ownerOnly: true },
-        { id: 'danger-zone', label: 'Danger Zone', canAccess: canDeleteCompany, ownerOnly: true },
-    ].filter((item) => item.id !== 'metadata-settings' || canViewMetadata)
+    /** @type {{ id: string, label: string | null, items: { id: string, label: string, canAccess: boolean, ownerOnly?: boolean }[] }[]} */
+    const navGroups = [
+        {
+            id: 'general',
+            label: null,
+            items: [
+                { id: 'company-information', label: 'Company Information', canAccess: canEditCompanySettings },
+                { id: 'plan-billing', label: 'Plan & Billing', canAccess: true },
+                { id: 'enterprise-download-policy', label: 'Enterprise Download Policy', canAccess: true },
+            ],
+        },
+        {
+            id: 'company',
+            label: 'Company',
+            items: [
+                { id: 'team-members', label: 'Team Members', canAccess: true },
+                ...(can_manage_agencies ? [{ id: 'agencies', label: 'Agencies', canAccess: true }] : []),
+                { id: 'brands-settings', label: 'Brands Settings', canAccess: true },
+                ...(canViewMetadata
+                    ? [{ id: 'metadata-settings', label: 'Categories & Fields', canAccess: true }]
+                    : []),
+            ],
+        },
+        {
+            id: 'ai',
+            label: 'AI',
+            items: [
+                { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
+                { id: 'tag-quality', label: 'Tag Quality', canAccess: canViewTagQuality },
+                { id: 'ai-usage', label: 'AI Usage', canAccess: canViewAiUsage },
+            ],
+        },
+        {
+            id: 'owner',
+            label: null,
+            items: [
+                { id: 'ownership-transfer', label: 'Ownership Transfer', canAccess: canOwnershipTransfer, ownerOnly: true },
+                { id: 'danger-zone', label: 'Danger Zone', canAccess: canDeleteCompany, ownerOnly: true },
+            ],
+        },
+    ]
 
     return (
         <div className="min-h-screen flex flex-col bg-gray-50">
@@ -331,27 +485,64 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                     <div className="flex flex-col lg:flex-row gap-8">
                         {/* Left sidebar nav - Tailwind UI docs style */}
                         <aside className="lg:w-56 flex-shrink-0">
-                            <nav className="sticky top-8 space-y-1" aria-label="Company settings sections">
-                                {navItems.map((item) => (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        onClick={() => handleSectionClick(item.id)}
-                                        className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                            activeSection === item.id
-                                                ? 'bg-indigo-50 text-indigo-700'
-                                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                                        } ${!item.canAccess ? 'opacity-75' : ''}`}
-                                    >
-                                        <span className="flex items-center justify-between">
-                                            {item.label}
-                                            {!item.canAccess && item.ownerOnly && (
-                                                <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
-                                                    Owner only
-                                                </span>
-                                            )}
-                                        </span>
-                                    </button>
+                            <nav className="sticky top-8 flex flex-col gap-4" aria-label="Company settings sections">
+                                {navGroups.map((group) => (
+                                    <div key={group.id} className={group.label ? '' : 'space-y-1'}>
+                                        {group.label ? (
+                                            <>
+                                                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                                                    {group.label}
+                                                </p>
+                                                <div className="rounded-lg border border-gray-200 bg-gray-50/90 p-1 shadow-sm">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        {group.items.map((item) => (
+                                                            <button
+                                                                key={item.id}
+                                                                type="button"
+                                                                onClick={() => handleSectionClick(item.id)}
+                                                                className={`w-full text-left rounded-md px-2.5 py-2 text-sm font-medium transition-colors ${
+                                                                    activeSection === item.id
+                                                                        ? 'bg-indigo-50 text-indigo-700 shadow-sm'
+                                                                        : 'text-gray-600 hover:bg-white hover:text-gray-900'
+                                                                } ${!item.canAccess ? 'opacity-75' : ''}`}
+                                                            >
+                                                                <span className="flex items-center justify-between gap-2">
+                                                                    {item.label}
+                                                                    {!item.canAccess && item.ownerOnly && (
+                                                                        <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
+                                                                            Owner only
+                                                                        </span>
+                                                                    )}
+                                                                </span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            group.items.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    onClick={() => handleSectionClick(item.id)}
+                                                    className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                                                        activeSection === item.id
+                                                            ? 'bg-indigo-50 text-indigo-700'
+                                                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                                    } ${!item.canAccess ? 'opacity-75' : ''}`}
+                                                >
+                                                    <span className="flex items-center justify-between gap-2">
+                                                        {item.label}
+                                                        {!item.canAccess && item.ownerOnly && (
+                                                            <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
+                                                                Owner only
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
                                 ))}
                             </nav>
                         </aside>
@@ -695,6 +886,198 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                         </div>
                     </div>
 
+                    {/* Agencies — explicit RBAC for partner agency tenants (team.manage) */}
+                    {can_manage_agencies && (
+                    <div id="agencies" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Agencies</h2>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Grant another company (registered as an agency) access to your company and brands. Access is role-based; no automatic inheritance.
+                                    </p>
+                                </div>
+                                <div className="lg:col-span-2 px-6 py-6 space-y-6">
+                                    {agencyError && (
+                                        <div className="rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
+                                            {agencyError}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <h3 className="text-sm font-semibold text-gray-900">Link an agency</h3>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Search by company name. Agency users will be added automatically and managed by the system. Anyone who already has access to this company is left unchanged.
+                                        </p>
+                                        <p className="mt-2 text-sm text-gray-500">
+                                            They receive the tenant role you choose; brand access follows your selections (or defaults to your default brand if none are checked).
+                                        </p>
+                                        <div className="mt-4 space-y-3">
+                                            <div>
+                                                <label htmlFor="agency-search" className="block text-sm font-medium text-gray-700">
+                                                    Find agency
+                                                </label>
+                                                <input
+                                                    id="agency-search"
+                                                    type="search"
+                                                    value={agencySearch}
+                                                    onChange={(e) => setAgencySearch(e.target.value)}
+                                                    placeholder="Type at least 2 characters…"
+                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                    autoComplete="off"
+                                                />
+                                                {agencySearchLoading && (
+                                                    <p className="mt-1 text-xs text-gray-500">Searching…</p>
+                                                )}
+                                                {agencySearchResults.length > 0 && (
+                                                    <ul className="mt-2 max-h-48 overflow-auto rounded-md border border-gray-200 bg-white shadow-sm">
+                                                        {agencySearchResults.map((t) => (
+                                                            <li key={t.id}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setSelectedAgencyTenantId(t.id)
+                                                                        setAgencySearch(t.name)
+                                                                        setAgencySearchResults([])
+                                                                    }}
+                                                                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                                                                        selectedAgencyTenantId === t.id ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900'
+                                                                    }`}
+                                                                >
+                                                                    <span className="font-medium">{t.name}</span>
+                                                                    <span className="ml-2 text-gray-500">{t.slug}</span>
+                                                                </button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label htmlFor="agency-tenant-role" className="block text-sm font-medium text-gray-700">
+                                                        Tenant role (for agency users)
+                                                    </label>
+                                                    <select
+                                                        id="agency-tenant-role"
+                                                        value={agencyTenantRole}
+                                                        onChange={(e) => setAgencyTenantRole(e.target.value)}
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                    >
+                                                        <option value="agency_admin">Agency admin</option>
+                                                        <option value="admin">Admin</option>
+                                                        <option value="member">Member</option>
+                                                        <option value="agency_partner">Agency partner</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label htmlFor="agency-brand-role" className="block text-sm font-medium text-gray-700">
+                                                        Brand role (when brands selected)
+                                                    </label>
+                                                    <select
+                                                        id="agency-brand-role"
+                                                        value={agencyBrandRole}
+                                                        onChange={(e) => setAgencyBrandRole(e.target.value)}
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                    >
+                                                        <option value="admin">Admin</option>
+                                                        <option value="brand_manager">Brand manager</option>
+                                                        <option value="contributor">Contributor</option>
+                                                        <option value="viewer">Viewer</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            {settings_brands.length > 0 && (
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-700">Brands (optional)</p>
+                                                    <p className="mt-0.5 text-xs text-gray-500">
+                                                        Leave unchecked to use your default brand with contributor access.
+                                                    </p>
+                                                    <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto rounded-md border border-gray-100 p-3">
+                                                        {settings_brands.map((b) => (
+                                                            <li key={b.id} className="flex items-center gap-2">
+                                                                <input
+                                                                    id={`agency-brand-${b.id}`}
+                                                                    type="checkbox"
+                                                                    checked={agencySelectedBrandIds.has(b.id)}
+                                                                    onChange={() => toggleAgencyBrand(b.id)}
+                                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                />
+                                                                <label htmlFor={`agency-brand-${b.id}`} className="text-sm text-gray-700">
+                                                                    {b.name}
+                                                                </label>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={submitAgencyLink}
+                                                    disabled={agencySaving || !selectedAgencyTenantId}
+                                                    className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {agencySaving ? 'Saving…' : 'Add agency'}
+                                                </button>
+                                                {selectedAgencyTenantId && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedAgencyTenantId(null)
+                                                            setAgencySearch('')
+                                                        }}
+                                                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                                                    >
+                                                        Clear selection
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="border-t border-gray-200 pt-6">
+                                        <h3 className="text-sm font-semibold text-gray-900">Linked agencies</h3>
+                                        {linked_agencies.length === 0 ? (
+                                            <p className="mt-2 text-sm text-gray-500">No agencies linked yet.</p>
+                                        ) : (
+                                            <ul className="mt-3 divide-y divide-gray-100">
+                                                {linked_agencies.map((row) => (
+                                                    <li key={row.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div>
+                                                            <p className="font-medium text-gray-900">{row.agency_tenant?.name}</p>
+                                                            <p className="text-sm text-gray-500">
+                                                                Tenant role: <span className="font-medium text-gray-700">{row.role}</span>
+                                                                {row.brand_assignments?.length > 0 && (
+                                                                    <>
+                                                                        {' · '}
+                                                                        Brands:{' '}
+                                                                        {row.brand_assignments
+                                                                            .map((a) => {
+                                                                                const label = a.brand_name || `Brand #${a.brand_id}`
+                                                                                return `${label} (${a.role})`
+                                                                            })
+                                                                            .join(', ')}
+                                                                    </>
+                                                                )}
+                                                            </p>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeAgencyLink(row.id)}
+                                                            disabled={agencySaving}
+                                                            className="shrink-0 text-sm font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+
                     {/* Brands Settings */}
                     <div id="brands-settings" className="mb-12 scroll-mt-8">
                         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
@@ -938,28 +1321,28 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                         )}
                     </div>
 
-                    {/* Metadata Settings */}
+                    {/* Categories & Fields (registry) */}
                     {canViewMetadata && (
                         <div id="metadata-settings" className="mb-12 scroll-mt-8">
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                     {/* Left: Header */}
                                     <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">Metadata Management</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Manage metadata fields and visibility settings</p>
+                                        <h2 className="text-lg font-semibold text-gray-900">Categories &amp; Fields</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Define how content is organized—same area as Brand Portal → Categories &amp; Fields</p>
                                     </div>
                                     {/* Right: Content */}
                                     <div className="lg:col-span-2 px-6 py-6">
                                         <div className="space-y-4">
                                             <div>
                                                 <p className="text-sm text-gray-700 mb-4">
-                                                    Configure metadata fields for your company. View system metadata fields, create custom fields, and control where fields appear in upload, edit, and filter interfaces.
+                                                    Open the registry to manage categories, metadata fields, allowed values, and where fields appear on upload, edit, and filters.
                                                 </p>
                                                 <Link
                                                     href="/app/tenant/metadata/registry"
                                                     className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                                 >
-                                                    Manage Metadata Fields
+                                                    Open Categories &amp; Fields
                                                     <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                                                     </svg>
@@ -972,34 +1355,6 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                         </div>
                     )}
 
-                    {/* Dashboard Widget Settings */}
-                    <div id="dashboard-widgets" className="mb-12 scroll-mt-8">
-                        {canManageDashboardWidgets ? (
-                            <DashboardWidgetSettings 
-                                tenant={tenant} 
-                                canEdit={canManageDashboardWidgets}
-                            />
-                        ) : (
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="relative">
-                                    <div className="blur-sm select-none pointer-events-none">
-                                        <div className="px-6 py-6">
-                                            <h2 className="text-lg font-semibold text-gray-900">Dashboard Widgets</h2>
-                                            <p className="mt-1 text-sm text-gray-500">Configure which widgets appear on the dashboard for each role</p>
-                                            <div className="mt-4 h-24 bg-gray-100 rounded" />
-                                        </div>
-                                    </div>
-                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
-                                        <div className="text-center px-4">
-                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
-                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to manage dashboard widgets. Ask an owner or admin to grant you access.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
                     {/* AI Settings */}
                     <div id="ai-settings" className="mb-12 scroll-mt-8">
                         {canManageAiSettings ? (
@@ -1007,7 +1362,9 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                     <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
                                         <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Control AI for tags and structured asset fields.
+                                        </p>
                                     </div>
                                     <div className="lg:col-span-2 px-6 py-6">
                                         <AiTaggingSettings 
@@ -1024,7 +1381,9 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                             <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
                                                 <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
-                                                <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    Control AI for tags and structured asset fields.
+                                                </p>
                                             </div>
                                             <div className="lg:col-span-2 px-6 py-6">
                                                 <div className="h-32 bg-gray-100 rounded" />

@@ -7,6 +7,7 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetCompletionService;
 use App\Services\AssetProcessingFailureService;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -156,8 +157,14 @@ class FinalizeAssetJob implements ShouldQueue
             ? $asset->thumbnail_status
             : null;
 
-        if ($thumbnailStatus !== ThumbnailStatus::SKIPPED && ImageEmbeddingService::isImageMimeType($mimeForEmbedding)) {
+        $willDispatchEmbedding = $thumbnailStatus !== ThumbnailStatus::SKIPPED
+            && ImageEmbeddingService::isImageMimeType($mimeForEmbedding);
+
+        if ($willDispatchEmbedding) {
             GenerateAssetEmbeddingJob::dispatch($asset->id);
+        } else {
+            // Non-images and image assets without embeddings: embedding job normally dispatches EBI after scoring.
+            app(BrandIntelligenceScheduleService::class)->dispatchAfterPipelineComplete($asset->fresh());
         }
     }
 

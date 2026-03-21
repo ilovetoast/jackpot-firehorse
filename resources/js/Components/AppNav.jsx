@@ -41,21 +41,31 @@ export default function AppNav({ brand, tenant, variant }) {
         post('/app/logout')
     }
 
-    const handleSwitchCompany = (companyId) => {
+    const handleSwitchCompanyTo = (companyId, redirectPath = '/app/overview') => {
         showWorkspaceSwitchingOverlay('company')
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        const fd = new FormData()
+        fd.append('_token', csrfToken)
+        fd.append('redirect', redirectPath)
         fetch(`/app/companies/${companyId}/switch`, {
             method: 'POST',
-            headers: {
-                'X-CSRF-TOKEN': csrfToken,
-                'Accept': 'application/json',
-            },
+            body: fd,
             credentials: 'same-origin',
-        }).then(() => {
-            window.location.href = '/app/overview'
-        }).catch(() => {
-            window.location.href = '/app/overview'
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
         })
+            .then(() => {
+                window.location.href = redirectPath
+            })
+            .catch(() => {
+                window.location.href = redirectPath
+            })
+    }
+
+    const handleSwitchCompany = (companyId) => {
+        handleSwitchCompanyTo(companyId, '/app/overview')
     }
 
     const handleSwitchBrand = (brandId) => {
@@ -92,6 +102,24 @@ export default function AppNav({ brand, tenant, variant }) {
     }
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
+    const managedAgencyClients = Array.isArray(auth.managed_agency_clients) ? auth.managed_agency_clients : []
+    const managedClientIdSet = new Set(managedAgencyClients.map((c) => c.id))
+    const agencyHomeCompany = auth.companies?.find((c) => c.is_agency === true) ?? null
+    const showAgencyQuickLink = Boolean(agencyHomeCompany)
+
+    const goAgencyDashboardFromMenu = () => {
+        if (!agencyHomeCompany) {
+            return
+        }
+        setUserMenuOpen(false)
+        setCompanyDropdownOpen(false)
+        if (activeCompany?.id === agencyHomeCompany.id) {
+            window.location.href = '/app/agency/dashboard'
+        } else {
+            handleSwitchCompanyTo(agencyHomeCompany.id, '/app/agency/dashboard')
+        }
+    }
+
     const effectivePermissions = Array.isArray(auth.effective_permissions) ? auth.effective_permissions : []
     const can = (p) => effectivePermissions.includes(p)
     const siteRoles = Array.isArray(auth.user?.site_roles) ? auth.user.site_roles : []
@@ -818,6 +846,20 @@ export default function AppNav({ brand, tenant, variant }) {
                                         {/* Company + Brand Portals — Switch Company dropdown, then Company Portal + Brand Portal */}
                                         {(hasAnyCompanyAccess || (activeBrand && hasAnyBrandAccess && !collectionOnly)) && (
                                         <div className="px-4 py-2 border-b border-gray-200">
+                                            {showAgencyQuickLink && (
+                                                <div className="mb-2 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Agency
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={goAgencyDashboardFromMenu}
+                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                                    >
+                                                        Agency dashboard
+                                                    </button>
+                                                </div>
+                                            )}
                                             {/* Switch Company — collapsible dropdown, scrollable for many companies */}
                                             {hasMultipleCompanies && (
                                                 <div className="mb-2">
@@ -859,6 +901,11 @@ export default function AppNav({ brand, tenant, variant }) {
                                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
                                                                     </svg>
                                                                     <span className="flex-1 font-medium truncate">{company.name}</span>
+                                                                    {activeCompany?.is_agency && managedClientIdSet.has(company.id) && (
+                                                                        <span className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-800">
+                                                                            Client
+                                                                        </span>
+                                                                    )}
                                                                     {company.is_active && (
                                                                         <svg className="h-4 w-4 text-white flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
                                                                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />

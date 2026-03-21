@@ -2,10 +2,13 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Tenant;
+use App\Models\TenantAgency;
+use App\Models\User;
 use App\Services\AuthPermissionService;
-use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Middleware;
@@ -77,17 +80,17 @@ class HandleInertiaRequests extends Middleware
                 $activeBrand = \App\Models\Brand::where('id', $brandId)
                     ->where('tenant_id', $tenant->id)
                     ->first();
-                
+
                 // Verify user has access to this brand (unless owner/admin)
                 if ($activeBrand && $user) {
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-                    
+
                     // Phase MI-1: Verify user has active brand membership (unless owner/admin)
                     if (! $isTenantOwnerOrAdmin) {
                         $membership = $user->activeBrandMembership($activeBrand);
                         $hasBrandAccess = $membership !== null;
-                        
+
                         if (! $hasBrandAccess) {
                             // User doesn't have active membership - find a brand they do have access to
                             $userBrand = null;
@@ -97,7 +100,7 @@ class HandleInertiaRequests extends Middleware
                                     break;
                                 }
                             }
-                            
+
                             if ($userBrand) {
                                 $activeBrand = $userBrand;
                                 session(['brand_id' => $activeBrand->id]);
@@ -117,19 +120,19 @@ class HandleInertiaRequests extends Middleware
                 if ($user) {
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-                    
+
                     if (! $isTenantOwnerOrAdmin) {
                         $userBrand = $user->brands()
                             ->where('tenant_id', $tenant->id)
                             ->first();
-                        
+
                         if ($userBrand) {
                             $activeBrand = $userBrand;
                             session(['brand_id' => $activeBrand->id]);
                         }
                     }
                 }
-                
+
                 // Fallback to default brand
                 if (! $activeBrand) {
                     $activeBrand = $tenant->defaultBrand;
@@ -179,15 +182,14 @@ class HandleInertiaRequests extends Middleware
                     }
                 }
 
-
                 // Filter brands based on user role and access
-                $accessibleBrands = $allBrands->filter(function ($brand) use ($userBrandIds, $activeBrand, $isTenantOwnerOrAdmin, $tenant, $user) {
+                $accessibleBrands = $allBrands->filter(function ($brand) use ($userBrandIds, $isTenantOwnerOrAdmin) {
                     // Tenant owners/admins see ALL brands (ignoring show_in_selector flag)
                     // This is bulletproof: owners/admins always see all brands for their tenant
                     if ($isTenantOwnerOrAdmin) {
                         return true;
                     }
-                    
+
                     // For regular members: check if they have explicit access via brand_user pivot table
                     // If they have a role on the brand, they should see it regardless of show_in_selector
                     // This ensures anyone with a role and access to the brand can see it
@@ -196,7 +198,7 @@ class HandleInertiaRequests extends Middleware
                         // User has explicit access to this brand (has a role) - always show it
                         return true;
                     }
-                    
+
                     // If user doesn't have explicit brand access, they shouldn't see it
                     // (show_in_selector is only for general visibility, but explicit access trumps it)
                     // NOTE: We do NOT include active brand if user doesn't have access - this prevents
@@ -210,8 +212,8 @@ class HandleInertiaRequests extends Middleware
 
                 $brands = $accessibleBrands->values()->map(function ($brand) use ($activeBrand, $disabledBrandIds) {
                     $isActive = $activeBrand && $brand->id === $activeBrand->id;
-                    $isDisabled = in_array($brand->id, $disabledBrandIds) && !$isActive;
-                    
+                    $isDisabled = in_array($brand->id, $disabledBrandIds) && ! $isActive;
+
                     $brandData = [
                         'id' => $brand->id,
                         'name' => $brand->name,
@@ -231,23 +233,23 @@ class HandleInertiaRequests extends Middleware
                             'nav_display_mode' => $brand->settings['nav_display_mode'] ?? 'logo',
                         ],
                     ];
-                    
+
                     return $brandData;
                 });
-                
+
                 // Calculate plan limit info for alerts
                 $disabledBrandsCount = $brands->where('is_disabled', true)->count();
-                
+
                 // Get user limit info
                 $currentUserCount = $tenant->users()->count();
                 $maxUsers = $limits['max_users'] ?? PHP_INT_MAX;
                 $userLimitExceeded = $currentUserCount > $maxUsers;
-                
+
                 // Get enabled/disabled users for this tenant
                 $enabledUsers = $tenant->getEnabledUsers($planService);
                 $disabledUserIds = $enabledUsers['disabled'];
                 $isUserDisabled = $user && in_array($user->id, $disabledUserIds);
-                
+
                 $planLimitInfo = [
                     'brand_limit_exceeded' => $brandLimitExceeded,
                     'current_brand_count' => $currentBrandCount,
@@ -284,13 +286,13 @@ class HandleInertiaRequests extends Middleware
         }
 
         $parentShared = parent::share($request);
-        
+
         // Manually ensure 'old' input is included if it exists in session but not in parent shared
         $sessionOldInput = $request->session()->getOldInput();
-        if (!empty($sessionOldInput) && !isset($parentShared['old'])) {
+        if (! empty($sessionOldInput) && ! isset($parentShared['old'])) {
             $parentShared['old'] = $sessionOldInput;
         }
-        
+
         // DEPRECATED: Processing assets are now fetched via /app/assets/processing endpoint
         // This shared prop is kept for backward compatibility but AssetProcessingTray now polls the endpoint
         // Remove this in a future cleanup after confirming the new polling approach works
@@ -340,6 +342,7 @@ class HandleInertiaRequests extends Middleware
             'collection_only_collection' => app()->bound('collection') ? (function () {
                 $collection = app('collection');
                 $brand = $collection->brand;
+
                 return [
                     'id' => $collection->id,
                     'name' => $collection->name,
@@ -395,6 +398,7 @@ class HandleInertiaRequests extends Middleware
                     'name' => $tenant->name,
                     'slug' => $tenant->slug,
                     'is_active' => $tenant->id == $currentTenantId,
+                    'is_agency' => (bool) $tenant->is_agency,
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
                 ]) : [],
                 'activeCompany' => $tenant ? [
@@ -405,6 +409,8 @@ class HandleInertiaRequests extends Middleware
                     'is_agency' => (bool) $tenant->is_agency,
                     'agency_tier' => $tenant->agencyTier?->name, // Phase AG-7.1: Agency nav link
                 ] : null,
+                /** Client companies linked to this agency (tenant_agencies) that the user may open */
+                'managed_agency_clients' => $this->managedAgencyClientsForUser($user, $tenant),
                 'activeBrand' => $activeBrand ? [
                     'id' => $activeBrand->id,
                     'name' => $activeBrand->name,
@@ -436,6 +442,7 @@ class HandleInertiaRequests extends Middleware
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);
+
                     return [
                         'approvals_enabled' => $featureGate->approvalsEnabled($tenant),
                         'notifications_enabled' => $featureGate->notificationsEnabled($tenant),
@@ -451,6 +458,7 @@ class HandleInertiaRequests extends Middleware
                 // Phase M-2: Metadata approval feature flags (company + brand gated)
                 'metadata_approval_features' => $tenant && $activeBrand ? (function () use ($tenant, $activeBrand) {
                     $featureGate = app(FeatureGate::class);
+
                     return [
                         'metadata_approval_enabled' => $featureGate->metadataApprovalEnabled($tenant, $activeBrand),
                     ];
@@ -470,7 +478,7 @@ class HandleInertiaRequests extends Middleware
             // Brand DNA: headline appearance tags (config/headline_appearance.php) for Builder / Brand Settings / guidelines
             'headlineAppearanceCatalog' => HeadlineAppearanceCatalog::forFrontend(),
         ];
-        
+
         // Add pending items counts for notification bell (simple, lightweight)
         // Only calculate if tenant and brand are available
         if ($tenant && $activeBrand && $user) {
@@ -484,7 +492,7 @@ class HandleInertiaRequests extends Middleware
                     ->whereNull('asset_metadata_candidates.dismissed_at')
                     ->where('asset_metadata_candidates.producer', 'ai')
                     ->count();
-                    
+
                 $pendingTagCount = DB::table('asset_tag_candidates')
                     ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
                     ->where('assets.tenant_id', $tenant->id)
@@ -493,14 +501,14 @@ class HandleInertiaRequests extends Middleware
                     ->whereNull('asset_tag_candidates.resolved_at')
                     ->whereNull('asset_tag_candidates.dismissed_at')
                     ->count();
-                    
+
                 $totalPendingAiSuggestions = $pendingMetadataCount + $pendingTagCount;
 
                 // Pending metadata approvals: Always compute user's own pending fields
                 // Only compute global pending (for approvers) if user can approve
                 $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
                 $canApprove = $approvalResolver->canApprove($user, $tenant);
-                
+
                 // Base query for pending metadata (field-based, not asset-based)
                 $pendingMetadataBaseQuery = DB::table('asset_metadata')
                     ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
@@ -519,19 +527,19 @@ class HandleInertiaRequests extends Middleware
                             ->whereNotNull('approved_metadata.approved_at')
                             ->whereNotIn('approved_metadata.source', ['user_rejected', 'ai_rejected']);
                     });
-                
+
                 // Always compute: user's own pending metadata fields
                 $myPendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
                     ->where('assets.user_id', $user->id)
                     ->count('asset_metadata.id');
-                
+
                 // Conditionally compute: all pending metadata fields (only for approvers)
                 $pendingMetadataApprovalsCount = null;
                 if ($canApprove) {
                     $pendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
                         ->count('asset_metadata.id');
                 }
-                
+
                 $shared['pending_items'] = [
                     'ai_suggestions' => $totalPendingAiSuggestions,
                     'ai_tag_suggestions' => $pendingTagCount,
@@ -566,5 +574,40 @@ class HandleInertiaRequests extends Middleware
         ]);
 
         return $shared;
+    }
+
+    /**
+     * @return array<int, array{id: int, name: string, slug: string}>
+     */
+    protected function managedAgencyClientsForUser(?User $user, ?Tenant $agencyTenant): array
+    {
+        if (! $user || ! $agencyTenant || ! $agencyTenant->is_agency) {
+            return [];
+        }
+
+        $linkedClientIds = TenantAgency::query()
+            ->where('agency_tenant_id', $agencyTenant->id)
+            ->pluck('tenant_id');
+        if ($linkedClientIds->isEmpty()) {
+            return [];
+        }
+
+        $memberIds = $user->tenants()->pluck('tenants.id');
+        $accessibleIds = $linkedClientIds->intersect($memberIds);
+        if ($accessibleIds->isEmpty()) {
+            return [];
+        }
+
+        return Tenant::query()
+            ->whereIn('id', $accessibleIds)
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug'])
+            ->map(fn (Tenant $t) => [
+                'id' => $t->id,
+                'name' => $t->name,
+                'slug' => $t->slug,
+            ])
+            ->values()
+            ->all();
     }
 }

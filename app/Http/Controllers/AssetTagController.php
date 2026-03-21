@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Asset;
 use App\Models\Tenant;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\PlanService;
 use App\Services\TagNormalizationService;
 use Illuminate\Http\JsonResponse;
@@ -16,13 +17,14 @@ use Illuminate\Support\Facades\Log;
  * Asset Tag Controller
  *
  * Phase J.2.3: Tag UX Implementation
- * 
+ *
  * Handles CRUD operations for asset tags with normalization and source tracking.
  * Provides APIs for the unified tag input component and tag removal functionality.
  */
 class AssetTagController extends Controller
 {
     protected TagNormalizationService $normalizationService;
+
     protected PlanService $planService;
 
     public function __construct(TagNormalizationService $normalizationService, PlanService $planService)
@@ -35,9 +37,6 @@ class AssetTagController extends Controller
      * Get all tags for an asset with source information.
      *
      * GET /api/assets/{asset}/tags
-     *
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function index(Asset $asset): JsonResponse
     {
@@ -76,10 +75,6 @@ class AssetTagController extends Controller
      * Add a new tag to an asset.
      *
      * POST /api/assets/{asset}/tags
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function store(Request $request, Asset $asset): JsonResponse
     {
@@ -92,7 +87,7 @@ class AssetTagController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'assets.tags.create')) {
+        if (! $user->hasPermissionForTenant($tenant, 'assets.tags.create')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -155,6 +150,8 @@ class AssetTagController extends Controller
             'tag_id' => $tagId,
         ]);
 
+        app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
+
         return response()->json([
             'message' => 'Tag created successfully',
             'tag' => [
@@ -173,10 +170,6 @@ class AssetTagController extends Controller
      * Remove a tag from an asset.
      *
      * DELETE /api/assets/{asset}/tags/{tagId}
-     *
-     * @param Asset $asset
-     * @param int $tagId
-     * @return JsonResponse
      */
     public function destroy(Asset $asset, int $tagId): JsonResponse
     {
@@ -189,7 +182,7 @@ class AssetTagController extends Controller
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'assets.tags.delete')) {
+        if (! $user->hasPermissionForTenant($tenant, 'assets.tags.delete')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -199,7 +192,7 @@ class AssetTagController extends Controller
             ->where('asset_id', $asset->id)
             ->first();
 
-        if (!$tag) {
+        if (! $tag) {
             return response()->json(['message' => 'Tag not found'], 404);
         }
 
@@ -218,6 +211,8 @@ class AssetTagController extends Controller
                 'source' => $tag->source,
             ]);
 
+            app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
+
             return response()->json([
                 'message' => 'Tag removed successfully',
                 'removed_tag' => [
@@ -235,10 +230,6 @@ class AssetTagController extends Controller
      * Get autocomplete suggestions for tag input (tenant-wide).
      *
      * GET /api/tenants/{tenant}/tags/autocomplete?q=search
-     *
-     * @param Request $request
-     * @param Tenant $tenant
-     * @return JsonResponse
      */
     public function tenantAutocomplete(Request $request, Tenant $tenant): JsonResponse
     {
@@ -251,7 +242,7 @@ class AssetTagController extends Controller
         }
 
         // Check permission (permission name is asset.view, not assets.view)
-        if (!$user->hasPermissionForTenant($tenant, 'asset.view')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -294,7 +285,7 @@ class AssetTagController extends Controller
                     ->from('assets')
                     ->where('tenant_id', $tenant->id);
             })
-            ->where('tag', 'LIKE', '%' . $queryTrimmed . '%')
+            ->where('tag', 'LIKE', '%'.$queryTrimmed.'%')
             ->groupBy('tag')
             ->orderByDesc('usage_count')
             ->orderBy('tag')
@@ -330,10 +321,6 @@ class AssetTagController extends Controller
      * Get autocomplete suggestions for tag input.
      *
      * GET /api/assets/{asset}/tags/autocomplete?q=search
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
      */
     public function autocomplete(Request $request, Asset $asset): JsonResponse
     {
@@ -350,7 +337,7 @@ class AssetTagController extends Controller
             // Note: This aligns with tag input functionality
 
             $query = $request->input('q', '');
-            
+
             if (strlen($query) < 2) {
                 return response()->json(['suggestions' => []]);
             }
@@ -363,7 +350,7 @@ class AssetTagController extends Controller
                         ->from('assets')
                         ->where('tenant_id', $tenant->id);
                 })
-                ->where('tag', 'LIKE', '%' . $query . '%')
+                ->where('tag', 'LIKE', '%'.$query.'%')
                 ->groupBy('tag')
                 ->orderByDesc('usage_count')
                 ->orderBy('tag')

@@ -4,21 +4,31 @@ import PermissionGate from '../PermissionGate'
 /**
  * Tab navigation for Company section — Overview, Team, Permissions, Activity, Setting, Agency.
  * Use on Company Overview and other company pages for consistent nav.
+ *
+ * @param {'default'|'cinematic'} variant — cinematic = dark / glass shell (Agency dashboard, etc.)
+ * @param {boolean} showAgencyTab — when false, hides the Agency dashboard tab (e.g. Company Portal links there in-page instead).
  */
-export default function CompanyTabs() {
+export default function CompanyTabs({ variant = 'default', showAgencyTab = true }) {
     const page = usePage()
     const { auth } = page.props
     const url = page.url
     const currentPath = typeof url === 'string' ? new URL(url, 'http://localhost').pathname : (typeof window !== 'undefined' ? window.location.pathname : '')
     const isAgency = auth?.activeCompany?.is_agency === true
+    const cinematic = variant === 'cinematic'
 
     const tabClass = (isActive) =>
-        `whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
-            isActive ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-        }`
+        cinematic
+            ? `whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                  isActive
+                      ? 'border-white/50 text-white'
+                      : 'border-transparent text-white/45 hover:border-white/25 hover:text-white/85'
+              }`
+            : `whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                  isActive ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+              }`
 
     return (
-        <div className="mb-8 border-b border-gray-200">
+        <div className={cinematic ? 'mb-8 border-b border-white/10' : 'mb-8 border-b border-gray-200'}>
             <nav className="-mb-px flex flex-wrap gap-x-6" aria-label="Company sections">
                 <Link href="/app" className={tabClass(currentPath === '/app' || currentPath === '/app/')}>
                     Overview
@@ -43,9 +53,9 @@ export default function CompanyTabs() {
                         Setting
                     </Link>
                 </PermissionGate>
-                {isAgency && (
+                {isAgency && showAgencyTab && (
                     <Link href="/app/agency/dashboard" className={tabClass(currentPath.startsWith('/app/agency/dashboard'))}>
-                        Agency
+                        Agency dashboard
                     </Link>
                 )}
             </nav>

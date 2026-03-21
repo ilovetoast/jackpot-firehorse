@@ -1122,7 +1122,7 @@ export default function MetadataFieldModal({
                                             />
                                             <SparklesIcon className={`h-4 w-4 flex-shrink-0 ${aiChecked ? 'text-purple-600' : aiAvailable ? 'text-purple-400' : 'text-gray-300'}`} />
                                             <span className={`text-sm ${aiAvailable ? 'text-gray-900' : 'text-gray-500'}`}>
-                                                Enable AI Suggestions
+                                                Allow AI Classification & Suggestions
                                             </span>
                                         </label>
                                         {!aiAvailable && (

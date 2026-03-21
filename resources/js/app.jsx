@@ -163,7 +163,7 @@ createInertiaApp({
         const root = createRoot(el)
         root.render(
             <BrandThemeProvider initialPage={props.initialPage}>
-                <BucketProvider>
+                <BucketProvider initialPage={props.initialPage}>
                     <SelectionProvider>
                         <App {...props} />
                     </SelectionProvider>

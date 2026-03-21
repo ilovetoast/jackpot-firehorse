@@ -12,8 +12,7 @@ This document lists all Company Settings sections and their backend permissions.
 | **Team Members** | `team.manage` | Team Members | ✓ | ✓ | Manage team members |
 | **Brands Settings** | `brand_settings.manage` | Brands Settings | ✓ | ✓ | Manage brands |
 | **Enterprise Download Policy** | `company_settings.manage_download_policy` | Enterprise Download Policy | ✓ | ✓ | Edit download policy (Enterprise plan only) |
-| **Metadata** | `metadata.registry.view` or `metadata.tenant.visibility.manage` | (in Metadata Governance) | ✓ | ✓ | View/manage metadata fields |
-| **Dashboard Widgets** | `company_settings.manage_dashboard_widgets` | Dashboard Widgets | ✓ | ✓ | Configure dashboard widget visibility per role |
+| **Categories & Fields** | `metadata.registry.view` or `metadata.tenant.visibility.manage` | (in Metadata Governance) | ✓ | ✓ | Link to registry; field governance permissions |
 | **AI Settings** | `company_settings.manage_ai_settings` | AI Settings | ✓ | ✓ | Configure AI tagging behavior |
 | **Tag Quality** | `company_settings.view_tag_quality` | Tag Quality | ✓ | ✓ | View tag quality metrics |
 | **AI Usage** | `ai.usage.view` | AI Usage | ✓ | ✓ | View AI usage stats |
@@ -39,7 +38,6 @@ These sections can be toggled per role. If an admin does not have the permission
 - Content blurred
 - Hint: "You don't have permission to [action]. Ask an owner or admin to grant you access."
 
-- Dashboard Widgets
 - AI Settings
 - Tag Quality
 
@@ -49,7 +47,6 @@ These sections can be toggled per role. If an admin does not have the permission
 - **CompanyController::updateSettings** – Requires `company_settings.view` and `company_settings.edit`
 - **CompanyController::destroy** – Requires user to be owner (role check)
 - **CompanyController::updateDownloadPolicy** – Requires `company_settings.manage_download_policy`
-- **CompanyController::updateWidgetSettings** – Requires `company_settings.manage_dashboard_widgets`
 
 ## Running the Seeder
 

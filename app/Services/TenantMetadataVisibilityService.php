@@ -34,8 +34,6 @@ class TenantMetadataVisibilityService
     /**
      * Get visibility overrides for fields at tenant level.
      *
-     * @param Tenant $tenant
-     * @param array $fieldIds
      * @return array Keyed by field_id
      */
     public function getFieldVisibilityOverrides(Tenant $tenant, array $fieldIds): array
@@ -71,9 +69,6 @@ class TenantMetadataVisibilityService
      * ⚠️ Use this instead of isVisibleForCategory() when processing multiple fields in a loop.
      * Queries: 1 for tenant-level overrides; +1 for category suppression when category is set.
      *
-     * @param Tenant $tenant
-     * @param array $fieldIds
-     * @param Category|null $category
      * @return array Keyed by field_id, value is bool (true = visible)
      */
     public function getBatchVisibilityForCategory(Tenant $tenant, array $fieldIds, ?Category $category): array
@@ -116,10 +111,11 @@ class TenantMetadataVisibilityService
         foreach ($fieldIds as $fieldId) {
             if (isset($categorySuppressed[$fieldId])) {
                 $result[$fieldId] = false;
+
                 continue;
             }
             $override = $tenantOverrides[$fieldId] ?? null;
-            $result[$fieldId] = $override === null || !($override->is_hidden ?? false);
+            $result[$fieldId] = $override === null || ! ($override->is_hidden ?? false);
         }
 
         return $result;
@@ -128,22 +124,19 @@ class TenantMetadataVisibilityService
     /**
      * Set visibility override for a field at tenant level.
      *
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @param array $visibility Visibility flags:
-     *   - show_on_upload: bool|null (null = no override)
-     *   - show_on_edit: bool|null (null = no override)
-     *   - show_in_filters: bool|null (null = no override)
-     * @return void
+     * @param  array  $visibility  Visibility flags:
+     *                             - show_on_upload: bool|null (null = no override)
+     *                             - show_on_edit: bool|null (null = no override)
+     *                             - show_in_filters: bool|null (null = no override)
      */
     public function setFieldVisibility(Tenant $tenant, int $fieldId, array $visibility): void
     {
         // Convert show_* flags to is_*_hidden flags
         // C9.2: is_hidden is ONLY for category suppression, NOT for edit visibility
         // Use is_edit_hidden for edit visibility (Quick View checkbox)
-        $isUploadHidden = isset($visibility['show_on_upload']) && !$visibility['show_on_upload'];
-        $isEditHidden = isset($visibility['show_on_edit']) && !$visibility['show_on_edit'];
-        $isFilterHidden = isset($visibility['show_in_filters']) && !$visibility['show_in_filters'];
+        $isUploadHidden = isset($visibility['show_on_upload']) && ! $visibility['show_on_upload'];
+        $isEditHidden = isset($visibility['show_on_edit']) && ! $visibility['show_on_edit'];
+        $isFilterHidden = isset($visibility['show_in_filters']) && ! $visibility['show_in_filters'];
 
         // Check if override already exists
         $existing = DB::table('metadata_field_visibility')
@@ -188,10 +181,6 @@ class TenantMetadataVisibilityService
 
     /**
      * Remove visibility override for a field at tenant level.
-     *
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @return void
      */
     public function removeFieldVisibility(Tenant $tenant, int $fieldId): void
     {
@@ -210,23 +199,18 @@ class TenantMetadataVisibilityService
 
     /**
      * Suppress a field for a category at tenant level.
-     *
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @param Category $category
-     * @return void
      */
     public function suppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
     {
         // Categories are brand-specific, so create brand-specific suppression records
         $brandId = $category->brand_id;
-        
+
         // Check if suppression already exists (brand-specific or tenant-level)
         $existingQuery = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('category_id', $category->id);
-        
+
         if ($brandId) {
             $existing = $existingQuery->where('brand_id', $brandId)->first();
         } else {
@@ -268,28 +252,23 @@ class TenantMetadataVisibilityService
 
     /**
      * Unsuppress a field for a category at tenant level.
-     *
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @param Category $category
-     * @return void
      */
     public function unsuppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
     {
         // Categories are brand-specific, so delete brand-specific suppression records
         $brandId = $category->brand_id;
-        
+
         $query = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('category_id', $category->id);
-        
+
         if ($brandId) {
             $query->where('brand_id', $brandId);
         } else {
             $query->whereNull('brand_id');
         }
-        
+
         $query->delete();
 
         Log::info('Tenant metadata field unsuppressed for category', [
@@ -303,8 +282,6 @@ class TenantMetadataVisibilityService
     /**
      * Get category suppressions for a field at tenant level.
      *
-     * @param Tenant $tenant
-     * @param int $fieldId
      * @return array Array of category IDs where field is suppressed
      */
     public function getSuppressedCategories(Tenant $tenant, int $fieldId, ?int $brandId = null): array
@@ -314,24 +291,19 @@ class TenantMetadataVisibilityService
             ->where('tenant_id', $tenant->id)
             ->whereNotNull('category_id')
             ->where('is_hidden', true);
-        
+
         // Check brand-specific records if brand is provided, otherwise check tenant-level
         if ($brandId !== null) {
             $query->where('brand_id', $brandId);
         } else {
             $query->whereNull('brand_id');
         }
-        
+
         return $query->pluck('category_id')->toArray();
     }
 
     /**
      * Check if a field is visible for a category at tenant level.
-     *
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @param Category|null $category
-     * @return bool
      */
     public function isVisibleForCategory(Tenant $tenant, int $fieldId, ?Category $category): bool
     {
@@ -345,12 +317,12 @@ class TenantMetadataVisibilityService
                 ->first();
 
             // If no override, field is visible
-            if (!$override) {
+            if (! $override) {
                 return true;
             }
 
             // Check if hidden at tenant level
-            return !$override->is_hidden;
+            return ! $override->is_hidden;
         }
 
         // Check category-specific suppression
@@ -360,18 +332,18 @@ class TenantMetadataVisibilityService
             ->where('tenant_id', $tenant->id)
             ->where('category_id', $category->id)
             ->where('is_hidden', true);
-        
+
         // If category has a brand, check brand-specific records first
         if ($category->brand_id) {
             $suppression = $suppressionQuery
                 ->where('brand_id', $category->brand_id)
                 ->exists();
-            
+
             if ($suppression) {
                 return false;
             }
         }
-        
+
         // Also check tenant-level suppression (brand_id is NULL)
         $suppression = $suppressionQuery
             ->whereNull('brand_id')
@@ -391,25 +363,22 @@ class TenantMetadataVisibilityService
             ->first();
 
         // If no override, field is visible
-        if (!$override) {
+        if (! $override) {
             return true;
         }
 
         // Check if hidden at tenant level
-        return !$override->is_hidden;
+        return ! $override->is_hidden;
     }
 
     /**
      * Get category-specific overrides for a field (including is_primary).
-     * 
+     *
      * Returns category-level visibility overrides including primary filter placement.
-     * 
+     *
      * ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
      * A field may be primary in Photography but secondary in Logos.
-     * 
-     * @param Tenant $tenant
-     * @param int $fieldId
-     * @param int|null $brandId
+     *
      * @return array Keyed by category_id, containing override data including is_primary
      */
     public function getCategoryOverrides(Tenant $tenant, int $fieldId, ?int $brandId = null): array
@@ -418,11 +387,11 @@ class TenantMetadataVisibilityService
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->whereNotNull('category_id');
-        
+
         if ($brandId !== null) {
             $query->where('brand_id', $brandId);
         }
-        
+
         $overrides = $query->select([
             'category_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden',
             'is_primary', 'is_edit_hidden', 'is_required',
@@ -453,9 +422,6 @@ class TenantMetadataVisibilityService
      * Copy all category-level visibility overrides from source category to target category.
      * Source and target must belong to the same tenant; they may be same or different brands.
      *
-     * @param Tenant $tenant
-     * @param Category $sourceCategory
-     * @param Category $targetCategory
      * @return int Number of rows copied (upserted for target)
      */
     public function copyCategoryVisibility(Tenant $tenant, Category $sourceCategory, Category $targetCategory): int
@@ -525,8 +491,6 @@ class TenantMetadataVisibilityService
      * Reset a category to default: delete all category-level visibility overrides for that category.
      * Behavior then falls back to tenant-level overrides and metadata_fields defaults.
      *
-     * @param Tenant $tenant
-     * @param Category $category
      * @return int Number of rows deleted
      */
     public function resetCategoryVisibility(Tenant $tenant, Category $category): int
@@ -561,8 +525,6 @@ class TenantMetadataVisibilityService
      * Apply minimal default visibility for a new custom category.
      * Only collection and tags are enabled; all other fields (system + automated) are disabled.
      *
-     * @param Tenant $tenant
-     * @param Category $category
      * @return int Number of rows written (inserted)
      */
     public function applyMinimalDefaultsForCustomCategory(Tenant $tenant, Category $category): int
@@ -596,7 +558,7 @@ class TenantMetadataVisibilityService
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brandId,
                 'category_id' => $categoryId,
-                'is_hidden' => !$enabled,
+                'is_hidden' => ! $enabled,
                 'is_upload_hidden' => false,
                 'is_filter_hidden' => false,
                 'is_primary' => null,
@@ -611,6 +573,7 @@ class TenantMetadataVisibilityService
                 'tenant_id' => $tenant->id,
                 'category_id' => $category->id,
             ]);
+
             return 0;
         }
 
@@ -630,8 +593,6 @@ class TenantMetadataVisibilityService
      * Used by "Reset to default" and by SystemCategoryService when adding a new category (Phase 3b).
      * Deletes existing category-level visibility, then inserts rows matching the seeder defaults.
      *
-     * @param Tenant $tenant
-     * @param Category $category
      * @return int Number of rows written (inserted)
      */
     public function applySeededDefaultsForCategory(Tenant $tenant, Category $category): int
@@ -709,6 +670,7 @@ class TenantMetadataVisibilityService
                 'tenant_id' => $tenant->id,
                 'category_id' => $category->id,
             ]);
+
             return 0;
         }
 
@@ -727,9 +689,7 @@ class TenantMetadataVisibilityService
      * Repair visibility: insert only missing rows from config. Does NOT override existing values.
      * Safe to run repeatedly. Logs each inserted row (unless dryRun).
      *
-     * @param Tenant $tenant
-     * @param Category $category
-     * @param bool $dryRun If true, return what would be inserted without making changes
+     * @param  bool  $dryRun  If true, return what would be inserted without making changes
      * @return array{inserted: int, changes: array<array{field_key: string, field_id: int}>}
      */
     public function repairVisibilityForCategory(Tenant $tenant, Category $category, bool $dryRun = false): array
@@ -835,9 +795,7 @@ class TenantMetadataVisibilityService
      * Type fields should only be visible in their configured category slugs; hidden everywhere else.
      * Updates existing rows and inserts missing ones. Logs changes.
      *
-     * @param Tenant $tenant
-     * @param Category $category
-     * @param bool $dryRun If true, return what would be changed without making changes
+     * @param  bool  $dryRun  If true, return what would be changed without making changes
      * @return array{updated: int, inserted: int, changes: array<array{field_key: string, action: string}>}
      */
     public function repairTypeDefaultsForCategory(Tenant $tenant, Category $category, bool $dryRun = false): array
@@ -885,8 +843,8 @@ class TenantMetadataVisibilityService
                 $settings = $categoryConfig[$key][$slug] ?? [];
                 $expected = [
                     'is_hidden' => ! ($settings['enabled'] ?? true),
-                    'is_upload_hidden' => false,
-                    'is_filter_hidden' => false,
+                    'is_upload_hidden' => $settings['is_upload_hidden'] ?? false,
+                    'is_filter_hidden' => $settings['is_filter_hidden'] ?? false,
                     'is_primary' => $settings['is_primary'] ?? null,
                     'is_edit_hidden' => $settings['is_edit_hidden'] ?? false,
                 ];
@@ -970,14 +928,6 @@ class TenantMetadataVisibilityService
      *
      * System fields (scope=system) are enabled for all categories by default.
      *
-     * @param string $fieldKey
-     * @param string $fieldScope
-     * @param string $categorySlug
-     * @param bool $isImageCategory
-     * @param array $categoryConfig
-     * @param array $restrictFields
-     * @param array $tagsAndCollectionOnlySlugs
-     * @param array $dominantColorsVisibility
      * @return array<string, mixed>|null
      */
     private function computeSeededDefaultForField(
@@ -994,7 +944,7 @@ class TenantMetadataVisibilityService
         // System automated fields: always enabled for every category
         if (in_array($fieldKey, $systemAutomatedEnabledForAll, true)) {
             $v = $dominantColorsVisibility[$fieldKey] ?? [];
-            if (!empty($v)) {
+            if (! empty($v)) {
                 return [
                     'is_hidden' => $v['is_hidden'] ?? false,
                     'is_upload_hidden' => $v['is_upload_hidden'] ?? false,
@@ -1005,6 +955,7 @@ class TenantMetadataVisibilityService
             }
             $alwaysHidden = config('metadata_category_defaults.always_hidden_fields', []);
             $isFilterHidden = in_array($fieldKey, $alwaysHidden, true);
+
             return [
                 'is_hidden' => false,
                 'is_upload_hidden' => false,
@@ -1014,19 +965,34 @@ class TenantMetadataVisibilityService
             ];
         }
 
+        // Starred: not in primary / More filters by default; still enabled and visible in drawer
+        if ($fieldKey === 'starred') {
+            $v = config('metadata_category_defaults.starred_default_visibility', []);
+            if (! empty($v)) {
+                return [
+                    'is_hidden' => $v['is_hidden'] ?? false,
+                    'is_upload_hidden' => $v['is_upload_hidden'] ?? false,
+                    'is_filter_hidden' => $v['is_filter_hidden'] ?? true,
+                    'is_primary' => $v['is_primary'] ?? null,
+                    'is_edit_hidden' => $v['is_edit_hidden'] ?? false,
+                ];
+            }
+        }
+
         // Explicit per-slug config for this field (checked first so type fields can override tags_and_collection_only)
         if (isset($categoryConfig[$fieldKey][$categorySlug])) {
             $settings = $categoryConfig[$fieldKey][$categorySlug];
             $enabled = $settings['enabled'] ?? true;
             $result = [
-                'is_hidden' => !$enabled,
-                'is_upload_hidden' => false,
-                'is_filter_hidden' => false,
+                'is_hidden' => ! $enabled,
+                'is_upload_hidden' => $settings['is_upload_hidden'] ?? false,
+                'is_filter_hidden' => $settings['is_filter_hidden'] ?? false,
                 'is_primary' => $settings['is_primary'] ?? null,
             ];
             if (array_key_exists('is_edit_hidden', $settings)) {
                 $result['is_edit_hidden'] = $settings['is_edit_hidden'];
             }
+
             return $result;
         }
 
@@ -1038,22 +1004,24 @@ class TenantMetadataVisibilityService
             $enabled = in_array($categorySlug, $enabledSlugs, true);
             $settings = $categoryConfig[$fieldKey][$categorySlug] ?? [];
             $result = [
-                'is_hidden' => !$enabled,
-                'is_upload_hidden' => !$enabled,
-                'is_filter_hidden' => !$enabled,
+                'is_hidden' => ! $enabled,
+                'is_upload_hidden' => ! $enabled,
+                'is_filter_hidden' => ! $enabled,
                 'is_primary' => $enabled ? ($settings['is_primary'] ?? null) : null,
             ];
-            if (!$enabled) {
+            if (! $enabled) {
                 $result['is_edit_hidden'] = true;
             }
+
             return $result;
         }
 
         // Video (and any tags_and_collection_only): system fields enabled; tenant fields limited to tags/collection
         if (in_array($categorySlug, $tagsAndCollectionOnlySlugs, true)) {
             $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
+
             return [
-                'is_hidden' => !$enabled,
+                'is_hidden' => ! $enabled,
                 'is_upload_hidden' => false,
                 'is_filter_hidden' => false,
                 'is_primary' => null,
@@ -1072,13 +1040,15 @@ class TenantMetadataVisibilityService
             if (array_key_exists('is_edit_hidden', $v)) {
                 $result['is_edit_hidden'] = $v['is_edit_hidden'];
             }
+
             return $result;
         }
 
         // Default: all system fields enabled for all categories; tenant fields limited to tags/collection
         $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
+
         return [
-            'is_hidden' => !$enabled,
+            'is_hidden' => ! $enabled,
             'is_upload_hidden' => false,
             'is_filter_hidden' => false,
             'is_primary' => null,
@@ -1088,8 +1058,6 @@ class TenantMetadataVisibilityService
     /**
      * Get sibling categories in other brands (same slug + asset_type) for "Apply to other brands".
      *
-     * @param Tenant $tenant
-     * @param Category $sourceCategory
      * @return array<array{brand_id: int, brand_name: string, category_id: int, category_name: string}>
      */
     public function getApplyToOtherBrandsTargets(Tenant $tenant, Category $sourceCategory): array
@@ -1129,8 +1097,6 @@ class TenantMetadataVisibilityService
      * Apply current category's visibility settings to the same category type in all other brands.
      * For each sibling category (same slug + asset_type, different brand), copies visibility from source.
      *
-     * @param Tenant $tenant
-     * @param Category $sourceCategory
      * @return array<array{category_id: int, brand_name: string, category_name: string, rows_copied: int}>
      */
     public function applyCategoryVisibilityToOtherBrands(Tenant $tenant, Category $sourceCategory): array
@@ -1142,7 +1108,7 @@ class TenantMetadataVisibilityService
             $targetCategory = Category::where('id', $target['category_id'])
                 ->where('tenant_id', $tenant->id)
                 ->first();
-            if (!$targetCategory) {
+            if (! $targetCategory) {
                 continue;
             }
             $count = $this->copyCategoryVisibility($tenant, $sourceCategory, $targetCategory);
@@ -1167,8 +1133,6 @@ class TenantMetadataVisibilityService
      * Phase 3a: Build a snapshot of category visibility for saving as a named profile.
      * Returns array of { metadata_field_id, is_hidden, is_upload_hidden, is_filter_hidden, is_primary, is_edit_hidden }.
      *
-     * @param Tenant $tenant
-     * @param Category $category
      * @return array<int, array<string, mixed>>
      */
     public function snapshotFromCategory(Tenant $tenant, Category $category): array
@@ -1205,9 +1169,7 @@ class TenantMetadataVisibilityService
      * Phase 3a: Apply a saved profile snapshot to a category.
      * Deletes existing category-level visibility, then inserts rows from snapshot (only for field_ids that exist for tenant).
      *
-     * @param Tenant $tenant
-     * @param Category $category
-     * @param array<int, array<string, mixed>> $snapshot Array of { metadata_field_id, is_hidden, is_upload_hidden, is_filter_hidden, is_primary, is_edit_hidden }
+     * @param  array<int, array<string, mixed>>  $snapshot  Array of { metadata_field_id, is_hidden, is_upload_hidden, is_filter_hidden, is_primary, is_edit_hidden }
      * @return int Number of rows written
      */
     public function applySnapshotToCategory(Tenant $tenant, Category $category, array $snapshot): int
@@ -1238,7 +1200,7 @@ class TenantMetadataVisibilityService
 
         foreach ($snapshot as $entry) {
             $fieldId = (int) ($entry['metadata_field_id'] ?? 0);
-            if ($fieldId <= 0 || !isset($validFieldIds[$fieldId])) {
+            if ($fieldId <= 0 || ! isset($validFieldIds[$fieldId])) {
                 continue;
             }
 

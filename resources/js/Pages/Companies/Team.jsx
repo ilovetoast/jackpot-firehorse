@@ -1,5 +1,5 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -34,8 +34,13 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null)
     const [ownershipTransferSettingsLink, setOwnershipTransferSettingsLink] = useState(null)
+    const [linkedAgencies, setLinkedAgencies] = useState([])
+    const [detachAgencyDialog, setDetachAgencyDialog] = useState({ open: false, link: null })
+    const [detachAgencySubmitting, setDetachAgencySubmitting] = useState(false)
 
     const debouncedSearch = useDebounce(search, 300)
+
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 
     const prevFiltersRef = useRef([debouncedSearch, filterBrand, filterRole])
 
@@ -49,7 +54,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
             prevFiltersRef.current = [debouncedSearch, filterBrand, filterRole]
         }
         const pageToUse = filtersChanged ? 1 : page
-        const params = new URLSearchParams({ page: pageToUse })
+        const params = new URLSearchParams({ page: pageToUse, per_page: '200' })
         if (debouncedSearch) params.set('search', debouncedSearch)
         if (filterBrand) params.set('brand_id', filterBrand)
         if (filterRole) params.set('role', filterRole)
@@ -59,9 +64,13 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 if (data.data) {
                     setUsers(data.data)
                     setMeta(data.meta || {})
+                    setLinkedAgencies(Array.isArray(data.linked_agencies) ? data.linked_agencies : [])
                 }
             })
-            .catch(() => setUsers([]))
+            .catch(() => {
+                setUsers([])
+                setLinkedAgencies([])
+            })
             .finally(() => setLoading(false))
     }, [page, debouncedSearch, filterBrand, filterRole])
 
@@ -159,6 +168,75 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
     const displayCount = meta.total ?? current_user_count ?? 0
     const maxDisplay = max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users
 
+    const { agencySections, directUsers } = useMemo(() => {
+        const direct = []
+        const byAgency = new Map()
+        for (const u of users) {
+            if (!u.is_agency_managed) {
+                direct.push(u)
+                continue
+            }
+            const aid = u.agency_tenant_id ?? 'unknown'
+            if (!byAgency.has(aid)) {
+                byAgency.set(aid, {
+                    agency_tenant_id: aid,
+                    name: u.agency_tenant_name || 'Agency partner',
+                    users: [],
+                })
+            }
+            byAgency.get(aid).users.push(u)
+        }
+        const sections = Array.from(byAgency.values()).sort((a, b) =>
+            (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+        )
+        return { agencySections: sections, directUsers: direct }
+    }, [users])
+
+    const hasAgencyUsers = useMemo(
+        () => agencySections.some((s) => s.users.length > 0),
+        [agencySections]
+    )
+
+    const findTenantAgencyLink = (agencyTenantId) =>
+        linkedAgencies.find((l) => Number(l.agency_tenant?.id) === Number(agencyTenantId))
+
+    const openDetachAgency = (agencyTenantId) => {
+        const link = findTenantAgencyLink(agencyTenantId)
+        if (!link) return
+        setDetachAgencyDialog({ open: true, link })
+    }
+
+    const confirmDetachAgency = async () => {
+        const link = detachAgencyDialog.link
+        if (!link?.id) {
+            setDetachAgencyDialog({ open: false, link: null })
+            return
+        }
+        setDetachAgencySubmitting(true)
+        try {
+            const res = await fetch(`/app/api/tenant/agencies/${link.id}`, {
+                method: 'DELETE',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+            })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                window.alert(data.message || 'Could not remove agency partnership.')
+                return
+            }
+            setDetachAgencyDialog({ open: false, link: null })
+            fetchUsers()
+        } catch {
+            window.alert('Network error.')
+        } finally {
+            setDetachAgencySubmitting(false)
+        }
+    }
+
     return (
         <div className="min-h-screen flex flex-col bg-gray-50">
             <AppHead title="Team" />
@@ -172,6 +250,23 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 </div>
 
                 <CompanyTabs />
+
+                {linkedAgencies.length > 0 && (
+                    <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/80 px-4 py-3 text-sm text-indigo-950">
+                        <p>
+                            <span className="font-medium">Agency partnerships</span>
+                            {' — '}
+                            Members added by an agency appear in the sections below. Brand access is controlled from{' '}
+                            <Link
+                                href="/app/companies/settings#agencies"
+                                className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+                            >
+                                Company settings → Agencies
+                            </Link>
+                            .
+                        </p>
+                    </div>
+                )}
 
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                     <button
@@ -231,20 +326,81 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                     ) : users.length === 0 ? (
                         <div className="py-12 text-center text-gray-500">No users found.</div>
                     ) : (
-                        users.map((user) => (
-                            <UserRow
-                                key={user.id}
-                                user={user}
-                                brands={brands}
-                                tenant={tenant}
-                                authUserId={auth?.user?.id}
-                                onCompanyRoleChange={handleCompanyRoleChange}
-                                onBrandRoleChange={handleBrandRoleChange}
-                                onRemoveBrand={handleRemoveBrand}
-                                onDeleteFromCompany={handleDeleteFromCompany}
-                                updatingKeys={updatingKeys}
-                            />
-                        ))
+                        <>
+                            {directUsers.length > 0 && (
+                                <div className={hasAgencyUsers ? 'border-b border-gray-200' : ''}>
+                                    {hasAgencyUsers && (
+                                        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+                                            <h2 className="text-base font-semibold text-gray-900">Direct team</h2>
+                                            <p className="text-xs text-gray-600">
+                                                Members invited or added directly by your company ({directUsers.length}{' '}
+                                                {directUsers.length === 1 ? 'person' : 'people'})
+                                            </p>
+                                        </div>
+                                    )}
+                                    {directUsers.map((user) => (
+                                        <UserRow
+                                            key={user.id}
+                                            user={user}
+                                            brands={brands}
+                                            tenant={tenant}
+                                            authUserId={auth?.user?.id}
+                                            onCompanyRoleChange={handleCompanyRoleChange}
+                                            onBrandRoleChange={handleBrandRoleChange}
+                                            onRemoveBrand={handleRemoveBrand}
+                                            onDeleteFromCompany={handleDeleteFromCompany}
+                                            updatingKeys={updatingKeys}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+
+                            {agencySections.map((section) => {
+                                const link = findTenantAgencyLink(section.agency_tenant_id)
+                                if (section.users.length === 0) {
+                                    return null
+                                }
+                                return (
+                                    <div key={section.agency_tenant_id} className="border-b border-gray-200 last:border-b-0">
+                                        <div className="flex flex-col gap-2 border-b border-gray-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div>
+                                                <h2 className="text-base font-semibold text-gray-900">
+                                                    {section.name}
+                                                </h2>
+                                                <p className="text-xs text-gray-600">
+                                                    Agency-managed team ({section.users.length}{' '}
+                                                    {section.users.length === 1 ? 'person' : 'people'})
+                                                </p>
+                                            </div>
+                                            {link && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openDetachAgency(section.agency_tenant_id)}
+                                                    className="inline-flex shrink-0 items-center justify-center rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-800 shadow-sm hover:bg-red-50"
+                                                >
+                                                    Remove agency from company
+                                                </button>
+                                            )}
+                                        </div>
+                                        {section.users.map((user) => (
+                                            <UserRow
+                                                key={user.id}
+                                                user={user}
+                                                brands={brands}
+                                                tenant={tenant}
+                                                authUserId={auth?.user?.id}
+                                                onCompanyRoleChange={handleCompanyRoleChange}
+                                                onBrandRoleChange={handleBrandRoleChange}
+                                                onRemoveBrand={handleRemoveBrand}
+                                                onDeleteFromCompany={handleDeleteFromCompany}
+                                                updatingKeys={updatingKeys}
+                                                groupedUnderAgencySection
+                                            />
+                                        ))}
+                                    </div>
+                                )
+                            })}
+                        </>
                     )}
                 </div>
 
@@ -252,7 +408,8 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 {meta.last_page > 1 && (
                     <div className="mt-4 flex items-center justify-between">
                         <p className="text-sm text-gray-600">
-                            Showing {(meta.current_page - 1) * 25 + 1}–{Math.min(meta.current_page * 25, meta.total)} of {meta.total} users
+                            Showing {(meta.current_page - 1) * (meta.per_page || 200) + 1}–
+                            {Math.min(meta.current_page * (meta.per_page || 200), meta.total)} of {meta.total} users
                         </p>
                         <div className="flex gap-2">
                             <button
@@ -362,6 +519,22 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 confirmText="Delete from company"
                 cancelText="Cancel"
                 variant="danger"
+            />
+
+            <ConfirmDialog
+                open={detachAgencyDialog.open && !!detachAgencyDialog.link}
+                onClose={() => !detachAgencySubmitting && setDetachAgencyDialog({ open: false, link: null })}
+                onConfirm={confirmDetachAgency}
+                title="Remove agency from this company?"
+                message={
+                    detachAgencyDialog.link
+                        ? `This removes the partnership with "${detachAgencyDialog.link.agency_tenant?.name || 'this agency'}" and revokes company access for everyone that agency added to ${tenant.name}. If that includes you, you will lose access here. Brand scopes can be adjusted later by linking the agency again from Company settings.`
+                        : ''
+                }
+                confirmText="Remove agency"
+                cancelText="Cancel"
+                variant="danger"
+                loading={detachAgencySubmitting}
             />
         </div>
     )

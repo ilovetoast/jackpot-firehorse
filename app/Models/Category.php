@@ -147,6 +147,59 @@ class Category extends Model
     }
 
     /**
+     * Brand Intelligence (EBI) master toggle for this category (stored in settings JSON).
+     * Deliverable categories default to on when the key is absent (new custom deliverables).
+     */
+    public function isEbiEnabled(): bool
+    {
+        $settings = $this->settings ?? [];
+        if (array_key_exists('ebi_enabled', $settings)) {
+            return (bool) $settings['ebi_enabled'];
+        }
+
+        return $this->asset_type === AssetType::DELIVERABLE;
+    }
+
+    /**
+     * Default EBI enablement for a system category slug (new categories + migration backfill).
+     * Execution-style categories default on; core asset library categories (logos/photography/graphics) off.
+     */
+    public static function defaultEbiEnabledForSystemSlug(string $slug): bool
+    {
+        $slug = strtolower($slug);
+
+        $enabled = [
+            'digital-ads',
+            'print',
+            'ooh',
+            'events',
+            'videos',
+            'sales-collateral',
+            'pr',
+            'packaging',
+            'product-renders',
+            'radio',
+            'video',
+        ];
+
+        $disabled = [
+            'logos',
+            'photography',
+            'graphics',
+        ];
+
+        if (in_array($slug, $disabled, true)) {
+            return false;
+        }
+
+        if (in_array($slug, $enabled, true)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Get the tenant that owns this category.
      */
     public function tenant(): BelongsTo

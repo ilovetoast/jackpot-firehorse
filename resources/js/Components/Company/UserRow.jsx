@@ -13,9 +13,19 @@ const ROLE_COLORS = {
     owner: 'bg-orange-100 text-orange-800 border-orange-200',
     admin: 'bg-purple-100 text-purple-800 border-purple-200',
     member: 'bg-gray-100 text-gray-800 border-gray-200',
+    agency_admin: 'bg-violet-100 text-violet-900 border-violet-200',
+    agency_partner: 'bg-violet-50 text-violet-900 border-violet-200',
     brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
     contributor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
     viewer: 'bg-gray-100 text-gray-800 border-gray-200',
+}
+
+const COMPANY_ROLE_LABEL = {
+    owner: 'Owner',
+    admin: 'Admin',
+    member: 'Member',
+    agency_admin: 'Agency admin',
+    agency_partner: 'Agency partner',
 }
 
 const BRAND_ROLES = [
@@ -35,6 +45,7 @@ export default function UserRow({
     onRemoveBrand,
     onDeleteFromCompany,
     updatingKeys = {},
+    groupedUnderAgencySection = false,
 }) {
     const [expanded, setExpanded] = useState(false)
     const [addBrandOpen, setAddBrandOpen] = useState(false)
@@ -45,7 +56,8 @@ export default function UserRow({
     const [deleteConfirm, setDeleteConfirm] = useState(false)
 
     const isOwner = user.company_role === 'owner'
-    const canModify = !isOwner && user.id !== authUserId
+    const isAgencyManaged = user.is_agency_managed === true
+    const canModify = !isOwner && user.id !== authUserId && !isAgencyManaged
     const userBrandIds = (user.brand_roles || []).map((br) => br.brand_id)
     const availableBrands = brands.filter((b) => !userBrandIds.includes(b.id))
 
@@ -113,9 +125,17 @@ export default function UserRow({
                 <Avatar avatarUrl={user.avatar_url} firstName={user.first_name} lastName={user.last_name} email={user.email} size="sm" />
                 <div className="flex-1 min-w-0">
                     <span className="font-medium text-gray-900">{user.name || user.email}</span>
+                    {isAgencyManaged && !groupedUnderAgencySection && (
+                        <span
+                            className="ml-2 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800"
+                            title={user.agency_tenant_name ? `Managed via agency: ${user.agency_tenant_name}` : 'Managed via agency link'}
+                        >
+                            Agency{user.agency_tenant_name ? ` · ${user.agency_tenant_name}` : ''}
+                        </span>
+                    )}
                     <span className="text-gray-500 text-sm ml-2">{user.email}</span>
                 </div>
-                {onCompanyRoleChange && !isOwner ? (
+                {onCompanyRoleChange && !isOwner && !isAgencyManaged ? (
                     <select
                         value={user.company_role || 'member'}
                         onChange={(e) => {
@@ -131,7 +151,7 @@ export default function UserRow({
                     </select>
                 ) : (
                     <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getRoleColor(user.company_role)}`}>
-                        {user.company_role === 'owner' ? 'Owner' : user.company_role === 'admin' ? 'Admin' : 'Member'}
+                        {COMPANY_ROLE_LABEL[user.company_role] || (user.company_role === 'owner' ? 'Owner' : user.company_role === 'admin' ? 'Admin' : 'Member')}
                     </span>
                 )}
                 {updatingKeys[`tenant_${user.id}`] && (
@@ -153,6 +173,11 @@ export default function UserRow({
             {expanded && (
                 <div className="bg-gray-50/80 px-4 pb-4 pt-2 border-t border-gray-100">
                     <div className="pl-10 space-y-2">
+                        {isAgencyManaged && (
+                            <p className="text-xs text-gray-600 pb-1">
+                                Roles for this person are managed by the agency link. To change access, use Company Settings → Agencies or remove the agency.
+                            </p>
+                        )}
                         {(user.brand_roles || []).map((br) => {
                             const key = `brand_${user.id}_${br.brand_id}`
                             const isUpdating = updatingKeys[key]
@@ -162,9 +187,10 @@ export default function UserRow({
                                     <select
                                         value={br.role}
                                         onChange={(e) => onBrandRoleChange?.(user.id, br.brand_id, e.target.value)}
-                                        disabled={isUpdating}
+                                        disabled={isUpdating || isAgencyManaged}
                                         className={`rounded-md border px-2 py-1 text-xs font-medium ${getRoleColor(br.role)} focus:ring-indigo-500 disabled:opacity-50`}
                                         onClick={(e) => e.stopPropagation()}
+                                        title={isAgencyManaged ? 'Managed via agency link' : undefined}
                                     >
                                         {BRAND_ROLES.map((r) => (
                                             <option key={r.value} value={r.value}>{r.label}</option>
@@ -175,7 +201,9 @@ export default function UserRow({
                                         <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); handleRemoveBrand(br.brand_id, br.brand_name) }}
-                                            className="text-xs text-red-600 hover:text-red-800"
+                                            className="text-xs text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                            disabled={isAgencyManaged}
+                                            title={isAgencyManaged ? 'Managed via agency link' : undefined}
                                         >
                                             Remove
                                         </button>
@@ -183,7 +211,7 @@ export default function UserRow({
                                 </div>
                             )
                         })}
-                        {canModify && (
+                        {canModify && !isAgencyManaged && (
                             <div className="pt-2">
                                 {!addBrandOpen ? (
                                     <button

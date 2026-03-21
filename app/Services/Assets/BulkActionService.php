@@ -4,7 +4,7 @@ namespace App\Services\Assets;
 
 use App\Enums\ApprovalStatus;
 use App\Enums\AssetBulkAction;
-use App\Enums\AssetStatus;
+use App\Enums\AssetType;
 use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\User;
@@ -26,8 +26,7 @@ class BulkActionService
 
     public function __construct(
         protected BulkMetadataService $bulkMetadataService
-    ) {
-    }
+    ) {}
 
     public function execute(array $assetIds, string $action, array $payload, User $user, int $tenantId, ?int $brandId): BulkActionResult
     {
@@ -52,6 +51,7 @@ class BulkActionService
             if ($opType !== 'clear' && empty($metadata)) {
                 throw new \InvalidArgumentException('Metadata payload is required for METADATA_ADD and METADATA_REPLACE.');
             }
+
             return $this->executeMetadataBulk($assetIds, $actionEnum, $metadata, $user, $tenantId, $brandId);
         }
 
@@ -74,9 +74,10 @@ class BulkActionService
             $deletionService = app(\App\Services\AssetDeletionService::class);
             foreach ($assets->chunk(self::CHUNK_SIZE) as $chunk) {
                 foreach ($chunk as $asset) {
-                    if (!Gate::forUser($user)->allows('forceDelete', $asset)) {
+                    if (! Gate::forUser($user)->allows('forceDelete', $asset)) {
                         $skipped++;
                         $perActionSummary['skipped_unauthorized'] = ($perActionSummary['skipped_unauthorized'] ?? 0) + 1;
+
                         continue;
                     }
                     try {
@@ -88,6 +89,7 @@ class BulkActionService
                     }
                 }
             }
+
             return new BulkActionResult(
                 totalSelected: count($assetIds),
                 processed: $processed,
@@ -99,18 +101,20 @@ class BulkActionService
 
         foreach ($assets->chunk(self::CHUNK_SIZE) as $chunk) {
             foreach ($chunk as $asset) {
-                if (!$this->canPerformAction($user, $asset, $actionEnum)) {
+                if (! $this->canPerformAction($user, $asset, $actionEnum)) {
                     $skipped++;
                     $perActionSummary['skipped_unauthorized'] = ($perActionSummary['skipped_unauthorized'] ?? 0) + 1;
+
                     continue;
                 }
 
                 try {
                     $previousState = $this->snapshotState($asset);
                     $didApply = $this->applyAction($asset, $actionEnum, $payload, $user);
-                    if (!$didApply) {
+                    if (! $didApply) {
                         $skipped++;
                         $perActionSummary['skipped_no_op'] = ($perActionSummary['skipped_no_op'] ?? 0) + 1;
+
                         continue;
                     }
                     $asset->save();
@@ -139,7 +143,7 @@ class BulkActionService
 
     protected function canPerformAction(User $user, Asset $asset, AssetBulkAction $action): bool
     {
-        if (!$user->can('view', $asset)) {
+        if (! $user->can('view', $asset)) {
             return false;
         }
 
@@ -152,8 +156,10 @@ class BulkActionService
             if ($asset->brand_id) {
                 $membership = $user->activeBrandMembership($asset->brand);
                 $brandRole = $membership['role'] ?? null;
+
                 return $brandRole && PermissionMap::canApproveAssets($brandRole);
             }
+
             return false;
         }
 
@@ -180,6 +186,7 @@ class BulkActionService
                 }
                 $asset->published_at = now();
                 $asset->published_by_id = $user->id;
+
                 return true;
 
             case AssetBulkAction::UNPUBLISH:
@@ -188,6 +195,7 @@ class BulkActionService
                 }
                 $asset->published_at = null;
                 $asset->published_by_id = null;
+
                 return true;
 
             case AssetBulkAction::ARCHIVE:
@@ -196,6 +204,7 @@ class BulkActionService
                 }
                 $asset->archived_at = now();
                 $asset->archived_by_id = $user->id;
+
                 return true;
 
             case AssetBulkAction::RESTORE_ARCHIVE:
@@ -204,6 +213,7 @@ class BulkActionService
                 }
                 $asset->archived_at = null;
                 $asset->archived_by_id = null;
+
                 return true;
 
             case AssetBulkAction::APPROVE:
@@ -212,6 +222,7 @@ class BulkActionService
                 $asset->approved_by_user_id = $user->id;
                 $asset->rejected_at = null;
                 $asset->rejection_reason = null;
+
                 return true;
 
             case AssetBulkAction::MARK_PENDING:
@@ -220,6 +231,7 @@ class BulkActionService
                 $asset->approved_by_user_id = null;
                 $asset->rejected_at = null;
                 $asset->rejection_reason = null;
+
                 return true;
 
             case AssetBulkAction::REJECT:
@@ -229,6 +241,7 @@ class BulkActionService
                 $asset->rejection_reason = $reason;
                 $asset->approved_at = null;
                 $asset->approved_by_user_id = null;
+
                 return true;
 
             case AssetBulkAction::SOFT_DELETE:
@@ -237,6 +250,7 @@ class BulkActionService
                 }
                 $asset->deleted_at = now();
                 $asset->deleted_by_user_id = $user->id;
+
                 return true;
 
             case AssetBulkAction::RESTORE_TRASH:
@@ -245,6 +259,7 @@ class BulkActionService
                 }
                 $asset->deleted_at = null;
                 $asset->deleted_by_user_id = null;
+
                 return true;
 
             default:
@@ -264,8 +279,19 @@ class BulkActionService
             ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
             ->first();
 
-        if (!$category) {
+        if (! $category) {
             throw new \InvalidArgumentException('Category not found or not accessible.');
+        }
+
+        $requestedAssetType = isset($payload['asset_type']) ? trim((string) $payload['asset_type']) : '';
+        if ($requestedAssetType !== '') {
+            $expected = AssetType::tryFrom($requestedAssetType);
+            if ($expected === null) {
+                throw new \InvalidArgumentException('Invalid asset_type. Use asset, deliverable, or ai_generated.');
+            }
+            if ($category->asset_type !== $expected) {
+                throw new \InvalidArgumentException('Selected category does not match the chosen asset type.');
+            }
         }
 
         $assets = Asset::whereIn('id', $assetIds)
@@ -278,14 +304,16 @@ class BulkActionService
         $errors = [];
 
         foreach ($assets as $asset) {
-            if (!Gate::forUser($user)->allows('view', $asset)) {
+            if (! Gate::forUser($user)->allows('view', $asset)) {
                 $skipped++;
+
                 continue;
             }
             try {
                 $metadata = $asset->metadata ?? [];
                 $metadata['category_id'] = $category->id;
                 $asset->metadata = $metadata;
+                $asset->type = $category->asset_type;
                 $asset->intake_state = 'normal';
                 $asset->builder_staged = false; // Clear builder_staged when classifying
                 $asset->save();
@@ -334,6 +362,7 @@ class BulkActionService
             );
         } catch (\Throwable $e) {
             Log::error('[BulkActionService] Metadata bulk execute failed', ['error' => $e->getMessage()]);
+
             return new BulkActionResult(
                 totalSelected: count($assetIds),
                 processed: 0,

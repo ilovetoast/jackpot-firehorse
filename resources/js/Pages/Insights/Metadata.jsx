@@ -80,6 +80,11 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
     }
 
     const coverage = analytics?.coverage || {}
+    const fieldCoverageRaw = coverage.field_coverage || []
+    const typeFamilyFields = fieldCoverageRaw.filter((f) => !!f.is_type_family)
+    const otherCoverageFields = fieldCoverageRaw.filter((f) => !f.is_type_family)
+    /** When a category filter is applied, analytics returns a single “Type” row — keep the flat grid. */
+    const groupTypeFamilySection = typeFamilyFields.length > 1
     const aiEffectiveness = analytics?.ai_effectiveness || {}
     const freshness = analytics?.freshness || {}
     const rightsRisk = analytics?.rights_risk || {}
@@ -140,34 +145,49 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                         Metadata Coverage
                     </h3>
                     <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
-                        {coverage.field_coverage && coverage.field_coverage.length > 0 ? (
+                        {fieldCoverageRaw.length > 0 ? (
                             <div className="space-y-4">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {coverage.field_coverage.map((field) => (
-                                        <div
-                                            key={field.field_id}
-                                            className="border border-gray-200 rounded-lg p-4"
-                                        >
-                                            <div className="flex items-center justify-between mb-2">
-                                                <span className="text-sm font-medium text-gray-900">
-                                                    {field.field_label}
-                                                </span>
-                                                <span className="text-sm text-gray-500">
-                                                    {field.coverage_percentage}%
-                                                </span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2">
-                                                <div
-                                                    className="bg-primary h-2 rounded-full transition-all"
-                                                    style={{ width: `${field.coverage_percentage}%` }}
+                                {groupTypeFamilySection ? (
+                                    <>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {otherCoverageFields.map((field) => (
+                                                <CoverageFieldCard
+                                                    key={field.field_id}
+                                                    field={field}
+                                                    totalAssets={coverage.total_assets}
                                                 />
-                                            </div>
-                                            <p className="mt-1 text-xs text-gray-500">
-                                                {field.assets_with_value} of {coverage.total_assets} assets
-                                            </p>
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="rounded-lg border border-gray-200 bg-gray-50/90 p-4">
+                                            <div className="mb-3">
+                                                <h4 className="text-sm font-semibold text-gray-900">Type</h4>
+                                                <p className="mt-0.5 text-xs text-gray-500">
+                                                    Each library category has its own type field (for example Photo Type,
+                                                    Logo Type). Coverage is per field, not a single shared value.
+                                                </p>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                {typeFamilyFields.map((field) => (
+                                                    <CoverageFieldCard
+                                                        key={field.field_id}
+                                                        field={field}
+                                                        totalAssets={coverage.total_assets}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {fieldCoverageRaw.map((field) => (
+                                            <CoverageFieldCard
+                                                key={field.field_id}
+                                                field={field}
+                                                totalAssets={coverage.total_assets}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
                                 {coverage.lowest_coverage_fields && coverage.lowest_coverage_fields.length > 0 && (
                                     <div className="mt-6 pt-6 border-t border-gray-200">
                                         <h4 className="text-sm font-semibold text-gray-900 mb-3">
@@ -351,6 +371,26 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                 )}
             </div>
         </InsightsLayout>
+    )
+}
+
+function CoverageFieldCard({ field, totalAssets }) {
+    return (
+        <div className="border border-gray-200 rounded-lg bg-white p-4">
+            <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-900">{field.field_label}</span>
+                <span className="text-sm text-gray-500">{field.coverage_percentage}%</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-gray-200">
+                <div
+                    className="bg-primary h-2 rounded-full transition-all"
+                    style={{ width: `${field.coverage_percentage}%` }}
+                />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+                {field.assets_with_value} of {totalAssets} assets
+            </p>
+        </div>
     )
 }
 

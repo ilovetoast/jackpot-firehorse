@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Controller;
 use App\Enums\EventType;
-use App\Models\Tenant;
+use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\Tenant;
+use App\Models\TenantAgency;
+use App\Services\AICostReportingService;
+use App\Services\AiUsageService;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
 use App\Services\PlanService;
-use App\Services\AiUsageService;
-use App\Services\AICostReportingService;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -21,27 +21,24 @@ use Inertia\Response;
 
 /**
  * Company View Controller
- * 
+ *
  * Displays detailed view of a company including:
  * - Basic company information
  * - Income vs expenses chart
  * - Activity, users, brands overview
  * - Profitability rating
- * 
+ *
  * Protected by 'company.manage' permission.
  */
 class CompanyViewController extends Controller
 {
     /**
      * Display the company view page.
-     * 
-     * @param Tenant $tenant
-     * @return Response
      */
     public function show(Tenant $tenant): Response
     {
         $user = Auth::user();
-        
+
         // Only user ID 1 (Site Owner) can access admin company view
         // This matches the pattern used in other admin controllers for consistency
         if (Auth::id() !== 1) {
@@ -57,10 +54,10 @@ class CompanyViewController extends Controller
         $owner = $tenant->owner();
         $planName = $planService->getCurrentPlan($tenant);
         $planConfig = config("plans.{$planName}", config('plans.free'));
-        
+
         // Get subscription info
         $subscription = $tenant->subscription('default');
-        $stripeConnected = !empty($tenant->stripe_id);
+        $stripeConnected = ! empty($tenant->stripe_id);
 
         // Calculate costs and income for last 6 months for chart
         $monthlyData = [];
@@ -68,10 +65,10 @@ class CompanyViewController extends Controller
             $date = now()->subMonths($i);
             $month = $date->month;
             $year = $date->year;
-            
+
             $costs = $costService->calculateMonthlyCosts($tenant, $month, $year);
             $income = $costService->calculateIncome($tenant, $month, $year);
-            
+
             $monthlyData[] = [
                 'month' => $date->format('M Y'),
                 'month_num' => $month,
@@ -108,7 +105,7 @@ class CompanyViewController extends Controller
         // Get users overview (first 5) - using standardized service method
         $companyDataService = app(CompanyDataService::class);
         $users = $companyDataService->getCompanyUsers($tenant, 5)->values()->toArray();
-        
+
         // Ensure owner is connected to default brand (data integrity enforcement)
         $companyDataService->ensureOwnerConnectedToDefaultBrand($tenant);
 
@@ -116,31 +113,31 @@ class CompanyViewController extends Controller
         $brandsQuery = $tenant->brands()
             ->orderBy('is_default', 'desc')
             ->orderBy('name');
-        
+
         $brandsCollection = $brandsQuery->get();
-        
+
         Log::info('CompanyViewController - Loading brands', [
             'tenant_id' => $tenant->id,
             'tenant_name' => $tenant->name,
             'brands_count' => $brandsCollection->count(),
             'brand_ids' => $brandsCollection->pluck('id')->toArray(),
         ]);
-        
+
         $allBrands = $brandsCollection->map(function ($brand) {
-                return [
-                    'id' => $brand->id,
-                    'name' => $brand->name,
-                    'slug' => $brand->slug,
-                    'is_default' => $brand->is_default,
-                ];
-            })
+            return [
+                'id' => $brand->id,
+                'name' => $brand->name,
+                'slug' => $brand->slug,
+                'is_default' => $brand->is_default,
+            ];
+        })
             ->values() // Reset keys for proper array serialization
             ->toArray(); // Convert to array for Inertia
 
         // Get brands overview (first 5) for display
         // $allBrands is already an array, so use array_slice
         $brands = array_slice($allBrands, 0, 5);
-        
+
         Log::info('CompanyViewController - Brands processed', [
             'tenant_id' => $tenant->id,
             'all_brands_count' => count($allBrands),
@@ -154,24 +151,24 @@ class CompanyViewController extends Controller
         $assetCount = Asset::where('tenant_id', $tenant->id)
             ->whereNull('deleted_at')
             ->count();
-        
+
         $totalStorageBytes = Asset::where('tenant_id', $tenant->id)
             ->whereNull('deleted_at')
             ->sum('size_bytes') ?? 0;
-        
+
         $totalStorageGB = round($totalStorageBytes / (1024 * 1024 * 1024), 2);
 
         // Get plan management info
         $planManagementSource = $planService->getPlanManagementSource($tenant);
         $isExternallyManaged = $planService->isExternallyManaged($tenant);
-        
+
         // Get plan change history (last plan update activity)
         // EventType is a class with constants, not an enum, so use the constant directly
         $lastPlanUpdate = ActivityEvent::where('tenant_id', $tenant->id)
             ->where('event_type', EventType::PLAN_UPDATED)
             ->orderBy('created_at', 'desc')
             ->first();
-        
+
         $planChangeInfo = null;
         if ($lastPlanUpdate) {
             $metadata = $lastPlanUpdate->metadata ?? [];
@@ -180,7 +177,7 @@ class CompanyViewController extends Controller
                 'changed_at' => $lastPlanUpdate->created_at?->toIso8601String(),
                 'changed_by' => $actor ? [
                     'id' => $actor->id ?? null,
-                    'name' => trim(($actor->first_name ?? '') . ' ' . ($actor->last_name ?? '')) ?: $actor->email ?? $metadata['admin_name'] ?? 'System',
+                    'name' => trim(($actor->first_name ?? '').' '.($actor->last_name ?? '')) ?: $actor->email ?? $metadata['admin_name'] ?? 'System',
                     'email' => $actor->email ?? $metadata['admin_email'] ?? null,
                 ] : [
                     'name' => $metadata['admin_name'] ?? ($lastPlanUpdate->actor_type === 'system' ? 'System' : 'System Administrator'),
@@ -198,42 +195,42 @@ class CompanyViewController extends Controller
         try {
             // Get usage status and breakdown
             $usageStatus = $aiUsageService->getUsageStatus($tenant);
-            
+
             // Get individual feature usage for current month
             $taggingUsage = $aiUsageService->getMonthlyUsage($tenant, 'tagging');
             $suggestionsUsage = $aiUsageService->getMonthlyUsage($tenant, 'suggestions');
             $totalUsage = $taggingUsage + $suggestionsUsage;
-            
+
             // Get AI cost report for current month (filter by tenant in query)
             $monthStart = now()->startOfMonth();
             $monthEnd = now()->endOfMonth();
-            
+
             // Query AIAgentRun directly for tenant-specific cost data
             $tenantCostData = \App\Models\AIAgentRun::where('tenant_id', $tenant->id)
                 ->whereBetween('started_at', [$monthStart, $monthEnd])
                 ->get();
-            
+
             $totalCost = $tenantCostData->sum('estimated_cost');
             $totalRuns = $tenantCostData->count();
-            
+
             // Get monthly cap data
             $taggingCap = $aiUsageService->getMonthlyCap($tenant, 'tagging');
             $suggestionsCap = $aiUsageService->getMonthlyCap($tenant, 'suggestions');
-            
+
             // Calculate projections based on current usage
             $daysInMonth = $monthEnd->day;
             $daysElapsed = now()->day;
             $dailyAverageUsage = $daysElapsed > 0 ? $totalUsage / $daysElapsed : 0;
             $projectedMonthlyUsage = $dailyAverageUsage * $daysInMonth;
-            
+
             // Calculate estimated costs
             $dailyAverageCost = $daysElapsed > 0 ? $totalCost / $daysElapsed : 0;
             $projectedMonthlyCost = $dailyAverageCost * $daysInMonth;
-            
+
             // Calculate usage percentage against highest cap
             $maxCap = max($taggingCap ?: 0, $suggestionsCap ?: 0);
             $usagePercentage = $maxCap > 0 ? min(100, ($projectedMonthlyUsage / $maxCap) * 100) : 0;
-            
+
             $aiUsageData = [
                 'current_usage' => [
                     'total_calls' => $totalUsage,
@@ -261,7 +258,7 @@ class CompanyViewController extends Controller
                 'tenant_id' => $tenant->id,
                 'error' => $e->getMessage(),
             ]);
-            
+
             $aiUsageData = [
                 'status' => 'error',
                 'message' => 'Unable to load AI usage data',
@@ -281,7 +278,7 @@ class CompanyViewController extends Controller
                 'approved_at' => $tenant->agency_approved_at?->toIso8601String(),
             ];
         }
-        
+
         // Phase AG-11: Load incubation/referral information
         $incubationInfo = null;
         if ($tenant->incubated_by_agency_id) {
@@ -295,7 +292,7 @@ class CompanyViewController extends Controller
                 'incubation_expires_at' => $tenant->incubation_expires_at?->toIso8601String(),
             ];
         }
-        
+
         $referralInfo = null;
         if ($tenant->referred_by_agency_id) {
             $referringAgency = Tenant::find($tenant->referred_by_agency_id);
@@ -308,7 +305,10 @@ class CompanyViewController extends Controller
             ];
         }
 
+        $linkedAgencies = $this->buildLinkedAgenciesPayload($tenant);
+
         return Inertia::render('Admin/CompanyView', [
+            'linked_agencies' => $linkedAgencies,
             'company' => [
                 'id' => $tenant->id,
                 'name' => $tenant->name,
@@ -326,11 +326,11 @@ class CompanyViewController extends Controller
                     'manual_plan_override' => $tenant->manual_plan_override,
                 ],
                 'infrastructure_tier' => $tenant->infrastructure_tier ?? 'shared',
-                'can_manage_plan' => !$stripeConnected, // Allow non-Stripe plans to be managed
+                'can_manage_plan' => ! $stripeConnected, // Allow non-Stripe plans to be managed
                 'plan_change_info' => $planChangeInfo,
                 'owner' => $owner ? [
                     'id' => $owner->id,
-                    'name' => trim(($owner->first_name ?? '') . ' ' . ($owner->last_name ?? '')),
+                    'name' => trim(($owner->first_name ?? '').' '.($owner->last_name ?? '')),
                     'email' => $owner->email,
                 ] : null,
                 // Phase AG-11: Agency information
@@ -356,4 +356,61 @@ class CompanyViewController extends Controller
         ]);
     }
 
+    /**
+     * Agency partners linked to this company (client tenant) via tenant_agencies, with managed users and brand roles.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildLinkedAgenciesPayload(Tenant $tenant): array
+    {
+        return TenantAgency::query()
+            ->where('tenant_id', $tenant->id)
+            ->with('agencyTenant')
+            ->orderBy('created_at')
+            ->get()
+            ->map(function (TenantAgency $ta) use ($tenant) {
+                $base = $ta->toApiArray();
+                $agencyTenantId = $ta->agency_tenant_id;
+
+                $managedUsers = DB::table('tenant_user')
+                    ->join('users', 'users.id', '=', 'tenant_user.user_id')
+                    ->where('tenant_user.tenant_id', $tenant->id)
+                    ->where('tenant_user.agency_tenant_id', $agencyTenantId)
+                    ->where('tenant_user.is_agency_managed', true)
+                    ->select('users.id', 'users.first_name', 'users.last_name', 'users.email', 'tenant_user.role as tenant_role')
+                    ->orderBy('users.email')
+                    ->get()
+                    ->map(function ($row) use ($tenant) {
+                        $uid = (int) $row->id;
+                        $brandAccess = DB::table('brand_user')
+                            ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
+                            ->where('brand_user.user_id', $uid)
+                            ->where('brands.tenant_id', $tenant->id)
+                            ->whereNull('brand_user.removed_at')
+                            ->select('brands.name as brand_name', 'brand_user.role as brand_role')
+                            ->orderBy('brands.name')
+                            ->get()
+                            ->map(fn ($b) => [
+                                'brand_name' => $b->brand_name,
+                                'role' => $b->brand_role,
+                            ])
+                            ->values()
+                            ->all();
+
+                        return [
+                            'id' => $uid,
+                            'name' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')) ?: $row->email,
+                            'email' => $row->email,
+                            'tenant_role' => $row->tenant_role,
+                            'brand_access' => $brandAccess,
+                        ];
+                    })
+                    ->values()
+                    ->all();
+
+                return array_merge($base, ['managed_users' => $managedUsers]);
+            })
+            ->values()
+            ->all();
+    }
 }

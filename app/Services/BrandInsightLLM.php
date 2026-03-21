@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\AITaskType;
 use App\Models\Brand;
+use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -36,9 +37,12 @@ class BrandInsightLLM
      * @param  array  $signals  Full signal objects from BrandInsightEngine (type, label, priority, href, context)
      * @return array<array{text: string, priority: string, type?: string, href?: string}>
      */
-    public function getInsightsForBrand(Brand $brand, array $signals = []): array
+    public function getInsightsForBrand(Brand $brand, array $signals = [], ?User $user = null): array
     {
-        $cacheKey = self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX;
+        // Per-user cache: signals are role/permission-specific (see BrandInsightEngine::getSignals).
+        $bust = (int) Cache::get('brand:'.$brand->id.':insights-bust', 0);
+        $userKey = $user ? 'user:'.$user->id : 'anon';
+        $cacheKey = self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX.':b'.$bust.':'.$userKey;
 
         return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL_MINUTES), function () use ($brand, $signals) {
             $metrics = $this->brandInsightAI->getMetricsForBrand($brand);
@@ -364,6 +368,9 @@ PROMPT;
      */
     public function bustCache(Brand $brand): void
     {
+        // Invalidates all per-user insight caches (BrandInsightEngine + LLM) without enumerating users.
+        Cache::put('brand:'.$brand->id.':insights-bust', time(), now()->addYears(10));
+
         Cache::forget(self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX);
         // Heuristic signals (What Needs Attention) — must clear when uploads/metrics change
         Cache::forget('brand:'.$brand->id.':insights');

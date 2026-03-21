@@ -19,8 +19,7 @@ class AssetBulkActionController extends Controller
 {
     public function __construct(
         protected BulkActionService $bulkActionService
-    ) {
-    }
+    ) {}
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -28,7 +27,7 @@ class AssetBulkActionController extends Controller
         $brand = app('brand');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['message' => 'Tenant not found.'], 404);
         }
 
@@ -59,6 +58,16 @@ class AssetBulkActionController extends Controller
                     'errors' => ['payload.category_id' => ['The category_id field is required.']],
                 ], 422);
             }
+            $assetTypePayload = $payload['asset_type'] ?? null;
+            if ($assetTypePayload !== null && $assetTypePayload !== '') {
+                $allowed = ['asset', 'deliverable', 'ai_generated'];
+                if (! in_array((string) $assetTypePayload, $allowed, true)) {
+                    return response()->json([
+                        'message' => 'asset_type must be asset, deliverable, or ai_generated.',
+                        'errors' => ['payload.asset_type' => ['Invalid asset_type.']],
+                    ], 422);
+                }
+            }
         }
 
         $actionEnum = AssetBulkAction::from($action);
@@ -86,6 +95,7 @@ class AssetBulkActionController extends Controller
             return response()->json($result->toArray());
         } catch (\InvalidArgumentException $e) {
             Log::info('[AssetBulkActionController] Validation error', ['message' => $e->getMessage()]);
+
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             Log::error('[AssetBulkActionController] Bulk action failed', [
@@ -93,6 +103,7 @@ class AssetBulkActionController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
             return response()->json(['message' => 'Bulk action failed. Please try again.'], 500);
         }
     }

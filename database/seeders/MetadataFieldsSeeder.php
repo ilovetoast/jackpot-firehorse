@@ -38,10 +38,10 @@ class MetadataFieldsSeeder extends Seeder
         // Seed all metadata fields
         $this->seedBasicFields();
         $this->seedFilterOnlyFields();
-        
+
         // Configure field-level properties
         $this->configureFieldProperties();
-        
+
         // Configure category-specific settings
         $this->configureCategorySettings();
 
@@ -66,7 +66,7 @@ class MetadataFieldsSeeder extends Seeder
                 'updated_at' => now(),
             ]);
     }
-    
+
     /**
      * Handle field renames (e.g., campaign -> collection).
      * Preserves existing data by updating the field in place.
@@ -81,7 +81,7 @@ class MetadataFieldsSeeder extends Seeder
         $collectionField = DB::table('metadata_fields')
             ->where('key', 'collection')
             ->first();
-            
+
         if ($collectionField && $collectionField->deprecated_at) {
             // C9.2: Restore collection field for Metadata Management governance
             DB::table('metadata_fields')
@@ -91,19 +91,19 @@ class MetadataFieldsSeeder extends Seeder
                     'updated_at' => now(),
                 ]);
         }
-        
+
         // Rename campaign to collection (if collection doesn't exist)
         $campaignField = DB::table('metadata_fields')
             ->where('key', 'campaign')
             ->first();
-            
+
         if ($campaignField) {
             // Check if collection already exists (including deprecated)
             $collectionField = DB::table('metadata_fields')
                 ->where('key', 'collection')
                 ->first();
-                
-            if (!$collectionField) {
+
+            if (! $collectionField) {
                 // Rename campaign to collection (preserves all existing data)
                 // C9.2: Do NOT deprecate - needed for Metadata Management governance
                 DB::table('metadata_fields')
@@ -117,7 +117,7 @@ class MetadataFieldsSeeder extends Seeder
             }
             // If collection already exists, leave campaign as-is (user can manually merge if needed)
         }
-        
+
         // Remove AI Color Palette and AI Detected Objects from database if they exist
         DB::table('metadata_fields')
             ->whereIn('key', ['ai_color_palette', 'ai_detected_objects'])
@@ -448,7 +448,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'ai_eligible' => false, // Collections are not AI-generated
         ]);
-        
+
         // C9.2: Ensure collection field is not deprecated and is grouped under General in uploader
         DB::table('metadata_fields')
             ->where('id', $collectionId)
@@ -474,7 +474,7 @@ class MetadataFieldsSeeder extends Seeder
             'population_mode' => 'manual', // Must be manual for stars to be clickable
             'readonly' => false,
         ]);
-        
+
         // Update existing quality_rating field to ensure is_internal_only is false and always user-editable
         // population_mode=manual and readonly=false are required for stars to be clickable in the quick panel
         DB::table('metadata_fields')
@@ -503,7 +503,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_upload_visible' => true, // Shown as toggle on uploader (UploadAssetDialog renders it above UploadTray)
             'is_internal_only' => false,
         ]);
-        
+
         // Update existing starred field to ensure correct configuration (display_widget = toggle everywhere)
         DB::table('metadata_fields')
             ->where('key', 'starred')
@@ -598,6 +598,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($printTypeId, [
@@ -620,6 +621,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($digitalTypeId, [
@@ -639,6 +641,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($oohTypeId, [
@@ -659,6 +662,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($eventTypeId, [
@@ -680,6 +684,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($executionVideoTypeId, [
@@ -703,6 +708,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($salesCollateralTypeId, [
@@ -724,6 +730,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($prTypeId, [
@@ -745,6 +752,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($packagingTypeId, [
@@ -765,6 +773,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
 
@@ -781,6 +790,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => true,
             'is_internal_only' => false,
+            'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
         $this->createOptions($radioTypeId, [
@@ -880,7 +890,6 @@ class MetadataFieldsSeeder extends Seeder
     /**
      * Get or create a metadata field.
      *
-     * @param array $fieldData
      * @return int Field ID
      */
     protected function getOrCreateField(array $fieldData): int
@@ -896,6 +905,7 @@ class MetadataFieldsSeeder extends Seeder
             DB::table('metadata_fields')
                 ->where('id', $existingField->id)
                 ->update($updateData);
+
             return $existingField->id;
         }
 
@@ -910,20 +920,17 @@ class MetadataFieldsSeeder extends Seeder
     /**
      * Create options for a metadata field (idempotent).
      *
-     * @param int $fieldId
-     * @param array $options Array of ['value' => string, 'system_label' => string]
-     * @return void
+     * @param  array  $options  Array of ['value' => string, 'system_label' => string]
      */
     /**
      * Sync options for a select field: keep only the given options (remove others), then create/update as needed.
      *
-     * @param int $fieldId
-     * @param array $options Array of ['value' => string, 'system_label' => string]
+     * @param  array  $options  Array of ['value' => string, 'system_label' => string]
      */
     protected function syncOptions(int $fieldId, array $options): void
     {
         $allowedValues = array_column($options, 'value');
-        if (!empty($allowedValues)) {
+        if (! empty($allowedValues)) {
             DB::table('metadata_options')
                 ->where('metadata_field_id', $fieldId)
                 ->whereNotIn('value', $allowedValues)
@@ -935,9 +942,7 @@ class MetadataFieldsSeeder extends Seeder
     /**
      * Create options for a metadata field (idempotent).
      *
-     * @param int $fieldId
-     * @param array $options Array of ['value' => string, 'system_label' => string]
-     * @return void
+     * @param  array  $options  Array of ['value' => string, 'system_label' => string]
      */
     protected function createOptions(int $fieldId, array $options): void
     {
@@ -947,7 +952,7 @@ class MetadataFieldsSeeder extends Seeder
                 ->where('value', $option['value'])
                 ->first();
 
-            if (!$existingOption) {
+            if (! $existingOption) {
                 DB::table('metadata_options')->insert([
                     'metadata_field_id' => $fieldId,
                     'value' => $option['value'],

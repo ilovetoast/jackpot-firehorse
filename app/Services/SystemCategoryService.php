@@ -38,7 +38,7 @@ class SystemCategoryService
                 ->orderBy('version', 'desc')
                 ->orderBy('id', 'desc') // If same version, get the latest created
                 ->first();
-            
+
             if ($latest) {
                 $latestIds[] = $latest->id;
             }
@@ -53,7 +53,6 @@ class SystemCategoryService
     /**
      * Get templates by asset type (latest versions only).
      *
-     * @param AssetType $assetType
      * @return \Illuminate\Database\Eloquent\Collection
      */
     public function getTemplatesByAssetType(AssetType $assetType)
@@ -73,7 +72,7 @@ class SystemCategoryService
                 ->where('version', $maxVersion->max_version)
                 ->orderBy('id', 'desc') // If multiple records have same version, get the latest one
                 ->first();
-            
+
             if ($latest) {
                 $latestIds[] = $latest->id;
             }
@@ -87,9 +86,6 @@ class SystemCategoryService
 
     /**
      * Create a new system category template.
-     *
-     * @param array $data
-     * @return SystemCategory
      */
     public function createTemplate(array $data): SystemCategory
     {
@@ -105,7 +101,7 @@ class SystemCategoryService
         while (SystemCategory::where('asset_type', $data['asset_type'])
             ->where('slug', $slug)
             ->exists()) {
-            $slug = $baseSlug . '-' . $counter;
+            $slug = $baseSlug.'-'.$counter;
             $counter++;
         }
         $data['slug'] = $slug;
@@ -127,10 +123,6 @@ class SystemCategoryService
     /**
      * Update a system category template.
      * If updating the latest version, creates a new version instead of modifying the existing one.
-     *
-     * @param SystemCategory $systemCategory
-     * @param array $data
-     * @return SystemCategory
      */
     public function updateTemplate(SystemCategory $systemCategory, array $data): SystemCategory
     {
@@ -157,7 +149,7 @@ class SystemCategoryService
                 ->where('slug', $slug)
                 ->where('id', '!=', $systemCategory->id)
                 ->exists()) {
-                $slug = $baseSlug . '-' . $counter;
+                $slug = $baseSlug.'-'.$counter;
                 $counter++;
             }
             $data['slug'] = $slug;
@@ -173,8 +165,7 @@ class SystemCategoryService
      * Clones the existing record, increments the version, and applies changes.
      * Does NOT touch existing brand categories.
      *
-     * @param SystemCategory $existing
-     * @param array $changes Array containing 'summary' and other fields to update
+     * @param  array  $changes  Array containing 'summary' and other fields to update
      * @return SystemCategory The new version
      */
     public function createNewVersion(SystemCategory $existing, array $changes): SystemCategory
@@ -209,7 +200,6 @@ class SystemCategoryService
      * Get upgrade statistics for a system category template.
      * Returns counts of brands with queued upgrades and brands that have already upgraded.
      *
-     * @param SystemCategory $systemCategory
      * @return array{queued_upgrades: int, upgraded: int, total_brands: int}
      */
     public function getUpgradeStatistics(SystemCategory $systemCategory): array
@@ -227,11 +217,11 @@ class SystemCategoryService
             $query->whereIn('system_category_id', $templateIds)
                 ->orWhere(function ($q) use ($systemCategory) {
                     $q->where('slug', $systemCategory->slug)
-                      ->where('asset_type', $systemCategory->asset_type->value);
+                        ->where('asset_type', $systemCategory->asset_type->value);
                 });
         })
-        ->where('is_system', true)
-        ->get();
+            ->where('is_system', true)
+            ->get();
 
         // Count unique brands
         $uniqueBrandIds = $matchingCategories->pluck('brand_id')->unique()->filter();
@@ -263,7 +253,7 @@ class SystemCategoryService
      * Detect categories that are outdated compared to the latest system category version.
      * Marks them with upgrade_available = true.
      *
-     * @param SystemCategory $latest The latest system category version
+     * @param  SystemCategory  $latest  The latest system category version
      * @return int Number of categories marked as needing upgrade
      */
     public function detectOutdatedCategories(SystemCategory $latest): int
@@ -287,21 +277,21 @@ class SystemCategoryService
             $query->whereIn('system_category_id', $templateIds)
                 ->where(function ($q) use ($latest) {
                     $q->whereNull('system_version')
-                      ->orWhere('system_version', '<', $latest->version);
+                        ->orWhere('system_version', '<', $latest->version);
                 });
         })
-        ->orWhere(function ($query) use ($latest) {
-            // Legacy categories with matching slug/asset_type (not linked via system_category_id)
-            $query->where('slug', $latest->slug)
-                  ->where('asset_type', $latest->asset_type->value)
-                  ->where('is_system', true)
-                  ->where(function ($q) use ($latest) {
-                      $q->whereNull('system_category_id')
-                        ->orWhereNull('system_version')
-                        ->orWhere('system_version', '<', $latest->version);
-                  });
-        })
-        ->get();
+            ->orWhere(function ($query) use ($latest) {
+                // Legacy categories with matching slug/asset_type (not linked via system_category_id)
+                $query->where('slug', $latest->slug)
+                    ->where('asset_type', $latest->asset_type->value)
+                    ->where('is_system', true)
+                    ->where(function ($q) use ($latest) {
+                        $q->whereNull('system_category_id')
+                            ->orWhereNull('system_version')
+                            ->orWhere('system_version', '<', $latest->version);
+                    });
+            })
+            ->get();
 
         // Mark them as needing upgrade
         $count = 0;
@@ -316,9 +306,6 @@ class SystemCategoryService
     /**
      * Delete a system category template.
      * Also soft-deletes all brand categories that were created from this template.
-     *
-     * @param SystemCategory $systemCategory
-     * @return bool
      */
     public function deleteTemplate(SystemCategory $systemCategory): bool
     {
@@ -335,11 +322,11 @@ class SystemCategoryService
             $query->whereIn('system_category_id', $templateIds)
                 ->orWhere(function ($q) use ($systemCategory) {
                     $q->where('slug', $systemCategory->slug)
-                      ->where('asset_type', $systemCategory->asset_type->value)
-                      ->where('is_system', true);
+                        ->where('asset_type', $systemCategory->asset_type->value)
+                        ->where('is_system', true);
                 });
         })
-        ->get();
+            ->get();
 
         // Mark all brand categories for deletion (user must accept the deletion)
         // This follows the same pattern as upgrades - user must accept the change
@@ -377,6 +364,7 @@ class SystemCategoryService
         }
 
         $this->addTemplateToBrand($brand, $template);
+
         return Category::where('tenant_id', $brand->tenant_id)
             ->where('brand_id', $brand->id)
             ->where('asset_type', AssetType::REFERENCE)
@@ -387,9 +375,6 @@ class SystemCategoryService
     /**
      * Sync system category templates to a brand.
      * Creates brand-specific categories from the templates (latest versions only).
-     *
-     * @param Brand $brand
-     * @return void
      */
     public function syncToBrand(Brand $brand): void
     {
@@ -404,8 +389,6 @@ class SystemCategoryService
      * Add a single system category template to a brand.
      * Creates a brand-specific category from the template if it doesn't already exist.
      *
-     * @param Brand $brand
-     * @param SystemCategory $template
      * @return Category|null The created category, or null if it already exists
      */
     public function addTemplateToBrand(Brand $brand, SystemCategory $template): ?Category
@@ -431,8 +414,17 @@ class SystemCategoryService
                     'system_version' => $template->version,
                     'upgrade_available' => false,
                 ]);
-                return $existing->fresh();
+                $fresh = $existing->fresh();
+                $settings = $fresh->settings ?? [];
+                if (! array_key_exists('ebi_enabled', $settings)) {
+                    $settings['ebi_enabled'] = Category::defaultEbiEnabledForSystemSlug($template->slug);
+                    $fresh->update(['settings' => $settings]);
+                    $fresh->refresh();
+                }
+
+                return $fresh;
             }
+
             return null;
         }
 
@@ -453,6 +445,9 @@ class SystemCategoryService
             'system_category_id' => $template->id,
             'system_version' => $template->version,
             'upgrade_available' => false,
+            'settings' => [
+                'ebi_enabled' => Category::defaultEbiEnabledForSystemSlug($template->slug),
+            ],
         ]);
 
         // Phase 3b: Apply seeded default metadata visibility for new category (from config/metadata_category_defaults.php)
@@ -476,8 +471,7 @@ class SystemCategoryService
      * This doesn't automatically create the category, but makes it available
      * for brands to add on their brand edit page.
      *
-     * @param SystemCategory $newCategory The newly created system category
-     * @return void
+     * @param  SystemCategory  $newCategory  The newly created system category
      */
     protected function notifyBrandsOfNewCategory(SystemCategory $newCategory): void
     {

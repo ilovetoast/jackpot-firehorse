@@ -2,28 +2,29 @@
 
 namespace App\Providers;
 
+use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
 use App\Events\CompanyTransferCompleted;
-use App\Listeners\QueueFailureListener;
-use Illuminate\Queue\Events\JobFailed;
 use App\Listeners\ActivateAgencyReferral;
 use App\Listeners\GrantAgencyPartnerReward;
 use App\Listeners\ProcessAssetOnUpload;
+use App\Listeners\QueueFailureListener;
 use App\Listeners\SendAssetPendingApprovalNotification;
-use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\AnthropicProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
-use Illuminate\Support\Facades\App;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,21 +37,21 @@ class AppServiceProvider extends ServiceProvider
             $defaultProviderName = config('ai.default_provider', 'openai');
 
             return match ($defaultProviderName) {
-                'anthropic' => new AnthropicProvider(),
-                default => new OpenAIProvider(),
+                'anthropic' => new AnthropicProvider,
+                default => new OpenAIProvider,
             };
         });
 
         $this->app->singleton(AnthropicProvider::class, function ($app) {
-            return new AnthropicProvider();
+            return new AnthropicProvider;
         });
 
         $this->app->singleton(OpenAIProvider::class, function ($app) {
-            return new OpenAIProvider();
+            return new OpenAIProvider;
         });
 
         $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {
-            return new ImageEmbeddingService();
+            return new ImageEmbeddingService;
         });
 
         // Request-scoped URL metrics/state for AssetUrlService.
@@ -86,14 +87,25 @@ class AppServiceProvider extends ServiceProvider
         \App\Models\MetadataFieldVisibility::observe(\App\Observers\MetadataFieldVisibilityObserver::class);
         \App\Models\MetadataOptionVisibility::observe(\App\Observers\MetadataOptionVisibilityObserver::class);
 
+        // Record last successful session login (web guard) for admin reporting
+        Event::listen(Login::class, function (Login $event): void {
+            if ($event->guard !== 'web') {
+                return;
+            }
+            $user = $event->user;
+            if ($user instanceof \App\Models\User) {
+                $user->forceFill(['last_login_at' => now()])->saveQuietly();
+            }
+        });
+
         // Register event listeners
         Event::listen(AssetUploaded::class, ProcessAssetOnUpload::class);
         Event::listen(AssetUploaded::class, \App\Listeners\BustBrandInsightCache::class);
         Event::listen(AssetPendingApproval::class, SendAssetPendingApprovalNotification::class);
-        
+
         // Phase AG-4: Agency partner reward attribution
         Event::listen(CompanyTransferCompleted::class, GrantAgencyPartnerReward::class);
-        
+
         // Phase AG-10: Agency referral activation (attribution only, no rewards)
         Event::listen(CompanyTransferCompleted::class, ActivateAgencyReferral::class);
 
@@ -123,7 +135,7 @@ class AppServiceProvider extends ServiceProvider
 
     /**
      * Validate Vite manifest requirement based on environment.
-     * 
+     *
      * - local: Uses Vite dev server, manifest NOT required
      * - staging/production: Manifest MUST exist or exception is thrown
      */
@@ -133,15 +145,15 @@ class AppServiceProvider extends ServiceProvider
         if (App::runningInConsole()) {
             return;
         }
-    
+
         // 🧪 Local uses Vite dev server — no manifest required aa
         if (app()->environment('local')) {
             return;
         }
-    
+
         // 🚨 Staging / Production MUST have built assets
         $manifestPath = public_path('build/manifest.json');
-    
+
         if (! File::exists($manifestPath)) {
             throw new RuntimeException(
                 'Vite build missing. Run npm run build.'

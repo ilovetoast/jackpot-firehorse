@@ -51,9 +51,10 @@ export default function AssetCollage({ assets = [] }) {
         }
     }, [handleMouseMove])
 
+    // Medium+ URLs only (no preview/LQIP — large object-cover tiles would look pixelated).
     const thumbs = assets
         .slice(0, MAX_ASSETS)
-        .map((a) => a.final_thumbnail_url || a.thumbnail_url || a.preview_thumbnail_url)
+        .map((a) => a.final_thumbnail_url || a.thumbnail_url)
         .filter(Boolean)
 
     const hasAssets = thumbs.length > 0
@@ -81,6 +82,7 @@ export default function AssetCollage({ assets = [] }) {
         backfaceVisibility: 'hidden',
     }
 
+    // Pairs with Overview/Index.jsx left column (lg:max-w-[50%], lg:mx-0). Do not widen to full-bleed or move without updating that layout contract.
     return (
         <div
             className="absolute right-0 bottom-0 h-full w-[38%] pointer-events-none hidden lg:block overflow-hidden"

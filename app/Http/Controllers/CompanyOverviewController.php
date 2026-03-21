@@ -6,11 +6,14 @@ use App\Enums\AssetStatus;
 use App\Enums\DownloadStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Download;
 use App\Services\AiUsageService;
 use App\Services\BrandService;
+use App\Support\DashboardLinks;
 use App\Services\PlanService;
 use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -28,18 +31,18 @@ class CompanyOverviewController extends Controller
      * Display company overview with metrics across all brands.
      * GET /app
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $tenant = app('tenant');
         $activeBrand = app('brand');
         $user = Auth::user();
 
         if (! $tenant) {
-            abort(403, 'Tenant must be selected.');
+            return redirect()->route('companies.index')->with('warning', 'Select a company to continue.');
         }
 
         if (! $user->hasPermissionForTenant($tenant, 'company.view')) {
-            abort(403, 'You do not have permission to view the company page.');
+            return redirect()->route('assets.index')->with('warning', 'You don\'t have access to the company overview.');
         }
 
         $planName = $this->planService->getCurrentPlan($tenant);
@@ -180,6 +183,86 @@ class CompanyOverviewController extends Controller
         $hasBrandSettingsManage = $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
         $canCreateBrand = $hasBrandSettingsManage && $this->brandService->canCreate($tenant);
 
+        $agencyManagedBrands = [];
+        if ($tenant->is_agency) {
+            $managedClients = app(CompanyController::class)->managedAgencyClientsForUser($user, $tenant);
+            foreach ($managedClients as $clientData) {
+                $clientTenantId = (int) $clientData['id'];
+                $brandMetas = $clientData['brands'] ?? [];
+                if ($brandMetas === []) {
+                    continue;
+                }
+                $brandIds = array_map(fn ($b) => (int) $b['id'], $brandMetas);
+                $metricsByBrand = $this->completedAssetMetricsByBrandIds($brandIds, $clientTenantId, $endOfLastMonth);
+
+                foreach ($brandMetas as $bm) {
+                    $bid = (int) $bm['id'];
+                    $brand = Brand::query()
+                        ->where('tenant_id', $clientTenantId)
+                        ->where('id', $bid)
+                        ->first();
+                    if (! $brand) {
+                        continue;
+                    }
+                    $m = $metricsByBrand[$bid] ?? [
+                        'total_assets' => 0,
+                        'assets_last_month' => 0,
+                        'total_storage' => 0.0,
+                        'storage_last_month' => 0.0,
+                    ];
+                    $totalAssets = $m['total_assets'];
+                    $totalAssetsLastMonth = $m['assets_last_month'];
+                    $assetsChange = $totalAssetsLastMonth > 0
+                        ? round((($totalAssets - $totalAssetsLastMonth) / $totalAssetsLastMonth) * 100, 2)
+                        : ($totalAssets > 0 ? 100 : 0);
+
+                    $storageBytes = (int) $m['total_storage'];
+                    $storageMB = round($storageBytes / 1024 / 1024, 2);
+                    $storageBytesLastMonth = (int) $m['storage_last_month'];
+                    $storageMBLastMonth = round($storageBytesLastMonth / 1024 / 1024, 2);
+                    $storageChange = $storageMBLastMonth > 0
+                        ? round((($storageMB - $storageMBLastMonth) / $storageMBLastMonth) * 100, 2)
+                        : ($storageMB > 0 ? 100 : 0);
+
+                    $downloadLinksThisMonth = Download::where('tenant_id', $clientTenantId)
+                        ->where('status', DownloadStatus::READY)
+                        ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
+                        ->whereHas('assets', fn ($q) => $q->where('brand_id', $bid))
+                        ->count();
+                    $downloadLinksLastMonth = Download::where('tenant_id', $clientTenantId)
+                        ->where('status', DownloadStatus::READY)
+                        ->whereBetween('created_at', [$startOfLastMonth, $endOfLastMonth])
+                        ->whereHas('assets', fn ($q) => $q->where('brand_id', $bid))
+                        ->count();
+                    $downloadChange = $downloadLinksLastMonth > 0
+                        ? round((($downloadLinksThisMonth - $downloadLinksLastMonth) / $downloadLinksLastMonth) * 100, 2)
+                        : ($downloadLinksThisMonth > 0 ? 100 : 0);
+
+                    $agencyManagedBrands[] = [
+                        'client_tenant_id' => $clientTenantId,
+                        'client_name' => $clientData['name'],
+                        'brand' => [
+                            'id' => $brand->id,
+                            'name' => $brand->name,
+                            'logo_path' => $brand->logo_path,
+                            'icon_path' => $brand->icon_path,
+                            'icon' => $brand->icon,
+                            'icon_bg_color' => $brand->icon_bg_color,
+                            'icon_style' => $brand->icon_style ?? 'subtle',
+                            'primary_color' => $brand->primary_color,
+                            'is_default' => (bool) ($bm['is_default'] ?? false),
+                            'is_disabled' => false,
+                            'stats' => [
+                                'total_assets' => ['value' => $totalAssets, 'change' => $assetsChange, 'is_positive' => $assetsChange >= 0],
+                                'storage_mb' => ['value' => $storageMB, 'change' => $storageChange, 'is_positive' => $storageChange >= 0, 'limit' => null],
+                                'download_links' => ['value' => $downloadLinksThisMonth, 'change' => $downloadChange, 'is_positive' => $downloadChange >= 0, 'limit' => null],
+                            ],
+                        ],
+                    ];
+                }
+            }
+        }
+
         $aiUsageData = null;
         if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
             $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
@@ -204,6 +287,10 @@ class CompanyOverviewController extends Controller
                 ],
             ];
         }
+
+        $tenant->loadMissing('defaultBrand');
+        $brandForPortal = $activeBrand ?? $tenant->defaultBrand;
+        $agencyPayload = DashboardLinks::agencyDashboardLinkForCompanyPortal($user, $tenant);
 
         return Inertia::render('Company/Overview', [
             'tenant' => $tenant,
@@ -235,6 +322,15 @@ class CompanyOverviewController extends Controller
             ],
             'brands' => $brandsWithMetrics,
             'ai_usage' => $aiUsageData,
+            'agency_managed_brands' => $agencyManagedBrands,
+            'dashboard_links' => [
+                'company' => null,
+                'company_current' => true,
+                'brand' => DashboardLinks::brandPortalHref($user, $tenant, $brandForPortal),
+                'brand_current' => false,
+                'agency' => $agencyPayload['href'] ?? null,
+                'agency_switch_tenant_id' => $agencyPayload['switch_tenant_id'] ?? null,
+            ],
         ]);
     }
 

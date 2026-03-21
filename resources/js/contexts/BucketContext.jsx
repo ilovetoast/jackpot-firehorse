@@ -1,18 +1,30 @@
 /**
  * Download bucket state shared across app. Rendered outside the page component
  * so the bucket bar does not remount when category/URL changes (no flash).
+ *
+ * Guest routes (e.g. login) must not call download-bucket APIs — they return 401 and clutter the console.
  */
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { router } from '@inertiajs/react'
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
 const BucketContext = createContext(null)
 
-export function BucketProvider({ children }) {
+/** Prefer live router page; fall back to initial SSR snapshot (BucketProvider sits outside Inertia tree). */
+function authUser(initialPage) {
+    return router.page?.props?.auth?.user ?? initialPage?.props?.auth?.user
+}
+
+export function BucketProvider({ children, initialPage }) {
     const [bucketAssetIds, setBucketAssetIds] = useState([])
 
     const fetchBucket = useCallback(() => {
         if (typeof window === 'undefined' || !window.route) return
+        if (!authUser(initialPage)) {
+            setBucketAssetIds([])
+            return
+        }
         fetch(route('download-bucket.items'), {
             method: 'GET',
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -24,10 +36,18 @@ export function BucketProvider({ children }) {
                 setBucketAssetIds(ids)
             })
             .catch(() => setBucketAssetIds([]))
-    }, [])
+    }, [initialPage])
 
     useEffect(() => {
-        fetchBucket()
+        const sync = () => fetchBucket()
+        sync()
+        document.addEventListener('inertia:finish', sync)
+        const onPopState = () => setTimeout(sync, 50)
+        window.addEventListener('popstate', onPopState)
+        return () => {
+            document.removeEventListener('inertia:finish', sync)
+            window.removeEventListener('popstate', onPopState)
+        }
     }, [fetchBucket])
 
     const applyBucketResponse = useCallback((data) => {

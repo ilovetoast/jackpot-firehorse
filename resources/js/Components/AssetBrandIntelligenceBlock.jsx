@@ -5,6 +5,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { SparklesIcon } from '@heroicons/react/24/outline'
+import { usePage } from '@inertiajs/react'
 
 const POLL_INTERVAL_MS = 1100
 const POLL_MAX_ATTEMPTS = 45
@@ -14,6 +16,7 @@ function levelToBrandLabel(level) {
     if (l === 'low') return 'Off Brand'
     if (l === 'medium') return 'Somewhat On Brand'
     if (l === 'high') return 'On Brand'
+    if (l === 'unknown') return 'Not enough data'
     return null
 }
 
@@ -23,6 +26,7 @@ function levelToHeadlineColorClass(level) {
     if (l === 'high') return 'text-emerald-700'
     if (l === 'medium') return 'text-amber-600'
     if (l === 'low') return 'text-red-600'
+    if (l === 'unknown') return 'text-slate-600'
     return 'text-slate-900'
 }
 
@@ -39,6 +43,7 @@ function levelToConfidenceLabelClass(level) {
     if (l === 'high') return 'text-emerald-600/90'
     if (l === 'medium') return 'text-amber-600/90'
     if (l === 'low') return 'text-red-600/90'
+    if (l === 'unknown') return 'text-slate-500'
     return 'text-slate-500'
 }
 
@@ -121,15 +126,22 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
     return null
 }
 
-export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = null }) {
+export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = null, primaryColor }) {
+    const { auth } = usePage().props
+    const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
+
     const [localBi, setLocalBi] = useState(null)
     const [rescoreLoading, setRescoreLoading] = useState(false)
     const [pollTimedOut, setPollTimedOut] = useState(false)
+    const [feedbackSent, setFeedbackSent] = useState(false)
+    const [feedbackLoading, setFeedbackLoading] = useState(false)
     const abortRef = useRef(null)
 
     useEffect(() => {
         setLocalBi(null)
         setPollTimedOut(false)
+        setFeedbackSent(false)
     }, [asset?.id])
 
     useEffect(() => {
@@ -202,34 +214,71 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
         }
     }
 
+    const sendInsightFeedback = async (rating) => {
+        if (!asset?.id || feedbackSent || feedbackLoading) return
+        setFeedbackLoading(true)
+        try {
+            const res = await fetch(`/app/assets/${asset.id}/brand-intelligence/feedback`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ rating }),
+            })
+            if (res.ok) {
+                setFeedbackSent(true)
+            }
+        } finally {
+            setFeedbackLoading(false)
+        }
+    }
+
+    // Hide entire block when category has Brand Intelligence disabled (guard after hooks — Rules of Hooks)
+    const category = asset?.category
+    if (!category?.ebi_enabled) {
+        return null
+    }
+
     if (!bi) {
         return (
-            <div className="px-4 py-3 border-b border-gray-200 bg-slate-50/80">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Brand Intelligence</h3>
-                {rescoreLoading ? (
-                    <p className="text-sm text-slate-600" role="status" aria-live="polite">
-                        Analyzing brand alignment…
-                    </p>
-                ) : (
-                    <>
-                        <p className="text-sm text-slate-600">Not analyzed yet</p>
-                        {canRequestEbi && (
-                            <button
-                                type="button"
-                                onClick={handleRescore}
-                                disabled={rescoreLoading}
-                                className="mt-2 inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
-                            >
-                                Analyze now
-                            </button>
-                        )}
-                        {pollTimedOut && (
-                            <p className="mt-2 text-xs text-amber-700">
-                                Scoring is still processing. Try again in a moment or use Re-score after it finishes.
-                            </p>
-                        )}
-                    </>
-                )}
+            <div className="px-4 py-3 border-t border-gray-200">
+                <div
+                    className="rounded-md p-2.5 border"
+                    style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
+                >
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                        <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
+                    </div>
+                    {rescoreLoading ? (
+                        <p className="text-sm text-slate-600" role="status" aria-live="polite">
+                            Analyzing brand alignment…
+                        </p>
+                    ) : (
+                        <>
+                            <p className="text-sm text-slate-600">Not analyzed yet</p>
+                            {canRequestEbi && (
+                                <button
+                                    type="button"
+                                    onClick={handleRescore}
+                                    disabled={rescoreLoading}
+                                    className="mt-2 inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50"
+                                    style={{ backgroundColor: brandColor, ['--tw-ring-color']: brandColor }}
+                                >
+                                    Analyze now
+                                </button>
+                            )}
+                            {pollTimedOut && (
+                                <p className="mt-2 text-xs text-amber-700">
+                                    Scoring is still processing. Try again in a moment or use Re-score after it finishes.
+                                </p>
+                            )}
+                        </>
+                    )}
+                </div>
             </div>
         )
     }
@@ -245,8 +294,15 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
     const insights = buildInsights(breakdown)
 
     return (
-        <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-br from-slate-50 to-white">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Brand Intelligence</h3>
+        <div className="px-4 py-3 border-t border-gray-200">
+            <div
+                className="rounded-md p-2.5 border"
+                style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
+            >
+                <div className="flex items-center gap-1.5 mb-2">
+                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                    <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
+                </div>
             {rescoreLoading ? (
                 <p className="text-lg font-semibold text-slate-700" role="status" aria-live="polite">
                     Analyzing brand alignment…
@@ -282,6 +338,30 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                             breakdown.ai_insight.confidence < 0.7 && (
                                 <p className="mt-1 text-xs text-slate-500">Low confidence</p>
                             )}
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-slate-500">Was this helpful?</span>
+                            <button
+                                type="button"
+                                disabled={feedbackSent || feedbackLoading}
+                                onClick={() => sendInsightFeedback('up')}
+                                className="text-xs font-medium text-slate-700 hover:text-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                👍 Helpful
+                            </button>
+                            <button
+                                type="button"
+                                disabled={feedbackSent || feedbackLoading}
+                                onClick={() => sendInsightFeedback('down')}
+                                className="text-xs font-medium text-slate-700 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                👎 Not helpful
+                            </button>
+                            {feedbackSent && (
+                                <span className="text-xs text-emerald-700" role="status">
+                                    Thanks for the feedback.
+                                </span>
+                            )}
+                        </div>
                     </div>
                 )}
             {pollTimedOut && !rescoreLoading && (
@@ -292,11 +372,13 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                     type="button"
                     onClick={handleRescore}
                     disabled={rescoreLoading}
-                    className="mt-3 text-xs font-medium text-indigo-600 hover:text-indigo-500 disabled:opacity-50"
+                    className="mt-3 text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                    style={{ color: brandColor }}
                 >
                     Re-score
                 </button>
             )}
+            </div>
         </div>
     )
 }

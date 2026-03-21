@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 export default function MetadataRegistryIndex({ fields = [] }) {
+    const { auth } = usePage().props
     const { can } = usePermission()
     const [categoryModalOpen, setCategoryModalOpen] = useState(false)
     const [selectedField, setSelectedField] = useState(null)
@@ -141,7 +142,7 @@ export default function MetadataRegistryIndex({ fields = [] }) {
 
     return (
         <div className="min-h-full">
-            <AppNav brand={auth.activeBrand} tenant={null} />
+            <AppNav brand={auth?.activeBrand ?? null} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}

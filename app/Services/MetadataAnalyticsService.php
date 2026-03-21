@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Category;
+use App\Support\Metadata\CategoryTypeResolver;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -172,8 +174,18 @@ class MetadataAnalyticsService
                 'total_assets' => 0,
                 'field_coverage' => [],
                 'lowest_coverage_fields' => [],
+                'type_coverage' => null,
             ];
         }
+
+        $typeResolved = null;
+        if ($categoryId) {
+            $cat = Category::find($categoryId);
+            if ($cat && $cat->slug) {
+                $typeResolved = CategoryTypeResolver::resolve($cat->slug);
+            }
+        }
+        $typeFamilyKeys = CategoryTypeResolver::typeFamilyFieldKeys();
 
         // Get all visible fields (excluding internal unless admin)
         $fieldQuery = DB::table('metadata_fields')
@@ -223,22 +235,34 @@ class MetadataAnalyticsService
         $lowestCoverage = [];
 
         foreach ($fields as $field) {
+            if ($categoryId !== null && in_array($field->key, $typeFamilyKeys, true)) {
+                if ($typeResolved === null || $field->key !== $typeResolved['field_key']) {
+                    continue;
+                }
+            }
+
             $count = (int) ($countsByFieldId[$field->id] ?? 0);
             $percentage = round(($count / $totalAssets) * 100, 2);
+
+            $label = ($typeResolved && $field->key === $typeResolved['field_key'])
+                ? 'Type'
+                : $field->system_label;
 
             $fieldCoverage[] = [
                 'field_id' => $field->id,
                 'field_key' => $field->key,
-                'field_label' => $field->system_label,
+                'field_label' => $label,
                 'field_type' => $field->type,
                 'assets_with_value' => $count,
                 'coverage_percentage' => $percentage,
+                'is_type_family' => in_array($field->key, $typeFamilyKeys, true),
             ];
 
             $lowestCoverage[] = [
                 'field_key' => $field->key,
-                'field_label' => $field->system_label,
+                'field_label' => $label,
                 'coverage_percentage' => $percentage,
+                'is_type_family' => in_array($field->key, $typeFamilyKeys, true),
             ];
         }
 
@@ -246,10 +270,21 @@ class MetadataAnalyticsService
         usort($lowestCoverage, fn ($a, $b) => $a['coverage_percentage'] <=> $b['coverage_percentage']);
         $lowestCoverage = array_slice($lowestCoverage, 0, 10); // Top 10 lowest
 
+        $typeCoverage = null;
+        if ($typeResolved !== null) {
+            foreach ($fieldCoverage as $row) {
+                if ($row['field_key'] === $typeResolved['field_key']) {
+                    $typeCoverage = $row;
+                    break;
+                }
+            }
+        }
+
         return [
             'total_assets' => $totalAssets,
             'field_coverage' => $fieldCoverage,
             'lowest_coverage_fields' => $lowestCoverage,
+            'type_coverage' => $typeCoverage,
         ];
     }
 

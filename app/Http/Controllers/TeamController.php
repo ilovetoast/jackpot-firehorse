@@ -27,8 +27,7 @@ class TeamController extends Controller
 {
     public function __construct(
         protected PlanService $planService
-    ) {
-    }
+    ) {}
 
     /**
      * Show the team management page.
@@ -111,6 +110,10 @@ class TeamController extends Controller
             abort(404, 'User is not a member of this company.');
         }
 
+        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
+            return $response;
+        }
+
         // Prevent removing yourself
         if ($user->id === $authUser->id) {
             return back()->withErrors([
@@ -128,7 +131,7 @@ class TeamController extends Controller
 
         // Get user role before removal for logging
         $userRole = $user->pivot->role ?? null;
-        
+
         // Remove user from tenant
         $tenant->users()->detach($user->id);
 
@@ -173,6 +176,10 @@ class TeamController extends Controller
         $owner = $tenant->owner();
         if ($wasInTenant && $owner && $owner->id === $user->id) {
             return back()->withErrors(['delete' => 'You cannot remove the company owner. Transfer ownership first.']);
+        }
+
+        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
+            return $response;
         }
 
         DB::transaction(function () use ($user, $tenant, $tenantBrandIds, $tenantCollectionIds, $wasInTenant) {
@@ -229,6 +236,10 @@ class TeamController extends Controller
             abort(404, 'User is not a member of this company.');
         }
 
+        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
+            return $response;
+        }
+
         // Prevent changing the owner role (must always be one owner)
         $owner = $tenant->owner();
         if ($owner && $owner->id === $user->id) {
@@ -254,7 +265,7 @@ class TeamController extends Controller
 
         // Get old role for logging
         $oldRole = $user->getRoleForTenant($tenant);
-        
+
         try {
             // Update role in pivot table
             // This will throw CannotAssignOwnerRoleException if trying to assign owner role
@@ -276,8 +287,8 @@ class TeamController extends Controller
             return back()->with('success', 'User role updated successfully.');
         } catch (\App\Exceptions\CannotAssignOwnerRoleException $e) {
             // Return error response with ownership transfer information
-            $settingsLink = route('companies.settings') . '#ownership-transfer';
-            
+            $settingsLink = route('companies.settings').'#ownership-transfer';
+
             if ($request->expectsJson() || $request->wantsJson()) {
                 return response()->json([
                     'message' => $e->getMessage(),
@@ -329,6 +340,10 @@ class TeamController extends Controller
         // Phase MI-1: Check active brand membership
         if (! $user->activeBrandMembership($brand)) {
             abort(404, 'User is not assigned to this brand.');
+        }
+
+        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
+            return $response;
         }
 
         // Validate using RoleRegistry - no automatic conversion
@@ -387,6 +402,10 @@ class TeamController extends Controller
 
         if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(404, 'User is not a member of this company.');
+        }
+
+        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
+            return $response;
         }
 
         $validated = $request->validate([
@@ -485,7 +504,7 @@ class TeamController extends Controller
         $brandIds = collect($validated['brands'])->pluck('brand_id')->unique();
         $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
         $invalidBrands = $brandIds->diff($tenantBrandIds);
-        
+
         if ($invalidBrands->isNotEmpty()) {
             return back()->withErrors([
                 'brands' => 'One or more selected brands do not belong to this company.',
@@ -522,9 +541,9 @@ class TeamController extends Controller
         // Determine tenant role (use provided role or default to 'member')
         // Default to 'member' if no role provided
         $tenantRole = $validated['role'] ?? 'member';
-        
+
         // Ensure tenant role is valid and assignable (RoleRegistry validation already ensured this)
-        if (!RoleRegistry::isAssignableTenantRole($tenantRole)) {
+        if (! RoleRegistry::isAssignableTenantRole($tenantRole)) {
             $tenantRole = 'member'; // Fallback to member if somehow invalid
         }
 
@@ -542,7 +561,7 @@ class TeamController extends Controller
         if ($existingUser) {
             // User exists, add them to tenant
             $tenant->users()->attach($existingUser->id, ['role' => $tenantRole]);
-            
+
             // Assign user to brands with roles
             foreach ($validated['brands'] as $brandAssignment) {
                 $brand = $tenant->brands()->find($brandAssignment['brand_id']);
@@ -550,7 +569,7 @@ class TeamController extends Controller
                     $existingUser->setRoleForBrand($brand, $brandAssignment['role']);
                 }
             }
-            
+
             // Send notification email
             Mail::to($validated['email'])->send(new InviteMember($tenant, $authUser, $inviteUrl));
 
@@ -623,7 +642,7 @@ class TeamController extends Controller
             ->whereNull('accepted_at')
             ->first();
 
-        if (!$invitation) {
+        if (! $invitation) {
             return redirect()->route('login')->withErrors([
                 'invitation' => 'Invalid or expired invitation link.',
             ]);
@@ -635,6 +654,7 @@ class TeamController extends Controller
             // Verify the authenticated user matches the invitation email
             if ($user->email !== $invitation->email) {
                 Auth::logout();
+
                 return redirect()->route('login')->withErrors([
                     'invitation' => 'This invitation is for a different email address. Please log in with the correct account.',
                 ]);
@@ -649,13 +669,14 @@ class TeamController extends Controller
                     'brand_id' => $defaultBrand->id,
                 ]);
             }
+
             return redirect()->route('dashboard');
         }
 
         // Check if user exists
         $user = User::where('email', $invitation->email)->first();
-        
-        if (!$user) {
+
+        if (! $user) {
             // User doesn't exist yet (shouldn't happen based on current flow, but handle it)
             return redirect()->route('login')->withErrors([
                 'invitation' => 'No account found for this invitation. Please contact support.',
@@ -665,14 +686,15 @@ class TeamController extends Controller
         // Check if user needs to complete registration
         // If first_name/last_name are empty or password hasn't been set properly
         $needsRegistration = empty($user->first_name) || empty($user->last_name);
-        
+
         if ($needsRegistration) {
             // Get brand information for display
             $brands = collect($invitation->brand_assignments ?? [])->map(function ($assignment) use ($tenant) {
                 $brand = $tenant->brands()->find($assignment['brand_id'] ?? null);
-                if (!$brand) {
+                if (! $brand) {
                     return null;
                 }
+
                 return [
                     'id' => $brand->id,
                     'name' => $brand->name,
@@ -699,7 +721,7 @@ class TeamController extends Controller
         }
 
         // User exists and has completed registration - redirect to login
-        return redirect()->route('login')->with('info', 'You have been invited to join ' . $tenant->name . '. Please log in to access your account.');
+        return redirect()->route('login')->with('info', 'You have been invited to join '.$tenant->name.'. Please log in to access your account.');
     }
 
     /**
@@ -713,7 +735,7 @@ class TeamController extends Controller
             ->whereNull('accepted_at')
             ->first();
 
-        if (!$invitation) {
+        if (! $invitation) {
             return back()->withErrors([
                 'invitation' => 'Invalid or expired invitation link.',
             ])->withInput($request->only(['first_name', 'last_name', 'country', 'timezone']));
@@ -722,7 +744,7 @@ class TeamController extends Controller
         // Find the user
         $user = User::where('email', $invitation->email)->first();
 
-        if (!$user) {
+        if (! $user) {
             return back()->withErrors([
                 'email' => 'No account found for this invitation.',
             ])->withInput($request->only(['first_name', 'last_name', 'country', 'timezone']));
@@ -743,7 +765,7 @@ class TeamController extends Controller
             // Extract input directly from request since $request->old() may be empty at this point
             // Exclude passwords for security
             $inputToPreserve = $request->only(['first_name', 'last_name', 'country', 'timezone']);
-            
+
             // Redirect back to the invite acceptance page with errors and old input
             // Inertia will automatically pick up errors and old input from the session
             return redirect()->route('invite.accept', ['token' => $token, 'tenant' => $tenant->id])
@@ -788,6 +810,26 @@ class TeamController extends Controller
             ]
         );
 
-        return redirect()->route('dashboard')->with('success', 'Welcome to ' . $tenant->name . '! Your account has been set up successfully.');
+        return redirect()->route('dashboard')->with('success', 'Welcome to '.$tenant->name.'! Your account has been set up successfully.');
+    }
+
+    /**
+     * Block team mutations for users provisioned via an agency link (managed in Company Settings → Agencies).
+     *
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse|null
+     */
+    protected function guardAgencyManagedUser(Request $request, Tenant $tenant, User $user)
+    {
+        if (! $user->isAgencyManagedMemberOf($tenant)) {
+            return null;
+        }
+
+        $msg = 'This user is managed by an agency link. Change access in Company Settings → Agencies, or remove the agency.';
+
+        if ($request->expectsJson() || $request->wantsJson()) {
+            return response()->json(['message' => $msg, 'error' => 'agency_managed_user'], 422);
+        }
+
+        return back()->withErrors(['team' => $msg]);
     }
 }

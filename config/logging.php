@@ -148,6 +148,13 @@ return [
             'days' => 14,
         ],
 
+        'insights' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/insights.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
+
     ],
 
 ];

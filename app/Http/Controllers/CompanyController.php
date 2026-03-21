@@ -2,19 +2,26 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunMetadataInsightsJob;
+use App\Models\Brand;
 use App\Models\Tenant;
-use App\Services\AiUsageService;
-use App\Services\DownloadNameResolver;
+use App\Models\TenantAgency;
+use App\Models\User;
 use App\Services\AiTagPolicyService;
+use App\Services\AiUsageService;
 use App\Services\BillingService;
 use App\Services\CompanyCostService;
+use App\Services\DownloadNameResolver;
 use App\Services\EnterpriseDownloadPolicy;
 use App\Services\PlanService;
 use App\Services\TagQualityMetricsService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Spatie\Permission\Models\Permission;
@@ -23,14 +30,14 @@ use Spatie\Permission\Models\Role;
 class CompanyController extends Controller
 {
     use HandlesFlashMessages;
+
     public function __construct(
         protected BillingService $billingService,
         protected AiUsageService $aiUsageService,
         protected AiTagPolicyService $aiTagPolicyService,
         protected TagQualityMetricsService $tagQualityMetricsService,
         protected CompanyCostService $companyCostService
-    ) {
-    }
+    ) {}
 
     /**
      * Show the company management page.
@@ -49,10 +56,10 @@ class CompanyController extends Controller
                     ->where('name', 'default')
                     ->orderBy('created_at', 'desc')
                     ->first();
-                
+
                 // Calculate AI costs for current month (all AI agents)
                 $aiCosts = $this->companyCostService->calculateAIAgentCosts($company);
-                
+
                 // Get AI usage from ai_usage table (tagging, suggestions)
                 $currentMonth = now()->startOfMonth();
                 $aiUsage = \Illuminate\Support\Facades\DB::table('ai_usage')
@@ -60,11 +67,11 @@ class CompanyController extends Controller
                     ->where('usage_date', '>=', $currentMonth)
                     ->selectRaw('SUM(call_count) as total_calls, SUM(COALESCE(cost_usd, 0)) as total_cost')
                     ->first();
-                
+
                 // Combine AI agent costs (from ai_agent_runs) with ai_usage costs
                 $totalAICost = ($aiCosts['total_cost'] ?? 0) + ($aiUsage->total_cost ?? 0);
                 $totalAICalls = ($aiCosts['runs_count'] ?? 0) + ($aiUsage->total_calls ?? 0);
-                
+
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
@@ -89,6 +96,119 @@ class CompanyController extends Controller
     }
 
     /**
+     * Legacy URL: managed companies list now lives on the agency dashboard.
+     */
+    public function managedCompanies(): RedirectResponse
+    {
+        $tenant = app('tenant');
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'company' => 'You must select a company first.',
+            ]);
+        }
+
+        if (! $tenant->is_agency) {
+            return redirect()->route('overview');
+        }
+
+        return redirect()->route('agency.dashboard');
+    }
+
+    /**
+     * @return array<int, array{id: int, name: string, slug: string, brands: array<int, array{id: int, name: string, is_default: bool}>}>
+     */
+    public function managedAgencyClientsForUser(User $user, Tenant $agencyTenant): array
+    {
+        if (! $agencyTenant->is_agency) {
+            return [];
+        }
+
+        $linkedClientIds = TenantAgency::query()
+            ->where('agency_tenant_id', $agencyTenant->id)
+            ->pluck('tenant_id');
+        if ($linkedClientIds->isEmpty()) {
+            return [];
+        }
+
+        $memberIds = $user->tenants()->pluck('tenants.id');
+        $accessibleIds = $linkedClientIds->intersect($memberIds);
+        if ($accessibleIds->isEmpty()) {
+            return [];
+        }
+
+        return Tenant::query()
+            ->whereIn('id', $accessibleIds)
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug'])
+            ->map(function (Tenant $t) use ($user) {
+                return [
+                    'id' => $t->id,
+                    'name' => $t->name,
+                    'slug' => $t->slug,
+                    'brands' => $this->brandsUserCanOpenInClientTenant($user, $t),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Brands the user may open when switching into a client company (tenant admins see all brands).
+     *
+     * @return array<int, array{id: int, name: string, is_default: bool}>
+     */
+    protected function brandsUserCanOpenInClientTenant(User $user, Tenant $clientTenant): array
+    {
+        $role = $user->getRoleForTenant($clientTenant);
+        $tenantWide = in_array($role, ['admin', 'owner', 'agency_admin'], true);
+
+        if ($tenantWide) {
+            return Brand::query()
+                ->where('tenant_id', $clientTenant->id)
+                ->orderBy('name')
+                ->get(['id', 'name', 'is_default'])
+                ->map(fn (Brand $b) => [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'is_default' => (bool) $b->is_default,
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $user->brands()
+            ->where('brands.tenant_id', $clientTenant->id)
+            ->wherePivotNull('removed_at')
+            ->orderBy('brands.name')
+            ->get(['brands.id', 'brands.name', 'brands.is_default'])
+            ->map(fn (Brand $b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'is_default' => (bool) $b->is_default,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Whether the user may switch into this brand for the given tenant (session).
+     */
+    protected function userCanSwitchToBrand(User $user, Tenant $tenant, Brand $brand): bool
+    {
+        if ($brand->tenant_id !== $tenant->id) {
+            return false;
+        }
+
+        $role = $user->getRoleForTenant($tenant);
+        if (in_array($role, ['admin', 'owner', 'agency_admin'], true)) {
+            return true;
+        }
+
+        return $user->activeBrandMembership($brand) !== null;
+    }
+
+    /**
      * Switch to a different company.
      */
     public function switch(Request $request, Tenant $tenant)
@@ -100,16 +220,34 @@ class CompanyController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
-        $defaultBrand = $tenant->defaultBrand;
-        
-        if (! $defaultBrand) {
-            abort(500, 'Tenant must have at least one brand');
+        $brandId = $request->input('brand_id');
+        if ($brandId !== null && $brandId !== '') {
+            $brand = Brand::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('id', $brandId)
+                ->first();
+            if (! $brand) {
+                abort(404, 'Brand not found for this company.');
+            }
+            if (! $this->userCanSwitchToBrand($user, $tenant, $brand)) {
+                abort(403, 'You do not have access to this brand.');
+            }
+            session([
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+        } else {
+            $defaultBrand = $tenant->defaultBrand;
+
+            if (! $defaultBrand) {
+                abort(500, 'Tenant must have at least one brand');
+            }
+
+            session([
+                'tenant_id' => $tenant->id,
+                'brand_id' => $defaultBrand->id,
+            ]);
         }
-        
-        session([
-            'tenant_id' => $tenant->id,
-            'brand_id' => $defaultBrand->id,
-        ]);
 
         $redirect = $request->input('redirect');
         if ($redirect && is_string($redirect)) {
@@ -149,7 +287,7 @@ class CompanyController extends Controller
         $slug = $baseSlug;
         $counter = 1;
         while (Tenant::where('slug', $slug)->exists()) {
-            $slug = $baseSlug . '-' . $counter;
+            $slug = $baseSlug.'-'.$counter;
             $counter++;
         }
 
@@ -210,7 +348,7 @@ class CompanyController extends Controller
             ->first();
         $teamMembersCount = $tenant->users()->count();
         $brandsCount = $tenant->brands()->count();
-        
+
         // Get current owner and all tenant users (excluding current owner) for ownership transfer
         $currentOwner = $tenant->owner();
         $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
@@ -219,7 +357,8 @@ class CompanyController extends Controller
             ->select('users.id', 'users.first_name', 'users.last_name', 'users.email')
             ->get()
             ->map(function ($u) {
-                $name = trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? ''));
+                $name = trim(($u->first_name ?? '').' '.($u->last_name ?? ''));
+
                 return [
                     'id' => $u->id,
                     'name' => $name ?: $u->email,
@@ -281,6 +420,18 @@ class CompanyController extends Controller
         $planService = app(PlanService::class);
         $canUseRequireLandingPage = $planService->canUseRequireLandingPage($tenant);
 
+        $canManageAgencies = $user->hasPermissionForTenant($tenant, 'team.manage');
+        $settingsBrands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
+        $linkedAgencies = [];
+        if ($canManageAgencies) {
+            $linkedAgencies = \App\Models\TenantAgency::query()
+                ->where('tenant_id', $tenant->id)
+                ->with(['agencyTenant:id,name,slug'])
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(fn (\App\Models\TenantAgency $row) => $row->toApiArray());
+        }
+
         // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -303,6 +454,9 @@ class CompanyController extends Controller
             'pending_transfer' => $pendingTransferData,
             'enterprise_download_policy' => $enterpriseDownloadPolicy,
             'can_use_require_landing_page' => $canUseRequireLandingPage,
+            'settings_brands' => $settingsBrands,
+            'linked_agencies' => $linkedAgencies,
+            'can_manage_agencies' => $canManageAgencies,
         ]);
     }
 
@@ -347,18 +501,18 @@ class CompanyController extends Controller
                     $existingTenant = Tenant::where('slug', $value)
                         ->where('id', '!=', $tenant->id)
                         ->exists();
-                    
+
                     if ($existingTenant) {
                         $fail('This slug is already taken by another company.');
                     }
-                    
+
                     // Check against reserved slugs
                     $reservedSlugs = config('subdomain.reserved_slugs', []);
-                    
+
                     if (in_array($value, $reservedSlugs, true)) {
                         $fail('This slug is reserved and cannot be used.');
                     }
-                }
+                },
             ],
             'timezone' => 'required|string|max:255',
             'settings' => 'nullable|array',
@@ -377,12 +531,13 @@ class CompanyController extends Controller
                     $msg = $resolver->validateTemplate($value);
                     if ($msg !== null) {
                         $fail($msg);
+
                         return;
                     }
                     $resolved = $resolver->resolve($value, $tenant, $tenant->defaultBrand ?? null, null);
                     $resolvedMsg = $resolver->validateResolved($resolved);
                     if ($resolvedMsg !== null) {
-                        $fail('Resolved preview: ' . $resolvedMsg);
+                        $fail('Resolved preview: '.$resolvedMsg);
                     }
                 },
             ],
@@ -392,11 +547,11 @@ class CompanyController extends Controller
         // Phase M-2: Handle settings separately
         $settings = $validated['settings'] ?? [];
         unset($validated['settings']);
-        
+
         // Phase J.3.1: Deep merge settings to preserve nested structure
         $currentSettings = $tenant->settings ?? [];
         $mergedSettings = array_merge_recursive($currentSettings, $settings);
-        
+
         // Fix array_merge_recursive behavior for boolean values (it creates arrays)
         if (isset($settings['enable_metadata_approval'])) {
             $mergedSettings['enable_metadata_approval'] = $settings['enable_metadata_approval'];
@@ -445,7 +600,7 @@ class CompanyController extends Controller
         }
 
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
-        if (!in_array($currentPlan, ['premium', 'enterprise'])) {
+        if (! in_array($currentPlan, ['premium', 'enterprise'])) {
             return redirect()->back()->withErrors(['download_policy' => 'Download policy is available on the Premium or Enterprise plan.']);
         }
 
@@ -466,43 +621,6 @@ class CompanyController extends Controller
         return redirect()->back()
             ->with('success', 'Download policy updated.')
             ->with('download_policy_saved', true);
-    }
-
-    /**
-     * Update dashboard widget settings.
-     */
-    public function updateWidgetSettings(Request $request)
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-
-        if (! $tenant) {
-            return redirect()->route('companies.index')->withErrors([
-                'settings' => 'You must select a company to update settings.',
-            ]);
-        }
-
-        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            abort(403, 'You do not have access to this company.');
-        }
-
-        if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_dashboard_widgets')) {
-            abort(403, 'You do not have permission to manage dashboard widgets.');
-        }
-
-        $validated = $request->validate([
-            'dashboard_widgets' => 'required|array',
-            'dashboard_widgets.*' => 'array', // Each role is an array
-            'dashboard_widgets.*.*' => 'boolean', // Each widget visibility is a boolean
-        ]);
-
-        // Merge widget settings with existing settings
-        $currentSettings = $tenant->settings ?? [];
-        $currentSettings['dashboard_widgets'] = $validated['dashboard_widgets'];
-        
-        $tenant->update(['settings' => $currentSettings]);
-
-        return $this->backWithSuccess('Widget settings updated successfully');
     }
 
     /**
@@ -565,7 +683,7 @@ class CompanyController extends Controller
             $query->where('created_at', '>=', $request->date_from);
         }
         if ($request->filled('date_to')) {
-            $query->where('created_at', '<=', $request->date_to . ' 23:59:59');
+            $query->where('created_at', '<=', $request->date_to.' 23:59:59');
         }
 
         // Filter by brand
@@ -606,7 +724,7 @@ class CompanyController extends Controller
         $brands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
         $eventTypes = \App\Enums\EventType::all();
         $actorTypes = ['user', 'system', 'api', 'guest'];
-        
+
         // Get unique subject types from this company's events
         $subjectTypes = \App\Models\ActivityEvent::select('subject_type')
             ->where('tenant_id', $tenant->id)
@@ -676,7 +794,7 @@ class CompanyController extends Controller
      */
     private function formatActor($event): ?array
     {
-        if (!$event->actor_type) {
+        if (! $event->actor_type) {
             return [
                 'type' => 'unknown',
                 'name' => 'Unknown',
@@ -700,7 +818,7 @@ class CompanyController extends Controller
                     return [
                         'type' => 'user',
                         'id' => $user->id,
-                        'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                        'name' => trim(($user->first_name ?? '').' '.($user->last_name ?? '')),
                         'first_name' => $user->first_name,
                         'last_name' => $user->last_name,
                         'email' => $user->email,
@@ -723,7 +841,7 @@ class CompanyController extends Controller
      */
     private function formatSubject($event): ?array
     {
-        if (!$event->subject_type || !$event->subject_id) {
+        if (! $event->subject_type || ! $event->subject_id) {
             return null;
         }
 
@@ -732,7 +850,7 @@ class CompanyController extends Controller
                 method_exists($event->subject, 'name') => $event->subject->name,
                 method_exists($event->subject, 'title') => $event->subject->title,
                 method_exists($event->subject, 'email') => $event->subject->email,
-                default => '#' . $event->subject->id,
+                default => '#'.$event->subject->id,
             };
 
             return [
@@ -745,7 +863,7 @@ class CompanyController extends Controller
         return [
             'type' => $event->subject_type,
             'id' => $event->subject_id,
-            'name' => '#' . $event->subject_id,
+            'name' => '#'.$event->subject_id,
         ];
     }
 
@@ -832,12 +950,12 @@ class CompanyController extends Controller
     {
         $eventType = $event->event_type;
         $metadata = $event->metadata ?? [];
-        
+
         // Ensure metadata is an array (it should be cast, but just in case)
         if (is_string($metadata)) {
             $metadata = json_decode($metadata, true) ?? [];
         }
-        
+
         // Check if this is a tenant event first (check both enum constants and string values)
         $tenantEventTypes = [
             \App\Enums\EventType::TENANT_CREATED,
@@ -848,19 +966,19 @@ class CompanyController extends Controller
             'tenant.deleted',
         ];
         $isTenantEvent = in_array($eventType, $tenantEventTypes, true);
-        
+
         // For tenant events, always use "Company" or tenant name, never show ID
         if ($isTenantEvent) {
             // For tenant events, the event is always about the current tenant
             // So we should use the current tenant's name, not try to load from subject
             // This is more reliable since we're viewing the activity log for a specific tenant
             $tenantName = $tenant ? $tenant->name : 'Company';
-            
+
             // However, if metadata has subject_name, that might be more accurate (e.g., if name changed)
             if (isset($metadata['subject_name'])) {
                 $tenantName = $metadata['subject_name'];
             }
-            
+
             // Format tenant events
             if ($eventType === \App\Enums\EventType::TENANT_UPDATED || $eventType === 'tenant.updated') {
                 return "Updated {$tenantName}";
@@ -872,17 +990,17 @@ class CompanyController extends Controller
                 return "Deleted {$tenantName}";
             }
         }
-        
+
         // Get subject name if available (for non-tenant events)
         $subjectName = null;
-        
+
         // PRIORITY 1: Check metadata first (most reliable, always stored for new events)
-        if (isset($metadata['subject_name']) && !empty($metadata['subject_name'])) {
+        if (isset($metadata['subject_name']) && ! empty($metadata['subject_name'])) {
             $subjectName = $metadata['subject_name'];
         }
-        
+
         // PRIORITY 2: Try to get from subject relationship if metadata doesn't have it
-        if (!$subjectName && $event->subject) {
+        if (! $subjectName && $event->subject) {
             // Check if it's a Tenant model
             if ($event->subject instanceof \App\Models\Tenant) {
                 $subjectName = $event->subject->name ?? null;
@@ -894,19 +1012,19 @@ class CompanyController extends Controller
                 $subjectName = $event->subject->title ?? null;
             }
         }
-        
+
         // Try brand name for brand-related events
-        if (!$subjectName && $event->brand) {
+        if (! $subjectName && $event->brand) {
             $subjectName = $event->brand->name ?? null;
         }
-        
+
         // If we still don't have a name but have subject_id, try to load it directly from database
         // This is important because the subject relationship might not be loaded or the model might be soft-deleted
-        if (!$subjectName && $event->subject_id && $event->subject_type) {
+        if (! $subjectName && $event->subject_id && $event->subject_type) {
             try {
                 // Try to load the model based on subject_type
                 $subjectClass = $event->subject_type;
-                
+
                 // Handle different class name formats
                 if (str_contains($subjectClass, '\\')) {
                     // Full class name like "App\Models\Tenant"
@@ -926,9 +1044,9 @@ class CompanyController extends Controller
                     // Try common model classes
                     $possibleClasses = [
                         "App\\Models\\{$subjectClass}",
-                        "App\\Models\\" . ucfirst($subjectClass),
+                        'App\\Models\\'.ucfirst($subjectClass),
                     ];
-                    
+
                     foreach ($possibleClasses as $class) {
                         if (class_exists($class)) {
                             $subjectModel = $class::find($event->subject_id);
@@ -948,13 +1066,13 @@ class CompanyController extends Controller
                 // Ignore errors - model might be deleted or class doesn't exist
             }
         }
-        
+
         // If no subject name but we have subject_id, use just the number with note
         $subjectIdentifier = $subjectName;
-        if (!$subjectIdentifier && $event->subject_id) {
+        if (! $subjectIdentifier && $event->subject_id) {
             $subjectIdentifier = "#{$event->subject_id} (no longer exists)";
         }
-        
+
         // Format based on event type with human-readable language
         switch ($eventType) {
             case \App\Enums\EventType::BRAND_CREATED:
@@ -972,6 +1090,7 @@ class CompanyController extends Controller
                 } elseif ($action === 'unsuspended') {
                     return $subjectIdentifier ? "Unsuspended {$subjectIdentifier} account" : 'Unsuspended account';
                 }
+
                 return $subjectIdentifier ? "Updated {$subjectIdentifier} account" : 'Updated user account';
             case \App\Enums\EventType::USER_DELETED:
                 return $subjectIdentifier ? "Deleted {$subjectIdentifier} account" : 'Deleted user account';
@@ -982,9 +1101,11 @@ class CompanyController extends Controller
             case \App\Enums\EventType::USER_ADDED_TO_BRAND:
                 $role = $metadata['role'] ?? 'member';
                 $brandName = $event->brand->name ?? null;
+
                 return $brandName ? "Added to {$brandName} as {$role}" : "Added to brand as {$role}";
             case \App\Enums\EventType::USER_REMOVED_FROM_BRAND:
                 $brandName = $event->brand->name ?? null;
+
                 return $brandName ? "Removed from {$brandName}" : 'Removed from brand';
             case \App\Enums\EventType::USER_ROLE_UPDATED:
                 $oldRole = $metadata['old_role'] ?? null;
@@ -992,15 +1113,19 @@ class CompanyController extends Controller
                 if ($oldRole && $newRole) {
                     return "Changed role from {$oldRole} to {$newRole}";
                 }
+
                 return 'Updated role';
             case \App\Enums\EventType::CATEGORY_CREATED:
                 $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+
                 return $subjectIdentifier ? "Created {$subjectIdentifier} Category{$brandContext}" : 'Created category';
             case \App\Enums\EventType::CATEGORY_UPDATED:
                 $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+
                 return $subjectIdentifier ? "Updated {$subjectIdentifier} Category{$brandContext}" : 'Updated category';
             case \App\Enums\EventType::CATEGORY_DELETED:
                 $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+
                 return $subjectIdentifier ? "Deleted {$subjectIdentifier} Category{$brandContext}" : 'Deleted category';
             case \App\Enums\EventType::CATEGORY_SYSTEM_UPGRADED:
                 $fieldsUpdated = $metadata['fields_updated'] ?? [];
@@ -1010,6 +1135,7 @@ class CompanyController extends Controller
                 if ($subjectIdentifier) {
                     return "Upgraded {$subjectIdentifier}{$versionInfo}";
                 }
+
                 return "Upgraded category{$versionInfo}";
             case \App\Enums\EventType::PLAN_UPDATED:
                 $oldPlan = $metadata['old_plan'] ?? null;
@@ -1019,10 +1145,12 @@ class CompanyController extends Controller
                 if ($oldPlanName && $newPlanName) {
                     return "Changed plan from {$oldPlanName} to {$newPlanName}";
                 }
+
                 return 'Updated plan';
             case \App\Enums\EventType::SUBSCRIPTION_CREATED:
                 $planName = $metadata['plan'] ?? $metadata['new_plan'] ?? $metadata['plan_name'] ?? null;
-                $planDisplayName = $planName ? ucfirst($planName) . ' plan' : 'subscription';
+                $planDisplayName = $planName ? ucfirst($planName).' plan' : 'subscription';
+
                 return "Started {$planDisplayName} subscription";
             case \App\Enums\EventType::SUBSCRIPTION_UPDATED:
                 $action = $metadata['action'] ?? null;
@@ -1030,7 +1158,7 @@ class CompanyController extends Controller
                 $newPlan = $metadata['new_plan'] ?? null;
                 $oldPlanName = $oldPlan ? ucfirst($oldPlan) : null;
                 $newPlanName = $newPlan ? ucfirst($newPlan) : null;
-                
+
                 if ($action === 'created' && $newPlanName) {
                     return "Started {$newPlanName} subscription";
                 } elseif ($action === 'resumed' && $newPlanName) {
@@ -1044,26 +1172,32 @@ class CompanyController extends Controller
                 } elseif ($newPlanName) {
                     return "Updated subscription to {$newPlanName}";
                 }
+
                 return 'Updated subscription';
             case \App\Enums\EventType::SUBSCRIPTION_CANCELED:
                 $planName = $metadata['plan'] ?? $metadata['old_plan'] ?? $metadata['plan_name'] ?? null;
-                $planDisplayName = $planName ? ucfirst($planName) . ' plan' : '';
+                $planDisplayName = $planName ? ucfirst($planName).' plan' : '';
+
                 return $planDisplayName ? "Canceled {$planDisplayName} subscription" : 'Canceled subscription';
             case \App\Enums\EventType::INVOICE_PAID:
                 $amount = $metadata['amount'] ?? null;
                 $currency = $metadata['currency'] ?? 'USD';
                 if ($amount) {
                     $formattedAmount = is_numeric($amount) ? number_format($amount / 100, 2) : $amount;
+
                     return "Paid invoice ({$currency} {$formattedAmount})";
                 }
+
                 return 'Paid invoice';
             case \App\Enums\EventType::INVOICE_FAILED:
                 $amount = $metadata['amount'] ?? null;
                 $currency = $metadata['currency'] ?? 'USD';
                 if ($amount) {
                     $formattedAmount = is_numeric($amount) ? number_format($amount / 100, 2) : $amount;
+
                     return "Invoice payment failed ({$currency} {$formattedAmount})";
                 }
+
                 return 'Invoice payment failed';
             case \App\Enums\EventType::PORTAL_VIEWED:
                 $collections = $metadata['collection_count'] ?? 0;
@@ -1072,14 +1206,16 @@ class CompanyController extends Controller
                 if ($hasContent) {
                     $parts = [];
                     if ($collections > 0) {
-                        $parts[] = $collections . ' ' . ($collections === 1 ? 'collection' : 'collections');
+                        $parts[] = $collections.' '.($collections === 1 ? 'collection' : 'collections');
                     }
                     if ($assets > 0) {
-                        $parts[] = $assets . ' ' . ($assets === 1 ? 'asset' : 'assets');
+                        $parts[] = $assets.' '.($assets === 1 ? 'asset' : 'assets');
                     }
                     $content = implode(', ', $parts);
+
                     return $content ? "Opened public portal ({$content})" : 'Opened public portal';
                 }
+
                 return 'Opened public portal (empty)';
             case \App\Enums\EventType::PORTAL_COLLECTION_VIEWED:
                 return $subjectIdentifier ? "Viewed collection {$subjectIdentifier}" : 'Viewed collection';
@@ -1213,7 +1349,7 @@ class CompanyController extends Controller
 
         // Check if user has permission to view permissions (owners/admins can view)
         $tenantRole = $user->getRoleForTenant($tenant);
-        if (!in_array($tenantRole, ['owner', 'admin'])) {
+        if (! in_array($tenantRole, ['owner', 'admin'])) {
             abort(403, 'Only administrators and owners can view permissions.');
         }
 
@@ -1232,9 +1368,9 @@ class CompanyController extends Controller
 
         // Get company permissions (all permissions that are NOT site permissions)
         $companyPermissions = Permission::where(function ($query) {
-                $query->whereNotIn('name', ['company.manage', 'permissions.manage'])
-                    ->where('name', 'not like', 'site.%');
-            })
+            $query->whereNotIn('name', ['company.manage', 'permissions.manage'])
+                ->where('name', 'not like', 'site.%');
+        })
             ->orderBy('name')
             ->pluck('name')
             ->toArray();
@@ -1265,8 +1401,6 @@ class CompanyController extends Controller
      * Check if a company slug is available.
      *
      * GET /api/companies/check-slug?slug=company-name
-     *
-     * @return JsonResponse
      */
     public function checkSlugAvailability(Request $request): JsonResponse
     {
@@ -1274,12 +1408,12 @@ class CompanyController extends Controller
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
             // Check if user has permission to edit company settings
-            if (!$user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
                 return response()->json(['error' => 'You do not have permission to check slug availability.'], 403);
             }
 
@@ -1307,9 +1441,9 @@ class CompanyController extends Controller
             $isReserved = in_array($slug, $reservedSlugs, true);
 
             return response()->json([
-                'available' => !$existingTenant && !$isReserved,
+                'available' => ! $existingTenant && ! $isReserved,
                 'slug' => $slug,
-                'reason' => $existingTenant ? 'taken' : ($isReserved ? 'reserved' : null)
+                'reason' => $existingTenant ? 'taken' : ($isReserved ? 'reserved' : null),
             ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -1317,7 +1451,7 @@ class CompanyController extends Controller
                 'available' => false,
                 'slug' => $request->input('slug'),
                 'reason' => 'invalid',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             \Log::error('Error checking slug availability', [
@@ -1332,7 +1466,7 @@ class CompanyController extends Controller
                 'available' => false,
                 'slug' => $request->input('slug'),
                 'reason' => 'error',
-                'error' => 'Failed to check slug availability. Please try again.'
+                'error' => 'Failed to check slug availability. Please try again.',
             ], 500);
         }
     }
@@ -1344,8 +1478,6 @@ class CompanyController extends Controller
      * Optional query: year (e.g. 2026), month (1-12) to view a specific month (for paging back).
      *
      * Admin-only endpoint to view AI usage and caps.
-     *
-     * @return JsonResponse
      */
     public function getAiUsage(Request $request): JsonResponse
     {
@@ -1414,10 +1546,8 @@ class CompanyController extends Controller
 
     /**
      * Phase J.2.5: Get AI Tag Settings
-     * 
-     * Admin-only endpoint to get current AI tagging policy settings.
      *
-     * @return JsonResponse
+     * Admin-only endpoint to get current AI tagging policy settings.
      */
     public function getAiSettings(): JsonResponse
     {
@@ -1425,7 +1555,7 @@ class CompanyController extends Controller
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant) {
+            if (! $tenant) {
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
@@ -1433,15 +1563,13 @@ class CompanyController extends Controller
             $currentOwner = $tenant->owner();
             $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
             $tenantRole = $user->getRoleForTenant($tenant);
-            
-            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+
+            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
                 return response()->json(['error' => 'You do not have permission to view AI settings.'], 403);
             }
 
-            $settings = $this->aiTagPolicyService->getTenantSettings($tenant);
-
             return response()->json([
-                'settings' => $settings,
+                'settings' => $this->buildAiSettingsPayload($tenant),
             ]);
 
         } catch (\Exception $e) {
@@ -1461,11 +1589,8 @@ class CompanyController extends Controller
 
     /**
      * Phase J.2.5: Update AI Tag Settings
-     * 
-     * Admin-only endpoint to update AI tagging policy settings.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * Admin-only endpoint to update AI tagging policy settings.
      */
     public function updateAiSettings(Request $request): JsonResponse
     {
@@ -1473,7 +1598,7 @@ class CompanyController extends Controller
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant) {
+            if (! $tenant) {
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
@@ -1481,8 +1606,8 @@ class CompanyController extends Controller
             $currentOwner = $tenant->owner();
             $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
             $tenantRole = $user->getRoleForTenant($tenant);
-            
-            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+
+            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
                 return response()->json(['error' => 'You do not have permission to update AI settings.'], 403);
             }
 
@@ -1493,10 +1618,18 @@ class CompanyController extends Controller
                 'ai_auto_tag_limit_mode' => 'in:best_practices,custom',
                 'ai_auto_tag_limit_value' => 'nullable|integer|min:1|max:10',
                 'ai_best_practices_limit' => 'nullable|integer|min:1|max:10',
+                'ai_insights_enabled' => 'boolean',
             ]);
 
-            // Update settings via the policy service
-            $updatedSettings = $this->aiTagPolicyService->updateTenantSettings($tenant, $validated);
+            if (array_key_exists('ai_insights_enabled', $validated)) {
+                $tenant->ai_insights_enabled = $validated['ai_insights_enabled'];
+                $tenant->save();
+            }
+
+            $tagSettings = collect($validated)->except('ai_insights_enabled')->all();
+            if (! empty($tagSettings)) {
+                $this->aiTagPolicyService->updateTenantSettings($tenant, $tagSettings);
+            }
 
             \Log::info('[CompanyController] AI settings updated', [
                 'tenant_id' => $tenant->id,
@@ -1506,7 +1639,7 @@ class CompanyController extends Controller
 
             return response()->json([
                 'message' => 'AI settings updated successfully',
-                'settings' => $updatedSettings,
+                'settings' => $this->buildAiSettingsPayload($tenant->fresh()),
             ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -1530,12 +1663,80 @@ class CompanyController extends Controller
     }
 
     /**
+     * Queue a metadata insights sync (bypasses 24h cooldown). Admin/owner only.
+     */
+    public function runMetadataInsightsNow(): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (! $tenant) {
+                return response()->json(['error' => 'Tenant context not found'], 400);
+            }
+
+            $currentOwner = $tenant->owner();
+            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+            $tenantRole = $user->getRoleForTenant($tenant);
+
+            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+                return response()->json(['error' => 'You do not have permission to run insights.'], 403);
+            }
+
+            if (! $tenant->ai_insights_enabled) {
+                return response()->json(['error' => 'Enable Asset Field Intelligence before running a sync.'], 422);
+            }
+
+            RunMetadataInsightsJob::dispatch($tenant->id, true);
+
+            return response()->json([
+                'message' => 'Queued. New suggestions update when the job finishes.',
+                'settings' => $this->buildAiSettingsPayload($tenant->fresh()),
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error queueing metadata insights run', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Could not queue insights sync. Please try again.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildAiSettingsPayload(Tenant $tenant): array
+    {
+        $settings = $this->aiTagPolicyService->getTenantSettings($tenant);
+        $tenant = $tenant->fresh() ?? $tenant;
+        $settings['ai_insights_enabled'] = (bool) $tenant->ai_insights_enabled;
+
+        $last = Cache::get("tenant:{$tenant->id}:metadata_insights:last_run_at");
+        $settings['last_insights_run_at'] = is_string($last) ? $last : null;
+
+        $settings['insights_pending_suggestions_count'] =
+            (int) DB::table('ai_metadata_value_suggestions')
+                ->where('tenant_id', $tenant->id)
+                ->where('status', 'pending')
+                ->count()
+            + (int) DB::table('ai_metadata_field_suggestions')
+                ->where('tenant_id', $tenant->id)
+                ->where('status', 'pending')
+                ->count();
+
+        return $settings;
+    }
+
+    /**
      * Phase J.2.6: Get Tag Quality Metrics Summary
-     * 
-     * Admin-only endpoint for tag quality analytics.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * Admin-only endpoint for tag quality analytics.
      */
     public function getTagQualityMetrics(Request $request): JsonResponse
     {
@@ -1543,7 +1744,7 @@ class CompanyController extends Controller
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant) {
+            if (! $tenant) {
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
@@ -1551,8 +1752,8 @@ class CompanyController extends Controller
             $currentOwner = $tenant->owner();
             $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
             $tenantRole = $user->getRoleForTenant($tenant);
-            
-            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+
+            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
                 return response()->json(['error' => 'You do not have permission to view tag quality metrics.'], 403);
             }
 
@@ -1588,10 +1789,9 @@ class CompanyController extends Controller
 
     /**
      * Phase J.2.6: Export Tag Quality Metrics as CSV
-     * 
+     *
      * Admin-only endpoint for exporting metrics data.
      *
-     * @param Request $request
      * @return \Symfony\Component\HttpFoundation\StreamedResponse
      */
     public function exportTagQualityMetrics(Request $request)
@@ -1600,7 +1800,7 @@ class CompanyController extends Controller
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant) {
+            if (! $tenant) {
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
@@ -1608,8 +1808,8 @@ class CompanyController extends Controller
             $currentOwner = $tenant->owner();
             $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
             $tenantRole = $user->getRoleForTenant($tenant);
-            
-            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+
+            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
                 return response()->json(['error' => 'You do not have permission to export tag quality metrics.'], 403);
             }
 
@@ -1620,7 +1820,7 @@ class CompanyController extends Controller
 
             return response()->streamDownload(function () use ($tagMetrics) {
                 $output = fopen('php://output', 'w');
-                
+
                 // CSV headers
                 fputcsv($output, [
                     'Tag',
@@ -1642,8 +1842,8 @@ class CompanyController extends Controller
                         $tag['total_generated'],
                         $tag['accepted'],
                         $tag['dismissed'],
-                        number_format($tag['acceptance_rate'] * 100, 1) . '%',
-                        number_format($tag['dismissal_rate'] * 100, 1) . '%',
+                        number_format($tag['acceptance_rate'] * 100, 1).'%',
+                        number_format($tag['dismissal_rate'] * 100, 1).'%',
                         $tag['avg_confidence'] ? number_format($tag['avg_confidence'], 3) : '',
                         $tag['avg_confidence_accepted'] ? number_format($tag['avg_confidence_accepted'], 3) : '',
                         $tag['avg_confidence_dismissed'] ? number_format($tag['avg_confidence_dismissed'], 3) : '',

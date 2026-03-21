@@ -28,6 +28,7 @@ import {
     FolderIcon,
     ChevronDownIcon,
     ChevronUpIcon,
+    ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -157,6 +158,21 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const billingItems = [
         { name: 'Stripe Management', description: 'Subscriptions & billing', href: '/app/admin/stripe-status', icon: CreditCardIcon },
         { name: 'Billing Overview', description: 'Income, MRR, reports', href: '/app/admin/billing', icon: ChartBarIcon },
+    ]
+
+    const organizationItems = [
+        {
+            name: 'View Companies & Users',
+            description: 'Companies, users, and cross-tenant activity',
+            href: '/app/admin/organization',
+            icon: BuildingOffice2Icon,
+        },
+        {
+            name: 'Activity logs',
+            description: 'Cross-tenant activity events',
+            href: '/app/admin/activity-logs',
+            icon: ClipboardDocumentListIcon,
+        },
     ]
 
     const configItems = [
@@ -301,21 +317,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                             items={billingItems}
                             defaultExpanded={false}
                         />
-                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                            <div className="px-5 py-4">
-                                <h3 className="text-base font-semibold text-slate-900">Organization Management</h3>
-                                <p className="text-sm text-slate-500">Companies and users</p>
-                            </div>
-                            <div className="border-t border-slate-200 px-5 py-4">
-                                <Link
-                                    href="/app/admin/organization"
-                                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 font-medium text-slate-900 hover:border-indigo-200 hover:bg-indigo-50/30"
-                                >
-                                    <BuildingOffice2Icon className="h-5 w-5" />
-                                    View Companies & Users
-                                </Link>
-                            </div>
-                        </div>
+                        <SectionCard
+                            title="Organization Management"
+                            description="Companies, users, and cross-tenant activity"
+                            items={organizationItems}
+                            defaultExpanded={true}
+                        />
                         <SectionCard
                             title="System Configuration"
                             description="Permissions, metadata, categories, notifications"

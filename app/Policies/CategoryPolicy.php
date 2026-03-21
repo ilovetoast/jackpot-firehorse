@@ -52,11 +52,11 @@ class CategoryPolicy
         }
 
         // User must be assigned to the brand
-        if ($category->brand_id && !$user->brands()->where('brands.id', $category->brand_id)->exists()) {
+        if ($category->brand_id && ! $user->isAssignedToBrandId($category->brand_id)) {
             // Check if user is tenant admin/owner (they have access to all brands)
             $tenant = $category->tenant;
             $tenantRole = $user->getRoleForTenant($tenant);
-            if (!in_array($tenantRole, ['admin', 'owner'])) {
+            if (! in_array($tenantRole, ['admin', 'owner'])) {
                 return false;
             }
         }
@@ -73,7 +73,7 @@ class CategoryPolicy
             $tenant = $category->tenant;
             $tenantRole = $user->getRoleForTenant($tenant);
             $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-            
+
             // Also check brand-level owner/admin role
             $brand = $category->brand;
             $isBrandOwnerOrAdmin = false;
@@ -91,7 +91,7 @@ class CategoryPolicy
             }
 
             // Otherwise, check if user has access via category_access rules
-            if (!$category->userHasAccess($user)) {
+            if (! $category->userHasAccess($user)) {
                 return false;
             }
         }
@@ -130,11 +130,11 @@ class CategoryPolicy
         // Check brand-level permission (or tenant-level for admin/owner)
         $brand = $category->brand;
         $tenant = $category->tenant;
-        
+
         if ($brand) {
             // Check brand-level permission
-            if (!$user->hasPermissionForBrand($brand, 'brand_categories.manage')
-                && !$user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            if (! $user->hasPermissionForBrand($brand, 'brand_categories.manage')
+                && ! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
                 return false;
             }
         } else {
@@ -158,12 +158,12 @@ class CategoryPolicy
                     ->where('asset_type', $category->asset_type->value)
                     ->exists();
             }
-            
+
             // If template exists, require edit_system_categories feature
             if ($templateExists) {
                 $planService = app(\App\Services\PlanService::class);
                 $canEditSystem = $planService->hasFeature($tenant, 'edit_system_categories');
-                
+
                 // If plan allows editing system categories, allow updates even if locked
                 // (CategoryService will handle which fields can be updated for locked categories)
                 if ($canEditSystem) {
@@ -179,6 +179,7 @@ class CategoryPolicy
                     'tenant_id' => $tenant->id,
                     'plan' => $planService->getCurrentPlan($tenant),
                 ]);
+
                 return false;
             }
             // Template is deleted, allow update
@@ -186,7 +187,7 @@ class CategoryPolicy
 
         // Cannot update locked custom categories
         // (System categories are handled above)
-        if ($category->is_locked && !$category->is_system) {
+        if ($category->is_locked && ! $category->is_system) {
             return false;
         }
 
@@ -208,11 +209,11 @@ class CategoryPolicy
         // Check brand-level permission (or tenant-level for admin/owner)
         $brand = $category->brand;
         $tenant = $category->tenant;
-        
+
         if ($brand) {
             // Check brand-level permission
-            if (!$user->hasPermissionForBrand($brand, 'brand_categories.manage')
-                && !$user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            if (! $user->hasPermissionForBrand($brand, 'brand_categories.manage')
+                && ! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
                 return false;
             }
         } else {
@@ -223,7 +224,7 @@ class CategoryPolicy
         }
 
         // Use the category's helper method to check if it can be deleted
-        if (!$category->canBeDeleted()) {
+        if (! $category->canBeDeleted()) {
             return false;
         }
 

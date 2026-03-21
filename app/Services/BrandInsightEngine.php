@@ -19,20 +19,23 @@ use Illuminate\Support\Facades\DB;
 class BrandInsightEngine
 {
     public function __construct(
-        protected MetadataAnalyticsService $metadataAnalytics
+        protected MetadataAnalyticsService $metadataAnalytics,
+        protected TenantPermissionResolver $tenantResolver
     ) {}
 
     /**
      * Get "What Needs Attention" signals for a brand.
      * Max 4 signals, sorted by priority (high → medium → low).
      *
-     * @return array<array{type: string, priority: string, icon: string, label: string, href: string, permission?: string}>
+     * @return array<array{type: string, priority: string, icon: string, label: string, href?: string, context?: array}>
      */
     public function getSignals(Brand $brand, User $user): array
     {
-        $cacheKey = "brand:{$brand->id}:insights";
+        // Per-user cache: counts and eligibility depend on brand role and permissions.
+        $bust = (int) Cache::get('brand:'.$brand->id.':insights-bust', 0);
+        $cacheKey = "brand:{$brand->id}:insights:user:{$user->id}:b{$bust}";
 
-        $signals = Cache::remember($cacheKey, 300, function () use ($brand) {
+        return Cache::remember($cacheKey, 300, function () use ($brand, $user) {
             $signals = [];
 
             $tenant = $brand->tenant;
@@ -40,80 +43,98 @@ class BrandInsightEngine
                 return [];
             }
 
+            $canSeeAllAiReview = $this->tenantResolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
+            $canSeeOwnAiReview = ! $canSeeAllAiReview
+                && $this->tenantResolver->hasForBrand($user, $brand, 'metadata.review_candidates');
+            $limitAiToUploader = $canSeeOwnAiReview ? $user : null;
+
+            $canActOnMetadataInsights = $this->userCanActOnMetadataInsights($user, $brand);
+            $scopeMetadataToUploader = $canActOnMetadataInsights
+                && $canSeeOwnAiReview
+                && $this->isBrandContributor($user, $brand);
+
             // 1a. AI Tag Suggestions Pending (high)
-            $tagCount = $this->getPendingAiTagSuggestionsCount($brand);
-            if ($tagCount > 0) {
-                $signals[] = [
-                    'type' => 'action',
-                    'priority' => 'high',
-                    'icon' => 'sparkles',
-                    'label' => "{$tagCount} AI tag suggestions to review",
-                    'href' => '/app/insights/review?tab=tags',
-                    'permission' => 'canViewAnalytics',
-                    'context' => [
-                        'count' => $tagCount,
-                        'category' => 'ai_tags',
-                    ],
-                ];
+            if ($canSeeAllAiReview || $canSeeOwnAiReview) {
+                $tagCount = $this->getPendingAiTagSuggestionsCount($brand, $limitAiToUploader);
+                if ($tagCount > 0) {
+                    $signals[] = [
+                        'type' => 'action',
+                        'priority' => 'high',
+                        'icon' => 'sparkles',
+                        'label' => "{$tagCount} AI tag suggestions to review",
+                        'href' => '/app/insights/review?tab=tags',
+                        'context' => [
+                            'count' => $tagCount,
+                            'category' => 'ai_tags',
+                        ],
+                    ];
+                }
             }
 
             // 1b. AI Category Suggestions Pending (high)
-            $categoryCount = $this->getPendingAiCategorySuggestionsCount($brand);
-            if ($categoryCount > 0) {
-                $signals[] = [
-                    'type' => 'action',
-                    'priority' => 'high',
-                    'icon' => 'sparkles',
-                    'label' => "{$categoryCount} AI category suggestions to review",
-                    'href' => '/app/insights/review?tab=categories',
-                    'permission' => 'canViewAnalytics',
-                    'context' => [
-                        'count' => $categoryCount,
-                        'category' => 'ai_categories',
-                    ],
-                ];
+            if ($canSeeAllAiReview || $canSeeOwnAiReview) {
+                $categoryCount = $this->getPendingAiCategorySuggestionsCount($brand, $limitAiToUploader);
+                if ($categoryCount > 0) {
+                    $signals[] = [
+                        'type' => 'action',
+                        'priority' => 'high',
+                        'icon' => 'sparkles',
+                        'label' => "{$categoryCount} AI category suggestions to review",
+                        'href' => '/app/insights/review?tab=categories',
+                        'context' => [
+                            'count' => $categoryCount,
+                            'category' => 'ai_categories',
+                        ],
+                    ];
+                }
             }
 
-            // 2. Missing Metadata (medium) — always link to asset grid (never analytics)
-            $assetsMissingMetadata = $this->getAssetsMissingMetadataCount($brand);
-            if ($assetsMissingMetadata > 0) {
-                $firstAssetId = $this->getFirstAssetMissingMetadataId($brand);
-                $href = $firstAssetId
-                    ? '/app/assets?missing_metadata=1&asset='.$firstAssetId
-                    : '/app/assets?missing_metadata=1';
-                $signals[] = [
-                    'type' => 'action',
-                    'priority' => 'medium',
-                    'icon' => 'document',
-                    'label' => "{$assetsMissingMetadata} assets missing metadata",
-                    'href' => $href,
-                    'permission' => 'canViewAnalytics',
-                    'context' => [
-                        'count' => $assetsMissingMetadata,
-                        'category' => 'metadata',
-                    ],
-                ];
+            // 2. Missing Metadata (medium) — link to asset grid (never analytics)
+            if ($canActOnMetadataInsights) {
+                $assetsMissingMetadata = $scopeMetadataToUploader
+                    ? $this->getAssetsMissingMetadataCountForUploader($brand, $user)
+                    : $this->getAssetsMissingMetadataCount($brand);
+                if ($assetsMissingMetadata > 0) {
+                    $firstAssetId = $scopeMetadataToUploader
+                        ? $this->getFirstAssetMissingMetadataIdForUploader($brand, $user)
+                        : $this->getFirstAssetMissingMetadataId($brand);
+                    $href = $firstAssetId
+                        ? '/app/assets?missing_metadata=1&asset='.$firstAssetId
+                        : '/app/assets?missing_metadata=1';
+                    $signals[] = [
+                        'type' => 'action',
+                        'priority' => 'medium',
+                        'icon' => 'document',
+                        'label' => "{$assetsMissingMetadata} assets missing metadata",
+                        'href' => $href,
+                        'context' => [
+                            'count' => $assetsMissingMetadata,
+                            'category' => 'metadata',
+                        ],
+                    ];
+                }
             }
 
             // 3. Expiring Assets (medium)
-            $expiringCount = $this->getExpiringAssetsCount($brand);
-            if ($expiringCount > 0) {
-                $signals[] = [
-                    'type' => 'action',
-                    'priority' => 'medium',
-                    'icon' => 'clock',
-                    'label' => "{$expiringCount} assets expiring soon",
-                    'href' => '/app/insights/overview?tab=rights',
-                    'permission' => 'canViewAnalytics',
-                    'context' => [
-                        'count' => $expiringCount,
-                        'category' => 'rights',
-                    ],
-                ];
+            if ($canActOnMetadataInsights) {
+                $expiringCount = $this->getExpiringAssetsCount($brand);
+                if ($expiringCount > 0) {
+                    $signals[] = [
+                        'type' => 'action',
+                        'priority' => 'medium',
+                        'icon' => 'clock',
+                        'label' => "{$expiringCount} assets expiring soon",
+                        'href' => '/app/insights/overview?tab=rights',
+                        'context' => [
+                            'count' => $expiringCount,
+                            'category' => 'rights',
+                        ],
+                    ];
+                }
             }
 
             // 4. Low Activity (low) — only when the brand already has assets (empty brand ≠ "stagnant")
-            if ($this->hasLowActivity($brand)) {
+            if ($this->tenantResolver->hasForBrand($user, $brand, 'asset.upload') && $this->hasLowActivity($brand)) {
                 $signals[] = [
                     'type' => 'info',
                     'priority' => 'low',
@@ -134,47 +155,63 @@ class BrandInsightEngine
             // Max 4 signals
             return array_slice($signals, 0, 4);
         });
-
-        // Filter by user permission on the fly (cache is shared)
-        $tenant = $brand->tenant;
-
-        return array_values(array_filter($signals, function ($s) use ($user, $tenant) {
-            if (empty($s['permission'])) {
-                return true;
-            }
-            if (! $tenant) {
-                return false;
-            }
-            if ($s['permission'] === 'canViewAnalytics') {
-                return $user->hasPermissionForTenant($tenant, 'activity_logs.view');
-            }
-
-            return true;
-        }));
     }
 
-    protected function getPendingAiTagSuggestionsCount(Brand $brand): int
+    /**
+     * Whether the user can act on metadata/rights-style dashboard nudges (not viewers).
+     */
+    protected function userCanActOnMetadataInsights(User $user, Brand $brand): bool
     {
-        return (int) DB::table('asset_tag_candidates')
+        foreach ([
+            'metadata.edit_post_upload',
+            'metadata.set_on_upload',
+            'metadata.bypass_approval',
+            'metadata.bulk_edit',
+            'metadata.override_automatic',
+        ] as $perm) {
+            if ($this->tenantResolver->hasForBrand($user, $brand, $perm)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function isBrandContributor(User $user, Brand $brand): bool
+    {
+        return strtolower($user->getRoleForBrand($brand) ?? '') === 'contributor';
+    }
+
+    protected function getPendingAiTagSuggestionsCount(Brand $brand, ?User $limitToUploader = null): int
+    {
+        $q = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
             ->where('assets.tenant_id', $brand->tenant_id)
             ->where('assets.brand_id', $brand->id)
             ->where('asset_tag_candidates.producer', 'ai')
             ->whereNull('asset_tag_candidates.resolved_at')
-            ->whereNull('asset_tag_candidates.dismissed_at')
-            ->count();
+            ->whereNull('asset_tag_candidates.dismissed_at');
+        if ($limitToUploader) {
+            $q->where('assets.user_id', $limitToUploader->id);
+        }
+
+        return (int) $q->count();
     }
 
-    protected function getPendingAiCategorySuggestionsCount(Brand $brand): int
+    protected function getPendingAiCategorySuggestionsCount(Brand $brand, ?User $limitToUploader = null): int
     {
-        return (int) DB::table('asset_metadata_candidates')
+        $q = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
             ->where('assets.tenant_id', $brand->tenant_id)
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
-            ->where('asset_metadata_candidates.producer', 'ai')
-            ->count();
+            ->where('asset_metadata_candidates.producer', 'ai');
+        if ($limitToUploader) {
+            $q->where('assets.user_id', $limitToUploader->id);
+        }
+
+        return (int) $q->count();
     }
 
     protected function getAssetsMissingMetadataCount(Brand $brand): int
@@ -207,6 +244,57 @@ class BrandInsightEngine
         $asset = DB::table('assets')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
+            ->whereNull('assets.deleted_at')
+            ->where('assets.status', 'visible')
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('asset_metadata')
+                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
+                    ->whereNotNull('asset_metadata.approved_at');
+            })
+            ->orderBy('assets.created_at', 'desc')
+            ->limit(1)
+            ->value('assets.id');
+
+        return $asset ? (string) $asset : null;
+    }
+
+    /**
+     * Count of the user's own visible assets with no approved metadata (contributor scope).
+     */
+    protected function getAssetsMissingMetadataCountForUploader(Brand $brand, User $user): int
+    {
+        $tenant = $brand->tenant;
+        if (! $tenant) {
+            return 0;
+        }
+
+        return (int) DB::table('assets')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.user_id', $user->id)
+            ->whereNull('assets.deleted_at')
+            ->where('assets.status', 'visible')
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('asset_metadata')
+                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
+                    ->whereNotNull('asset_metadata.approved_at');
+            })
+            ->count();
+    }
+
+    protected function getFirstAssetMissingMetadataIdForUploader(Brand $brand, User $user): ?string
+    {
+        $tenant = $brand->tenant;
+        if (! $tenant) {
+            return null;
+        }
+
+        $asset = DB::table('assets')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.user_id', $user->id)
             ->whereNull('assets.deleted_at')
             ->where('assets.status', 'visible')
             ->whereNotExists(function ($query) {

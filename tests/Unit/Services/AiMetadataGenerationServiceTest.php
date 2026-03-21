@@ -7,8 +7,8 @@ use App\Models\Brand;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
-use App\Services\AiMetadataGenerationService;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\AiMetadataGenerationService;
 use App\Services\TenantBucketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +25,7 @@ class AiMetadataGenerationServiceTest extends TestCase
     use RefreshDatabase;
 
     protected AiMetadataGenerationService $service;
+
     protected $mockProvider;
 
     protected $mockBucketService;
@@ -115,6 +116,50 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
+     * When only the Tags field is AI-eligible (no options), still run vision and create tag candidates.
+     */
+    public function test_runs_tag_inference_when_no_structured_fields(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'tags' => [
+                        ['value' => 'vibrant', 'confidence' => 0.95],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->with(100, 50, 'gpt-4o-mini')
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset);
+
+        $this->assertEquals(0, $results['candidates_created']);
+        $this->assertGreaterThanOrEqual(1, $results['tags_created']);
+        $this->assertEmpty($results['fields_processed']);
+
+        $row = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->first();
+        $this->assertNotNull($row);
+        $this->assertEquals('vibrant', $row->tag);
+    }
+
+    /**
      * Test: Skips when category missing
      */
     public function test_skips_when_category_missing(): void
@@ -152,7 +197,7 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->andReturn(0.001);
 
         $asset = $this->createAssetWithCategory();
-        
+
         // Create ai_eligible field
         $eligibleField = $this->createAiEligibleField('photo_type', $asset->tenant_id);
         $this->createFieldOption($eligibleField->id, 'landscape');
@@ -177,7 +222,7 @@ class AiMetadataGenerationServiceTest extends TestCase
     {
         $asset = $this->createAssetWithCategory();
         $categoryId = $asset->metadata['category_id'];
-        
+
         $field = $this->createAiEligibleField('photo_type', $asset->tenant_id);
         $this->createFieldOption($field->id, 'landscape');
 
@@ -363,10 +408,10 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->andReturn(0.001);
 
         $asset = $this->createAssetWithCategory();
-        
+
         $field1 = $this->createAiEligibleField('photo_type', $asset->tenant_id);
         $this->createFieldOption($field1->id, 'landscape');
-        
+
         $field2 = $this->createAiEligibleField('usage_rights', $asset->tenant_id);
         $this->createFieldOption($field2->id, 'editorial');
 
@@ -383,7 +428,7 @@ class AiMetadataGenerationServiceTest extends TestCase
     protected function createAssetWithCategory(): Asset
     {
         $asset = $this->createAsset();
-        
+
         $category = \App\Models\Category::create([
             'tenant_id' => $asset->tenant_id,
             'brand_id' => $asset->brand_id,

@@ -20,7 +20,9 @@ use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\BrandInsightEngine;
 use App\Services\PlanService;
 use App\Support\AssetVariant;
+use App\Support\DashboardLinks;
 use App\Support\DeliveryContext;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -38,7 +40,7 @@ class DashboardController extends Controller
     /**
      * Display the cinematic brand overview.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         return $this->buildDashboardResponse($request, 'Overview/Index');
     }
@@ -46,18 +48,18 @@ class DashboardController extends Controller
     /**
      * Display the detailed brand dashboard (stat cards, activity, top assets).
      */
-    public function dashboard(Request $request): Response
+    public function dashboard(Request $request): Response|RedirectResponse
     {
         return $this->buildDashboardResponse($request, 'Overview/Dashboard');
     }
 
-    private function buildDashboardResponse(Request $request, string $view): Response
+    private function buildDashboardResponse(Request $request, string $view): Response|RedirectResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
 
         if (! $tenant || ! $brand) {
-            abort(403, 'Tenant and brand must be selected.');
+            return redirect()->route('assets.index')->with('warning', 'Select a company and brand to view the overview.');
         }
 
         // Get current plan name
@@ -778,11 +780,7 @@ class DashboardController extends Controller
             });
         }
 
-        // Get widget visibility configuration from tenant settings
-        $widgetConfig = $tenant->settings['dashboard_widgets'] ?? [];
-
-        // Default widget visibility: company widgets visible to owner/admin/brand_manager, hidden for contributor/viewer
-        // Widget config format: { role: { widget_name: true/false } }
+        // Widget visibility by role (defaults only; no per-tenant overrides).
         // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'most_trending', 'pending_ai_suggestions', 'pending_metadata_approvals'
         $defaultWidgetVisibility = [
             'owner' => [
@@ -842,18 +840,9 @@ class DashboardController extends Controller
             ],
         ];
 
-        // Merge user config with defaults (user config overrides defaults)
-        $roleWidgetVisibility = [];
-        foreach ($defaultWidgetVisibility as $role => $widgets) {
-            $roleWidgetVisibility[$role] = array_merge(
-                $defaultWidgetVisibility[$role],
-                $widgetConfig[$role] ?? []
-            );
-        }
-
         // Determine current user's widget visibility
         $userRole = strtolower($userRole ?? 'viewer');
-        $userWidgetVisibility = $roleWidgetVisibility[$userRole] ?? $roleWidgetVisibility['viewer'];
+        $userWidgetVisibility = $defaultWidgetVisibility[$userRole] ?? $defaultWidgetVisibility['viewer'];
 
         // Admin preview hook: ?as=viewer|contributor overrides permission flags for UX testing
         // Not enforced on backend routes — purely cosmetic for dashboard tile visibility
@@ -873,6 +862,23 @@ class DashboardController extends Controller
             ];
         }
 
+        $agencyPayload = DashboardLinks::agencyDashboardLinkForCompanyPortal($user, $tenant);
+
+        // Brand cinematic overview: Company + optional Agency for agency partners only — no Brand row (you’re on brand overview).
+        $dashboardLinks = [
+            'company' => DashboardLinks::companyOverviewHref($user, $tenant),
+            'agency' => $agencyPayload['href'] ?? null,
+            'agency_switch_tenant_id' => $agencyPayload['switch_tenant_id'] ?? null,
+        ];
+
+        if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
+            $dashboardLinks = [
+                'company' => null,
+                'agency' => null,
+                'agency_switch_tenant_id' => null,
+            ];
+        }
+
         $theme = app(BrandThemeBuilder::class)->build($tenant, $brand);
 
         // Brand insight signals (What Needs Attention) — cached 5 min
@@ -883,7 +889,7 @@ class DashboardController extends Controller
 
         // AI insights (LLM-generated, cached 30 min; fallback to rule-based on failure)
         // Pass full signals so LLM can reinforce (not duplicate) and insights inherit correct hrefs
-        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals);
+        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
 
         // Collage assets: best visual quality first (compliance score), then most viewed.
         // Match main Assets library: published, non-archived, normal intake, not builder-staged, type=asset (excludes reference/research materials).
@@ -911,7 +917,7 @@ class DashboardController extends Controller
             ->select('assets.*')
             ->orderByRaw('COALESCE(bis_dash.overall_score, 0) DESC')
             ->orderByRaw('COALESCE(views.view_count, 0) DESC')
-            ->limit(8)
+            ->limit(50)
             ->get()
             ->map(function ($asset) {
                 $metadata = $asset->metadata ?? [];
@@ -919,27 +925,35 @@ class DashboardController extends Controller
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
-                $finalThumbnailUrl = null;
-                if ($thumbnailStatus === 'completed') {
-                    $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
-                    $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
-                    $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
-                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                        $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
-                    }
+                if ($thumbnailStatus !== 'completed') {
+                    return null;
+                }
+
+                $thumbnails = $metadata['thumbnails'] ?? [];
+                // Collage tiles are large; only medium+ derivatives avoid blocky upscaling.
+                $hasLarge = isset($thumbnails['large']);
+                if (! isset($thumbnails['medium']) && ! $hasLarge) {
+                    return null;
+                }
+
+                $variant = $hasLarge ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
+                $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
+                if (! $finalThumbnailUrl) {
+                    return null;
+                }
+
+                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                if ($thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                    $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
                 }
 
                 return [
                     'id' => $asset->id,
                     'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
                     'final_thumbnail_url' => $finalThumbnailUrl,
-                    'preview_thumbnail_url' => $previewThumbnailUrl,
-                    'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl,
+                    'thumbnail_url' => $finalThumbnailUrl,
                 ];
-            })->filter(fn ($a) => $a['thumbnail_url'])->values();
+            })->filter()->values()->take(8);
 
         return Inertia::render($view, [
             'tenant' => $tenant,
@@ -995,6 +1009,7 @@ class DashboardController extends Controller
             'brand_signals' => $brandSignals, // Cinematic Overview: What Needs Attention (permission-filtered)
             'momentum_data' => $momentumData, // Recent Momentum (aggregated counts)
             'ai_insights' => $aiInsights, // LLM insights (cached 30 min; fallback to rule-based)
+            'dashboard_links' => $dashboardLinks, // Subtle header links on cinematic Overview (permission-gated)
         ]);
     }
 

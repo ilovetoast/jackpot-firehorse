@@ -18,6 +18,7 @@ import {
     SparklesIcon,
     CpuChipIcon,
     InformationCircleIcon,
+    TrashIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AdminCompanyView({ 
@@ -31,7 +32,8 @@ export default function AdminCompanyView({
     brands = [],
     all_brands = [],
     stats,
-    aiUsage = null
+    aiUsage = null,
+    linked_agencies = [],
 }) {
     const [showAddUserForm, setShowAddUserForm] = useState(false)
     const [availableUsers, setAvailableUsers] = useState([])
@@ -114,6 +116,26 @@ export default function AdminCompanyView({
             }
         }
     }, [userSearchQuery, showAddUserForm, company.id])
+
+    const formatRoleLabel = (role) => {
+        if (!role || typeof role !== 'string') return '—'
+        return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    }
+
+    const confirmRemoveAgencyLink = (link) => {
+        const name = link.agency_tenant?.name || 'this agency'
+        if (!window.confirm(`Remove agency link to "${name}"? Agency-managed users will lose access to this company.`)) {
+            return
+        }
+        router.delete(`/app/admin/companies/${company.id}/agency-links/${link.id}`, { preserveScroll: true })
+    }
+
+    const confirmRemoveAgencyUser = (user) => {
+        if (!window.confirm(`Remove ${user.email} from this company? They will lose access to brands here.`)) {
+            return
+        }
+        router.delete(`/app/admin/companies/${company.id}/users/${user.id}`, { preserveScroll: true })
+    }
 
     const handleUserSelect = (user) => {
         setData('user_id', user.id)
@@ -306,6 +328,133 @@ export default function AdminCompanyView({
                                         <dd className="mt-1 text-sm text-gray-900">{stats.total_storage_gb} GB</dd>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Linked agency partners (client company ↔ agency) */}
+                    <div className="mb-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="p-6">
+                                <h2 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                                    <BuildingOfficeIcon className="h-5 w-5 text-gray-400" />
+                                    Agency partners
+                                </h2>
+                                <p className="text-sm text-gray-600 mb-4">
+                                    Agencies linked to this company, their scope, and users provisioned by each agency.
+                                </p>
+                                {linked_agencies.length === 0 ? (
+                                    <p className="text-sm text-gray-500">No agency is linked to this company.</p>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {linked_agencies.map((link) => (
+                                            <div
+                                                key={link.id}
+                                                className="rounded-lg border border-gray-200 bg-gray-50/80 p-4"
+                                            >
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                    <div>
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            {link.agency_tenant?.id ? (
+                                                                <Link
+                                                                    href={`/app/admin/agencies/${link.agency_tenant.id}`}
+                                                                    className="text-base font-semibold text-indigo-700 hover:text-indigo-900"
+                                                                >
+                                                                    {link.agency_tenant.name || 'Agency'}
+                                                                </Link>
+                                                            ) : (
+                                                                <span className="text-base font-semibold text-gray-900">
+                                                                    {link.agency_tenant?.name || 'Agency'}
+                                                                </span>
+                                                            )}
+                                                            <span className="inline-flex rounded-md bg-white px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+                                                                {formatRoleLabel(link.role)}
+                                                            </span>
+                                                        </div>
+                                                        {link.brand_assignments?.length > 0 && (
+                                                            <ul className="mt-2 text-sm text-gray-700">
+                                                                {link.brand_assignments.map((ba) => (
+                                                                    <li key={`${link.id}-${ba.brand_id}`}>
+                                                                        <span className="font-medium">{ba.brand_name || `Brand #${ba.brand_id}`}</span>
+                                                                        {' — '}
+                                                                        <span className="text-gray-600">{formatRoleLabel(ba.role)}</span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => confirmRemoveAgencyLink(link)}
+                                                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+                                                    >
+                                                        <TrashIcon className="h-4 w-4" />
+                                                        Remove agency link
+                                                    </button>
+                                                </div>
+
+                                                <div className="mt-4 overflow-x-auto">
+                                                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                        <thead>
+                                                            <tr className="text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                                <th className="py-2 pr-4">User</th>
+                                                                <th className="py-2 pr-4">Company role</th>
+                                                                <th className="py-2 pr-4">Brand access</th>
+                                                                <th className="py-2 text-right">Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-100 bg-white">
+                                                            {link.managed_users?.length ? (
+                                                                link.managed_users.map((u) => (
+                                                                    <tr key={u.id}>
+                                                                        <td className="py-2 pr-4">
+                                                                            <div className="font-medium text-gray-900">{u.name}</div>
+                                                                            <div className="text-xs text-gray-500">{u.email}</div>
+                                                                        </td>
+                                                                        <td className="py-2 pr-4 text-gray-800">
+                                                                            {formatRoleLabel(u.tenant_role)}
+                                                                        </td>
+                                                                        <td className="py-2 pr-4 text-gray-700">
+                                                                            {u.brand_access?.length ? (
+                                                                                <ul className="space-y-0.5">
+                                                                                    {u.brand_access.map((b, i) => (
+                                                                                        <li key={i}>
+                                                                                            {b.brand_name}{' '}
+                                                                                            <span className="text-gray-500">
+                                                                                                ({formatRoleLabel(b.role)})
+                                                                                            </span>
+                                                                                        </li>
+                                                                                    ))}
+                                                                                </ul>
+                                                                            ) : (
+                                                                                <span className="text-gray-400">—</span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="py-2 text-right">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => confirmRemoveAgencyUser(u)}
+                                                                                className="text-sm font-medium text-red-600 hover:text-red-800"
+                                                                            >
+                                                                                Remove from company
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))
+                                                            ) : (
+                                                                <tr>
+                                                                    <td colSpan={4} className="py-3 text-gray-500">
+                                                                        No agency-managed users on this link.
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -807,6 +956,15 @@ export default function AdminCompanyView({
                                                 <p className="text-gray-900 font-medium">{user.name || user.email}</p>
                                                 <div className="flex items-center gap-2 mt-1">
                                                     <span className="text-xs text-gray-500">{user.email}</span>
+                                                    {user.last_login_at && (
+                                                        <span className="text-xs text-gray-400">
+                                                            Last login{' '}
+                                                            {new Date(user.last_login_at).toLocaleString(undefined, {
+                                                                dateStyle: 'medium',
+                                                                timeStyle: 'short',
+                                                            })}
+                                                        </span>
+                                                    )}
                                                     {user.is_owner && (
                                                         <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800">
                                                             Owner

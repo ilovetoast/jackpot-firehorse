@@ -51,7 +51,6 @@ export default function CompanyPermissions({
                 'company_settings.view',
                 'company_settings.edit',
                 'company_settings.manage_download_policy',
-                'company_settings.manage_dashboard_widgets',
                 'company_settings.manage_ai_settings',
                 'company_settings.view_tag_quality',
                 'company_settings.ownership_transfer',

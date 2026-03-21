@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Tenant;
-use App\Services\PlanService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -29,10 +28,9 @@ class AiUsageService
      * Hard stop: If cap would be exceeded, throws exception instead of tracking.
      * This prevents runaway usage even if multiple requests check simultaneously.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
-     * @param int $callCount Number of calls (default: 1)
-     * @return void
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
+     * @param  int  $callCount  Number of calls (default: 1)
+     *
      * @throws PlanLimitExceededException If cap would be exceeded
      */
     public function trackUsage(Tenant $tenant, string $feature, int $callCount = 1): void
@@ -44,7 +42,7 @@ class AiUsageService
             // Get current month usage (within transaction for accuracy)
             $monthStart = now()->startOfMonth()->toDateString();
             $monthEnd = now()->endOfMonth()->toDateString();
-            
+
             $currentUsage = (int) DB::table('ai_usage')
                 ->where('tenant_id', $tenant->id)
                 ->where('feature', $feature)
@@ -105,14 +103,13 @@ class AiUsageService
      * Extends trackUsage() to also track actual costs, tokens, and model used.
      * This is used for AI metadata generation where we have detailed cost information.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
-     * @param int $callCount Number of calls (default: 1)
-     * @param float $costUsd Actual cost in USD
-     * @param int|null $tokensIn Input tokens used
-     * @param int|null $tokensOut Output tokens used
-     * @param string|null $model Model name used
-     * @return void
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
+     * @param  int  $callCount  Number of calls (default: 1)
+     * @param  float  $costUsd  Actual cost in USD
+     * @param  int|null  $tokensIn  Input tokens used
+     * @param  int|null  $tokensOut  Output tokens used
+     * @param  string|null  $model  Model name used
+     *
      * @throws PlanLimitExceededException If cap would be exceeded
      */
     public function trackUsageWithCost(
@@ -131,7 +128,7 @@ class AiUsageService
             // Get current month usage (within transaction for accuracy)
             $monthStart = now()->startOfMonth()->toDateString();
             $monthEnd = now()->endOfMonth()->toDateString();
-            
+
             $currentUsage = (int) DB::table('ai_usage')
                 ->where('tenant_id', $tenant->id)
                 ->where('feature', $feature)
@@ -164,8 +161,8 @@ class AiUsageService
                     ->update([
                         'call_count' => DB::raw("call_count + {$callCount}"),
                         'cost_usd' => DB::raw("COALESCE(cost_usd, 0) + {$costUsd}"),
-                        'tokens_in' => DB::raw("COALESCE(tokens_in, 0) + " . ($tokensIn ?? 0)),
-                        'tokens_out' => DB::raw("COALESCE(tokens_out, 0) + " . ($tokensOut ?? 0)),
+                        'tokens_in' => DB::raw('COALESCE(tokens_in, 0) + '.($tokensIn ?? 0)),
+                        'tokens_out' => DB::raw('COALESCE(tokens_out, 0) + '.($tokensOut ?? 0)),
                         'model' => $model ?? $existing->model, // Update model if provided
                         'updated_at' => now(),
                     ]);
@@ -201,8 +198,7 @@ class AiUsageService
     /**
      * Get current month's usage for a tenant and feature.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
      * @return int Total calls this month
      */
     public function getMonthlyUsage(Tenant $tenant, string $feature): int
@@ -220,8 +216,7 @@ class AiUsageService
     /**
      * Get monthly cap for a tenant and feature.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
      * @return int Monthly cap (0 = unlimited, -1 = disabled, positive number = cap)
      */
     public function getMonthlyCap(Tenant $tenant, string $feature): int
@@ -240,8 +235,7 @@ class AiUsageService
     /**
      * Check if tenant can use AI feature (within cap).
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
      * @return bool True if within cap, false if exceeded
      */
     public function canUseFeature(Tenant $tenant, string $feature): bool
@@ -267,10 +261,9 @@ class AiUsageService
     /**
      * Check if tenant can use AI feature and throw exception if exceeded.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
-     * @param int $requestedCalls Number of calls requested (default: 1)
-     * @return void
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
+     * @param  int  $requestedCalls  Number of calls requested (default: 1)
+     *
      * @throws PlanLimitExceededException If cap exceeded
      */
     public function checkUsage(Tenant $tenant, string $feature, int $requestedCalls = 1): void
@@ -309,12 +302,11 @@ class AiUsageService
     /**
      * Get usage status for a tenant (all features).
      *
-     * @param Tenant $tenant
      * @return array Status for each feature: ['feature' => ['usage' => int, 'cap' => int, 'remaining' => int, 'percentage' => float]]
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -341,8 +333,7 @@ class AiUsageService
     /**
      * Get usage breakdown by date for current month.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
      * @return array Array of ['date' => string, 'calls' => int]
      */
     public function getUsageBreakdown(Tenant $tenant, string $feature): array
@@ -353,10 +344,9 @@ class AiUsageService
     /**
      * Get usage for a specific month (for historical paging).
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
-     * @param int $year Year (e.g. 2026)
-     * @param int $month Month 1-12
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
+     * @param  int  $year  Year (e.g. 2026)
+     * @param  int  $month  Month 1-12
      * @return int Total calls in that month
      */
     public function getMonthlyUsageForPeriod(Tenant $tenant, string $feature, int $year, int $month): int
@@ -375,14 +365,13 @@ class AiUsageService
      * Get usage status for a specific month (for historical paging).
      * Uses current plan caps for display; usage is for the requested period.
      *
-     * @param Tenant $tenant
-     * @param int $year Year (e.g. 2026)
-     * @param int $month Month 1-12
+     * @param  int  $year  Year (e.g. 2026)
+     * @param  int  $month  Month 1-12
      * @return array Same shape as getUsageStatus()
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -409,10 +398,9 @@ class AiUsageService
     /**
      * Get usage breakdown by date for a specific month.
      *
-     * @param Tenant $tenant
-     * @param string $feature Feature name ('tagging', 'suggestions')
-     * @param int $year Year (e.g. 2026)
-     * @param int $month Month 1-12
+     * @param  string  $feature  Feature name ('tagging', 'suggestions')
+     * @param  int  $year  Year (e.g. 2026)
+     * @param  int  $month  Month 1-12
      * @return array Array of ['date' => string, 'calls' => int]
      */
     public function getUsageBreakdownForPeriod(Tenant $tenant, string $feature, int $year, int $month): array

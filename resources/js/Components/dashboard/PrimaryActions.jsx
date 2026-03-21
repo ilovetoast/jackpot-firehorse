@@ -15,7 +15,8 @@ const ALL_ACTIONS = [
         key: 'portal',
         title: 'Brand Portal',
         description: 'All brand settings',
-        hrefFn: (brand) => brand ? `/app/brands/${brand.id}/edit#brand-portal` : null,
+        // Scoped to the `brand` prop (workspace brand you’re viewing); same tenant — not the agency switch.
+        hrefFn: (brand) => (brand?.id ? `/app/brands/${brand.id}/edit#brand-portal` : null),
         permission: 'canManageBrand',
     },
     {
@@ -46,7 +47,7 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
     }
 
     return (
-        <div className="grid grid-cols-2 gap-4 w-full">
+        <div className="grid grid-cols-1 gap-3 w-full sm:grid-cols-2 sm:gap-4">
             {actions.map((a, i) => {
                 const Icon = ICON_MAP[a.key]
                 return (

@@ -191,7 +191,25 @@ export default function ViewUser({ user, companies, brand_assignments, activitie
                                         </div>
                                         <div>
                                             <dt className="text-sm font-medium text-gray-500">Account Created</dt>
-                                            <dd className="mt-1 text-sm text-gray-900">{user.created_at || 'N/A'}</dd>
+                                            <dd className="mt-1 text-sm text-gray-900">
+                                                {user.created_at
+                                                    ? new Date(user.created_at).toLocaleString(undefined, {
+                                                          dateStyle: 'medium',
+                                                          timeStyle: 'short',
+                                                      })
+                                                    : 'N/A'}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-sm font-medium text-gray-500">Last login</dt>
+                                            <dd className="mt-1 text-sm text-gray-900">
+                                                {user.last_login_at
+                                                    ? new Date(user.last_login_at).toLocaleString(undefined, {
+                                                          dateStyle: 'medium',
+                                                          timeStyle: 'short',
+                                                      })
+                                                    : 'Never'}
+                                            </dd>
                                         </div>
                                         {user.country && (
                                             <div>

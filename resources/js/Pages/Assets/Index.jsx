@@ -38,7 +38,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
+export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -1232,6 +1232,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     isTrashMode={lifecycle === 'deleted'}
                     canForceDelete={auth?.user?.tenant_role === 'owner' || auth?.user?.tenant_role === 'admin' || auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin'}
                     categories={categories ?? []}
+                    bulkCategoriesByAssetType={bulk_categories_by_asset_type}
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
                         router.reload({ only: ['assets', 'next_page_url', 'staged_count', 'reference_materials_count'] })

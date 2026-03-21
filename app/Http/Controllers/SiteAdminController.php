@@ -3,22 +3,23 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
+use App\Enums\TicketStatus;
 use App\Mail\AccountCanceled;
 use App\Mail\AccountDeleted;
 use App\Mail\AccountSuspended;
-use App\Mail\PlanChangedTenant;
 use App\Mail\PlanChangedAdmin;
-use App\Enums\TicketStatus;
+use App\Mail\PlanChangedTenant;
 use App\Models\ActivityEvent;
+use App\Models\AssetDerivativeFailure;
 use App\Models\Brand;
 use App\Models\Download;
-use App\Models\UploadSession;
-use App\Models\AssetDerivativeFailure;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Models\Ticket;
+use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\ActivityRecorder;
-use App\Support\Roles\RoleRegistry;
+use App\Services\TenantAgencyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -29,9 +30,9 @@ use Inertia\Response;
 use Laravel\Cashier\Subscription;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
-use Stripe\Stripe;
 use Stripe\Account;
 use Stripe\Price;
+use Stripe\Stripe;
 
 class SiteAdminController extends Controller
 {
@@ -58,37 +59,38 @@ class SiteAdminController extends Controller
     public function index(Request $request): Response
     {
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
-        
+
         // MINIMAL INITIAL LOAD - Only load basic company info
         // Heavy data (users, costs, etc.) will be loaded via AJAX
         $perPage = (int) $request->get('per_page', 10);
         $searchQuery = $request->get('search', '');
-        
+
         $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override', 'is_agency', 'agency_tier_id'])
             ->with('agencyTier:id,name');
-        
+
         // Apply search filter if provided
-        if (!empty($searchQuery)) {
+        if (! empty($searchQuery)) {
             $companiesQuery->where(function ($query) use ($searchQuery) {
                 $query->where('name', 'like', "%{$searchQuery}%")
                     ->orWhere('slug', 'like', "%{$searchQuery}%");
             });
         }
-        
+
         $companies = $companiesQuery
             ->orderBy('created_at', 'desc')
             ->paginate($perPage)
             ->appends($request->except('page'));
 
         $planService = app(\App\Services\PlanService::class);
-        
+
         // Load only minimal company data - details loaded via API on expand
         return Inertia::render('Admin/Index', [
             'companies' => $companies->map(function ($company) use ($planService) {
                 // Quick plan lookup without heavy queries
                 $planName = $planService->getCurrentPlan($company);
-                
-                $stripeConnected = !empty($company->stripe_id);
+
+                $stripeConnected = ! empty($company->stripe_id);
+
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
@@ -102,7 +104,7 @@ class SiteAdminController extends Controller
                     ],
                     // Allow non-Stripe plans to be managed in all environments
                     // Stripe-connected companies must use Stripe billing portal
-                    'can_manage_plan' => !$stripeConnected,
+                    'can_manage_plan' => ! $stripeConnected,
                     // Phase AG-11: Agency info
                     'is_agency' => (bool) $company->is_agency,
                     'agency_tier' => $company->agencyTier?->name,
@@ -135,7 +137,7 @@ class SiteAdminController extends Controller
         $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override', 'is_agency', 'agency_tier_id'])
             ->with('agencyTier:id,name');
 
-        if (!empty($searchQuery)) {
+        if (! empty($searchQuery)) {
             $companiesQuery->where(function ($query) use ($searchQuery) {
                 $query->where('name', 'like', "%{$searchQuery}%")
                     ->orWhere('slug', 'like', "%{$searchQuery}%");
@@ -161,7 +163,8 @@ class SiteAdminController extends Controller
         return Inertia::render('Admin/Organization/Index', [
             'companies' => $companies->map(function ($company) use ($planService) {
                 $planName = $planService->getCurrentPlan($company);
-                $stripeConnected = !empty($company->stripe_id);
+                $stripeConnected = ! empty($company->stripe_id);
+
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
@@ -173,7 +176,7 @@ class SiteAdminController extends Controller
                         'source' => $planService->getPlanManagementSource($company),
                         'is_externally_managed' => $planService->isExternallyManaged($company),
                     ],
-                    'can_manage_plan' => !$stripeConnected,
+                    'can_manage_plan' => ! $stripeConnected,
                     'is_agency' => (bool) $company->is_agency,
                     'agency_tier' => $company->agencyTier?->name,
                     'details_loaded' => false,
@@ -281,38 +284,38 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin();
 
         $planService = app(\App\Services\PlanService::class);
-        
+
         // Load owner efficiently
         // Query pivot table directly to find owner
         $ownerPivot = DB::table('tenant_user')
             ->where('tenant_id', $tenant->id)
             ->where('role', 'owner')
             ->first();
-        
+
         $owner = null;
         if ($ownerPivot) {
             $owner = User::where('id', $ownerPivot->user_id)
                 ->select('id', 'first_name', 'last_name', 'email')
                 ->first();
         }
-        
+
         $planName = $planService->getCurrentPlan($tenant);
         $limits = $planService->getPlanLimits($tenant);
-        
+
         // Get counts efficiently
         $brandCount = $tenant->brands()->count();
         $userCount = $tenant->users()->count();
-        
-        $stripeConnected = !empty($tenant->stripe_id);
+
+        $stripeConnected = ! empty($tenant->stripe_id);
         $latestSubscription = $tenant->subscriptions()
             ->where('name', 'default')
             ->orderBy('created_at', 'desc')
             ->first();
-        
-        $stripeStatus = $latestSubscription 
-            ? $latestSubscription->stripe_status 
+
+        $stripeStatus = $latestSubscription
+            ? $latestSubscription->stripe_status
             : ($stripeConnected ? 'inactive' : 'not_connected');
-        
+
         // Load brands - convert to array for JSON response
         $brands = $tenant->brands()
             ->orderBy('is_default', 'desc')
@@ -326,7 +329,7 @@ class SiteAdminController extends Controller
             ])
             ->values() // Reset keys for proper array serialization
             ->toArray(); // Convert to array for JSON
-        
+
         return response()->json([
             'id' => $tenant->id,
             'name' => $tenant->name,
@@ -340,7 +343,7 @@ class SiteAdminController extends Controller
             'has_access_to_brand_manager' => $planService->hasAccessToBrandManagerRole($tenant),
             'owner' => $owner ? [
                 'id' => $owner->id,
-                'name' => trim(($owner->first_name ?? '') . ' ' . ($owner->last_name ?? '')),
+                'name' => trim(($owner->first_name ?? '').' '.($owner->last_name ?? '')),
                 'email' => $owner->email,
             ] : null,
             'created_at' => $tenant->created_at?->format('M d, Y'),
@@ -359,7 +362,7 @@ class SiteAdminController extends Controller
             ],
             // Allow non-Stripe plans to be managed in all environments
             // Stripe-connected companies must use Stripe billing portal
-            'can_manage_plan' => !$stripeConnected,
+            'can_manage_plan' => ! $stripeConnected,
             'brands' => $brands,
             // Users loaded separately via companyUsers endpoint
             'costs' => null,
@@ -376,16 +379,16 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin();
 
         $planService = app(\App\Services\PlanService::class);
-        
+
         // Load users with minimal data
         $users = $tenant->users()
             ->orderBy('tenant_user.created_at')
-            ->get(['users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.avatar_url'])
-            ->map(function ($user, $index) use ($tenant, $planService) {
+            ->get(['users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.avatar_url', 'users.last_login_at'])
+            ->map(function ($user, $index) use ($tenant) {
                 $tenantRole = $user->getRoleForTenant($tenant);
                 $isOwner = $tenant->isOwner($user);
                 $isDisabledByPlanLimit = $isOwner ? false : $user->isDisabledByPlanLimit($tenant);
-                
+
                 // Phase MI-1: Load brand assignments efficiently (active memberships only)
                 $brandIds = $tenant->brands()->pluck('id');
                 $userBrandRoles = DB::table('brand_user')
@@ -394,7 +397,7 @@ class SiteAdminController extends Controller
                     ->whereNull('removed_at') // Phase MI-1: Only active memberships
                     ->pluck('role', 'brand_id')
                     ->toArray();
-                
+
                 $brands = $tenant->brands()
                     ->orderBy('is_default', 'desc')
                     ->orderBy('name')
@@ -404,6 +407,7 @@ class SiteAdminController extends Controller
                         if ($role === 'owner') {
                             $role = 'admin';
                         }
+
                         return [
                             'id' => $brand->id,
                             'name' => $brand->name,
@@ -411,13 +415,14 @@ class SiteAdminController extends Controller
                             'role' => $role,
                         ];
                     });
-                
+
                 return [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
                     'last_name' => $user->last_name,
                     'email' => $user->email,
                     'avatar_url' => $user->avatar_url,
+                    'last_login_at' => $user->last_login_at?->toIso8601String(),
                     'tenant_role' => strtolower($tenantRole ?? 'member'),
                     'is_owner' => $isOwner,
                     'is_disabled_by_plan_limit' => $isDisabledByPlanLimit,
@@ -425,7 +430,7 @@ class SiteAdminController extends Controller
                     'brand_assignments' => $brands,
                 ];
             });
-        
+
         return response()->json($users->values());
     }
 
@@ -438,29 +443,30 @@ class SiteAdminController extends Controller
 
         $perPage = (int) $request->get('per_page', 50);
         $search = $request->get('search', '');
-        
+
         $query = User::with(['tenants', 'brands.tenant']);
-        
+
         // Add search filter if provided
         if ($search) {
             $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
             });
         }
-        
+
         $users = $query->paginate($perPage)
             ->through(function ($user) {
                 $userRoles = $user->getRoleNames()->toArray();
-                $siteRoles = array_unique(array_filter($userRoles, fn($role) => str_contains(strtolower($role), 'site')));
-                
+                $siteRoles = array_unique(array_filter($userRoles, fn ($role) => str_contains(strtolower($role), 'site')));
+
                 return [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
                     'last_name' => $user->last_name,
                     'email' => $user->email,
                     'avatar_url' => $user->avatar_url,
+                    'last_login_at' => $user->last_login_at?->toIso8601String(),
                     'companies_count' => $user->tenants->count(),
                     'brands_count' => $user->brands->count(),
                     'is_suspended' => $user->isSuspended(),
@@ -468,6 +474,7 @@ class SiteAdminController extends Controller
                     'site_roles' => array_values($siteRoles),
                     'companies' => $user->tenants->map(function ($tenant) {
                         $role = $tenant->pivot->role ?? null;
+
                         return [
                             'id' => $tenant->id,
                             'name' => $tenant->name,
@@ -480,6 +487,7 @@ class SiteAdminController extends Controller
                         if ($brandRole === 'owner') {
                             $brandRole = 'admin';
                         }
+
                         return [
                             'id' => $brand->id,
                             'name' => $brand->name,
@@ -491,7 +499,7 @@ class SiteAdminController extends Controller
                     }),
                 ];
             });
-        
+
         return response()->json($users);
     }
 
@@ -505,34 +513,34 @@ class SiteAdminController extends Controller
 
         $search = $request->get('search', '');
         $excludeTenantId = $request->get('exclude_tenant_id');
-        
+
         $query = User::select(['id', 'first_name', 'last_name', 'email']);
-        
+
         // Exclude users already in the specified tenant (if provided)
         if ($excludeTenantId) {
             $query->whereDoesntHave('tenants', function ($q) use ($excludeTenantId) {
                 $q->where('tenants.id', $excludeTenantId);
             });
         }
-        
+
         if ($search) {
             $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
             });
         }
-        
+
         $users = $query->limit(100)->get()->map(fn ($user) => [
             'id' => $user->id,
             'first_name' => $user->first_name,
             'last_name' => $user->last_name,
             'email' => $user->email,
         ]);
-        
+
         return response()->json($users);
     }
-    
+
     /**
      * Add a user to a company.
      */
@@ -548,26 +556,26 @@ class SiteAdminController extends Controller
         // Check if company has access to brand_manager role (Pro/Enterprise plans only)
         $planService = app(\App\Services\PlanService::class);
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
-        
+
         // Tenant roles can include owner
         // Tenant/Company roles only (brand_manager is a brand role, not a tenant role)
         // Note: Only Owner, Admin, and Member are tenant-level roles. All other roles are brand-scoped.
         $allowedTenantRoles = ['owner', 'admin', 'member'];
-        
+
         // Brand roles cannot include owner
-            $allowedBrandRoles = ['admin', 'contributor', 'viewer'];
+        $allowedBrandRoles = ['admin', 'contributor', 'viewer'];
         if ($hasAccessToBrandManager) {
             $allowedBrandRoles[] = 'brand_manager';
         }
-        
+
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'role' => ['nullable', 'string', 'in:' . implode(',', $allowedTenantRoles)],
+            'role' => ['nullable', 'string', 'in:'.implode(',', $allowedTenantRoles)],
             'brands' => 'required|array|min:1',
             'brands.*.brand_id' => 'required|exists:brands,id',
-            'brands.*.role' => 'required|string|in:' . implode(',', $allowedBrandRoles),
+            'brands.*.role' => 'required|string|in:'.implode(',', $allowedBrandRoles),
         ]);
-        
+
         // Prevent owner and member from being assigned as brand roles
         // Owner is tenant-level only -> convert to admin
         // Member is tenant-level only -> convert to viewer
@@ -594,7 +602,7 @@ class SiteAdminController extends Controller
         $brandIds = collect($validated['brands'])->pluck('brand_id')->unique();
         $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
         $invalidBrands = $brandIds->diff($tenantBrandIds);
-        
+
         if ($invalidBrands->isNotEmpty()) {
             return back()->withErrors([
                 'brands' => 'One or more selected brands do not belong to this company.',
@@ -606,7 +614,7 @@ class SiteAdminController extends Controller
         $tenantRole = $validated['role'] ?? 'member';
         // If tenant role came from brand role and it's not a valid tenant role, default to member
         // Note: Only Owner, Admin, and Member are tenant-level roles
-        if (!in_array($tenantRole, ['owner', 'admin', 'member'])) {
+        if (! in_array($tenantRole, ['owner', 'admin', 'member'])) {
             $tenantRole = 'member';
         }
 
@@ -650,26 +658,26 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify user belongs to this company
-        if (!$tenant->users()->where('users.id', $user->id)->exists()) {
+        if (! $tenant->users()->where('users.id', $user->id)->exists()) {
             abort(404, 'User is not a member of this company.');
         }
 
         // Check if company has access to brand_manager role (Pro/Enterprise plans only)
         $planService = app(\App\Services\PlanService::class);
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
-        
+
         $allowedRoles = ['owner', 'admin', 'member'];
         if ($hasAccessToBrandManager) {
             $allowedRoles[] = 'brand_manager';
         }
-        
+
         $validated = $request->validate([
-            'role' => ['required', 'string', 'in:' . implode(',', $allowedRoles)],
+            'role' => ['required', 'string', 'in:'.implode(',', $allowedRoles)],
         ]);
 
         // Check if trying to assign owner role
         $isBecomingOwner = $validated['role'] === 'owner';
-        
+
         // Only platform super-owner (user ID 1) can directly assign owner role
         if ($isBecomingOwner && Auth::id() !== 1) {
             throw new \App\Exceptions\CannotAssignOwnerRoleException(
@@ -685,16 +693,16 @@ class SiteAdminController extends Controller
         $pivot = $tenant->users()->where('users.id', $user->id)->first()?->pivot;
         $oldRole = $pivot->role ?? null;
         $isCurrentlyOwner = $oldRole && strtolower($oldRole) === 'owner';
-        
+
         // If setting a new owner, demote the current owner first
         // This ensures only ONE owner exists at a time - database is source of truth
-        if ($isBecomingOwner && !$isCurrentlyOwner) {
+        if ($isBecomingOwner && ! $isCurrentlyOwner) {
             $currentOwner = $tenant->owner();
             if ($currentOwner && $currentOwner->id !== $user->id) {
                 // Demote current owner to admin (preserving their status)
                 // This is allowed for super-owner (break-glass exception)
                 $currentOwner->setRoleForTenant($tenant, 'admin');
-                
+
                 // Log the owner change for audit trail
                 ActivityRecorder::record(
                     tenant: $tenant,
@@ -713,16 +721,16 @@ class SiteAdminController extends Controller
                 );
             }
         }
-        
+
         // Prevent demoting the owner without a replacement
         // If demoting current owner to non-owner, ensure someone else is being set as owner
-        if ($isCurrentlyOwner && !$isBecomingOwner) {
+        if ($isCurrentlyOwner && ! $isBecomingOwner) {
             // Check if there's another user being set as owner in this same request
             // (This would be handled by the above logic if someone else is becoming owner)
             // But if we're just demoting the owner, prevent it - there must always be an owner
             abort(422, 'Cannot remove owner role. There must always be one owner per company. Please assign owner role to another user first.');
         }
-        
+
         // Update role in pivot table (tenant-scoped)
         // For super-owner, this will succeed. For others, CannotAssignOwnerRoleException would have been thrown above.
         $user->setRoleForTenant($tenant, $validated['role']);
@@ -756,7 +764,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify user belongs to this company
-        if (!$tenant->users()->where('users.id', $user->id)->exists()) {
+        if (! $tenant->users()->where('users.id', $user->id)->exists()) {
             abort(404, 'User is not a member of this company.');
         }
 
@@ -768,36 +776,36 @@ class SiteAdminController extends Controller
         // Check if company has access to brand_manager role (Pro/Enterprise plans only)
         $planService = app(\App\Services\PlanService::class);
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
-        
+
         $allowedRoles = ['admin', 'member'];
         if ($hasAccessToBrandManager) {
             $allowedRoles[] = 'brand_manager';
         }
-        
+
         // Get the role value - allow empty/null for "not assigned"
         // Handle multiple ways the frontend might send empty values
         $role = $request->input('role');
-        
+
         // Convert empty string, null, or missing value to null
-        if ($role === '' || $role === null || !$request->has('role')) {
+        if ($role === '' || $role === null || ! $request->has('role')) {
             $role = null;
         } else {
             // Prevent 'owner' from being a brand role - convert to 'admin' if attempted
             if ($role === 'owner') {
                 $role = 'admin';
             }
-            
+
             // Validate role if provided
-            if (!in_array($role, $allowedRoles)) {
+            if (! in_array($role, $allowedRoles)) {
                 return back()->withErrors([
-                    'role' => 'Invalid role. Must be one of: ' . implode(', ', $allowedRoles),
+                    'role' => 'Invalid role. Must be one of: '.implode(', ', $allowedRoles),
                 ]);
             }
         }
 
         // Get old role for logging
         $oldRole = $user->getRoleForBrand($brand);
-        
+
         // If role is empty/null, remove user from brand; otherwise update/add role
         if (empty($role)) {
             // Remove user from brand
@@ -893,7 +901,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user to be removed belongs to this company
-        if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(404, 'User is not a member of this company.');
         }
 
@@ -944,6 +952,22 @@ class SiteAdminController extends Controller
     }
 
     /**
+     * Remove the agency–client link for this company (admin). Revokes agency-managed access via TenantAgencyService::detach.
+     */
+    public function detachAgencyLink(Tenant $tenant, TenantAgency $tenantAgency, TenantAgencyService $tenantAgencyService): \Illuminate\Http\RedirectResponse
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can perform this action.');
+
+        if ((int) $tenantAgency->tenant_id !== (int) $tenant->id) {
+            abort(404);
+        }
+
+        $tenantAgencyService->detach($tenantAgency);
+
+        return redirect()->back()->with('success', 'Agency link removed. Agency-managed users were removed from this company.');
+    }
+
+    /**
      * Cancel a user's account (remove from company but keep account active).
      */
     public function cancelAccount(Request $request, Tenant $tenant, User $user)
@@ -952,7 +976,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user belongs to this company
-        if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(404, 'User is not a member of this company.');
         }
 
@@ -1019,7 +1043,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user belongs to this company
-        if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(404, 'User is not a member of this company.');
         }
 
@@ -1034,6 +1058,7 @@ class SiteAdminController extends Controller
                     'error' => 'Cannot delete the company owner account.',
                 ], 422);
             }
+
             return back()->withErrors([
                 'user' => 'Cannot delete the company owner account.',
             ]);
@@ -1047,6 +1072,7 @@ class SiteAdminController extends Controller
                     'error' => 'Cannot delete the company owner account.',
                 ], 422);
             }
+
             return back()->withErrors([
                 'user' => 'Cannot delete the company owner account.',
             ]);
@@ -1055,9 +1081,9 @@ class SiteAdminController extends Controller
         // Check if tenant has a Stripe account/subscription
         // If yes, require user to be suspended before deletion
         // If no Stripe account, allow deletion directly
-        $hasStripeAccount = !empty($tenant->stripe_id);
+        $hasStripeAccount = ! empty($tenant->stripe_id);
         $hasActiveSubscription = false;
-        
+
         if ($hasStripeAccount) {
             $subscription = $tenant->subscriptions()
                 ->where('name', 'default')
@@ -1068,13 +1094,14 @@ class SiteAdminController extends Controller
 
         // If tenant has Stripe account/subscription, user must be suspended first
         if ($hasStripeAccount || $hasActiveSubscription) {
-            if (!$user->isSuspended()) {
+            if (! $user->isSuspended()) {
                 $errorMessage = 'Cannot delete a user whose company has a Stripe account. Please suspend the user first, then delete them.';
                 if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                     return response()->json([
                         'error' => $errorMessage,
                     ], 422);
                 }
+
                 return back()->withErrors([
                     'user' => $errorMessage,
                 ]);
@@ -1124,7 +1151,7 @@ class SiteAdminController extends Controller
                 'message' => 'User account deleted successfully. Notification email sent.',
             ]);
         }
-        
+
         return redirect()->route('admin.index')->with('success', 'User account deleted successfully. Notification email sent.');
     }
 
@@ -1140,13 +1167,14 @@ class SiteAdminController extends Controller
         // Check if user has no companies
         $hasNoCompanies = $user->tenants()->count() === 0;
 
-        if (!$hasNoCompanies) {
+        if (! $hasNoCompanies) {
             $errorMessage = 'Cannot delete account: User is associated with companies. Use the company-specific deletion route instead.';
             if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json([
                     'error' => $errorMessage,
                 ], 422);
             }
+
             return back()->withErrors([
                 'user' => $errorMessage,
             ]);
@@ -1281,8 +1309,9 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Get user's companies with roles
-        $companies = $user->tenants()->get()->map(function ($tenant) use ($user) {
+        $companies = $user->tenants()->get()->map(function ($tenant) {
             $role = $tenant->pivot->role ?? null;
+
             return [
                 'id' => $tenant->id,
                 'name' => $tenant->name,
@@ -1304,17 +1333,17 @@ class SiteAdminController extends Controller
 
         // Get activity events for this user (as subject or actor)
         $activities = ActivityEvent::where(function ($query) use ($user) {
-                $query->where(function ($q) use ($user) {
-                    // Events where this user is the subject
-                    $q->where('subject_type', User::class)
-                      ->where('subject_id', $user->id);
-                })->orWhere(function ($q) use ($user) {
-                    // Events where this user is the actor
-                    $q->where('actor_type', 'user')
-                      ->where('actor_id', $user->id);
-                });
-            })
-            ->with(['tenant', 'brand'])
+            $query->where(function ($q) use ($user) {
+                // Events where this user is the subject
+                $q->where('subject_type', User::class)
+                    ->where('subject_id', $user->id);
+            })->orWhere(function ($q) use ($user) {
+                // Events where this user is the actor
+                $q->where('actor_type', 'user')
+                    ->where('actor_id', $user->id);
+            });
+        })
+            ->with(['tenant', 'brand', 'subject'])
             ->orderBy('created_at', 'desc')
             ->limit(50)
             ->get()
@@ -1363,7 +1392,7 @@ class SiteAdminController extends Controller
             });
 
         // Get site roles
-        $siteRoles = $user->getRoleNames()->filter(fn($role) => str_contains(strtolower($role), 'site'))->values();
+        $siteRoles = $user->getRoleNames()->filter(fn ($role) => str_contains(strtolower($role), 'site'))->values();
 
         return Inertia::render('Admin/ViewUser', [
             'user' => [
@@ -1381,6 +1410,8 @@ class SiteAdminController extends Controller
                 'zip' => $user->zip,
                 'suspended_at' => $user->suspended_at?->toISOString(),
                 'is_suspended' => $user->isSuspended(),
+                'last_login_at' => $user->last_login_at?->toIso8601String(),
+                'created_at' => $user->created_at?->toIso8601String(),
                 'site_roles' => $siteRoles->toArray(),
             ],
             'companies' => $companies,
@@ -1411,14 +1442,14 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can update plans.');
 
         $planService = app(\App\Services\PlanService::class);
-        
+
         // Check if plan is externally managed
         if ($planService->isExternallyManaged($tenant)) {
             return back()->withErrors([
                 'plan' => 'This plan is managed externally (e.g., Shopify) and cannot be adjusted from the backend. Please update the plan through the external billing system.',
             ]);
         }
-        
+
         // Check if tenant is connected to Stripe
         // Prevent manual plan adjustments when connected to Stripe
         // Plan should be changed through Stripe billing portal or subscription changes
@@ -1441,14 +1472,14 @@ class SiteAdminController extends Controller
         $billingStatus = $validated['billing_status'] ?? null;
         $expirationMonths = $validated['expiration_months'] ?? null;
         $equivalentPlanValue = $validated['equivalent_plan_value'] ?? null;
-        
+
         // Validate plan exists
-        if (!config("plans.{$planName}")) {
+        if (! config("plans.{$planName}")) {
             return back()->withErrors([
                 'plan' => 'Invalid plan selected.',
             ]);
         }
-        
+
         // If setting trial/comped with expiration, use the service
         // This ensures proper audit logging and protections
         if ($billingStatus && in_array($billingStatus, ['trial', 'comped']) && $expirationMonths) {
@@ -1456,7 +1487,7 @@ class SiteAdminController extends Controller
                 $expirationService = app(\App\Services\BillingExpirationService::class);
                 $admin = Auth::user();
                 $oldPlan = $planService->getCurrentPlan($tenant);
-                
+
                 $expirationService->setBillingStatusWithExpiration(
                     tenant: $tenant,
                     billingStatus: $billingStatus,
@@ -1466,47 +1497,47 @@ class SiteAdminController extends Controller
                     reason: 'admin_manual_assignment',
                     adminUser: $admin
                 );
-                
+
                 // Set management source if provided
                 if ($managementSource) {
                     $tenant->plan_management_source = $managementSource;
                     $tenant->save();
                 }
-                
+
                 // Email notifications and activity logging are handled by the service
                 return back()->with('success', "Plan set to {$planName} with {$billingStatus} status (expires in {$expirationMonths} months)");
             } catch (\Exception $e) {
                 return back()->withErrors([
-                    'plan' => 'Failed to set billing status: ' . $e->getMessage(),
+                    'plan' => 'Failed to set billing status: '.$e->getMessage(),
                 ]);
             }
         }
-        
+
         // Legacy path: Simple plan assignment without expiration
         // Get old plan for logging
         $oldPlan = $planService->getCurrentPlan($tenant);
-        
+
         // Update plan
         $tenant->manual_plan_override = $planName;
         if ($managementSource) {
             $tenant->plan_management_source = $managementSource;
         }
-        
+
         // Set billing_status for accounting purposes (legacy - no expiration)
         // When manually assigning a plan without Stripe, account is comped (no revenue)
         // This is NOT frontend-facing - internal accounting only
         // TODO: Encourage use of billing_status with expiration for better tracking
-        if (!$tenant->stripe_id) {
+        if (! $tenant->stripe_id) {
             // If billing_status provided, use it; otherwise default to 'comped'
             $tenant->billing_status = $billingStatus ?? 'comped';
-            
+
             // Set equivalent_plan_value for comped accounts if provided
             if ($tenant->billing_status === 'comped' && $equivalentPlanValue !== null) {
                 $tenant->equivalent_plan_value = $equivalentPlanValue;
             }
         }
         // If they have Stripe, billing_status should remain null (paid/subscribed)
-        
+
         $tenant->save();
 
         // Log activity with admin info
@@ -1531,7 +1562,7 @@ class SiteAdminController extends Controller
         // Send email notifications
         $adminName = $admin->name ?? $admin->email ?? 'System Administrator';
         $owner = $tenant->owner();
-        
+
         // Send to tenant owner
         if ($owner && $owner->email) {
             try {
@@ -1552,7 +1583,7 @@ class SiteAdminController extends Controller
                 ]);
             }
         }
-        
+
         // Send to admin (site owner)
         $siteOwner = User::find(1); // Site owner is user ID 1
         if ($siteOwner && $siteOwner->email && $siteOwner->id !== $admin->id) {
@@ -1601,26 +1632,27 @@ class SiteAdminController extends Controller
     {
         $eventType = $activity->event_type;
         $metadata = $activity->metadata ?? [];
-        
-        // Get subject name if available
+
+        // Get subject name if available (never lazy-load subject — staging disables lazy loading)
         $subjectName = null;
-        if ($activity->subject) {
-            if (method_exists($activity->subject, 'getNameAttribute')) {
-                $subjectName = $activity->subject->name;
-            } elseif (isset($activity->subject->name)) {
-                $subjectName = $activity->subject->name;
+        $subject = $activity->relationLoaded('subject') ? $activity->getRelation('subject') : null;
+        if ($subject) {
+            if (method_exists($subject, 'getNameAttribute')) {
+                $subjectName = $subject->name;
+            } elseif (isset($subject->name)) {
+                $subjectName = $subject->name;
             }
         }
-        if (!$subjectName && isset($metadata['subject_name'])) {
+        if (! $subjectName && isset($metadata['subject_name'])) {
             $subjectName = $metadata['subject_name'];
         }
-        if (!$subjectName && $activity->tenant) {
+        if (! $subjectName && $activity->tenant) {
             $subjectName = $activity->tenant->name ?? null;
         }
-        if (!$subjectName && $activity->brand) {
+        if (! $subjectName && $activity->brand) {
             $subjectName = $activity->brand->name ?? null;
         }
-        
+
         // Format based on event type with human-readable language
         switch ($eventType) {
             case EventType::TENANT_UPDATED:
@@ -1644,6 +1676,7 @@ class SiteAdminController extends Controller
                 } elseif ($action === 'unsuspended') {
                     return $subjectName ? "Unsuspended {$subjectName} account" : 'Unsuspended account';
                 }
+
                 return $subjectName ? "Updated {$subjectName} account" : 'Updated user account';
             case EventType::USER_DELETED:
                 return $subjectName ? "Deleted {$subjectName} account" : 'Deleted user account';
@@ -1654,9 +1687,11 @@ class SiteAdminController extends Controller
             case EventType::USER_ADDED_TO_BRAND:
                 $role = $metadata['role'] ?? 'member';
                 $brandName = $activity->brand->name ?? null;
+
                 return $brandName ? "Added to {$brandName} as {$role}" : "Added to brand as {$role}";
             case EventType::USER_REMOVED_FROM_BRAND:
                 $brandName = $activity->brand->name ?? null;
+
                 return $brandName ? "Removed from {$brandName}" : 'Removed from brand';
             case EventType::USER_ROLE_UPDATED:
                 $oldRole = $metadata['old_role'] ?? null;
@@ -1664,6 +1699,7 @@ class SiteAdminController extends Controller
                 if ($oldRole && $newRole) {
                     return "Changed role from {$oldRole} to {$newRole}";
                 }
+
                 return 'Updated role';
             case EventType::CATEGORY_CREATED:
                 return $subjectName ? "Created {$subjectName}" : 'Created category';
@@ -1679,6 +1715,7 @@ class SiteAdminController extends Controller
                 if ($subjectName) {
                     return "Upgraded {$subjectName}{$versionInfo}";
                 }
+
                 return "Upgraded category{$versionInfo}";
             case EventType::PLAN_UPDATED:
                 $oldPlan = $metadata['old_plan'] ?? null;
@@ -1686,6 +1723,7 @@ class SiteAdminController extends Controller
                 if ($oldPlan && $newPlan) {
                     return "Changed plan from {$oldPlan} to {$newPlan}";
                 }
+
                 return 'Updated plan';
             default:
                 // Fallback: format event type nicely
@@ -1728,31 +1766,31 @@ class SiteAdminController extends Controller
         // Get site permissions (company.manage, permissions.manage, ticket permissions, AI dashboard permissions, plus any custom site permissions)
         // Site permissions are identified by being in the site permissions list or having 'site.' prefix
         $sitePermissions = Permission::where(function ($query) {
-                $query->whereIn('name', [
-                    'company.manage',
-                    'permissions.manage',
-                    'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
-                    'tickets.view_any',
-                    'tickets.view_tenant',
-                    'tickets.create',
-                    'tickets.reply',
-                    'tickets.view_staff',
-                    'tickets.assign',
-                    'tickets.add_internal_note',
-                    'tickets.convert',
-                    'tickets.view_sla',
-                    'tickets.view_audit_log',
-                    'tickets.create_engineering',
-                    'tickets.view_engineering',
-                    'tickets.link_diagnostic',
-                    'ai.dashboard.view',
-                    'ai.dashboard.manage',
-                    'ai.budgets.view',
-                    'ai.budgets.manage',
-                    'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
-                ])
-                    ->orWhere('name', 'like', 'site.%');
-            })
+            $query->whereIn('name', [
+                'company.manage',
+                'permissions.manage',
+                'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
+                'tickets.view_any',
+                'tickets.view_tenant',
+                'tickets.create',
+                'tickets.reply',
+                'tickets.view_staff',
+                'tickets.assign',
+                'tickets.add_internal_note',
+                'tickets.convert',
+                'tickets.view_sla',
+                'tickets.view_audit_log',
+                'tickets.create_engineering',
+                'tickets.view_engineering',
+                'tickets.link_diagnostic',
+                'ai.dashboard.view',
+                'ai.dashboard.manage',
+                'ai.budgets.view',
+                'ai.budgets.manage',
+                'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
+            ])
+                ->orWhere('name', 'like', 'site.%');
+        })
             ->orderBy('name')
             ->pluck('name')
             ->toArray();
@@ -1762,35 +1800,35 @@ class SiteAdminController extends Controller
         // Company roles should only have tenant-facing ticket permissions (create, reply, view_tenant, view_any)
         // Note: tickets.view_any and tickets.view_tenant are site permissions (for staff), but can also be assigned to company roles for tenant users
         $companyPermissions = Permission::where(function ($query) {
-                $query->whereNotIn('name', [
-                    'company.manage',
-                    'permissions.manage',
-                    'tickets.view_staff',
-                    'tickets.assign',
-                    'tickets.add_internal_note',
-                    'tickets.convert',
-                    'tickets.view_sla',
-                    'tickets.view_audit_log',
-                    'tickets.create_engineering',
-                    'tickets.view_engineering',
-                    'tickets.link_diagnostic',
-                    'ai.dashboard.view',
-                    'ai.dashboard.manage',
-                    'ai.budgets.view',
-                    'ai.budgets.manage',
-                    'assets.regenerate_thumbnails_admin', // Exclude from company permissions
-                ])
-                    ->where('name', 'not like', 'site.%');
-            })
+            $query->whereNotIn('name', [
+                'company.manage',
+                'permissions.manage',
+                'tickets.view_staff',
+                'tickets.assign',
+                'tickets.add_internal_note',
+                'tickets.convert',
+                'tickets.view_sla',
+                'tickets.view_audit_log',
+                'tickets.create_engineering',
+                'tickets.view_engineering',
+                'tickets.link_diagnostic',
+                'ai.dashboard.view',
+                'ai.dashboard.manage',
+                'ai.budgets.view',
+                'ai.budgets.manage',
+                'assets.regenerate_thumbnails_admin', // Exclude from company permissions
+            ])
+                ->where('name', 'not like', 'site.%');
+        })
             ->orderBy('name')
             ->pluck('name')
             ->toArray();
-        
+
         // Add tenant-facing ticket permissions to company permissions (these can be assigned to company roles)
         // These are also site permissions, but they're dual-purpose: staff can use them, and tenant users can too
         $tenantTicketPermissions = ['tickets.create', 'tickets.reply', 'tickets.view_tenant', 'tickets.view_any'];
         foreach ($tenantTicketPermissions as $perm) {
-            if (!in_array($perm, $companyPermissions)) {
+            if (! in_array($perm, $companyPermissions)) {
                 $companyPermissions[] = $perm;
             }
         }
@@ -1868,25 +1906,25 @@ class SiteAdminController extends Controller
         // Use config() not env() — env() returns null when config is cached (staging/production)
         $stripeKey = config('services.stripe.key');
         $stripeSecret = config('services.stripe.secret');
-        $hasKeys = !empty($stripeKey) && !empty($stripeSecret);
+        $hasKeys = ! empty($stripeKey) && ! empty($stripeSecret);
 
         // Diagnostics to help debug why keys might not be found on staging
         $diagnostics = [
-            'env_stripe_key_set' => !empty($stripeKey),
-            'env_stripe_secret_set' => !empty($stripeSecret),
+            'env_stripe_key_set' => ! empty($stripeKey),
+            'env_stripe_secret_set' => ! empty($stripeSecret),
             'config_cached' => app()->configurationIsCached(),
             'env_file_exists' => file_exists(base_path('.env')),
             'env_file_path' => base_path('.env'),
             'app_env' => config('app.env'),
         ];
         $diagnostics['suggestions'] = $this->getStripeKeyDiagnosticSuggestions($diagnostics);
-        
+
         // Test Stripe connection by making an API call
         $connectionTest = [
             'connected' => false,
             'error' => null,
         ];
-        
+
         if ($hasKeys) {
             try {
                 Stripe::setApiKey($stripeSecret);
@@ -1906,7 +1944,7 @@ class SiteAdminController extends Controller
         // Check price sync status - verify prices in config exist in Stripe
         $priceSyncStatus = [];
         $plans = config('plans');
-        
+
         if ($connectionTest['connected']) {
             try {
                 foreach ($plans as $planKey => $planConfig) {
@@ -1918,9 +1956,10 @@ class SiteAdminController extends Controller
                             'exists' => true,
                             'note' => 'Free plan (no Stripe price required)',
                         ];
+
                         continue;
                     }
-                    
+
                     $priceId = $planConfig['stripe_price_id'];
                     try {
                         $price = Price::retrieve($priceId);
@@ -1928,8 +1967,8 @@ class SiteAdminController extends Controller
                             'name' => $planConfig['name'],
                             'price_id' => $priceId,
                             'exists' => true,
-                            'stripe_price_name' => $price->nickname ?? ($price->product ? 'Product: ' . $price->product : 'N/A'),
-                            'amount' => $price->unit_amount ? '$' . number_format($price->unit_amount / 100, 2) : 'N/A',
+                            'stripe_price_name' => $price->nickname ?? ($price->product ? 'Product: '.$price->product : 'N/A'),
+                            'amount' => $price->unit_amount ? '$'.number_format($price->unit_amount / 100, 2) : 'N/A',
                             'currency' => strtoupper($price->currency ?? 'usd'),
                             'active' => $price->active ?? false,
                         ];
@@ -1956,7 +1995,7 @@ class SiteAdminController extends Controller
                         'name' => $planConfig['name'],
                         'price_id' => $planConfig['stripe_price_id'],
                         'exists' => null,
-                        'error' => 'Could not verify: ' . $e->getMessage(),
+                        'error' => 'Could not verify: '.$e->getMessage(),
                     ];
                 }
             }
@@ -1982,9 +2021,9 @@ class SiteAdminController extends Controller
                     ->where('name', 'default')
                     ->orderBy('created_at', 'desc')
                     ->first();
-                $planService = new \App\Services\PlanService();
+                $planService = new \App\Services\PlanService;
                 $currentPlan = $planService->getCurrentPlan($tenant);
-                
+
                 return [
                     'id' => $tenant->id,
                     'name' => $tenant->name,
@@ -2004,9 +2043,9 @@ class SiteAdminController extends Controller
             ->get()
             ->map(function ($subscription) use ($connectionTest) {
                 $tenant = $subscription->owner; // Cashier uses 'owner' relationship for billable model
-                $planService = new \App\Services\PlanService();
+                $planService = new \App\Services\PlanService;
                 $currentPlan = $tenant ? $planService->getCurrentPlan($tenant) : 'unknown';
-                
+
                 // Calculate monthly revenue for this subscription
                 $monthlyRevenue = 0;
                 if ($subscription->stripe_price && $connectionTest['connected']) {
@@ -2021,7 +2060,7 @@ class SiteAdminController extends Controller
                         // Price not found or error
                     }
                 }
-                
+
                 return [
                     'id' => $subscription->id,
                     'tenant_id' => $subscription->tenant_id,
@@ -2082,9 +2121,9 @@ class SiteAdminController extends Controller
     {
         $suggestions = [];
 
-        if (!$diagnostics['env_stripe_key_set'] || !$diagnostics['env_stripe_secret_set']) {
-            if (!$diagnostics['env_file_exists']) {
-                $suggestions[] = '.env file not found at ' . $diagnostics['env_file_path'] . ' — ensure .env exists (e.g. in shared dir on deploy)';
+        if (! $diagnostics['env_stripe_key_set'] || ! $diagnostics['env_stripe_secret_set']) {
+            if (! $diagnostics['env_file_exists']) {
+                $suggestions[] = '.env file not found at '.$diagnostics['env_file_path'].' — ensure .env exists (e.g. in shared dir on deploy)';
             } elseif ($diagnostics['config_cached']) {
                 $suggestions[] = 'Config is cached. When config was cached, STRIPE_KEY/STRIPE_SECRET may not have been in .env. Run: php artisan config:clear && php artisan config:cache';
             } else {
@@ -2103,8 +2142,8 @@ class SiteAdminController extends Controller
     {
         $logFile = storage_path('logs/laravel.log');
         $events = [];
-        
-        if (!file_exists($logFile)) {
+
+        if (! file_exists($logFile)) {
             return $events;
         }
 
@@ -2112,12 +2151,12 @@ class SiteAdminController extends Controller
             // Read last N lines of log file
             $lines = array_slice(file($logFile), -1000); // Read last 1000 lines for context
             $lines = array_reverse($lines); // Most recent first
-            
+
             foreach ($lines as $line) {
                 if (count($events) >= $limit) {
                     break;
                 }
-                
+
                 // Look for webhook log entries
                 if (preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\].*Stripe webhook received.*"type":"([^"]+)".*"id":"([^"]+)"/', $line, $matches)) {
                     $events[] = [
@@ -2137,7 +2176,7 @@ class SiteAdminController extends Controller
                 }
             }
         } catch (\Exception $e) {
-            \Log::warning('Error reading webhook events from logs: ' . $e->getMessage());
+            \Log::warning('Error reading webhook events from logs: '.$e->getMessage());
         }
 
         return array_slice($events, 0, $limit);
@@ -2157,34 +2196,34 @@ class SiteAdminController extends Controller
         ]);
 
         $role = Role::where('name', $validated['role_id'])->firstOrFail();
-        
+
         // Get only valid site permissions (all site permissions start with specific prefixes)
         $validPermissions = Permission::where(function ($query) {
-                $query->whereIn('name', [
-                    'company.manage',
-                    'permissions.manage',
-                    'assets.regenerate_thumbnails_admin',
-                    'tickets.view_any',
-                    'tickets.view_tenant',
-                    'tickets.create',
-                    'tickets.reply',
-                    'tickets.view_staff',
-                    'tickets.assign',
-                    'tickets.add_internal_note',
-                    'tickets.convert',
-                    'tickets.view_sla',
-                    'tickets.view_audit_log',
-                    'tickets.create_engineering',
-                    'tickets.view_engineering',
-                    'tickets.link_diagnostic',
-                    'ai.dashboard.view',
-                    'ai.dashboard.manage',
-                    'ai.budgets.view',
-                    'ai.budgets.manage',
-                    'assets.regenerate_thumbnails_admin',
-                ])
+            $query->whereIn('name', [
+                'company.manage',
+                'permissions.manage',
+                'assets.regenerate_thumbnails_admin',
+                'tickets.view_any',
+                'tickets.view_tenant',
+                'tickets.create',
+                'tickets.reply',
+                'tickets.view_staff',
+                'tickets.assign',
+                'tickets.add_internal_note',
+                'tickets.convert',
+                'tickets.view_sla',
+                'tickets.view_audit_log',
+                'tickets.create_engineering',
+                'tickets.view_engineering',
+                'tickets.link_diagnostic',
+                'ai.dashboard.view',
+                'ai.dashboard.manage',
+                'ai.budgets.view',
+                'ai.budgets.manage',
+                'assets.regenerate_thumbnails_admin',
+            ])
                 ->orWhere('name', 'like', 'site.%');
-            })
+        })
             ->pluck('name')
             ->toArray();
 
@@ -2218,7 +2257,7 @@ class SiteAdminController extends Controller
                 'string',
                 function ($attribute, $value, $fail) {
                     $role = Role::where('name', $value)->where('guard_name', 'web')->first();
-                    if (!$role) {
+                    if (! $role) {
                         $fail("Role does not exist: {$value}");
                     }
                 },
@@ -2227,17 +2266,17 @@ class SiteAdminController extends Controller
         ]);
 
         $role = Role::where('name', $validated['role_id'])->firstOrFail();
-        
+
         // Get only valid company permissions (all permissions except site permissions)
         // Exclude site-only permissions like assets.regenerate_thumbnails_admin
         $validPermissions = Permission::where(function ($query) {
-                $query->whereNotIn('name', [
-                    'company.manage',
-                    'permissions.manage',
-                    'assets.regenerate_thumbnails_admin', // Site-only permission
-                ])
-                    ->where('name', 'not like', 'site.%');
-            })
+            $query->whereNotIn('name', [
+                'company.manage',
+                'permissions.manage',
+                'assets.regenerate_thumbnails_admin', // Site-only permission
+            ])
+                ->where('name', 'not like', 'site.%');
+        })
             ->pluck('name')
             ->toArray();
 
@@ -2271,8 +2310,8 @@ class SiteAdminController extends Controller
 
         // For site permissions, prefix with 'site.' if not already prefixed
         $permissionName = $validated['name'];
-        if ($validated['type'] === 'site' && !str_starts_with($permissionName, 'site.')) {
-            $permissionName = 'site.' . $permissionName;
+        if ($validated['type'] === 'site' && ! str_starts_with($permissionName, 'site.')) {
+            $permissionName = 'site.'.$permissionName;
         }
 
         // Check if permission already exists
@@ -2300,13 +2339,13 @@ class SiteAdminController extends Controller
         // Only user ID 1 (Site Owner) can access
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
-        if (!$tenant->stripe_id) {
+        if (! $tenant->stripe_id) {
             return back()->withErrors(['error' => 'Tenant does not have a Stripe customer ID.']);
         }
 
         try {
             Stripe::setApiKey(config('services.stripe.secret'));
-            
+
             // Get customer's subscriptions from Stripe
             $stripeCustomer = \Stripe\Customer::retrieve($tenant->stripe_id);
             $stripeSubscriptions = \Stripe\Subscription::all([
@@ -2324,11 +2363,11 @@ class SiteAdminController extends Controller
                 $subscription->stripe_status = $stripeSubscription->status;
                 $subscription->stripe_price = $stripeSubscription->items->data[0]->price->id ?? null;
                 $subscription->quantity = $stripeSubscription->items->data[0]->quantity ?? 1;
-                $subscription->trial_ends_at = $stripeSubscription->trial_end 
-                    ? \Carbon\Carbon::createFromTimestamp($stripeSubscription->trial_end) 
+                $subscription->trial_ends_at = $stripeSubscription->trial_end
+                    ? \Carbon\Carbon::createFromTimestamp($stripeSubscription->trial_end)
                     : null;
-                $subscription->ends_at = $stripeSubscription->cancel_at 
-                    ? \Carbon\Carbon::createFromTimestamp($stripeSubscription->cancel_at) 
+                $subscription->ends_at = $stripeSubscription->cancel_at
+                    ? \Carbon\Carbon::createFromTimestamp($stripeSubscription->cancel_at)
                     : null;
                 $subscription->save();
 
@@ -2346,7 +2385,7 @@ class SiteAdminController extends Controller
 
             return back()->with('success', 'Subscription synced successfully from Stripe.');
         } catch (\Exception $e) {
-            return back()->withErrors(['error' => 'Failed to sync subscription: ' . $e->getMessage()]);
+            return back()->withErrors(['error' => 'Failed to sync subscription: '.$e->getMessage()]);
         }
     }
 
@@ -2366,10 +2405,10 @@ class SiteAdminController extends Controller
         ]);
 
         $tenant = Tenant::findOrFail($validated['tenant_id']);
-        $billingService = new \App\Services\BillingService();
+        $billingService = new \App\Services\BillingService;
 
         try {
-            $amount = $validated['amount'] ? (int)($validated['amount'] * 100) : null; // Convert to cents
+            $amount = $validated['amount'] ? (int) ($validated['amount'] * 100) : null; // Convert to cents
             $refund = $billingService->refundInvoice(
                 $tenant,
                 $validated['invoice_id'],
@@ -2377,9 +2416,9 @@ class SiteAdminController extends Controller
                 $validated['reason'] ?? null
             );
 
-            return back()->with('success', 'Refund processed successfully. Refund ID: ' . $refund['id']);
+            return back()->with('success', 'Refund processed successfully. Refund ID: '.$refund['id']);
         } catch (\Exception $e) {
-            return back()->withErrors(['error' => 'Failed to process refund: ' . $e->getMessage()]);
+            return back()->withErrors(['error' => 'Failed to process refund: '.$e->getMessage()]);
         }
     }
 
@@ -2418,7 +2457,7 @@ class SiteAdminController extends Controller
             $query->where('created_at', '>=', $request->date_from);
         }
         if ($request->filled('date_to')) {
-            $query->where('created_at', '<=', $request->date_to . ' 23:59:59');
+            $query->where('created_at', '<=', $request->date_to.' 23:59:59');
         }
 
         // Filter by brand
@@ -2432,8 +2471,8 @@ class SiteAdminController extends Controller
 
         // Search functionality
         if ($request->filled('search')) {
-            $searchTerm = '%' . $request->search . '%';
-            $query->where(function ($q) use ($searchTerm, $request) {
+            $searchTerm = '%'.$request->search.'%';
+            $query->where(function ($q) use ($searchTerm) {
                 // Search in event type
                 $q->where('activity_events.event_type', 'like', $searchTerm)
                     // Search in tenant name (via left join)
@@ -2508,8 +2547,9 @@ class SiteAdminController extends Controller
 
         // Paginate results
         $perPage = (int) $request->get('per_page', 50);
-        // Only eager load actor for 'user' type to avoid errors with string types (system, api, guest)
-        $events = $query->with(['tenant', 'brand', 'subject'])
+        // Do not eager load `subject`: ActivityRecorder stores subject_type = 'unknown' when subject is null,
+        // which breaks MorphTo (Class 'unknown' not found). Subjects are resolved safely in formatSubject().
+        $events = $query->with(['tenant', 'brand'])
             ->paginate($perPage)
             ->appends($request->except('page'));
 
@@ -2518,7 +2558,7 @@ class SiteAdminController extends Controller
         $brands = \App\Models\Brand::orderBy('name')->get(['id', 'name', 'tenant_id']);
         $eventTypes = \App\Enums\EventType::all();
         $actorTypes = ['user', 'system', 'api', 'guest'];
-        
+
         // Get unique subject types from recent events
         $subjectTypes = \App\Models\ActivityEvent::select('subject_type')
             ->distinct()
@@ -2528,16 +2568,16 @@ class SiteAdminController extends Controller
             ->toArray();
 
         // Format events for display
-        $planService = new \App\Services\PlanService();
+        $planService = new \App\Services\PlanService;
         $formattedEvents = $events->map(function ($event) use ($planService) {
             $tenant = $event->tenant;
             $hasPaidPlan = false;
-            
+
             if ($tenant) {
                 $currentPlan = $planService->getCurrentPlan($tenant);
                 $hasPaidPlan = $currentPlan !== 'free';
             }
-            
+
             return [
                 'id' => $event->id,
                 'event_type' => $event->event_type,
@@ -2599,7 +2639,7 @@ class SiteAdminController extends Controller
      */
     private function formatActor($event): ?array
     {
-        if (!$event->actor_type) {
+        if (! $event->actor_type) {
             return [
                 'type' => 'unknown',
                 'name' => 'Unknown',
@@ -2621,7 +2661,7 @@ class SiteAdminController extends Controller
                         // Ignore
                     }
                 }
-                
+
                 return [
                     'type' => 'admin',
                     'name' => $metadata['admin_name'] ?? 'Site Admin',
@@ -2633,6 +2673,7 @@ class SiteAdminController extends Controller
                     'is_system_action' => true, // Flag to indicate this was a system action initiated by admin
                 ];
             }
+
             return [
                 'type' => $event->actor_type,
                 'name' => ucfirst($event->actor_type),
@@ -2641,10 +2682,10 @@ class SiteAdminController extends Controller
 
         // For 'user' type, manually load the User model to avoid relationship errors
         // Also handle 'App\Models\User' class name format
-        $isUserType = $event->actor_type === 'user' || 
+        $isUserType = $event->actor_type === 'user' ||
                      $event->actor_type === 'App\\Models\\User' ||
                      str_contains($event->actor_type, 'User');
-        
+
         if ($isUserType && $event->actor_id) {
             try {
                 $user = \App\Models\User::find($event->actor_id);
@@ -2652,7 +2693,7 @@ class SiteAdminController extends Controller
                     return [
                         'type' => 'user',
                         'id' => $user->id,
-                        'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->email,
+                        'name' => trim(($user->first_name ?? '').' '.($user->last_name ?? '')) ?: $user->email,
                         'first_name' => $user->first_name,
                         'last_name' => $user->last_name,
                         'email' => $user->email,
@@ -2667,6 +2708,7 @@ class SiteAdminController extends Controller
         // Handle class name formats (e.g., "App\Models\User")
         if (str_contains($event->actor_type, '\\')) {
             $className = class_basename($event->actor_type);
+
             return [
                 'type' => strtolower($className),
                 'name' => $className,
@@ -2682,38 +2724,70 @@ class SiteAdminController extends Controller
 
     /**
      * Format subject for display.
+     *
+     * Never access $event->subject (MorphTo): subject_type may be the literal string "unknown"
+     * (see ActivityRecorder::resolveSubject) which is not a resolvable class.
      */
     private function formatSubject($event): ?array
     {
-        if (!$event->subject_type || !$event->subject_id) {
+        if (! $event->subject_type) {
             return null;
         }
 
-        if ($event->subject) {
-            $name = match (true) {
-                method_exists($event->subject, 'name') => $event->subject->name,
-                method_exists($event->subject, 'title') => $event->subject->title,
-                method_exists($event->subject, 'email') => $event->subject->email,
-                default => '#' . $event->subject->id,
-            };
-
+        if ((int) $event->subject_id === 0) {
             return [
                 'type' => $event->subject_type,
                 'id' => $event->subject_id,
-                'name' => $name,
+                'name' => $event->subject_type === 'unknown' ? '(no subject)' : '#0',
             ];
+        }
+
+        if ($event->subject_type === 'unknown' || ! str_contains($event->subject_type, '\\')) {
+            return [
+                'type' => $event->subject_type,
+                'id' => $event->subject_id,
+                'name' => '#'.$event->subject_id,
+            ];
+        }
+
+        if (! class_exists($event->subject_type)) {
+            return [
+                'type' => $event->subject_type,
+                'id' => $event->subject_id,
+                'name' => '#'.$event->subject_id,
+            ];
+        }
+
+        try {
+            $subject = $event->subject_type::query()->find($event->subject_id);
+            if ($subject) {
+                $name = match (true) {
+                    isset($subject->name) => $subject->name,
+                    isset($subject->title) => $subject->title,
+                    isset($subject->email) => $subject->email,
+                    default => '#'.$subject->id,
+                };
+
+                return [
+                    'type' => $event->subject_type,
+                    'id' => $event->subject_id,
+                    'name' => $name,
+                ];
+            }
+        } catch (\Throwable $e) {
+            // Fall through to generic fallback
         }
 
         return [
             'type' => $event->subject_type,
             'id' => $event->subject_id,
-            'name' => '#' . $event->subject_id,
+            'name' => '#'.$event->subject_id,
         ];
     }
 
     /**
      * Get the plan prefix label (Comped, Trial, Forced, etc.)
-     * 
+     *
      * Uses billing_status for comped/trial accounts instead of generic "Override"
      * This is internal-only labeling for admin purposes.
      */
@@ -2724,28 +2798,28 @@ class SiteAdminController extends Controller
         if ($tenant->billing_status === 'comped') {
             return 'Comped'; // No revenue, expenses still apply
         }
-        
+
         if ($tenant->billing_status === 'trial') {
             return 'Trial'; // No revenue during trial, expenses still apply
         }
-        
+
         // Check if manually overridden (legacy - before billing_status was added)
         // For accounts with manual_plan_override but no billing_status set, treat as comped
-        if ($tenant->manual_plan_override && !$tenant->stripe_id) {
+        if ($tenant->manual_plan_override && ! $tenant->stripe_id) {
             // TODO: Set billing_status to 'comped' when updating plan manually
             return 'Comped';
         }
-        
+
         // Check if externally managed (e.g., Shopify)
         if ($planService->isExternallyManaged($tenant)) {
             return 'Forced';
         }
-        
+
         // Check if not paid (no active subscription) but not free plan
-        if ($planName !== 'free' && (!$latestSubscription || $latestSubscription->stripe_status !== 'active')) {
+        if ($planName !== 'free' && (! $latestSubscription || $latestSubscription->stripe_status !== 'active')) {
             return 'Forced';
         }
-        
+
         return null;
     }
 
@@ -2805,7 +2879,7 @@ class SiteAdminController extends Controller
             return back()->with('success', "All subscriptions for {$tenant->name} have been reset. They can now create a new subscription.");
         } catch (\Exception $e) {
             return back()->withErrors([
-                'subscription' => 'Failed to reset subscriptions: ' . $e->getMessage(),
+                'subscription' => 'Failed to reset subscriptions: '.$e->getMessage(),
             ]);
         }
     }

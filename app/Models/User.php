@@ -17,7 +17,7 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, HasRoles, RecordsActivity;
+    use HasFactory, HasRoles, Notifiable, RecordsActivity;
 
     /**
      * Custom event names for activity logging.
@@ -46,6 +46,7 @@ class User extends Authenticatable
         'state',
         'zip',
         'suspended_at',
+        'last_login_at',
     ];
 
     /**
@@ -77,6 +78,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'suspended_at' => 'datetime',
+            'last_login_at' => 'datetime',
             'password' => 'hashed',
         ];
     }
@@ -86,7 +88,7 @@ class User extends Authenticatable
      */
     public function getNameAttribute(): string
     {
-        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
+        return trim(($this->first_name ?? '').' '.($this->last_name ?? ''));
     }
 
     /**
@@ -117,7 +119,9 @@ class User extends Authenticatable
      */
     public function tenants(): BelongsToMany
     {
-        return $this->belongsToMany(Tenant::class)->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(Tenant::class)
+            ->withPivot(['role', 'is_agency_managed', 'agency_tenant_id'])
+            ->withTimestamps();
     }
 
     /**
@@ -135,8 +139,21 @@ class User extends Authenticatable
     }
 
     /**
+     * True when this user's membership on the tenant is provisioned by an agency link (not a direct invite).
+     */
+    public function isAgencyManagedMemberOf(Tenant $tenant): bool
+    {
+        $row = DB::table('tenant_user')
+            ->where('tenant_id', $tenant->id)
+            ->where('user_id', $this->id)
+            ->first();
+
+        return $row && (bool) ($row->is_agency_managed ?? false);
+    }
+
+    /**
      * Get the brands that this user belongs to.
-     * 
+     *
      * Phase MI-1: This relationship includes all pivots (active and removed).
      * Use activeBrandMembership() or filter by removed_at IS NULL for active memberships.
      */
@@ -145,6 +162,34 @@ class User extends Authenticatable
         return $this->belongsToMany(Brand::class)
             ->withPivot('role', 'requires_approval', 'removed_at')
             ->withTimestamps();
+    }
+
+    /**
+     * Per-user instance cache: brand IDs from the brand_user pivot (equivalent to
+     * brands()->where('brands.id', $id)->exists() without N EXISTS queries).
+     *
+     * @var list<string>|null
+     */
+    protected ?array $assignedBrandIdsCache = null;
+
+    /**
+     * Whether this user has a brand_user row for the given brand.
+     * Caches the full id list on first call to fix N+1 in CategoryPolicy::view and similar loops.
+     */
+    public function isAssignedToBrandId(string|int|null $brandId): bool
+    {
+        if ($brandId === null || $brandId === '') {
+            return false;
+        }
+
+        if ($this->assignedBrandIdsCache === null) {
+            $this->assignedBrandIdsCache = $this->brands()
+                ->pluck('brands.id')
+                ->map(fn ($id) => (string) $id)
+                ->all();
+        }
+
+        return in_array((string) $brandId, $this->assignedBrandIdsCache, true);
     }
 
     /**
@@ -219,32 +264,30 @@ class User extends Authenticatable
 
     /**
      * Set the user's role for a specific tenant.
-     * 
-     * @param Tenant $tenant
-     * @param string $role
-     * @param bool $bypassOwnerCheck If true, allows owner role assignment (for ownership transfers)
-     * @return void
+     *
+     * @param  bool  $bypassOwnerCheck  If true, allows owner role assignment (for ownership transfers)
+     *
      * @throws \App\Exceptions\CannotAssignOwnerRoleException If trying to assign owner role and current user is not platform super-owner
      * @throws \InvalidArgumentException If role is invalid
      */
     public function setRoleForTenant(Tenant $tenant, string $role, bool $bypassOwnerCheck = false): void
     {
         // Validate role using RoleRegistry
-        if (!\App\Support\Roles\RoleRegistry::isValidTenantRole($role)) {
+        if (! \App\Support\Roles\RoleRegistry::isValidTenantRole($role)) {
             throw new \InvalidArgumentException(
-                "Invalid tenant role: {$role}. Valid roles are: " . implode(', ', \App\Support\Roles\RoleRegistry::tenantRoles())
+                "Invalid tenant role: {$role}. Valid roles are: ".implode(', ', \App\Support\Roles\RoleRegistry::tenantRoles())
             );
         }
-        
+
         // Prevent direct owner role assignment - must use ownership transfer workflow
-        if (strtolower($role) === 'owner' && !$bypassOwnerCheck) {
+        if (strtolower($role) === 'owner' && ! $bypassOwnerCheck) {
             // Allow if tenant has no owner (initial setup case)
             $currentOwner = $tenant->owner();
             if ($currentOwner) {
                 $currentUser = \Illuminate\Support\Facades\Auth::user();
-                
+
                 // Only platform super-owner (user ID 1) can directly assign owner role (break-glass exception)
-                if (!$currentUser || $currentUser->id !== 1) {
+                if (! $currentUser || $currentUser->id !== 1) {
                     throw new \App\Exceptions\CannotAssignOwnerRoleException(
                         $tenant,
                         $this,
@@ -273,12 +316,12 @@ class User extends Authenticatable
     {
         $allRoles = $this->getRoleNames()->toArray();
         $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
-        
+
         $filtered = array_filter(
             $allRoles,
-            fn($role) => in_array($role, $siteRoleNames)
+            fn ($role) => in_array($role, $siteRoleNames)
         );
-        
+
         // Use array_values to ensure it's a proper array, not an object with numeric keys
         return array_values($filtered);
     }
@@ -296,8 +339,9 @@ class User extends Authenticatable
 
     /**
      * Get valid brand roles.
-     * 
+     *
      * @deprecated Use RoleRegistry::brandRoles() instead
+     *
      * @return array<string> Valid brand role names
      */
     public static function getValidBrandRoles(): array
@@ -307,11 +351,10 @@ class User extends Authenticatable
 
     /**
      * Phase MI-1: Get active brand membership information.
-     * 
+     *
      * Centralizes brand membership resolution with integrity checks.
      * Verifies tenant membership, brand_user existence, and active status.
-     * 
-     * @param Brand $brand
+     *
      * @return array{role: string|null, requires_approval: bool}|null Returns null if no active membership
      */
     public function activeBrandMembership(Brand $brand): ?array
@@ -321,31 +364,32 @@ class User extends Authenticatable
         if (! $this->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
             return null;
         }
-        
+
         // Query for active brand_user pivot (removed_at IS NULL)
         $pivot = DB::table('brand_user')
             ->where('user_id', $this->id)
             ->where('brand_id', $brand->id)
             ->whereNull('removed_at') // Phase MI-1: Only active memberships
             ->first();
-        
-        if (!$pivot) {
+
+        if (! $pivot) {
             return null;
         }
-        
+
         $role = $pivot->role ?? null;
-        
+
         // Validate role - if invalid, log warning and return null
         // NO automatic conversion - invalid roles should be fixed manually
-        if ($role && !\App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
+        if ($role && ! \App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
             \Log::warning('[User] Invalid brand role detected in database', [
                 'user_id' => $this->id,
                 'brand_id' => $brand->id,
                 'invalid_role' => $role,
             ]);
+
             return null; // Return null for invalid roles
         }
-        
+
         return [
             'role' => $role,
             'requires_approval' => (bool) ($pivot->requires_approval ?? false),
@@ -354,18 +398,19 @@ class User extends Authenticatable
 
     /**
      * Get the user's role for a specific brand.
-     * 
+     *
      * Phase MI-1: Now uses activeBrandMembership for integrity.
      */
     public function getRoleForBrand(Brand $brand): ?string
     {
         $membership = $this->activeBrandMembership($brand);
+
         return $membership['role'] ?? null;
     }
 
     /**
      * Set the user's role for a specific brand.
-     * 
+     *
      * Phase MI-1: Handles soft-deleted pivots by restoring them.
      * Prevents duplicate active memberships.
      * NO automatic conversion - invalid roles must be validated before calling this method.
@@ -374,18 +419,18 @@ class User extends Authenticatable
     public function setRoleForBrand(Brand $brand, string $role): void
     {
         // Validate role using RoleRegistry - throw exception if invalid
-        if (!\App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
+        if (! \App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
             throw new \InvalidArgumentException(
-                "Invalid brand role: {$role}. Valid roles are: " . implode(', ', \App\Support\Roles\RoleRegistry::brandRoles())
+                "Invalid brand role: {$role}. Valid roles are: ".implode(', ', \App\Support\Roles\RoleRegistry::brandRoles())
             );
         }
-        
+
         // Phase MI-1: Check for existing pivot (including soft-deleted)
         $existingPivot = DB::table('brand_user')
             ->where('user_id', $this->id)
             ->where('brand_id', $brand->id)
             ->first();
-        
+
         // Phase MI-1: Guard against duplicate active memberships
         // If another active membership exists (shouldn't happen, but defensive check)
         $activeCount = DB::table('brand_user')
@@ -393,8 +438,8 @@ class User extends Authenticatable
             ->where('brand_id', $brand->id)
             ->whereNull('removed_at')
             ->count();
-        
-        if ($activeCount > 0 && (!$existingPivot || $existingPivot->removed_at !== null)) {
+
+        if ($activeCount > 0 && (! $existingPivot || $existingPivot->removed_at !== null)) {
             // Another active membership exists - this is a data integrity issue
             \Log::error('[User::setRoleForBrand] Duplicate active membership detected', [
                 'user_id' => $this->id,
@@ -403,7 +448,7 @@ class User extends Authenticatable
             ]);
             throw new \RuntimeException('Duplicate active brand membership detected. Please run diagnostic command to fix.');
         }
-        
+
         if ($existingPivot) {
             // Pivot exists - update it and clear removed_at if it was soft-deleted
             DB::table('brand_user')
@@ -430,27 +475,27 @@ class User extends Authenticatable
     public function hasPermissionForBrand(Brand $brand, string $permission): bool
     {
         $tenant = $brand->tenant;
-        
+
         // Check tenant-level access first
         $tenantRole = $this->getRoleForTenant($tenant);
-        
+
         // Admin/Owner at tenant level have full access to all brands
-        if (in_array($tenantRole, ['admin', 'owner'])) {
+        if (in_array($tenantRole, ['admin', 'owner', 'agency_admin'], true)) {
             return $this->hasPermissionForTenant($tenant, $permission);
         }
-        
+
         // Phase MI-1: Check active brand membership
         $membership = $this->activeBrandMembership($brand);
-        if (!$membership) {
+        if (! $membership) {
             return false;
         }
-        
+
         // Get brand role and check permissions
         $brandRole = $membership['role'];
-        if (!$brandRole) {
+        if (! $brandRole) {
             return false;
         }
-        
+
         // Check if brand role has permission
         $role = \Spatie\Permission\Models\Role::where('name', $brandRole)->first();
         if ($role) {
@@ -471,9 +516,9 @@ class User extends Authenticatable
      * Check if user has a permission in the given tenant/brand context.
      * Uses AuthPermissionService for unified backend permission checks.
      *
-     * @param string $permission Permission string (e.g. 'team.manage', 'asset.view')
-     * @param Tenant|null $tenant Tenant context (null for site-only checks)
-     * @param Brand|null $brand Brand context (optional, for brand-scoped permissions)
+     * @param  string  $permission  Permission string (e.g. 'team.manage', 'asset.view')
+     * @param  Tenant|null  $tenant  Tenant context (null for site-only checks)
+     * @param  Brand|null  $brand  Brand context (optional, for brand-scoped permissions)
      */
     public function canForContext(string $permission, ?Tenant $tenant = null, ?Brand $brand = null): bool
     {
@@ -493,7 +538,7 @@ class User extends Authenticatable
         if ($tenantRole) {
             $permissionMap = \App\Support\Roles\PermissionMap::tenantPermissions();
             $rolePermissions = $permissionMap[strtolower($tenantRole)] ?? [];
-            
+
             // Owner/Admin have all permissions via PermissionMap
             if (in_array($permission, $rolePermissions)) {
                 return true;
@@ -503,7 +548,7 @@ class User extends Authenticatable
         // Define site-specific permissions that should check Spatie permissions
         $siteSpecificPermissions = ['company.manage', 'permissions.manage'];
         $isSitePermission = in_array($permission, $siteSpecificPermissions) || str_starts_with($permission, 'site.');
-        
+
         // For site permissions, check Spatie permissions first
         if ($isSitePermission && $this->can($permission)) {
             return true;
@@ -511,7 +556,7 @@ class User extends Authenticatable
 
         // For ALL permissions (both company and site), check tenant role permissions
         // This ensures company permissions are ONLY checked via tenant role
-        if (!$tenantRole) {
+        if (! $tenantRole) {
             return false;
         }
 
@@ -559,9 +604,6 @@ class User extends Authenticatable
      * Check if user is disabled due to plan limits for a specific tenant.
      * Owner is never disabled due to plan limits.
      * Owner is determined by having 'owner' role OR being the first user by created_at.
-     * 
-     * @param \App\Models\Tenant $tenant
-     * @return bool
      */
     public function isDisabledByPlanLimit(Tenant $tenant): bool
     {
@@ -570,10 +612,10 @@ class User extends Authenticatable
         if ($tenant->isOwner($this)) {
             return false;
         }
-        
+
         $planService = app(\App\Services\PlanService::class);
         $enabledUsers = $tenant->getEnabledUsers($planService);
-        
+
         return in_array($this->id, $enabledUsers['disabled']);
     }
 
@@ -581,7 +623,6 @@ class User extends Authenticatable
      * Send the password reset notification.
      *
      * @param  string  $token
-     * @return void
      */
     public function sendPasswordResetNotification($token): void
     {

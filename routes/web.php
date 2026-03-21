@@ -171,7 +171,6 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
         Route::put('/companies/settings/download-policy', [\App\Http\Controllers\CompanyController::class, 'updateDownloadPolicy'])->name('companies.settings.download-policy');
-        Route::put('/companies/settings/widgets', [\App\Http\Controllers\CompanyController::class, 'updateWidgetSettings'])->name('companies.settings.widgets.update');
         Route::get('/companies/permissions', [\App\Http\Controllers\CompanyController::class, 'permissions'])->name('companies.permissions');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
@@ -181,6 +180,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
         Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
+        Route::get('/companies/managed', [\App\Http\Controllers\CompanyController::class, 'managedCompanies'])->name('companies.managed');
 
         // Phase AG-7: Agency Partner Dashboard (read-only)
         Route::get('/agency/dashboard', [\App\Http\Controllers\AgencyDashboardController::class, 'index'])->name('agency.dashboard');
@@ -206,6 +206,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Phase J.2.5: AI settings API endpoints (company admins only)
         Route::get('/api/companies/ai-settings', [\App\Http\Controllers\CompanyController::class, 'getAiSettings'])->name('companies.ai-settings');
         Route::patch('/api/companies/ai-settings', [\App\Http\Controllers\CompanyController::class, 'updateAiSettings'])->name('companies.ai-settings.update');
+        Route::post('/api/companies/ai-settings/run-insights', [\App\Http\Controllers\CompanyController::class, 'runMetadataInsightsNow'])->name('companies.ai-settings.run-insights');
 
         // Phase J.2.6: Tag quality metrics API endpoints (company admins only)
         Route::get('/api/companies/ai-tag-metrics', [\App\Http\Controllers\CompanyController::class, 'getTagQualityMetrics'])->name('companies.ai-tag-metrics');
@@ -213,6 +214,12 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
         // Company slug availability checking
         Route::get('/api/companies/check-slug', [\App\Http\Controllers\CompanyController::class, 'checkSlugAvailability'])->name('companies.check-slug');
+
+        // Linked agencies (client tenant grants RBAC access to agency tenant users)
+        Route::get('/api/tenant/agencies', [\App\Http\Controllers\TenantAgencyController::class, 'index'])->name('api.tenant.agencies.index');
+        Route::get('/api/tenant/agencies/search', [\App\Http\Controllers\TenantAgencyController::class, 'searchAgencies'])->name('api.tenant.agencies.search');
+        Route::post('/api/tenant/agencies', [\App\Http\Controllers\TenantAgencyController::class, 'store'])->name('api.tenant.agencies.store');
+        Route::delete('/api/tenant/agencies/{tenantAgency}', [\App\Http\Controllers\TenantAgencyController::class, 'destroy'])->name('api.tenant.agencies.destroy');
 
         // Company team management API (paginated users, add brand access)
         Route::get('/api/companies/users', [\App\Http\Controllers\CompanyTeamApiController::class, 'users'])->name('api.companies.users');
@@ -341,6 +348,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/permissions/create', [\App\Http\Controllers\SiteAdminController::class, 'createPermission'])->name('admin.permissions.create');
     Route::post('/admin/companies/{tenant}/add-user', [\App\Http\Controllers\SiteAdminController::class, 'addUserToCompany'])->name('admin.companies.add-user');
     Route::delete('/admin/companies/{tenant}/users/{user}', [\App\Http\Controllers\SiteAdminController::class, 'removeUserFromCompany'])->name('admin.companies.remove-user');
+    Route::delete('/admin/companies/{tenant}/agency-links/{tenantAgency}', [\App\Http\Controllers\SiteAdminController::class, 'detachAgencyLink'])->name('admin.companies.agency-links.detach');
     Route::put('/admin/companies/{tenant}/users/{user}/role', [\App\Http\Controllers\SiteAdminController::class, 'updateUserRole'])->name('admin.companies.users.update-role');
     Route::post('/admin/companies/{tenant}/users/{user}/cancel', [\App\Http\Controllers\SiteAdminController::class, 'cancelAccount'])->name('admin.companies.users.cancel');
     Route::post('/admin/companies/{tenant}/users/{user}/delete', [\App\Http\Controllers\SiteAdminController::class, 'deleteAccount'])->name('admin.companies.users.delete');
@@ -537,14 +545,19 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
             // Pending AI Suggestions API (dashboard tile)
             Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');
-            // AI Review Workspace (split tags / categories)
+            // AI Review Workspace (tags / categories / value & field suggestions from insights tables)
             Route::get('/api/ai/review', [\App\Http\Controllers\AiReviewController::class, 'data'])->name('api.ai.review');
+            Route::post('/api/ai/review/value-suggestions/{id}/accept', [\App\Http\Controllers\AiReviewController::class, 'acceptValueSuggestion'])->whereNumber('id')->name('api.ai.review.value-suggestions.accept');
+            Route::post('/api/ai/review/value-suggestions/{id}/reject', [\App\Http\Controllers\AiReviewController::class, 'rejectValueSuggestion'])->whereNumber('id')->name('api.ai.review.value-suggestions.reject');
+            Route::post('/api/ai/review/field-suggestions/{id}/accept', [\App\Http\Controllers\AiReviewController::class, 'acceptFieldSuggestion'])->whereNumber('id')->name('api.ai.review.field-suggestions.accept');
+            Route::post('/api/ai/review/field-suggestions/{id}/reject', [\App\Http\Controllers\AiReviewController::class, 'rejectFieldSuggestion'])->whereNumber('id')->name('api.ai.review.field-suggestions.reject');
 
             // TASK 2: Pending metadata approvals endpoint (UI-only, does not alter approval logic)
             Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');
 
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/brand-intelligence', [\App\Http\Controllers\AssetMetadataController::class, 'brandIntelligence'])->name('assets.brand-intelligence');
+            Route::post('/assets/{asset}/brand-intelligence/feedback', [\App\Http\Controllers\AssetMetadataController::class, 'storeBrandIntelligenceFeedback'])->name('assets.brand-intelligence.feedback');
             Route::post('/assets/{asset}/rescore', [\App\Http\Controllers\AssetMetadataController::class, 'rescore'])->name('assets.rescore');
             Route::post('/assets/{asset}/reanalyze', [\App\Http\Controllers\AssetMetadataController::class, 'reanalyze'])->name('assets.reanalyze');
             Route::get('/assets/{asset}/incidents', [\App\Http\Controllers\AssetMetadataController::class, 'getIncidents'])->name('assets.incidents');
@@ -782,6 +795,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/categories/add-system-template', [\App\Http\Controllers\CategoryController::class, 'addSystemTemplate'])->name('brands.categories.add-system-template');
             Route::put('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'update'])->name('brands.categories.update');
             Route::patch('/api/brands/{brand}/categories/{category}/visibility', [\App\Http\Controllers\CategoryController::class, 'updateVisibility'])->name('brands.categories.visibility');
+            Route::patch('/api/brands/{brand}/categories/{category}/ebi-enabled', [\App\Http\Controllers\CategoryController::class, 'patchEbiEnabled'])->name('brands.categories.ebi-enabled');
             Route::delete('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'destroy'])->name('brands.categories.destroy');
             Route::put('/api/brands/{brand}/categories/reorder', [\App\Http\Controllers\CategoryController::class, 'reorder'])->name('brands.categories.reorder');
             Route::post('/brands/{brand}/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('brands.categories.update-order');

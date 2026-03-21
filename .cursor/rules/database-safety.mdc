@@ -35,7 +35,11 @@ composer test:db-fresh
 ./vendor/bin/sail exec laravel.test php artisan test
 ```
 
-Tests use `DB_DATABASE=testing` (phpunit.xml + .env.testing). Your `laravel` database is never modified.
+Tests use `DB_DATABASE=testing` (`phpunit.xml` + `tests/bootstrap.php` forces it before autoload + `.env.testing`). Your main dev database must never be the target of `RefreshDatabase`.
+
+**Agents: never run** `php vendor/bin/phpunit` **on the host** outside Sail if the host `.env` could point PHPUnit at the same MySQL database name as development — use `./vendor/bin/sail test` or ensure `tests/bootstrap.php` is the PHPUnit bootstrap (see `phpunit.xml`).
+
+See `docs/TESTING_DATABASE.md`.
 
 ## Main Database
 

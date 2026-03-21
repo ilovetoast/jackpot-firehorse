@@ -5,6 +5,7 @@ namespace App\Services\BrandIntelligence;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
+use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandVisualReference;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AiMetadataGenerationService;
@@ -18,7 +19,7 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v1_reference_embedding_v5_ai_insight_refine';
+    public const ENGINE_VERSION = 'v1_generative_validation';
 
     public const AI_USAGE_TYPE = 'brand_intelligence_ai';
 
@@ -83,6 +84,102 @@ class BrandIntelligenceEngine
 
         $confidence = $this->confidenceForSignals($signals);
 
+        $feedback = BrandIntelligenceFeedback::query()
+            ->where('asset_id', $asset->id)
+            ->latest()
+            ->limit(5)
+            ->get();
+
+        $positive = $feedback->where('rating', 'up')->count();
+        $negative = $feedback->where('rating', 'down')->count();
+        $feedbackScore = $positive - $negative;
+
+        if ($feedbackScore > 1) {
+            $confidence += 0.1;
+        }
+        if ($feedbackScore < -1) {
+            $confidence -= 0.15;
+        }
+        $confidence = max(0.0, min(1.0, $confidence));
+        $confidence = round($confidence, 2);
+
+        $clusterSpread = $refBlock['reference_cluster']['spread'] ?? null;
+        if ($clusterSpread !== null && $clusterSpread > 0.4) {
+            $confidence -= 0.1;
+            $confidence = max(0.0, min(1.0, round($confidence, 2)));
+        }
+
+        $signalStrength = $this->computeSignalStrength($signals, $refBlock['reference_similarity']);
+
+        $keywordRelevance = $this->computeDomainRelevance($asset, $brand);
+        $embeddingRelevance = $this->computeEmbeddingDomainRelevance($asset, $brand);
+
+        $domainRelevance = $keywordRelevance;
+
+        if ($embeddingRelevance !== null) {
+            $domainRelevance = round(
+                ($keywordRelevance * 0.4) + ($embeddingRelevance * 0.6),
+                2
+            );
+        }
+
+        if ($embeddingRelevance !== null && $embeddingRelevance < 0.35) {
+            $domainRelevance = min($domainRelevance, 0.35);
+        }
+
+        if ($domainRelevance < 0.3) {
+            $confidence -= 0.2;
+        } elseif ($domainRelevance < 0.5) {
+            $confidence -= 0.1;
+        } elseif ($domainRelevance > 0.7) {
+            $confidence += 0.05;
+        }
+        $confidence = max(0.0, min(1.0, round($confidence, 2)));
+
+        if ($domainRelevance < 0.3) {
+            $score -= 15;
+        } elseif ($domainRelevance < 0.5) {
+            $score -= 8;
+        }
+        $score = max(0, min(100, $score));
+
+        $score = $this->applyConfidenceAndSignalAdjustments(
+            $score,
+            $confidence,
+            $signalStrength,
+            $refBlock['reference_similarity']
+        );
+
+        $preBreakdown = [
+            'reference_similarity' => $refBlock['reference_similarity'],
+            'confidence' => $confidence,
+        ];
+        $generativeValidationPayload = [
+            'used' => false,
+            'score' => null,
+            'confidence' => 0,
+        ];
+        if ($this->shouldRunGenerativeValidation($asset, $preBreakdown)) {
+            $gv = $this->runGenerativeValidation($asset, $brand, $dryRun);
+            if ($gv !== null) {
+                $aiScore = $gv['score'] / 100.0;
+                if ($aiScore < 0.4) {
+                    $score -= 10;
+                }
+                $score = max(0, min(100, $score));
+                $confidence = max($confidence, $gv['confidence']);
+                $confidence = max(0.0, min(1.0, round($confidence, 2)));
+                $generativeValidationPayload = [
+                    'used' => true,
+                    'score' => $gv['score'],
+                    'confidence' => $gv['confidence'],
+                ];
+                if (! $dryRun) {
+                    $this->logBrandIntelligenceAiUsage($asset);
+                }
+            }
+        }
+
         $baseBreakdown = $this->mergeSignalBreakdown([
             'source' => 'ebi_asset_score',
             'scoring_basis' => self::SCORING_BASIS_SINGLE_ASSET,
@@ -92,8 +189,33 @@ class BrandIntelligenceEngine
 
         $withRefs = $this->applySignalInterpretationToBreakdown($baseBreakdown, $signals);
         $withRefs['reference_similarity'] = $refBlock['reference_similarity'];
-        $level = $this->mapScoreToLevel($score);
+        $level = $this->mapScoreToLevel($score, $signalStrength, $confidence, $domainRelevance);
         $withRefs['level'] = $level;
+        $withRefs['signal_strength'] = $signalStrength;
+        $withRefs['domain_relevance'] = [
+            'score' => $domainRelevance,
+            'keyword' => $keywordRelevance,
+            'embedding' => $embeddingRelevance,
+        ];
+        $withRefs['insufficient_signal'] = $this->isInsufficientSignal($signalStrength, $confidence, $domainRelevance);
+        $withRefs['confidence_reason'] = [
+            'low_signal' => $signalStrength < 0.5,
+            'no_references' => empty($refBlock['reference_similarity']['used']),
+            'missing_typography' => ! $signals['has_typography'],
+        ];
+        $withRefs['reference_quality'] = $refBlock['reference_quality'];
+        $withRefs['reference_stability'] = $refBlock['reference_stability'] ?? ['consistent' => false];
+        $withRefs['reference_cluster'] = $refBlock['reference_cluster'] ?? [
+            'spread' => null,
+            'tight_cluster' => false,
+        ];
+        $withRefs['feedback'] = [
+            'count' => $feedback->count(),
+            'score' => $feedbackScore,
+        ];
+
+        $withRefs['generative_validation'] = $generativeValidationPayload;
+        $withRefs['confidence'] = $confidence;
 
         $recs = $this->generateRecommendations($withRefs);
         $withRefs['recommendations'] = $recs['recommendations'];
@@ -103,7 +225,7 @@ class BrandIntelligenceEngine
         $aiInsightPayload = $this->generateAIInsight($asset, $withRefs, $dryRun);
         unset($withRefs['_gate_confidence'], $withRefs['_gate_level']);
 
-        $aiUsed = false;
+        $aiUsed = ($generativeValidationPayload['used'] ?? false) === true;
         if ($aiInsightPayload !== null && isset($aiInsightPayload['ai_insight']['text'])) {
             $withRefs['ai_insight'] = $aiInsightPayload['ai_insight'];
             $aiUsed = true;
@@ -544,7 +666,7 @@ class BrandIntelligenceEngine
 
     /**
      * Compare asset embedding to brand visual reference embeddings (same brand, refs with embeddings).
-     * Uses mean of top-3 cosine similarities, then maps to 0–100. Does not call compliance.
+     * Top-5 mean of cosine similarities (noise filtered), variance for stability. Does not call compliance.
      *
      * @return array{
      *     reference_similarity: array{
@@ -552,61 +674,124 @@ class BrandIntelligenceEngine
      *         confidence: float,
      *         reference_count: int,
      *         normalized: float|null,
-     *         used: bool
+     *         used: bool,
+     *         weighted: bool,
+     *         top_match_ids: list<int|string>,
+     *         variance: float|null
      *     },
-     *     normalized_similarity: float|null
+     *     normalized_similarity: float|null,
+     *     reference_quality: array{has_primary: bool, reference_count: int, mean: float|null, variance: float|null},
+     *     reference_stability: array{consistent: bool},
+     *     reference_cluster: array{spread: float|null, tight_cluster: bool}
      * }
      */
     protected function buildReferenceSimilarityBreakdown(Asset $asset, Brand $brand): array
     {
-        $refs = BrandVisualReference::query()
+        $query = BrandVisualReference::query()
             ->where('brand_id', $brand->id)
-            ->whereNotNull('embedding_vector')
-            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
-            ->get();
+            ->whereNotNull('embedding_vector');
+
+        if (Schema::hasColumn('brand_visual_references', 'is_primary')) {
+            $query->orderByDesc('is_primary');
+        }
+        if (Schema::hasColumn('brand_visual_references', 'weight')) {
+            $query->orderByDesc('weight');
+        }
+
+        $refs = $query->limit(30)->get();
 
         $referenceCount = $refs->count();
+
+        $hasPrimaryColumn = Schema::hasColumn('brand_visual_references', 'is_primary');
+        $hasPrimary = $hasPrimaryColumn && $refs->contains(fn ($r) => (bool) ($r->is_primary ?? false));
+
+        $referenceQuality = [
+            'has_primary' => $hasPrimary,
+            'reference_count' => $referenceCount,
+            'mean' => null,
+            'variance' => null,
+        ];
 
         $assetEmbedding = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
         $assetVec = array_values($assetEmbedding?->embedding_vector ?? []);
 
+        $emptySimilarity = [
+            'score' => null,
+            'confidence' => 0.0,
+            'reference_count' => $referenceCount,
+            'normalized' => null,
+            'used' => false,
+            'weighted' => false,
+            'top_match_ids' => [],
+            'variance' => null,
+        ];
+
         $empty = [
-            'reference_similarity' => [
-                'score' => null,
-                'confidence' => 0.0,
-                'reference_count' => $referenceCount,
-                'normalized' => null,
-                'used' => false,
-            ],
+            'reference_similarity' => $emptySimilarity,
             'normalized_similarity' => null,
+            'reference_quality' => $referenceQuality,
+            'reference_stability' => [
+                'consistent' => false,
+            ],
+            'reference_cluster' => [
+                'spread' => null,
+                'tight_cluster' => false,
+            ],
         ];
 
         if (empty($assetVec) || $referenceCount === 0) {
             return $empty;
         }
 
-        $similarities = [];
+        $pairScores = [];
         foreach ($refs as $ref) {
             $refVec = array_values($ref->embedding_vector ?? []);
-            if (empty($refVec) || count($refVec) !== count($assetVec)) {
+            if ($refVec === [] || ! $this->isSameVectorLength($assetVec, $refVec)) {
                 continue;
             }
-            $similarities[] = $this->cosineSimilarity($assetVec, $refVec);
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            $sim = max(0.0, min(1.0, $sim));
+            $pairScores[] = [
+                'id' => $ref->id,
+                'similarity' => $sim,
+            ];
         }
 
-        if ($similarities === []) {
+        $pairScores = array_values(array_filter(
+            $pairScores,
+            fn (array $m) => $m['similarity'] > 0.35
+        ));
+
+        if ($pairScores === []) {
             return $empty;
         }
 
-        rsort($similarities, SORT_NUMERIC);
-        $top = array_slice($similarities, 0, 3);
+        usort($pairScores, fn ($a, $b) => $b['similarity'] <=> $a['similarity']);
+        $topMatches = array_slice($pairScores, 0, 5);
+        $top = array_column($topMatches, 'similarity');
+
         $aggregate = array_sum($top) / count($top);
 
         $normalized = max(0.0, min(1.0, $aggregate));
         $scoreInt = (int) round($normalized * 100);
 
-        $validRefCount = count($similarities);
+        $variance = $this->computeVariance($top);
+
+        $clusterSpread = max($top) - min($top);
+
+        $validRefCount = count($pairScores);
         $confidence = round(min(1.0, 0.35 + 0.15 * min($validRefCount, 4)), 2);
+
+        if (count($top) < 3) {
+            $confidence = 0.3;
+        }
+
+        $confidence = max(0.0, min(1.0, round($confidence, 2)));
+
+        $topMatchIds = array_map(fn ($m) => $m['id'], $topMatches);
+
+        $referenceQuality['mean'] = round($aggregate, 2);
+        $referenceQuality['variance'] = round($variance, 3);
 
         return [
             'reference_similarity' => [
@@ -615,9 +800,40 @@ class BrandIntelligenceEngine
                 'reference_count' => $referenceCount,
                 'normalized' => round($normalized, 2),
                 'used' => true,
+                'weighted' => false,
+                'top_match_ids' => $topMatchIds,
+                'variance' => round($variance, 3),
             ],
             'normalized_similarity' => $normalized,
+            'reference_quality' => $referenceQuality,
+            'reference_stability' => [
+                'consistent' => $variance < 0.01,
+            ],
+            'reference_cluster' => [
+                'spread' => round($clusterSpread, 3),
+                'tight_cluster' => $clusterSpread < 0.15,
+            ],
         ];
+    }
+
+    /**
+     * Population variance of numeric values (0 if fewer than 2 values).
+     *
+     * @param  list<float>  $values
+     */
+    private function computeVariance(array $values): float
+    {
+        if (count($values) < 2) {
+            return 0.0;
+        }
+
+        $mean = array_sum($values) / count($values);
+        $sum = 0.0;
+        foreach ($values as $v) {
+            $sum += ($v - $mean) ** 2;
+        }
+
+        return $sum / count($values);
     }
 
     /**
@@ -630,6 +846,24 @@ class BrandIntelligenceEngine
     {
         if (($breakdown['level'] ?? null) === 'high') {
             return ['recommendations' => []];
+        }
+
+        if (($breakdown['domain_relevance']['score'] ?? 1) < 0.3) {
+            return [
+                'recommendations' => [
+                    'This asset may not match your brand\'s domain or subject matter',
+                    'Consider using content more aligned with your brand\'s core themes',
+                ],
+            ];
+        }
+
+        if (($breakdown['insufficient_signal'] ?? false) === true) {
+            return [
+                'recommendations' => [
+                    'Add reference images to establish brand alignment',
+                    'Provide more brand context (typography, tone, or tags)',
+                ],
+            ];
         }
 
         $ref = $breakdown['reference_similarity'] ?? [];
@@ -671,8 +905,14 @@ class BrandIntelligenceEngine
         ];
     }
 
-    protected function mapScoreToLevel(int $score): string
+    /**
+     * Maps numeric score to alignment level; may return "unknown" when signal is too weak to interpret.
+     */
+    protected function mapScoreToLevel(int $score, float $signalStrength, float $confidence, float $domainRelevance = 1.0): string
     {
+        if ($this->isInsufficientSignal($signalStrength, $confidence, $domainRelevance)) {
+            return 'unknown';
+        }
         if ($score < 50) {
             return 'low';
         }
@@ -681,6 +921,325 @@ class BrandIntelligenceEngine
         }
 
         return 'high';
+    }
+
+    /**
+     * Weighted sum of available evaluation signals (0–1).
+     *
+     * TODO: Next phase — incorporate approved tags into signalStrength.
+     */
+    private function computeSignalStrength(array $signals, array $referenceSimilarity): float
+    {
+        $s = 0.0;
+
+        if (! empty($signals['has_visual'])) {
+            $s += 0.3;
+        }
+
+        if (! empty($signals['has_text'])) {
+            $s += 0.3;
+        }
+
+        if (! empty($signals['has_typography'])) {
+            $s += 0.2;
+        }
+
+        if (! empty($referenceSimilarity['used'])
+            && (($referenceSimilarity['confidence'] ?? 0) > 0.5)) {
+            $s += 0.2;
+        }
+
+        return round(min(1.0, $s), 2);
+    }
+
+    private function applyConfidenceAndSignalAdjustments(
+        int $score,
+        float $confidence,
+        float $signalStrength,
+        array $referenceSimilarity
+    ): int {
+        if ($signalStrength < 0.3) {
+            $score = min($score, 40);
+        } elseif ($signalStrength < 0.5) {
+            $score = min($score, 55);
+        }
+
+        if (empty($referenceSimilarity['used'])) {
+            $score = min($score, 65);
+        }
+
+        if ($confidence < 0.5) {
+            $score -= 10;
+        } elseif ($confidence < 0.6) {
+            $score -= 5;
+        }
+
+        return max(0, min(100, $score));
+    }
+
+    private function isInsufficientSignal(float $signalStrength, float $confidence, float $domainRelevance = 1.0): bool
+    {
+        return $signalStrength < 0.4 || $confidence < 0.45 || $domainRelevance < 0.3;
+    }
+
+    /**
+     * Tag / DNA keyword overlap → 0–1 (0.5 = neutral when tags or brand keywords are missing).
+     *
+     * TODO:
+     * Add category-aware domain weighting
+     * Add generative validation override
+     */
+    private function computeDomainRelevance(Asset $asset, Brand $brand): float
+    {
+        $tagQuery = DB::table('asset_tags')->where('asset_id', $asset->id);
+        if (Schema::hasColumn('asset_tags', 'approved')) {
+            $tagQuery->where('approved', true);
+        } else {
+            $tagQuery->whereIn('source', ['manual', 'user', 'manual_override']);
+        }
+
+        $tags = $tagQuery->pluck('tag')
+            ->map(fn ($t) => strtolower(trim((string) $t)))
+            ->filter()
+            ->values()
+            ->all();
+
+        $keywords = $this->collectBrandDomainKeywordStrings($brand);
+
+        if ($tags === [] || $keywords === []) {
+            return 0.5;
+        }
+
+        $matches = 0;
+        foreach ($tags as $tag) {
+            foreach ($keywords as $keyword) {
+                if ($keyword === '' || mb_strlen($keyword) < 2) {
+                    continue;
+                }
+                if (str_contains($tag, $keyword) || str_contains($keyword, $tag)) {
+                    $matches++;
+                    break;
+                }
+            }
+        }
+
+        $ratio = $matches / max(count($tags), 1);
+
+        return round(min(1.0, $ratio), 2);
+    }
+
+    /**
+     * Mean of top-5 cosine similarities vs brand visual reference embeddings (0–1 per pair, aligned with reference scoring).
+     */
+    private function computeEmbeddingDomainRelevance(Asset $asset, Brand $brand): ?float
+    {
+        $assetEmbedding = AssetEmbedding::query()
+            ->where('asset_id', $asset->id)
+            ->first();
+
+        if (! $assetEmbedding || empty($assetEmbedding->embedding_vector)) {
+            return null;
+        }
+
+        $assetVec = array_values($assetEmbedding->embedding_vector ?? []);
+
+        $refs = BrandVisualReference::query()
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector')
+            ->limit(25)
+            ->get();
+
+        if ($refs->isEmpty()) {
+            return null;
+        }
+
+        $scores = [];
+
+        foreach ($refs as $ref) {
+            $refVec = array_values($ref->embedding_vector ?? []);
+            if (! $this->isSameVectorLength($assetVec, $refVec)) {
+                continue;
+            }
+
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            $scores[] = max(0.0, min(1.0, $sim));
+        }
+
+        if ($scores === []) {
+            return null;
+        }
+
+        rsort($scores, SORT_NUMERIC);
+
+        $top = array_slice($scores, 0, 5);
+
+        return round(array_sum($top) / count($top), 2);
+    }
+
+    /**
+     * @param  list<float|int>  $a
+     * @param  list<float|int>  $b
+     */
+    private function isSameVectorLength(array $a, array $b): bool
+    {
+        return $a !== [] && $b !== [] && count($a) === count($b);
+    }
+
+    /**
+     * Flatten brand DNA strings into searchable keyword tokens (aligned with extractBrandContextForInsight paths).
+     *
+     * @return list<string>
+     */
+    private function collectBrandDomainKeywordStrings(Brand $brand): array
+    {
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $personality = is_array($payload['personality'] ?? null) ? $payload['personality'] : [];
+        $visual = is_array($payload['visual'] ?? null) ? $payload['visual'] : [];
+        $rules = is_array($payload['scoring_rules'] ?? null) ? $payload['scoring_rules'] : [];
+
+        $chunks = [];
+        foreach ($personality as $v) {
+            if (is_string($v) && trim($v) !== '') {
+                $chunks[] = $v;
+            }
+        }
+        foreach ($visual as $v) {
+            if (is_string($v) && trim($v) !== '') {
+                $chunks[] = $v;
+            }
+        }
+
+        $toneKeywords = $rules['tone_keywords'] ?? null;
+        if (is_array($toneKeywords)) {
+            foreach ($toneKeywords as $item) {
+                if (is_string($item)) {
+                    $chunks[] = $item;
+                } elseif (is_array($item)) {
+                    $t = $item['label'] ?? $item['value'] ?? $item['text'] ?? '';
+                    if (is_string($t) && trim($t) !== '') {
+                        $chunks[] = $t;
+                    }
+                }
+            }
+        }
+
+        $tokens = [];
+        foreach ($chunks as $chunk) {
+            foreach (preg_split('/[,;]+/u', $chunk) as $part) {
+                $part = strtolower(trim($part));
+                if ($part !== '') {
+                    $tokens[] = $part;
+                }
+            }
+        }
+
+        return array_values(array_unique($tokens));
+    }
+
+    /**
+     * Lightweight vision validation when references are absent and confidence is low.
+     */
+    private function shouldRunGenerativeValidation(Asset $asset, array $breakdown): bool
+    {
+        if (! $this->assetHasVisual($asset)) {
+            return false;
+        }
+
+        return ($breakdown['reference_similarity']['used'] ?? false) === false
+            && ($breakdown['confidence'] ?? 1) < 0.6;
+    }
+
+    /**
+     * @return array{score: int, confidence: float}|null
+     */
+    private function runGenerativeValidation(Asset $asset, Brand $brand, bool $dryRun): ?array
+    {
+        if ($dryRun) {
+            return null;
+        }
+
+        if (! $this->assetHasVisual($asset)) {
+            return null;
+        }
+
+        $imageDataUrl = $this->aiMetadataGenerationService->fetchThumbnailForVisionAnalysis($asset);
+        if ($imageDataUrl === null || $imageDataUrl === '') {
+            Log::info('[EBI] Generative validation skipped: no thumbnail for vision', ['asset_id' => $asset->id]);
+
+            return null;
+        }
+
+        $brand->loadMissing('brandModel');
+        $ctx = $this->extractBrandContextForInsight($brand);
+        $modelKey = 'gpt-4o-mini';
+        $modelName = config("ai.models.{$modelKey}.model_name", 'gpt-4o-mini');
+
+        $system = "You are evaluating if an image fits a brand's visual identity.";
+        $prompt = $system."\n\n"
+            .'Brand tone: '.($ctx['tone'] ?? 'Not specified')."\n"
+            .'Brand style: '.($ctx['visual_style'] ?? 'Not specified')."\n\n"
+            ."Respond with JSON only:\n"
+            ."{\n"
+            ."  \"score\": <integer 0-100>,\n"
+            ."  \"confidence\": <number 0-1>\n"
+            ."}\n"
+            ."score = how well the image fits the brand's visual identity (0-100). "
+            .'confidence = your confidence in that judgment (0-1).';
+
+        try {
+            $response = $this->aiProvider->analyzeImage($imageDataUrl, $prompt, [
+                'model' => $modelName,
+                'max_tokens' => 400,
+                'response_format' => ['type' => 'json_object'],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[EBI] Generative validation failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        return $this->parseGenerativeValidationResponse($response['text'] ?? '');
+    }
+
+    /**
+     * @return array{score: int, confidence: float}|null
+     */
+    private function parseGenerativeValidationResponse(string $text): ?array
+    {
+        $raw = trim($text);
+        if ($raw === '') {
+            return null;
+        }
+        if (preg_match('/```(?:json)?\s*(\{[\s\S]*?\})\s*```/m', $raw, $m)) {
+            $raw = $m[1];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        $score = $decoded['score'] ?? null;
+        $conf = $decoded['confidence'] ?? null;
+        if (! is_numeric($score) || ! is_numeric($conf)) {
+            return null;
+        }
+
+        $score = (int) round(max(0.0, min(100.0, (float) $score)));
+        $conf = (float) max(0.0, min(1.0, (float) $conf));
+
+        return [
+            'score' => $score,
+            'confidence' => round($conf, 2),
+        ];
     }
 
     /**

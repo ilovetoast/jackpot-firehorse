@@ -2,12 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\RunMetadataInsightsJob;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AiTagPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -20,7 +21,9 @@ class CompanyAiSettingsTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected User $admin;
+
     protected User $user;
 
     protected function setUp(): void
@@ -42,8 +45,8 @@ class CompanyAiSettingsTest extends TestCase
         $this->admin->tenants()->attach($this->tenant->id, [
             'permissions' => json_encode([
                 'company_settings.edit',
-                'ai.usage.view'
-            ])
+                'ai.usage.view',
+            ]),
         ]);
 
         // Create regular user without permission
@@ -53,7 +56,7 @@ class CompanyAiSettingsTest extends TestCase
         ]);
 
         $this->user->tenants()->attach($this->tenant->id, [
-            'permissions' => json_encode(['assets.view'])
+            'permissions' => json_encode(['assets.view']),
         ]);
 
         // Set up app context
@@ -77,7 +80,10 @@ class CompanyAiSettingsTest extends TestCase
                 'enable_ai_tag_auto_apply',
                 'ai_auto_tag_limit_mode',
                 'ai_auto_tag_limit_value',
-            ]
+                'ai_insights_enabled',
+                'last_insights_run_at',
+                'insights_pending_suggestions_count',
+            ],
         ]);
 
         // Check default values
@@ -99,7 +105,7 @@ class CompanyAiSettingsTest extends TestCase
 
         $response->assertStatus(403);
         $response->assertJson([
-            'error' => 'You do not have permission to view AI settings.'
+            'error' => 'You do not have permission to view AI settings.',
         ]);
     }
 
@@ -152,7 +158,7 @@ class CompanyAiSettingsTest extends TestCase
 
         $response->assertStatus(403);
         $response->assertJson([
-            'error' => 'You do not have permission to update AI settings.'
+            'error' => 'You do not have permission to update AI settings.',
         ]);
     }
 
@@ -214,10 +220,10 @@ class CompanyAiSettingsTest extends TestCase
 
         $response->assertOk();
         $settings = $response->json('settings');
-        
+
         // Updated setting
         $this->assertTrue($settings['disable_ai_tagging']);
-        
+
         // Other settings should remain unchanged
         $this->assertTrue($settings['enable_ai_tag_suggestions']);
         $this->assertFalse($settings['enable_ai_tag_auto_apply']);
@@ -239,7 +245,7 @@ class CompanyAiSettingsTest extends TestCase
 
         // Fetch settings again
         $response = $this->getJson('/app/api/companies/ai-settings');
-        
+
         $response->assertOk();
         $settings = $response->json('settings');
         $this->assertTrue($settings['disable_ai_tagging']);
@@ -271,7 +277,7 @@ class CompanyAiSettingsTest extends TestCase
         // Settings should be different (defaults) for other tenant
         $policyService = app(AiTagPolicyService::class);
         $otherSettings = $policyService->getTenantSettings($otherTenant);
-        
+
         $this->assertFalse($otherSettings['disable_ai_tagging']); // Should be default
     }
 
@@ -281,7 +287,7 @@ class CompanyAiSettingsTest extends TestCase
     public function test_ai_settings_no_tenant_context(): void
     {
         Auth::login($this->admin);
-        
+
         // Remove tenant context
         app()->instance('tenant', null);
 
@@ -294,5 +300,49 @@ class CompanyAiSettingsTest extends TestCase
         ]);
         $response->assertStatus(400);
         $response->assertJson(['error' => 'Tenant context not found']);
+    }
+
+    public function test_run_insights_now_as_admin_queues_job(): void
+    {
+        Queue::fake();
+
+        Auth::login($this->admin);
+        $this->tenant->update(['ai_insights_enabled' => true]);
+
+        $response = $this->postJson('/app/api/companies/ai-settings/run-insights');
+
+        $response->assertOk();
+        $response->assertJsonStructure(['message', 'settings']);
+
+        Queue::assertPushed(RunMetadataInsightsJob::class, function (RunMetadataInsightsJob $job) {
+            return $job->tenantId === $this->tenant->id && $job->forceBypassCooldown === true;
+        });
+    }
+
+    public function test_run_insights_now_when_disabled_returns_422(): void
+    {
+        Queue::fake();
+
+        Auth::login($this->admin);
+        $this->tenant->update(['ai_insights_enabled' => false]);
+
+        $response = $this->postJson('/app/api/companies/ai-settings/run-insights');
+
+        $response->assertStatus(422);
+        $response->assertJson(['error' => 'Enable Asset Field Intelligence before running a sync.']);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_run_insights_now_without_permission(): void
+    {
+        Queue::fake();
+
+        Auth::login($this->user);
+        $this->tenant->update(['ai_insights_enabled' => true]);
+
+        $response = $this->postJson('/app/api/companies/ai-settings/run-insights');
+
+        $response->assertStatus(403);
+        Queue::assertNothingPushed();
     }
 }

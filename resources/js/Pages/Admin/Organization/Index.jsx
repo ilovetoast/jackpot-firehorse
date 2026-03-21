@@ -11,6 +11,15 @@ import {
     DocumentIcon,
 } from '@heroicons/react/24/outline'
 
+function formatDateTime(iso) {
+    if (!iso) return '—'
+    try {
+        return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    } catch {
+        return '—'
+    }
+}
+
 /**
  * Organization Management - Companies and Users.
  * Moved from main Admin Dashboard per Command Center refactor.
@@ -259,6 +268,7 @@ export default function AdminOrganizationIndex({
                                                     <tr>
                                                         <th className="py-3 text-left text-sm font-semibold text-slate-900">User</th>
                                                         <th className="py-3 text-left text-sm font-semibold text-slate-900">Email</th>
+                                                        <th className="py-3 text-left text-sm font-semibold text-slate-900">Last login</th>
                                                         <th className="py-3 text-right text-sm font-semibold text-slate-900">Actions</th>
                                                     </tr>
                                                 </thead>
@@ -271,6 +281,9 @@ export default function AdminOrganizationIndex({
                                                                 </span>
                                                             </td>
                                                             <td className="py-3 text-sm text-slate-600">{u.email}</td>
+                                                            <td className="py-3 text-sm text-slate-600 whitespace-nowrap">
+                                                                {formatDateTime(u.last_login_at)}
+                                                            </td>
                                                             <td className="py-3 text-right">
                                                                 <Link
                                                                     href={`/app/admin/users/${u.id}`}

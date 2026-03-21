@@ -230,7 +230,7 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
     )
 }
 
-export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null }) {
+export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null, canEditBrandDna = false }) {
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
 
     useEffect(() => {
@@ -442,6 +442,19 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                 >
                     <AppNav brand={auth?.activeBrand} tenant={null} variant={scrolledPastHero ? undefined : 'transparent'} />
                 </div>
+            )}
+            {canEditBrandDna && (
+                <Link
+                    href={typeof route === 'function' ? route('brands.brand-guidelines.builder', { brand: brand.id }) : `/app/brands/${brand.id}/brand-guidelines/builder`}
+                    className={`fixed left-4 z-[60] rounded-md border px-2.5 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
+                        showCallout || !scrolledPastHero
+                            ? 'top-20 border-white/25 bg-black/35 text-white hover:bg-black/50'
+                            : 'top-20 border-gray-200 bg-white/95 text-gray-800 hover:bg-white'
+                    }`}
+                    aria-label="Edit Brand DNA"
+                >
+                    Edit
+                </Link>
             )}
             {showProcessingBanner && (
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">

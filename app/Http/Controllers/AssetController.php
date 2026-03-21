@@ -83,6 +83,11 @@ class AssetController extends Controller
 
             return Inertia::render('Assets/Index', [
                 'categories' => [],
+                'bulk_categories_by_asset_type' => [
+                    'asset' => [],
+                    'deliverable' => [],
+                    'ai_generated' => [],
+                ],
                 'categories_by_type' => ['all' => []],
                 'selected_category' => null,
                 'assets' => [],
@@ -592,7 +597,7 @@ class AssetController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->whereIn('id', $assetCategoryIds)
-                ->get(['id', 'name', 'slug'])
+                ->get(['id', 'name', 'slug', 'settings'])
                 ->keyBy('id');
         }
 
@@ -754,6 +759,7 @@ class AssetController extends Controller
                             'id' => $categoryId,
                             'name' => $categoryName,
                             'slug' => $categorySlug,
+                            'ebi_enabled' => $categoryRow?->isEbiEnabled() ?? false,
                         ] : null,
                         'user_id' => $asset->user_id, // For delete-own permission check
                         'uploaded_by' => $uploadedBy, // User who uploaded the asset
@@ -1335,9 +1341,12 @@ class AssetController extends Controller
             ]);
         }
 
+        $bulkCategoriesByAssetType = $this->buildBulkAssignCategoryOptionsByAssetType($tenant, $brand, $user);
+
         return Inertia::render('Assets/Index', [
             'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete
             'categories' => $allCategories,
+            'bulk_categories_by_asset_type' => $bulkCategoriesByAssetType,
             'categories_by_type' => [
                 'all' => $allCategories,
             ],
@@ -2429,5 +2438,44 @@ class AssetController extends Controller
         $url = $asset->deliveryUrl(AssetVariant::VIDEO_POSTER, DeliveryContext::AUTHENTICATED);
 
         return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Category dropdown options per asset type for bulk "Assign Category" (library / execution / generative).
+     *
+     * @return array{asset: list<array{id: int, name: string, slug: string, asset_type: string}>, deliverable: list<array<string, mixed>>, ai_generated: list<array<string, mixed>>}
+     */
+    private function buildBulkAssignCategoryOptionsByAssetType($tenant, $brand, ?User $user): array
+    {
+        $out = [
+            AssetType::ASSET->value => [],
+            AssetType::DELIVERABLE->value => [],
+            AssetType::AI_GENERATED->value => [],
+        ];
+
+        foreach ([AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED] as $type) {
+            $query = Category::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('asset_type', $type)
+                ->active()
+                ->ordered();
+
+            if (! $user || ! $user->can('manage categories')) {
+                $query->visible();
+            }
+
+            $categories = $query->get()->filter(function ($category) use ($user) {
+                return $user ? Gate::forUser($user)->allows('view', $category) : false;
+            });
+
+            $out[$type->value] = $categories->map(fn (Category $c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'slug' => $c->slug,
+                'asset_type' => $c->asset_type->value,
+            ])->values()->all();
+        }
+
+        return $out;
     }
 }

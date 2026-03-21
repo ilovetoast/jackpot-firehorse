@@ -12,6 +12,7 @@ use App\Services\BrandDNA\PipelineFinalizationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -42,9 +43,11 @@ class BrandGuidelinesController extends Controller
     {
         $tenant = app('tenant');
         if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
+            return redirect()->route('assets.index')->with('warning', 'That brand is not available in this workspace.');
         }
-        $this->authorize('update', $brand);
+        if (! Gate::allows('view', $brand)) {
+            return redirect()->route('assets.index')->with('warning', 'You don\'t have access to Brand Guidelines for this brand.');
+        }
 
         $brandModel = $brand->brandModel;
         $activeVersion = $brandModel?->activeVersion;
@@ -94,7 +97,8 @@ class BrandGuidelinesController extends Controller
 
         // Auto-redirect to builder when a draft exists but no published version yet
         // (skip the callout/landing page — go straight to the builder at the resume step)
-        if ($hasDraft && ! $activeVersion) {
+        // View-only users stay on the read-only guidelines experience.
+        if ($hasDraft && ! $activeVersion && Gate::allows('update', $brand)) {
             return redirect()->to($resumeUrl);
         }
 
@@ -139,6 +143,7 @@ class BrandGuidelinesController extends Controller
         }
 
         return Inertia::render('Brands/BrandGuidelines/Index', [
+            'can_edit_brand_dna' => Gate::forUser(request()->user())->allows('update', $brand),
             'brand' => [
                 'id' => $brand->id,
                 'name' => $brand->name,

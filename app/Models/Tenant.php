@@ -48,6 +48,7 @@ class Tenant extends Model
         'storage_bucket', // Dedicated bucket name (Enterprise)
         'cdn_distribution_id', // CloudFront distribution (Enterprise)
         'infrastructure_tier', // 'shared' | 'dedicated' — decoupled from plan; local always shared
+        'ai_insights_enabled', // Scheduled metadata insights (value/field suggestion sync)
     ];
 
     /**
@@ -62,6 +63,7 @@ class Tenant extends Model
             'equivalent_plan_value' => 'decimal:2',
             'settings' => 'array', // Phase M-2: Company settings (JSON)
             'is_agency' => 'boolean', // Phase AG-1: Agency identification
+            'ai_insights_enabled' => 'boolean',
             'agency_approved_at' => 'datetime', // Phase AG-1: Agency approval timestamp
             'incubated_at' => 'datetime', // Phase AG-2: Incubation start timestamp
             'incubation_expires_at' => 'datetime', // Phase AG-2: Incubation expiration timestamp
@@ -83,13 +85,13 @@ class Tenant extends Model
                 'is_default' => true,
                 'show_in_selector' => true, // Default to showing in selector
             ]);
-            
+
             // If tenant already has an owner (e.g., created via seeder or admin), connect them to default brand
             $owner = $tenant->owner();
             if ($owner && $defaultBrand) {
                 // Connect owner to default brand with admin role (owners can't have brand roles)
                 $defaultBrand->users()->syncWithoutDetaching([
-                    $owner->id => ['role' => 'admin']
+                    $owner->id => ['role' => 'admin'],
                 ]);
             }
 
@@ -124,7 +126,9 @@ class Tenant extends Model
      */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(User::class)
+            ->withPivot(['role', 'is_agency_managed', 'agency_tenant_id'])
+            ->withTimestamps();
     }
 
     /**
@@ -169,7 +173,7 @@ class Tenant extends Model
 
     /**
      * Get the downloads for this tenant.
-     * 
+     *
      * Phase 3.1 — Downloader Foundations
      */
     public function downloads(): HasMany
@@ -179,7 +183,7 @@ class Tenant extends Model
 
     /**
      * Get the agency tier for this tenant.
-     * 
+     *
      * Phase AG-1 — Agency Core Data Model
      */
     public function agencyTier(): BelongsTo
@@ -189,7 +193,7 @@ class Tenant extends Model
 
     /**
      * Get the agency that incubated this tenant.
-     * 
+     *
      * Phase AG-2 — Incubation State & Tracking
      */
     public function incubatedByAgency(): BelongsTo
@@ -199,7 +203,7 @@ class Tenant extends Model
 
     /**
      * Get the partner rewards received by this agency.
-     * 
+     *
      * Phase AG-4 — Partner Reward Attribution
      */
     public function agencyPartnerRewards(): HasMany
@@ -209,9 +213,9 @@ class Tenant extends Model
 
     /**
      * Get the agency that referred this tenant.
-     * 
+     *
      * Phase AG-10 — Partner Marketing & Referral Attribution
-     * 
+     *
      * NOTE: This is SEPARATE from incubation. A tenant can be:
      * - Incubated only (built by agency, transferred)
      * - Referred only (signed up via referral, not built by agency)
@@ -224,12 +228,28 @@ class Tenant extends Model
 
     /**
      * Get the partner referrals made by this agency.
-     * 
+     *
      * Phase AG-10 — Partner Marketing & Referral Attribution
      */
     public function agencyPartnerReferrals(): HasMany
     {
         return $this->hasMany(AgencyPartnerReferral::class, 'agency_tenant_id');
+    }
+
+    /**
+     * Agency records where this tenant is the client (linked agency firms).
+     */
+    public function agencies(): HasMany
+    {
+        return $this->hasMany(TenantAgency::class, 'tenant_id');
+    }
+
+    /**
+     * Client tenants that have linked this agency (this tenant is the agency).
+     */
+    public function agencyClients(): HasMany
+    {
+        return $this->hasMany(TenantAgency::class, 'agency_tenant_id');
     }
 
     /**
@@ -265,24 +285,25 @@ class Tenant extends Model
         $ownerWithRole = $this->users()
             ->wherePivot('role', 'owner')
             ->first();
-        
+
         if ($ownerWithRole) {
             return $ownerWithRole;
         }
-        
+
         // No owner exists in database - this is a data integrity issue
         // Fix it by setting the first user's role to 'owner' in the database
         $firstUser = $this->users()
             ->orderBy('tenant_user.created_at')
             ->first();
-        
+
         if ($firstUser) {
             // Update the database to fix the discrepancy
             // Use bypassOwnerCheck=true since this is internal data integrity fix
             $firstUser->setRoleForTenant($this, 'owner', true);
+
             return $firstUser;
         }
-        
+
         return null;
     }
 
@@ -295,6 +316,7 @@ class Tenant extends Model
     {
         // Database is the SINGLE source of truth
         $role = $user->getRoleForTenant($this);
+
         // Case-insensitive comparison, but database is still the source
         return $role && strtolower($role) === 'owner';
     }
@@ -304,39 +326,40 @@ class Tenant extends Model
      * Users are ordered by users.created_at (user account creation) to match owner logic.
      * Owner is ALWAYS enabled, regardless of join order or limit.
      * Non-owners are enabled based on their position among non-owners only.
-     * 
+     *
      * @return array{enabled: array<int>, disabled: array<int>}
      */
     public function getEnabledUsers(\App\Services\PlanService $planService): array
     {
         $limits = $planService->getPlanLimits($this);
         $maxUsers = $limits['max_users'] ?? PHP_INT_MAX;
-        
+
         // Get all users ordered by users.created_at (user account creation) to match owner logic
         // This ensures consistency with isOwner() which uses users.created_at
         $allUsers = $this->users()
             ->orderBy('users.created_at')
             ->get();
-        
+
         // Ensure owner exists in database (fixes any discrepancies)
         $this->owner();
-        
+
         $enabledUserIds = [];
         $disabledUserIds = [];
         $nonOwnerIndex = 0; // Track position among non-owners only
         $maxNonOwners = max(0, $maxUsers - 1); // Reserve 1 slot for owner (owner always counts as 1)
-        
+
         foreach ($allUsers as $user) {
             // Database role is the SINGLE source of truth - use isOwner() which checks database
             $isOwner = $this->isOwner($user);
-            
+
             // Owner is ALWAYS enabled, regardless of join order or limit
             if ($isOwner) {
                 $enabledUserIds[] = $user->id;
+
                 // Don't increment nonOwnerIndex - owner counts as 1 user, so we reserve 1 slot
                 continue;
             }
-            
+
             // For non-owners: enable them if they're within the remaining limit
             // maxNonOwners = maxUsers - 1 (reserving 1 slot for owner)
             // nonOwnerIndex tracks position among non-owners only (owners excluded)
@@ -345,10 +368,10 @@ class Tenant extends Model
             } else {
                 $disabledUserIds[] = $user->id;
             }
-            
+
             $nonOwnerIndex++;
         }
-        
+
         return [
             'enabled' => $enabledUserIds,
             'disabled' => $disabledUserIds,

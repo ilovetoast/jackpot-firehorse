@@ -7,19 +7,19 @@
  *
  * Schema is controlled by migrations and must be assumed valid.
  */
+
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\MetadataVisibilityProfile;
 use App\Models\Tenant;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
+use App\Support\Metadata\CategoryTypeResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -46,8 +46,7 @@ class TenantMetadataRegistryController extends Controller
         protected TenantMetadataRegistryService $registryService,
         protected TenantMetadataVisibilityService $visibilityService,
         protected TenantMetadataFieldService $fieldService
-    ) {
-    }
+    ) {}
 
     /**
      * Display the Tenant Metadata Registry.
@@ -59,7 +58,7 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             abort(404, 'Tenant not found');
         }
 
@@ -67,7 +66,7 @@ class TenantMetadataRegistryController extends Controller
         $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
 
-        if (!$canView) {
+        if (! $canView) {
             abort(403, 'You do not have permission to view the metadata registry.');
         }
 
@@ -84,9 +83,10 @@ class TenantMetadataRegistryController extends Controller
         $brands = $tenant->brands()
             ->orderBy('name')
             ->get()
-            ->map(function ($b) use ($planService, $categoryService, $tenant, $maxCategories) {
+            ->map(function ($b) use ($categoryService, $tenant, $maxCategories) {
                 $currentCount = $b->categories()->custom()->count();
                 $canCreate = $categoryService->canCreate($tenant, $b);
+
                 return [
                     'id' => $b->id,
                     'name' => $b->name,
@@ -118,7 +118,7 @@ class TenantMetadataRegistryController extends Controller
             ->filter(fn ($category) => $category->isActive())
             ->map(function ($category) {
                 $accessRules = [];
-                if ($category->is_private && !$category->is_system) {
+                if ($category->is_private && ! $category->is_system) {
                     $accessRules = $category->accessRules()->get()->map(function ($rule) {
                         if ($rule->access_type === 'role') {
                             return ['type' => 'role', 'role' => $rule->role];
@@ -126,13 +126,18 @@ class TenantMetadataRegistryController extends Controller
                         if ($rule->access_type === 'user') {
                             return ['type' => 'user', 'user_id' => $rule->user_id];
                         }
+
                         return null;
                     })->filter()->values()->toArray();
                 }
+
+                $slug = $category->slug ?? \Illuminate\Support\Str::slug($category->name);
+
                 return [
                     'id' => $category->id,
                     'name' => $category->name,
-                    'slug' => $category->slug ?? \Illuminate\Support\Str::slug($category->name),
+                    'slug' => $slug,
+                    'type_field' => CategoryTypeResolver::resolve($slug),
                     'brand_id' => $category->brand_id,
                     'brand_name' => $category->brand?->name ?? null,
                     'asset_type' => $category->asset_type?->value ?? 'asset',
@@ -144,13 +149,14 @@ class TenantMetadataRegistryController extends Controller
                     'system_version' => $category->system_version,
                     'upgrade_available' => $category->upgrade_available ?? false,
                     'deletion_available' => $category->deletion_available ?? false,
+                    'ebi_enabled' => $category->isEbiEnabled(),
                 ];
             })
             ->values();
 
         // Get plan limits for custom metadata fields (reuse $planService, $limits from brands block above)
         $maxCustomFields = $limits['max_custom_metadata_fields'] ?? 0;
-        
+
         // Count current custom fields (exclude archived)
         $currentCustomFieldsCount = \Illuminate\Support\Facades\DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
@@ -159,13 +165,13 @@ class TenantMetadataRegistryController extends Controller
             ->whereNull('deprecated_at')
             ->whereNull('archived_at')
             ->count();
-        
+
         $canCreateCustomField = $maxCustomFields === 0 || $currentCustomFieldsCount < $maxCustomFields;
 
         // Owners and admins should have full access to manage fields
         $tenantRole = $user->getRoleForTenant($tenant);
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-        
+
         return Inertia::render('Tenant/MetadataRegistry/Index', [
             'registry' => $registry,
             'brands' => $brands,
@@ -194,7 +200,7 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
@@ -202,7 +208,7 @@ class TenantMetadataRegistryController extends Controller
         $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
 
-        if (!$canView) {
+        if (! $canView) {
             abort(403, 'You do not have permission to view the metadata registry.');
         }
 
@@ -221,14 +227,14 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
         $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
 
-        if (!$canView) {
+        if (! $canView) {
             abort(403, 'You do not have permission to view the metadata registry.');
         }
 
@@ -247,12 +253,12 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -271,7 +277,7 @@ class TenantMetadataRegistryController extends Controller
             ->where('id', $field)
             ->first();
 
-        if (!$fieldRecord) {
+        if (! $fieldRecord) {
             return response()->json(['error' => 'Field not found'], 404);
         }
 
@@ -296,22 +302,24 @@ class TenantMetadataRegistryController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->first();
 
-            if (!$category) {
+            if (! $category) {
                 \Log::error('[TenantMetadataRegistryController] Category not found', [
                     'category_id' => $categoryId,
                     'tenant_id' => $tenant->id,
                 ]);
+
                 return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
             }
 
             // Use brand from context, or resolve from category so save works when context is missing (e.g. fetch from Metadata Registry)
-            if (!$brand) {
+            if (! $brand) {
                 $brand = $category->brand;
-                if (!$brand) {
+                if (! $brand) {
                     \Log::error('[TenantMetadataRegistryController] Brand not found for category', [
                         'category_id' => $categoryId,
                         'brand_id' => $category->brand_id,
                     ]);
+
                     return response()->json(['error' => 'Brand not found for category'], 500);
                 }
                 \Log::info('[TenantMetadataRegistryController] Resolved brand from category', [
@@ -326,6 +334,7 @@ class TenantMetadataRegistryController extends Controller
                         'category_brand_id' => $category->brand_id,
                         'context_brand_id' => $brand->id,
                     ]);
+
                     return response()->json(['error' => 'Category does not belong to current brand'], 404);
                 }
             }
@@ -337,7 +346,7 @@ class TenantMetadataRegistryController extends Controller
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
             ]);
-            
+
             // Get or create category-level visibility override
             $existing = \DB::table('metadata_field_visibility')
                 ->where('metadata_field_id', $field)
@@ -345,14 +354,14 @@ class TenantMetadataRegistryController extends Controller
                 ->where('brand_id', $brand->id)
                 ->where('category_id', $categoryId)
                 ->first();
-            
+
             // Convert show_* flags to is_*_hidden flags
             // Handle string "true"/"false" from JSON (ensure boolean conversion)
             // C9.2: is_hidden is ONLY for category suppression (big toggle), NOT for edit visibility
             // Use is_edit_hidden for Quick View checkbox (show_on_edit)
-            $isUploadHidden = isset($validated['show_on_upload']) ? !filter_var($validated['show_on_upload'], FILTER_VALIDATE_BOOLEAN) : null;
-            $isEditHidden = isset($validated['show_on_edit']) ? !filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
-            $isFilterHidden = isset($validated['show_in_filters']) ? !filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isUploadHidden = isset($validated['show_on_upload']) ? ! filter_var($validated['show_on_upload'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isEditHidden = isset($validated['show_on_edit']) ? ! filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isFilterHidden = isset($validated['show_in_filters']) ? ! filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
             $isPrimary = isset($validated['is_primary']) ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
             $isRequired = isset($validated['is_required']) ? filter_var($validated['is_required'], FILTER_VALIDATE_BOOLEAN) : null;
 
@@ -374,33 +383,39 @@ class TenantMetadataRegistryController extends Controller
             }
 
             // NOTE: is_hidden is NOT set here - it's only set by category suppression toggle (toggleCategoryField)
-            
+
             \Log::info('[TenantMetadataRegistryController] Converted visibility flags', [
                 'show_on_upload' => $validated['show_on_upload'] ?? 'not set',
                 'is_upload_hidden' => $isUploadHidden,
                 'existing_record' => $existing ? 'yes' : 'no',
             ]);
-            
+
             if ($existing) {
                 // Update existing category override - only update provided fields
                 // C9.2: is_hidden is ONLY for category suppression, NOT for edit visibility
                 // Use is_edit_hidden for Quick View checkbox
                 $updateData = ['updated_at' => now()];
-                if ($isUploadHidden !== null) $updateData['is_upload_hidden'] = $isUploadHidden;
+                if ($isUploadHidden !== null) {
+                    $updateData['is_upload_hidden'] = $isUploadHidden;
+                }
                 if ($isEditHidden !== null) {
                     $updateData['is_edit_hidden'] = $isEditHidden;
                 }
-                if ($isFilterHidden !== null) $updateData['is_filter_hidden'] = $isFilterHidden;
-                if ($isPrimary !== null) $updateData['is_primary'] = $isPrimary;
+                if ($isFilterHidden !== null) {
+                    $updateData['is_filter_hidden'] = $isFilterHidden;
+                }
+                if ($isPrimary !== null) {
+                    $updateData['is_primary'] = $isPrimary;
+                }
                 if ($isRequired !== null) {
                     $updateData['is_required'] = $isRequired;
                 }
-                
+
                 \Log::info('[TenantMetadataRegistryController] Updating existing category override', [
                     'record_id' => $existing->id,
                     'update_data' => $updateData,
                 ]);
-                
+
                 \DB::table('metadata_field_visibility')
                     ->where('id', $existing->id)
                     ->update($updateData);
@@ -414,7 +429,7 @@ class TenantMetadataRegistryController extends Controller
                     ->whereNull('category_id')
                     ->select(['id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary', 'is_edit_hidden', 'is_required'])
                     ->first();
-                
+
                 $insertData = [
                     'metadata_field_id' => $field,
                     'tenant_id' => $tenant->id,
@@ -429,21 +444,20 @@ class TenantMetadataRegistryController extends Controller
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
-                
+
                 $insertData['is_edit_hidden'] = $isEditHidden !== null ? $isEditHidden : ($tenantOverride ? (bool) ($tenantOverride->is_edit_hidden ?? false) : false);
                 $insertData['is_required'] = $isRequired !== null ? $isRequired : ($tenantOverride ? (bool) ($tenantOverride->is_required ?? false) : false);
-                
+
                 \Log::info('[TenantMetadataRegistryController] Creating new category override', [
                     'insert_data' => $insertData,
                 ]);
-                
+
                 \DB::table('metadata_field_visibility')->insert($insertData);
             }
         } else {
             // No category_id - save at tenant level (existing behavior)
             $this->visibilityService->setFieldVisibility($tenant, $field, $validated);
         }
-
 
         return response()->json([
             'success' => true,
@@ -461,12 +475,12 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -490,11 +504,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             return response()->json(['error' => 'You do not have permission to manage metadata visibility.'], 403);
         }
 
@@ -504,7 +518,7 @@ class TenantMetadataRegistryController extends Controller
             })
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
@@ -533,12 +547,12 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -549,7 +563,7 @@ class TenantMetadataRegistryController extends Controller
             })
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
@@ -572,12 +586,12 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
         // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -588,7 +602,7 @@ class TenantMetadataRegistryController extends Controller
             })
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
@@ -611,7 +625,7 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
@@ -619,7 +633,7 @@ class TenantMetadataRegistryController extends Controller
         $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
 
-        if (!$canView) {
+        if (! $canView) {
             abort(403, 'You do not have permission to view metadata visibility.');
         }
 
@@ -645,11 +659,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -660,12 +674,13 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$sourceModel || !$targetModel) {
+        if (! $sourceModel || ! $targetModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
         try {
             $count = $this->visibilityService->copyCategoryVisibility($tenant, $sourceModel, $targetModel);
+
             return response()->json([
                 'success' => true,
                 'message' => "Settings copied from {$sourceModel->name} to {$targetModel->name}.",
@@ -686,11 +701,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -698,11 +713,12 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
         $count = $this->visibilityService->applySeededDefaultsForCategory($tenant, $categoryModel);
+
         return response()->json([
             'success' => true,
             'message' => 'Category reset to seeded default. Visibility now matches the configured defaults for this category type.',
@@ -720,11 +736,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -732,12 +748,13 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
         try {
             $targets = $this->visibilityService->getApplyToOtherBrandsTargets($tenant, $categoryModel);
+
             return response()->json(['targets' => $targets]);
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
@@ -754,11 +771,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -766,17 +783,18 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$categoryModel) {
+        if (! $categoryModel) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
         try {
             $results = $this->visibilityService->applyCategoryVisibilityToOtherBrands($tenant, $categoryModel);
             $count = count($results);
+
             return response()->json([
                 'success' => true,
                 'message' => $count > 0
-                    ? "Settings applied to {$count} categor" . ($count === 1 ? 'y' : 'ies') . " in other brands."
+                    ? "Settings applied to {$count} categor".($count === 1 ? 'y' : 'ies').' in other brands.'
                     : 'No other brands have a category of this type.',
                 'results' => $results,
             ]);
@@ -795,11 +813,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -836,11 +854,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -848,7 +866,7 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$profileModel) {
+        if (! $profileModel) {
             return response()->json(['error' => 'Profile not found'], 404);
         }
 
@@ -873,11 +891,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -891,7 +909,7 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
@@ -931,11 +949,11 @@ class TenantMetadataRegistryController extends Controller
         $tenant = app('tenant');
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
             abort(403, 'You do not have permission to manage metadata visibility.');
         }
 
@@ -943,7 +961,7 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$profileModel) {
+        if (! $profileModel) {
             return response()->json(['error' => 'Profile not found'], 404);
         }
 
@@ -955,12 +973,13 @@ class TenantMetadataRegistryController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$category) {
+        if (! $category) {
             return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
         }
 
         try {
             $count = $this->visibilityService->applySnapshotToCategory($tenant, $category, $profileModel->snapshot ?? []);
+
             return response()->json([
                 'success' => true,
                 'message' => "Profile \"{$profileModel->name}\" applied. {$count} visibility settings updated.",

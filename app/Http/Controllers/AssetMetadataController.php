@@ -24,21 +24,26 @@ use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
+use App\Models\Brand;
+use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\MetadataApprovalResolver;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
+use App\Services\TenantPermissionResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -263,7 +268,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset);
+        app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
 
         return response()->json(['message' => 'Suggestion approved']);
     }
@@ -400,7 +405,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset);
+        app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
 
         return response()->json(['message' => 'Suggestion edited and accepted']);
     }
@@ -1098,7 +1103,7 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
-        // Clear idempotent rows so re-score always runs; forceRun bypasses category EBI-off for manual runs.
+        // Clear idempotent rows so re-score always runs; forceRun bypasses category ebi_enabled for manual runs.
         BrandIntelligenceScore::where('asset_id', $asset->id)
             ->where('brand_id', $asset->brand_id)
             ->whereNull('execution_id')
@@ -1146,6 +1151,36 @@ class AssetMetadataController extends Controller
         return response()->json([
             'brand_intelligence' => $fresh->brandIntelligencePayloadForFrontend(),
         ]);
+    }
+
+    /**
+     * Thumbs up / down on AI insight (telemetry only).
+     * POST /assets/{asset}/brand-intelligence/feedback
+     */
+    public function storeBrandIntelligenceFeedback(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $validated = $request->validate([
+            'rating' => 'required|string|in:up,down',
+        ]);
+
+        BrandIntelligenceFeedback::create([
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'type' => 'ai_insight',
+            'rating' => $validated['rating'],
+        ]);
+
+        return response()->json(['success' => true]);
     }
 
     /**
@@ -2274,7 +2309,7 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset);
+        app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
 
         return response()->json(['message' => 'Metadata updated']);
     }
@@ -3313,6 +3348,10 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Manual override already exists for this field'], 422);
         }
 
+        if (! $this->canApplyAiSuggestionOnAsset($user, $brand, $asset)) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
         // Get field info for activity logging
         $field = DB::table('metadata_fields')->where('id', $candidate->metadata_field_id)->first();
         $fieldKey = $field->key ?? 'unknown';
@@ -3429,6 +3468,10 @@ class AssetMetadataController extends Controller
         $field = DB::table('metadata_fields')->where('id', $candidate->metadata_field_id)->first();
         $fieldKey = $field->key ?? 'unknown';
         $fieldLabel = $field->system_label ?? $fieldKey;
+
+        if (! $this->canDismissAiSuggestionOnAsset($user, $brand, $asset)) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
 
         // Mark candidate as dismissed
         DB::table('asset_metadata_candidates')
@@ -3943,16 +3986,20 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $this->canApplyAiSuggestionOnAsset($user, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
-        // Check plan tag limit before accepting AI suggestion
+        // Check plan tag limit before accepting AI suggestion (always JSON — same shape as PlanLimitExceededException::render)
         try {
             $this->planService->enforceTagLimit($asset);
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            return $e->render($request);
+            return response()->json([
+                'message' => $e->getMessage(),
+                'limit_type' => $e->limitType,
+                'current_count' => $e->currentCount,
+                'max_allowed' => $e->maxAllowed,
+            ], 403);
         }
 
         // Get candidate
@@ -4017,6 +4064,8 @@ class AssetMetadataController extends Controller
 
         app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
 
+        app(BrandIntelligenceScheduleService::class)->scheduleDebouncedRescoreAfterUserEdit($asset);
+
         return response()->json([
             'message' => 'Tag accepted',
             'canonical_tag' => $canonicalTag,
@@ -4041,11 +4090,6 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
-            return response()->json(['message' => 'Permission denied'], 403);
-        }
-
         // Get candidate
         $candidate = DB::table('asset_tag_candidates')
             ->where('id', $candidateId)
@@ -4057,6 +4101,10 @@ class AssetMetadataController extends Controller
 
         if (! $candidate) {
             return response()->json(['message' => 'Tag suggestion not found'], 404);
+        }
+
+        if (! $this->canDismissAiSuggestionOnAsset($user, $brand, $asset)) {
+            return response()->json(['message' => 'Permission denied'], 403);
         }
 
         // Phase J.2.1: Normalize tag to canonical form for dismissal
@@ -4587,6 +4635,38 @@ class AssetMetadataController extends Controller
 
         // All metadata approved and AI suggestions not yet completed - trigger AI
         \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
+    }
+
+    /**
+     * Accept AI tag/field suggestions when the user has apply-all, or owns the asset and can edit metadata.
+     */
+    protected function canApplyAiSuggestionOnAsset(User $user, Brand $brand, Asset $asset): bool
+    {
+        $resolver = app(TenantPermissionResolver::class);
+        if ($resolver->hasForBrand($user, $brand, 'metadata.suggestions.apply')) {
+            return true;
+        }
+        if ((int) $asset->user_id !== (int) $user->id) {
+            return false;
+        }
+
+        return $resolver->hasForBrand($user, $brand, 'metadata.edit_post_upload');
+    }
+
+    /**
+     * Dismiss AI suggestions when the user has dismiss-all, or owns the asset and can edit metadata.
+     */
+    protected function canDismissAiSuggestionOnAsset(User $user, Brand $brand, Asset $asset): bool
+    {
+        $resolver = app(TenantPermissionResolver::class);
+        if ($resolver->hasForBrand($user, $brand, 'metadata.suggestions.dismiss')) {
+            return true;
+        }
+        if ((int) $asset->user_id !== (int) $user->id) {
+            return false;
+        }
+
+        return $resolver->hasForBrand($user, $brand, 'metadata.edit_post_upload');
     }
 
     /**

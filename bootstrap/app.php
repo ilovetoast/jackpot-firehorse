@@ -7,6 +7,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Sentry\Laravel\Integration;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -69,5 +70,28 @@ return Application::configure(basePath: dirname(__DIR__))
                 'unlock_url' => '',
                 'cdn_domain' => config('cloudfront.domain'),
             ], $branding))->toResponse($request)->setStatusCode(404);
+        });
+
+        // Inertia app: avoid full-page 403 — send users to the asset grid with a toast instead of "Access denied".
+        $exceptions->render(function (HttpExceptionInterface $e, Request $request) {
+            if ($e->getStatusCode() !== 403) {
+                return null;
+            }
+            if ($request->expectsJson()) {
+                return null;
+            }
+            if (! $request->is('app/*')) {
+                return null;
+            }
+            if ($request->routeIs(['assets.index', 'assets.staged', 'assets.processing'])) {
+                return null;
+            }
+
+            $msg = (string) $e->getMessage();
+            if ($msg === '' || str_contains($msg, 'This action is unauthorized')) {
+                $msg = 'You don\'t have permission to use that page.';
+            }
+
+            return redirect()->route('assets.index')->with('warning', $msg);
         });
     })->create();

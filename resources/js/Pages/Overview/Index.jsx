@@ -1,7 +1,9 @@
-import { usePage, Link } from '@inertiajs/react'
+import { usePage } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import AppHead from '../../Components/AppHead'
+import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import AppNav from '../../Components/AppNav'
+import ManagedCompaniesTeaser from '../../Components/dashboard/ManagedCompaniesTeaser'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
 import AssetCollage from '../../Components/dashboard/AssetCollage'
 import ActiveSignals from '../../Components/Brand/ActiveSignals'
@@ -33,10 +35,32 @@ export default function Overview({
     brand_signals = [],
     momentum_data = {},
     ai_insights = [],
+    dashboard_links = {},
 }) {
-    const { auth: authFromPage } = usePage().props
+    const page = usePage()
+    const { auth: authFromPage } = page.props
     const activeBrand = brand ?? authFromPage?.activeBrand ?? auth?.activeBrand
     const brandColor = theme.colors?.primary || '#6366f1'
+    const managedAgencyClients = authFromPage?.managed_agency_clients ?? []
+    const showManagedCompanies =
+        Boolean(authFromPage?.activeCompany?.is_agency) && managedAgencyClients.length > 0
+
+    const isAgencyAccount = authFromPage?.activeCompany?.is_agency === true
+    const dashLinksRaw = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
+    // Cinematic brand overview = you’re on the brand page — never show Brand (link or “· here”) in this row.
+    const dashLinks = {
+        company: dashLinksRaw.company,
+        agency: dashLinksRaw.agency,
+        agency_switch_tenant_id: dashLinksRaw.agency_switch_tenant_id,
+        company_current: dashLinksRaw.company_current,
+        agency_current: dashLinksRaw.agency_current,
+    }
+    const hasDashboardLinks = Boolean(
+        dashLinks.company ||
+            dashLinks.agency ||
+            dashLinks.company_current ||
+            dashLinks.agency_current
+    )
 
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
     const collageAssets = collage_assets?.length
@@ -66,7 +90,7 @@ export default function Overview({
     }
 
     return (
-        <div className="h-screen overflow-hidden bg-[#0B0B0D] relative">
+        <div className="relative h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none bg-[#0B0B0D]">
             <AppHead title="Overview" />
 
             {/* Nav — absolute so it overlays the cinematic content */}
@@ -74,7 +98,7 @@ export default function Overview({
                 <AppNav brand={authFromPage?.activeBrand || auth?.activeBrand} tenant={tenant} variant="transparent" />
             </div>
 
-            <div className="relative h-full overflow-hidden">
+            <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
                 {/* Cinematic background */}
                 <div
                     className="absolute inset-0 will-change-transform"
@@ -97,33 +121,58 @@ export default function Overview({
                     <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
                 </div>
 
-                {/* Asset collage — right side, hidden on mobile */}
+                {/* Asset collage — pairs with left column below; absolute right, ~38% width (see AssetCollage.jsx). */}
                 <AssetCollage assets={collageAssets} />
 
-                {/* Main content — left column on desktop */}
-                <div className="relative z-10 h-full max-w-7xl mx-auto px-6 lg:px-12 flex flex-col justify-center">
-                    {/* Hero + Actions — space-y-6 layout */}
-                    <motion.div
-                        className="lg:max-w-[50%] space-y-6"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.4 }}
-                    >
-                        {/* Plan badge */}
-                        {plan?.show_badge && plan?.name && (
-                            <div className="animate-fadeInUp">
-                                <span
-                                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium mb-6 border border-white/10 text-white/60 bg-white/[0.06] backdrop-blur-sm"
-                                >
-                                    {plan.name} Plan
-                                </span>
-                            </div>
-                        )}
+                {/* Main content — scroll on small viewports (PWA: single pane + overscroll containment) */}
+                <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+                    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:px-12">
+                        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain [-webkit-overflow-scrolling:touch] lg:overflow-visible lg:overscroll-auto">
+                            {/*
+                             * ---------------------------------------------------------------------------
+                             * OVERVIEW COLUMN LAYOUT — DO NOT CHANGE without explicit design/product sign-off.
+                             * ---------------------------------------------------------------------------
+                             * Intended behavior (lg+): a fixed LEFT content column (max 50% of this max-w-7xl
+                             * container), left-aligned — NOT viewport-centered — so the cinematic asset
+                             * collage (absolute; right: 0; ~38vw) reads as a distinct right pane. Using
+                             * mx-auto on this column breaks that split and stacks content in the middle.
+                             * Mobile: full-width column; collage hidden.
+                             * ---------------------------------------------------------------------------
+                             */}
+                            <motion.div
+                                className="flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 pt-[5.5rem] sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16 lg:pt-12 xl:pt-16"
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.4 }}
+                            >
+                                {/* Plan badge + optional Dashboards links — grouped so the badge never overlaps the heading on narrow screens */}
+                                <div className="animate-fadeInUp space-y-3 sm:space-y-4">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                                        <div className="min-w-0">
+                                            {plan?.show_badge && plan?.name && (
+                                                <span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm">
+                                                    <span>
+                                                        {plan.name} Plan
+                                                        {isAgencyAccount && (
+                                                            <span className="text-white/45"> · Agency account</span>
+                                                        )}
+                                                    </span>
+                                                </span>
+                                            )}
+                                        </div>
+                                        {hasDashboardLinks && (
+                                            <DashboardLinksRow
+                                                links={dashLinks}
+                                                variant="dark"
+                                                className="shrink-0 sm:pt-0.5 sm:text-right"
+                                            />
+                                        )}
+                                    </div>
 
-                        {/* Brand name */}
-                        <h1 className="animate-fadeInUp-d2 text-3xl md:text-4xl font-semibold tracking-tight text-white leading-tight">
-                            {theme.name || activeBrand?.name || 'Overview'}
-                        </h1>
+                                    <h1 className="animate-fadeInUp-d2 break-words text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
+                                        {theme.name || activeBrand?.name || 'Overview'}
+                                    </h1>
+                                </div>
 
                         {/* Tagline */}
                         {theme.tagline && (
@@ -178,20 +227,31 @@ export default function Overview({
                         {/* Recent Momentum — aggregated, meaningful */}
                         <RecentMomentum data={momentum_data} />
 
-                        {/* Primary action tiles — Brand Portal, Team, Analytics always */}
-                        <PrimaryActions
-                            permissions={permissions}
-                            brand={activeBrand}
-                            brandColor={brandColor}
-                        />
-                    </motion.div>
+                        {/* Agency: client companies linked via tenant_agencies */}
+                        {showManagedCompanies && (
+                            <ManagedCompaniesTeaser
+                                count={managedAgencyClients.length}
+                                brandColor={brandColor}
+                                agencyName={authFromPage?.activeCompany?.name ?? ''}
+                            />
+                        )}
 
-                    {/* Powered by footer (default theme only) */}
-                    {theme.mode === 'default' && (
-                        <div className="absolute bottom-6 left-6 lg:left-12 text-xs text-white/20">
-                            Powered by Jackpot
+                        {/* Primary action tiles — Brand Portal, Team, Analytics always */}
+                                <PrimaryActions
+                                    permissions={permissions}
+                                    brand={activeBrand}
+                                    brandColor={brandColor}
+                                />
+                            </motion.div>
+
+                            {/* Powered by footer (default theme only) */}
+                            {theme.mode === 'default' && (
+                                <div className="pointer-events-none shrink-0 px-1 pb-4 pt-2 text-xs text-white/20 lg:absolute lg:bottom-6 lg:left-6 lg:px-0 lg:pb-0 lg:pt-0">
+                                    Powered by Jackpot
+                                </div>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
         </div>

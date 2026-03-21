@@ -87,7 +87,6 @@ export default function ByCategoryView({
     initialCategorySlug = null,
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
-    const [expandedFamilies, setExpandedFamilies] = useState({})
     const selectedCategoryIdRef = useRef(null)
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [loadingFields, setLoadingFields] = useState(new Set())
@@ -141,6 +140,7 @@ export default function ByCategoryView({
     const [archivedFields, setArchivedFields] = useState([])
     const [archivedLoading, setArchivedLoading] = useState(false)
     const [restoreLoading, setRestoreLoading] = useState(false)
+    const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
 
     useEffect(() => {
         setLocalCategories(categories)
@@ -151,6 +151,11 @@ export default function ByCategoryView({
         if (!selectedBrandId) return localCategories
         return localCategories.filter(c => c.brand_id === selectedBrandId)
     }, [localCategories, selectedBrandId])
+
+    const selectedCategory = useMemo(
+        () => categoriesForBrand.find((cat) => cat.id === selectedCategoryId) ?? null,
+        [categoriesForBrand, selectedCategoryId]
+    )
 
     // Sync selectedCategoryId from URL param (initialCategorySlug) on mount and when slug/brand changes
     useEffect(() => {
@@ -865,56 +870,71 @@ export default function ByCategoryView({
         return { enabled, available, enabledAutomated, availableAutomated }
     }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder, previewOverlay])
 
-    // Phase K: Field families — split enabled/available by family (only "type" family for now)
-    const typeFamilyConfig = (metadataFieldFamilies && typeof metadataFieldFamilies === 'object' && metadataFieldFamilies.type) ? metadataFieldFamilies.type : null
+    // Registry "type" family keys — used to hide non-applicable *_type fields (virtual "Type" per category)
     const typeFamilyFieldKeys = useMemo(() => {
-        if (!typeFamilyConfig || !Array.isArray(typeFamilyConfig.fields)) return []
-        return typeFamilyConfig.fields
-    }, [typeFamilyConfig])
+        const tf = metadataFieldFamilies?.type
+        if (!tf || !Array.isArray(tf.fields)) return []
+        return tf.fields
+    }, [metadataFieldFamilies])
 
     const tenantFieldIds = useMemo(() => new Set((registry?.tenant_fields || []).map(f => f.id)), [registry?.tenant_fields])
 
     const fieldsByFamily = useMemo(() => {
         const { enabled, available } = getFieldsForCategory
-        const typeEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
-        const typeAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
-        const otherEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => !typeFamilyFieldKeys.includes(f.key)) : enabled
-        const otherAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => !typeFamilyFieldKeys.includes(f.key)) : available
-        const otherSystemEnabled = otherEnabled.filter(f => !tenantFieldIds.has(f.id))
-        const customEnabledForCategory = otherEnabled.filter(f => tenantFieldIds.has(f.id))
+        const resolvedTypeKey = selectedCategory?.type_field?.field_key ?? null
+
+        const hideTypeFamilyMember = (field) => {
+            if (!typeFamilyFieldKeys.length || !typeFamilyFieldKeys.includes(field.key)) {
+                return false
+            }
+            if (!resolvedTypeKey) {
+                return true
+            }
+
+            return field.key !== resolvedTypeKey
+        }
+
+        const primaryTypeField = resolvedTypeKey
+            ? (enabled.find((f) => f.key === resolvedTypeKey) || available.find((f) => f.key === resolvedTypeKey) || null)
+            : null
+
+        const primarySceneField =
+            enabled.find((f) => f.key === 'scene_classification') ||
+            available.find((f) => f.key === 'scene_classification') ||
+            null
+
+        const otherEnabled = enabled.filter(
+            (f) => !hideTypeFamilyMember(f) && f.key !== 'scene_classification' && !(resolvedTypeKey && f.key === resolvedTypeKey)
+        )
+        const otherAvailable = available.filter(
+            (f) => !hideTypeFamilyMember(f) && f.key !== 'scene_classification' && !(resolvedTypeKey && f.key === resolvedTypeKey)
+        )
         return {
-            typeFamilyEnabled: typeEnabled,
-            typeFamilyAvailable: typeAvailable,
+            primaryTypeField,
+            primarySceneField,
             otherEnabled,
             otherAvailable,
-            otherSystemEnabled,
-            customEnabledForCategory,
         }
-    }, [getFieldsForCategory, typeFamilyFieldKeys, tenantFieldIds])
+    }, [getFieldsForCategory, typeFamilyFieldKeys, tenantFieldIds, selectedCategory?.type_field?.field_key])
 
-    const toggleFamilyExpanded = useCallback((familyKey) => {
-        setExpandedFamilies(prev => ({ ...prev, [familyKey]: !prev[familyKey] }))
-    }, [])
-
-    const buildFullFieldOrder = useCallback((typeFamilyIds, otherSystemIds, customIds) => {
-        return [...typeFamilyIds, ...otherSystemIds, ...customIds]
+    const buildFullFieldOrder = useCallback((primaryFieldIds, otherFieldIds) => {
+        return [...primaryFieldIds, ...otherFieldIds]
     }, [])
 
     const handleEnabledFieldsDragEnd = useCallback((event) => {
         const { active, over } = event
         if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
 
-        const { otherEnabled, typeFamilyEnabled } = fieldsByFamily
+        const { otherEnabled, primaryTypeField, primarySceneField } = fieldsByFamily
         const oldIndex = otherEnabled.findIndex(f => String(f.id) === String(active.id))
         const newIndex = otherEnabled.findIndex(f => String(f.id) === String(over.id))
         if (oldIndex === -1 || newIndex === -1) return
 
         const reorderedOther = arrayMove(otherEnabled, oldIndex, newIndex)
-        const newFieldIds = buildFullFieldOrder(
-            typeFamilyEnabled.map(f => f.id),
-            reorderedOther.map(f => f.id),
-            [] // custom fields are now part of otherEnabled
-        )
+        const primaryIds = []
+        if (primaryTypeField) primaryIds.push(primaryTypeField.id)
+        if (primarySceneField) primaryIds.push(primarySceneField.id)
+        const newFieldIds = buildFullFieldOrder(primaryIds, reorderedOther.map(f => f.id))
 
         setFieldOrder(prev => ({
             ...prev,
@@ -943,7 +963,47 @@ export default function ByCategoryView({
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     )
 
-    const selectedCategory = categoriesForBrand.find(cat => cat.id === selectedCategoryId)
+    // Category-level Brand Intelligence (settings.ebi_enabled)
+    const toggleEbiEnabled = async () => {
+        if (!canManageVisibility || !selectedCategory || !brandId) return
+        const current = selectedCategory.ebi_enabled === true
+        const newValue = !current
+        setEbiToggleLoading(true)
+        try {
+            const url =
+                typeof route === 'function'
+                    ? route('brands.categories.ebi-enabled', { brand: brandId, category: selectedCategory.id })
+                    : `/app/api/brands/${brandId}/categories/${selectedCategory.id}/ebi-enabled`
+            const response = await fetch(url, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ebi_enabled: newValue }),
+            })
+            if (response.ok) {
+                setLocalCategories((prev) =>
+                    prev.map((c) => (c.id === selectedCategory.id ? { ...c, ebi_enabled: newValue } : c))
+                )
+                setSuccessMessage(`Brand Intelligence ${newValue ? 'enabled' : 'disabled'} for this category`)
+                setTimeout(() => setSuccessMessage(null), 3000)
+            } else {
+                const errorData = await response.json().catch(() => ({}))
+                setSuccessMessage(errorData.message || errorData.error || 'Failed to update Brand Intelligence setting')
+                setTimeout(() => setSuccessMessage(null), 4000)
+            }
+        } catch (error) {
+            console.error('Failed to toggle ebi_enabled:', error)
+            setSuccessMessage('Failed to update Brand Intelligence setting')
+            setTimeout(() => setSuccessMessage(null), 3000)
+        } finally {
+            setEbiToggleLoading(false)
+        }
+    }
 
     // Refresh metadata page via router.get preserving category + brand in URL (replaces router.reload)
     const refreshMetadataRegistry = useCallback((opts = {}) => {
@@ -1664,6 +1724,33 @@ export default function ByCategoryView({
                                 </div>
                             )}
                         </div>
+                        {canManageVisibility && selectedCategory && (
+                            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-900">Enable Brand Intelligence</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        When on, assets in this category are scored after analysis (same idea as AI field
+                                        toggles).
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={selectedCategory.ebi_enabled === true}
+                                    disabled={ebiToggleLoading || !!previewProfileName}
+                                    onClick={toggleEbiEnabled}
+                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        selectedCategory.ebi_enabled === true ? 'bg-indigo-600' : 'bg-gray-200'
+                                    }`}
+                                >
+                                    <span
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                            selectedCategory.ebi_enabled === true ? 'translate-x-5' : 'translate-x-0'
+                                        }`}
+                                    />
+                                </button>
+                            </div>
+                        )}
                         <div className="mt-4 border-b border-gray-200" aria-hidden />
                         {previewProfileName && (
                             <div className="rounded-lg bg-amber-50/80 border border-amber-200/60 px-4 py-2 flex items-center justify-between">
@@ -1705,68 +1792,102 @@ export default function ByCategoryView({
                                 )}
                             </div>
                             <div className="space-y-0.5">
-                                {getFieldsForCategory.enabled.length > 0 || (fieldsByFamily.typeFamilyEnabled.length + fieldsByFamily.typeFamilyAvailable.length) > 0 ? (
+                                {(() => {
+                                    const showPrimary = Boolean(fieldsByFamily.primaryTypeField || fieldsByFamily.primarySceneField)
+                                    const showRest = fieldsByFamily.otherEnabled.length > 0
+                                    return showPrimary || showRest
+                                })() ? (
                                     <>
                                         <div className="flex items-center px-3 py-1.5 text-xs font-medium text-gray-500" aria-hidden>
                                             <div className="flex-1" />
                                             <span>Status</span>
                                         </div>
-                                        {typeFamilyConfig && (fieldsByFamily.typeFamilyEnabled.length > 0 || fieldsByFamily.typeFamilyAvailable.length > 0) && (
-                                            <FamilyRow
-                                                familyKey="type"
-                                                familyConfig={typeFamilyConfig}
-                                                enabledMembers={fieldsByFamily.typeFamilyEnabled}
-                                                availableMembers={fieldsByFamily.typeFamilyAvailable}
-                                                categoryId={selectedCategoryId}
-                                                expanded={!!expandedFamilies['type']}
-                                                onToggleExpand={() => toggleFamilyExpanded('type')}
-                                                wrapToggle={wrapToggle}
-                                                onVisibilityToggle={toggleVisibility}
-                                                onPrimaryToggle={togglePrimary}
-                                                onRequiredToggle={toggleRequired}
-                                                onAiEligibleToggle={toggleAiEligible}
-                                                onEdit={canManageFields ? handleEditField : null}
-                                                canManage={canManageVisibility && !previewProfileName}
-                                                canManageFields={canManageFields}
-                                                systemFields={systemFields}
-                                                fieldCategoryData={fieldCategoryData}
-                                                previewOverlay={previewOverlay}
-                                                highlightedFieldId={highlightedFieldId}
-                                            />
+                                        {(fieldsByFamily.primaryTypeField || fieldsByFamily.primarySceneField) && (
+                                            <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-3">
+                                                <h4 className="text-xs font-semibold uppercase tracking-wide text-indigo-900/90">
+                                                    Primary classification
+                                                </h4>
+                                                <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                                                    Classify this asset based on its format or usage.
+                                                </p>
+                                                <div className="mt-3 space-y-0.5">
+                                                    {fieldsByFamily.primaryTypeField && (
+                                                        <FieldRow
+                                                            field={fieldsByFamily.primaryTypeField}
+                                                            categoryId={selectedCategoryId}
+                                                            isEnabled={getFieldsForCategory.enabled.some((f) => f.id === fieldsByFamily.primaryTypeField.id)}
+                                                            displayLabel="Type"
+                                                            onToggle={wrapToggle(fieldsByFamily.primaryTypeField, selectedCategoryId)}
+                                                            onVisibilityToggle={toggleVisibility}
+                                                            onPrimaryToggle={togglePrimary}
+                                                            onRequiredToggle={toggleRequired}
+                                                            onAiEligibleToggle={toggleAiEligible}
+                                                            onEdit={canManageFields ? handleEditField : null}
+                                                            canManage={canManageVisibility && !previewProfileName}
+                                                            canManageFields={canManageFields}
+                                                            systemFields={systemFields}
+                                                            fieldCategoryData={previewOverlay[fieldsByFamily.primaryTypeField.id] ?? fieldCategoryData[fieldsByFamily.primaryTypeField.id]}
+                                                            isHighlighted={fieldsByFamily.primaryTypeField.id === highlightedFieldId}
+                                                        />
+                                                    )}
+                                                    {fieldsByFamily.primarySceneField && (
+                                                        <FieldRow
+                                                            field={fieldsByFamily.primarySceneField}
+                                                            categoryId={selectedCategoryId}
+                                                            isEnabled={getFieldsForCategory.enabled.some((f) => f.id === fieldsByFamily.primarySceneField.id)}
+                                                            onToggle={wrapToggle(fieldsByFamily.primarySceneField, selectedCategoryId)}
+                                                            onVisibilityToggle={toggleVisibility}
+                                                            onPrimaryToggle={togglePrimary}
+                                                            onRequiredToggle={toggleRequired}
+                                                            onAiEligibleToggle={toggleAiEligible}
+                                                            onEdit={canManageFields ? handleEditField : null}
+                                                            canManage={canManageVisibility && !previewProfileName}
+                                                            canManageFields={canManageFields}
+                                                            systemFields={systemFields}
+                                                            fieldCategoryData={previewOverlay[fieldsByFamily.primarySceneField.id] ?? fieldCategoryData[fieldsByFamily.primarySceneField.id]}
+                                                            isHighlighted={fieldsByFamily.primarySceneField.id === highlightedFieldId}
+                                                        />
+                                                    )}
+                                                </div>
+                                            </div>
                                         )}
-                                        <DndContext
-                                            sensors={sensors}
-                                            collisionDetection={closestCenter}
-                                            onDragEnd={handleEnabledFieldsDragEnd}
-                                        >
-                                            <SortableContext
-                                                items={fieldsByFamily.otherEnabled.map(f => f.id)}
-                                                strategy={verticalListSortingStrategy}
-                                            >
-                                                {fieldsByFamily.otherEnabled.map((field) => (
-                                                    <SortableFieldRow
-                                                        key={field.id}
-                                                        field={field}
-                                                        categoryId={selectedCategoryId}
-                                                        isEnabled={true}
-                                                        onToggle={wrapToggle(field, selectedCategoryId)}
-                                                        onVisibilityToggle={toggleVisibility}
-                                                        onPrimaryToggle={togglePrimary}
-                                                        onRequiredToggle={toggleRequired}
-                                                        onAiEligibleToggle={toggleAiEligible}
-                                                        onEdit={canManageFields ? handleEditField : null}
-                                                        onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
-                                                        canManage={canManageVisibility && !previewProfileName}
-                                                        canManageFields={canManageFields}
-                                                        systemFields={systemFields}
-                                                        fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                                        isHighlighted={field.id === highlightedFieldId}
-                                                    />
-                                                ))}
-                                            </SortableContext>
-                                        </DndContext>
-                                        {fieldReorderLoading && (
-                                            <p className="text-xs text-gray-400 mt-1">Saving order…</p>
+                                        {fieldsByFamily.otherEnabled.length > 0 && (
+                                            <>
+                                                <DndContext
+                                                    sensors={sensors}
+                                                    collisionDetection={closestCenter}
+                                                    onDragEnd={handleEnabledFieldsDragEnd}
+                                                >
+                                                    <SortableContext
+                                                        items={fieldsByFamily.otherEnabled.map(f => f.id)}
+                                                        strategy={verticalListSortingStrategy}
+                                                    >
+                                                        {fieldsByFamily.otherEnabled.map((field) => (
+                                                            <SortableFieldRow
+                                                                key={field.id}
+                                                                field={field}
+                                                                categoryId={selectedCategoryId}
+                                                                isEnabled={true}
+                                                                onToggle={wrapToggle(field, selectedCategoryId)}
+                                                                onVisibilityToggle={toggleVisibility}
+                                                                onPrimaryToggle={togglePrimary}
+                                                                onRequiredToggle={toggleRequired}
+                                                                onAiEligibleToggle={toggleAiEligible}
+                                                                onEdit={canManageFields ? handleEditField : null}
+                                                                onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
+                                                                canManage={canManageVisibility && !previewProfileName}
+                                                                canManageFields={canManageFields}
+                                                                systemFields={systemFields}
+                                                                fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                                                isHighlighted={field.id === highlightedFieldId}
+                                                            />
+                                                        ))}
+                                                    </SortableContext>
+                                                </DndContext>
+                                                {fieldReorderLoading && (
+                                                    <p className="text-xs text-gray-400 mt-1">Saving order…</p>
+                                                )}
+                                            </>
                                         )}
                                     </>
                                 ) : (
@@ -2145,169 +2266,6 @@ export default function ByCategoryView({
 }
 
 /**
- * Family Row Component (Phase K)
- *
- * Collapsible row for a field family. Shows family label, system badge, shared visibility toggles.
- * When expanded, shows member fields (enabled then available) as individual FieldRows.
- * Family-level toggle applies to all member fields.
- */
-function FamilyRow({
-    familyKey,
-    familyConfig,
-    enabledMembers,
-    availableMembers,
-    categoryId,
-    expanded,
-    onToggleExpand,
-    wrapToggle,
-    onVisibilityToggle,
-    onPrimaryToggle,
-    onRequiredToggle,
-    onAiEligibleToggle,
-    onEdit,
-    canManage,
-    canManageFields,
-    systemFields,
-    fieldCategoryData,
-    previewOverlay,
-    highlightedFieldId,
-}) {
-    const label = familyConfig?.label || familyKey
-    const members = [...enabledMembers, ...availableMembers]
-
-    const getEffective = (field, context) => {
-        const categoryData = previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]
-        const override = categoryId && categoryData?.overrides?.[categoryId]
-        if (context === 'upload') return override?.show_on_upload !== undefined ? override.show_on_upload : (field.effective_show_on_upload ?? field.show_on_upload ?? true)
-        if (context === 'edit') return override?.show_on_edit !== undefined ? override.show_on_edit : (field.effective_show_on_edit ?? field.show_on_edit ?? true)
-        if (context === 'filter') return override?.show_in_filters !== undefined ? override.show_in_filters : (field.effective_show_in_filters ?? field.show_in_filters ?? true)
-        return true
-    }
-
-    const uploads = members.map(f => getEffective(f, 'upload'))
-    const edits = members.map(f => getEffective(f, 'edit'))
-    const filters = members.map(f => getEffective(f, 'filter'))
-    const allUpload = uploads.length > 0 && uploads.every(Boolean)
-    const noUpload = uploads.length > 0 && uploads.every(v => !v)
-    const allEdit = edits.length > 0 && edits.every(Boolean)
-    const noEdit = edits.length > 0 && edits.every(v => !v)
-    const allFilter = filters.length > 0 && filters.every(Boolean)
-    const noFilter = filters.length > 0 && filters.every(v => !v)
-    const mixedUpload = uploads.length > 0 && !allUpload && !noUpload
-    const mixedEdit = edits.length > 0 && !allEdit && !noEdit
-    const mixedFilter = filters.length > 0 && !allFilter && !noFilter
-
-    const handleFamilyVisibility = (context, currentCommon) => {
-        const newVal = !currentCommon
-        members.forEach(field => {
-            const cur = getEffective(field, context)
-            if (cur !== newVal) {
-                const key = context === 'upload' ? 'upload' : context === 'edit' ? 'edit' : 'filter'
-                onVisibilityToggle(field.id, key, cur)
-            }
-        })
-    }
-
-    return (
-        <div className="rounded-md overflow-hidden text-sm">
-            <div
-                className="group px-3 py-1.5 flex items-center gap-2 cursor-pointer hover:bg-gray-50/80 transition-all duration-200 ease-out rounded-md"
-                onClick={onToggleExpand}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand() } }}
-                aria-expanded={expanded}
-            >
-                <span className="flex-shrink-0 text-gray-500">
-                    {expanded ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
-                </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field group" />
-                <span className="text-sm font-medium text-gray-900">{label}</span>
-                <span className="text-xs text-gray-500" title={`${enabledMembers.length} enabled; ${availableMembers.length} available`}>
-                    {enabledMembers.length} enabled · {availableMembers.length} available
-                </span>
-                <div className="flex-1" />
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-70 focus-within:opacity-70 transition-opacity duration-200" onClick={e => e.stopPropagation()}>
-                    <button
-                        type="button"
-                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('upload', allUpload)}
-                        disabled={!canManage || members.length === 0}
-                        title={mixedUpload ? 'Some fields differ. Click to set all.' : 'Upload: Show in upload form when adding assets'}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allUpload ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                    >
-                        <CloudArrowUpIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('edit', allEdit)}
-                        disabled={!canManage || members.length === 0}
-                        title={mixedEdit ? 'Some fields differ. Click to set all.' : 'Quick View: Show in asset details drawer and modal'}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allEdit ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                    >
-                        <EyeIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('filter', allFilter)}
-                        disabled={!canManage || members.length === 0}
-                        title={mixedFilter ? 'Some fields differ. Click to set all.' : 'Filter: Show in asset grid filter bar'}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allFilter ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                    >
-                        <FunnelIcon className="w-4 h-4" />
-                    </button>
-                </div>
-            </div>
-            {expanded && (
-                <div className="border-t border-gray-100/80 space-y-0.5 pt-2 mt-1">
-                    {enabledMembers.map(field => (
-                        <div key={field.id}>
-                            <FieldRow
-                                field={field}
-                                categoryId={categoryId}
-                                isEnabled={true}
-                                onToggle={wrapToggle(field, categoryId)}
-                                onVisibilityToggle={onVisibilityToggle}
-                                onPrimaryToggle={onPrimaryToggle}
-                                onRequiredToggle={onRequiredToggle}
-                                onAiEligibleToggle={onAiEligibleToggle}
-                                onEdit={onEdit}
-                                canManage={canManage}
-                                canManageFields={canManageFields}
-                                systemFields={systemFields}
-                                fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
-                                isDraggable={false}
-                                isHighlighted={field.id === highlightedFieldId}
-                            />
-                        </div>
-                    ))}
-                    {availableMembers.map(field => (
-                        <div key={field.id}>
-                            <FieldRow
-                                field={field}
-                                categoryId={categoryId}
-                                isEnabled={false}
-                                onToggle={wrapToggle(field, categoryId)}
-                                onVisibilityToggle={onVisibilityToggle}
-                                onPrimaryToggle={onPrimaryToggle}
-                                onRequiredToggle={onRequiredToggle}
-                                onAiEligibleToggle={onAiEligibleToggle}
-                                onEdit={onEdit}
-                                canManage={canManage}
-                                canManageFields={canManageFields}
-                                systemFields={systemFields}
-                                fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
-                                isDraggable={false}
-                                isHighlighted={field.id === highlightedFieldId}
-                            />
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    )
-}
-
-/**
  * Sortable Field Row — wraps FieldRow with dnd-kit useSortable
  */
 function SortableFieldRow(props) {
@@ -2347,6 +2305,7 @@ function FieldRow({
     field,
     categoryId,
     isEnabled,
+    displayLabel = null,
     onToggle,
     onVisibilityToggle,
     onPrimaryToggle,
@@ -2420,6 +2379,13 @@ function FieldRow({
         : field.is_required ?? false
 
     const aiEligible = field.ai_eligible ?? false
+    const resolvedTitle =
+        displayLabel ||
+        (field.key && String(field.key).endsWith('_type') ? 'Type' : null) ||
+        field.label ||
+        field.system_label ||
+        field.key ||
+        'Unnamed Field'
     // dominant_hue_group: filter-only — user may only control is_filter_hidden
     const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
 
@@ -2457,7 +2423,7 @@ function FieldRow({
                             <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field" />
                         )}
                         <span className="text-sm font-semibold text-gray-900 truncate">
-                            {field.label || field.system_label || field.key || 'Unnamed Field'}
+                            {resolvedTitle}
                         </span>
                     </div>
 

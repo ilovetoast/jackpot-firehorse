@@ -12,20 +12,19 @@ use App\Services\SystemCategoryService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class CategoryController extends Controller
 {
     use HandlesFlashMessages;
+
     public function __construct(
         protected CategoryService $categoryService,
         protected PlanService $planService,
         protected SystemCategoryService $systemCategoryService,
         protected CategoryUpgradeService $categoryUpgradeService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of categories.
@@ -74,7 +73,7 @@ class CategoryController extends Controller
         // Get system category templates and merge with existing categories
         // This ensures all brands see system categories even if they don't have them yet
         $systemTemplates = $this->systemCategoryService->getAllTemplates();
-        
+
         // Filter templates by asset type if filter is applied
         if ($request->has('asset_type') && $request->asset_type) {
             $systemTemplates = $systemTemplates->filter(function ($template) use ($request) {
@@ -103,7 +102,7 @@ class CategoryController extends Controller
         foreach ($systemTemplates as $template) {
             // Check if brand already has a category with this slug and asset_type
             $exists = $categories->contains(function ($category) use ($template) {
-                return $category->slug === $template->slug && 
+                return $category->slug === $template->slug &&
                        $category->asset_type->value === $template->asset_type->value;
             });
 
@@ -133,7 +132,7 @@ class CategoryController extends Controller
             ->where('is_system', false) // Only count custom categories
             ->count();
         $canCreate = $this->categoryService->canCreate($tenant, $brand);
-        
+
         // Get plan information
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $planFeatures = $this->planService->getPlanFeatures($tenant);
@@ -185,7 +184,7 @@ class CategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
+            'asset_type' => 'required|string|in:'.implode(',', array_column(AssetType::cases(), 'value')),
             'is_private' => 'nullable|boolean',
             'access_rules' => 'nullable|array',
             'access_rules.*.type' => 'required|string|in:role,user',
@@ -219,6 +218,7 @@ class CategoryController extends Controller
             if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json(['message' => $e->getMessage(), 'error' => $e->getMessage()], 422);
             }
+
             return back()->withErrors([
                 'plan_limit' => $e->getMessage(),
             ])->onlyInput('name', 'slug');
@@ -257,7 +257,7 @@ class CategoryController extends Controller
                 'is_hidden' => 'nullable|boolean',
                 // is_locked is site admin only - not accepted from tenant requests
             ]);
-            
+
             // Explicitly reject is_locked if somehow sent
             if ($request->has('is_locked')) {
                 abort(403, 'Lock status can only be managed by site administrators.');
@@ -276,7 +276,7 @@ class CategoryController extends Controller
                 'access_rules.*.role' => 'required_if:access_rules.*.type,role|nullable|string',
                 'access_rules.*.user_id' => 'required_if:access_rules.*.type,user|nullable|integer|exists:users,id',
             ]);
-            
+
             // Explicitly reject is_locked if somehow sent (site admin only)
             if ($request->has('is_locked')) {
                 abort(403, 'Lock status can only be managed by site administrators.');
@@ -305,12 +305,14 @@ class CategoryController extends Controller
                     ],
                 ]);
             }
+
             // No flash for non-Inertia either - avoids ghost toasts when navigating
             return back();
         } catch (\Exception $e) {
             if ($request->header('X-Inertia')) {
                 return back()->withErrors(['error' => $e->getMessage()]);
             }
+
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ])->onlyInput('name', 'slug');
@@ -341,6 +343,38 @@ class CategoryController extends Controller
         $category->update(['is_hidden' => $validated['is_hidden']]);
 
         return response()->json(['success' => true, 'is_hidden' => $category->is_hidden]);
+    }
+
+    /**
+     * Toggle Brand Intelligence (EBI) for this category (settings.ebi_enabled).
+     * Uses metadata registry permissions so tenant admins can update system categories without full category edit rights.
+     */
+    public function patchEbiEnabled(Request $request, Brand $brand, Category $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        if ($brand->tenant_id !== $tenant->id || $category->tenant_id !== $tenant->id || $category->brand_id !== $brand->id) {
+            abort(403);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')
+            && ! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'You do not have permission to update category Brand Intelligence settings.');
+        }
+
+        $validated = $request->validate([
+            'ebi_enabled' => 'required|boolean',
+        ]);
+
+        $settings = $category->settings ?? [];
+        $settings['ebi_enabled'] = $validated['ebi_enabled'];
+        $category->update(['settings' => $settings]);
+
+        return response()->json([
+            'success' => true,
+            'ebi_enabled' => $category->fresh()->isEbiEnabled(),
+        ]);
     }
 
     /**
@@ -392,12 +426,13 @@ class CategoryController extends Controller
         }
 
         // Check if category can be deleted (business logic check)
-        if (!$category->canBeDeleted()) {
+        if (! $category->canBeDeleted()) {
             if ($category->is_system && $category->systemTemplateExists()) {
                 return back()->withErrors([
                     'error' => 'Cannot delete system categories while the template exists.',
                 ]);
             }
+
             // Note: Locked system categories with deleted templates CAN be deleted
             // The canBeDeleted() method handles this logic
             return back()->withErrors([
@@ -488,7 +523,7 @@ class CategoryController extends Controller
 
         foreach ($validated['categories'] as $item) {
             $category = Category::find($item['id']);
-            
+
             // Verify category belongs to tenant/brand
             if ($category && $category->tenant_id === $tenant->id && $category->brand_id === $brand->id) {
                 $category->update(['order' => $item['order']]);
@@ -527,6 +562,7 @@ class CategoryController extends Controller
 
         try {
             $preview = $this->categoryUpgradeService->previewUpgrade($category);
+
             return response()->json($preview);
         } catch (\Exception $e) {
             return response()->json([
@@ -559,9 +595,9 @@ class CategoryController extends Controller
 
         try {
             $systemCategory = \App\Models\SystemCategory::findOrFail($validated['system_category_id']);
-            
+
             // Verify this is the latest version
-            if (!$systemCategory->isLatestVersion()) {
+            if (! $systemCategory->isLatestVersion()) {
                 // Get the latest version instead
                 $systemCategory = $systemCategory->getLatestVersion();
             }
@@ -569,10 +605,11 @@ class CategoryController extends Controller
             // Add the template to the brand
             $category = $this->systemCategoryService->addTemplateToBrand($brand, $systemCategory);
 
-            if (!$category) {
+            if (! $category) {
                 if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                     return response()->json(['error' => 'This system category already exists for this brand.'], 422);
                 }
+
                 return back()->withErrors([
                     'error' => 'This system category already exists for this brand.',
                 ]);
@@ -592,11 +629,13 @@ class CategoryController extends Controller
                     ],
                 ]);
             }
+
             return redirect()->route('brands.edit', $brand)->with('success', 'System category added successfully.');
         } catch (\Exception $e) {
             if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json(['error' => $e->getMessage()], 422);
             }
+
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ]);
@@ -640,13 +679,13 @@ class CategoryController extends Controller
                 'approved_fields' => 'nullable|array',
                 'approved_fields.*' => 'string|in:name,icon,is_private,is_hidden',
             ]);
-            
+
             // Ensure approved_fields is always an array (even if empty)
             $validated['approved_fields'] = $validated['approved_fields'] ?? [];
         } catch (\Illuminate\Validation\ValidationException $e) {
             if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json([
-                    'error' => 'Validation failed: ' . implode(', ', array_merge(...array_values($e->errors()))),
+                    'error' => 'Validation failed: '.implode(', ', array_merge(...array_values($e->errors()))),
                 ], 422);
             }
             throw $e;

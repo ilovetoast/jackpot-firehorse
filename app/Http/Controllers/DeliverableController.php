@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
@@ -467,9 +468,18 @@ class DeliverableController extends Controller
             }
         }
 
+        $publishedByIds = $assetModels->pluck('published_by_id')->filter()->unique()->values()->all();
+        $publishedByUsers = collect();
+        if ($publishedByIds !== []) {
+            $publishedByUsers = User::query()
+                ->whereIn('id', $publishedByIds)
+                ->get(['id', 'first_name', 'last_name', 'email'])
+                ->keyBy('id');
+        }
+
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $mappedAssets = $assetModels
-            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset) {
+            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset, $publishedByUsers) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -540,18 +550,15 @@ class DeliverableController extends Controller
                     $title = null;
                 }
 
-                // Get category name if category_id exists in metadata
-                $categoryName = null;
+                // Get category if category_id exists in metadata
                 $categoryId = null;
+                $category = null;
                 if ($asset->metadata && isset($asset->metadata['category_id'])) {
                     $categoryId = $asset->metadata['category_id'];
                     $category = \App\Models\Category::where('id', $categoryId)
                         ->where('tenant_id', $tenant->id)
                         ->where('brand_id', $brand->id)
                         ->first();
-                    if ($category) {
-                        $categoryName = $category->name;
-                    }
                 }
 
                 // Get user who uploaded the asset
@@ -600,6 +607,8 @@ class DeliverableController extends Controller
                     }
                 }
 
+                $publisher = $asset->published_by_id ? $publishedByUsers->get($asset->published_by_id) : null;
+
                 return [
                     'id' => $asset->id,
                     'title' => $title,
@@ -611,9 +620,10 @@ class DeliverableController extends Controller
                     'created_at' => $asset->created_at?->toIso8601String(),
                     'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
                     'starred' => $this->assetIsStarred($metadata['starred'] ?? null), // boolean; source: assets.metadata.starred only
-                    'category' => $categoryName ? [
-                        'id' => $categoryId,
-                        'name' => $categoryName,
+                    'category' => $category ? [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'ebi_enabled' => $category->isEbiEnabled(),
                     ] : null,
                     'user_id' => $asset->user_id, // For delete-own permission check
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
@@ -621,9 +631,9 @@ class DeliverableController extends Controller
                     'published_at' => $asset->published_at?->toIso8601String(),
                     'is_published' => $asset->published_at !== null, // Canonical boolean for publication state
                     'published_by' => $asset->published_by_id ? [
-                        'id' => $asset->publishedBy?->id ?? null,
-                        'name' => $asset->publishedBy?->name ?? null,
-                        'email' => $asset->publishedBy?->email ?? null,
+                        'id' => $publisher?->id,
+                        'name' => $publisher ? (trim(($publisher->first_name ?? '').' '.($publisher->last_name ?? '')) ?: null) : null,
+                        'email' => $publisher?->email,
                     ] : null,
                     'archived_at' => $asset->archived_at?->toIso8601String(),
                     // Thumbnail URLs - distinct paths prevent cache confusion

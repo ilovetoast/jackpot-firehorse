@@ -170,13 +170,13 @@ class BrandController extends Controller
             ]);
         }
 
-        // Check if user is tenant owner/admin - they can switch to any accessible brand
+        // Tenant-wide roles can switch to any brand in the company (align with company switch + permissions)
         $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        $isTenantWideBrandAccess = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
 
-        // Verify user has access to this brand (via brand_user pivot table) OR is tenant owner/admin
+        // Verify user has access to this brand (via brand_user pivot table) OR tenant-wide role
         // Phase MI-1: Check active membership
-        if (! $isTenantOwnerOrAdmin && ! $user->activeBrandMembership($brand)) {
+        if (! $isTenantWideBrandAccess && ! $user->activeBrandMembership($brand)) {
             abort(403, 'You do not have access to this brand.');
         }
 
@@ -1176,6 +1176,12 @@ class BrandController extends Controller
             abort(404, 'User is not a member of this brand.');
         }
 
+        if ($user->isAgencyManagedMemberOf($tenant)) {
+            return back()->withErrors([
+                'brand' => 'This user is managed by an agency link. Change access in Company Settings → Agencies.',
+            ]);
+        }
+
         // Validate using RoleRegistry - no automatic conversion
         $validated = $request->validate([
             'role' => [
@@ -1233,6 +1239,12 @@ class BrandController extends Controller
         $membership = $user->activeBrandMembership($brand);
         if (! $membership) {
             abort(404, 'User is not an active member of this brand.');
+        }
+
+        if ($user->isAgencyManagedMemberOf($tenant)) {
+            return back()->withErrors([
+                'brand' => 'This user is managed by an agency link. Change access in Company Settings → Agencies.',
+            ]);
         }
 
         // Phase MI-1: Soft delete - set removed_at instead of deleting pivot

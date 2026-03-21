@@ -56,9 +56,9 @@ const BULK_ACTION_GROUPS = [
     },
     {
         label: 'Classification',
-        sectionDescription: 'Assign category to staged assets (moves to main grid).',
+        sectionDescription: 'Assign category (library, execution, or generative) and move to main grid.',
         actions: [
-            { id: 'ASSIGN_CATEGORY', label: 'Assign Category', helper: 'Set category and move to main grid', icon: DocumentCheckIcon },
+            { id: 'ASSIGN_CATEGORY', label: 'Assign Category', helper: 'Set category, asset type, and move to main grid', icon: DocumentCheckIcon },
         ],
     },
     {
@@ -86,6 +86,13 @@ const LIFECYCLE_ACTIONS = new Set([
 ])
 const METADATA_ACTIONS = new Set(['METADATA_ADD', 'METADATA_REPLACE', 'METADATA_CLEAR'])
 const ASSIGN_CATEGORY_ACTION = 'ASSIGN_CATEGORY'
+
+/** Keys aligned with App\Enums\AssetType for bulk assign */
+const BULK_ASSET_TYPE_OPTIONS = [
+    { value: 'asset', label: 'Library' },
+    { value: 'deliverable', label: 'Execution' },
+    { value: 'ai_generated', label: 'Generative' },
+]
 
 /**
  * Build selection summary from current-page assets and selected IDs.
@@ -165,11 +172,17 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
 /**
  * For each group, return only actions that are valid. Filter out groups with zero valid actions.
  * When validIds is null, all actions in all groups are shown.
- * Classification (ASSIGN_CATEGORY) is hidden when categories is empty.
+ * Classification (ASSIGN_CATEGORY) is hidden when there are no categories for any asset type.
  */
-function computedValidActions(groups, validIds, categories = []) {
+function computedValidActions(groups, validIds, categories = [], bulkCategoriesByAssetType = null) {
     let filteredGroups = groups
-    if (Array.isArray(categories) && categories.length === 0) {
+    const hasAnyTypedCategory =
+        bulkCategoriesByAssetType &&
+        typeof bulkCategoriesByAssetType === 'object' &&
+        ['asset', 'deliverable', 'ai_generated'].some(
+            (k) => Array.isArray(bulkCategoriesByAssetType[k]) && bulkCategoriesByAssetType[k].length > 0
+        )
+    if (Array.isArray(categories) && categories.length === 0 && !hasAnyTypedCategory) {
         filteredGroups = groups.filter((g) => g.label !== 'Classification')
     }
     if (!validIds) return filteredGroups.map((g) => ({ ...g, validActions: g.actions }))
@@ -210,10 +223,13 @@ export default function BulkActionsModal({
     canForceDelete = false,
     /** Staged intake: categories for Assign Category bulk action */
     categories = [],
+    /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution / Generative */
+    bulkCategoriesByAssetType = null,
 }) {
     const [step, setStep] = useState('select')
     const [selectedAction, setSelectedAction] = useState(null)
     const [rejectionReason, setRejectionReason] = useState('')
+    const [assignAssetType, setAssignAssetType] = useState('asset')
     const [assignCategoryId, setAssignCategoryId] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
@@ -229,9 +245,23 @@ export default function BulkActionsModal({
         [selectionSummary, isTrashMode, canForceDelete]
     )
     const groupsWithValidActions = useMemo(
-        () => computedValidActions(BULK_ACTION_GROUPS, validIds, categories),
-        [validIds, categories]
+        () => computedValidActions(BULK_ACTION_GROUPS, validIds, categories, bulkCategoriesByAssetType),
+        [validIds, categories, bulkCategoriesByAssetType]
     )
+
+    const hasTypedBulkCategories =
+        bulkCategoriesByAssetType &&
+        typeof bulkCategoriesByAssetType === 'object' &&
+        BULK_ASSET_TYPE_OPTIONS.some(
+            (o) => Array.isArray(bulkCategoriesByAssetType[o.value]) && bulkCategoriesByAssetType[o.value].length > 0
+        )
+
+    const assignCategoryOptions = useMemo(() => {
+        if (hasTypedBulkCategories && assignAssetType && bulkCategoriesByAssetType[assignAssetType]) {
+            return bulkCategoriesByAssetType[assignAssetType]
+        }
+        return Array.isArray(categories) ? categories : []
+    }, [hasTypedBulkCategories, assignAssetType, bulkCategoriesByAssetType, categories])
 
     useEffect(() => {
         const t = requestAnimationFrame(() => requestAnimationFrame(() => setModalEntered(true)))
@@ -262,7 +292,10 @@ export default function BulkActionsModal({
         setSelectedAction(actionId)
         setStep('configure')
         setError(null)
-        if (actionId === ASSIGN_CATEGORY_ACTION) setAssignCategoryId('')
+        if (actionId === ASSIGN_CATEGORY_ACTION) {
+            setAssignCategoryId('')
+            setAssignAssetType('asset')
+        }
     }, [assetIds, onOpenMetadataEdit, onClose])
 
     const handleBack = useCallback(() => {
@@ -277,6 +310,7 @@ export default function BulkActionsModal({
         setSelectedAction(null)
         setRejectionReason('')
         setAssignCategoryId('')
+        setAssignAssetType('asset')
         setError(null)
         onClose()
     }, [onClose])
@@ -295,7 +329,12 @@ export default function BulkActionsModal({
         try {
             let payload = {}
             if (selectedAction === 'REJECT') payload = { rejection_reason: rejectionReason.trim() }
-            else if (selectedAction === ASSIGN_CATEGORY_ACTION) payload = { category_id: parseInt(assignCategoryId, 10) }
+            else if (selectedAction === ASSIGN_CATEGORY_ACTION) {
+                payload = { category_id: parseInt(assignCategoryId, 10) }
+                if (hasTypedBulkCategories) {
+                    payload.asset_type = assignAssetType
+                }
+            }
             const { data } = await axios.post(bulkActionUrl, {
                 asset_ids: assetIds,
                 action: selectedAction,
@@ -473,6 +512,27 @@ export default function BulkActionsModal({
 
                             {selectedAction === ASSIGN_CATEGORY_ACTION && (
                                 <>
+                                    {hasTypedBulkCategories && (
+                                        <>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Asset type
+                                            </label>
+                                            <select
+                                                value={assignAssetType}
+                                                onChange={(e) => {
+                                                    setAssignAssetType(e.target.value)
+                                                    setAssignCategoryId('')
+                                                }}
+                                                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mb-4"
+                                            >
+                                                {BULK_ASSET_TYPE_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </>
+                                    )}
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
                                         Category
                                     </label>
@@ -482,12 +542,12 @@ export default function BulkActionsModal({
                                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                                     >
                                         <option value="">Select a category...</option>
-                                        {Array.isArray(categories) && categories.map((cat) => (
+                                        {assignCategoryOptions.map((cat) => (
                                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                                         ))}
                                     </select>
-                                    {categories.length === 0 && (
-                                        <p className="mt-2 text-xs text-amber-600">No categories available. Create a category first.</p>
+                                    {assignCategoryOptions.length === 0 && (
+                                        <p className="mt-2 text-xs text-amber-600">No categories for this asset type. Create a category first.</p>
                                     )}
                                 </>
                             )}

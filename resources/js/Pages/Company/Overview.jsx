@@ -1,5 +1,6 @@
 import { usePage, router } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
+import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 import { useState, useRef, useEffect } from 'react'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -7,6 +8,7 @@ import AppNav from '../../Components/AppNav'
 import BrandAvatar from '../../Components/BrandAvatar'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import {
     FolderIcon,
     CloudArrowDownIcon,
@@ -30,11 +32,14 @@ export default function CompanyOverview({
     ai_usage,
     canCreateBrand = false,
     canManageBrands = false,
+    agency_managed_brands = [],
+    dashboard_links = {},
 }) {
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
     const [actionsOpen, setActionsOpen] = useState(null)
     const actionsRef = useRef(null)
     const { auth } = usePage().props
+    const dashLinks = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -86,6 +91,24 @@ export default function CompanyOverview({
         } else {
             handleSwitchBrand(brandId)
         }
+    }
+
+    const handleOpenClientManagedBrand = (clientTenantId, brandId) => {
+        showWorkspaceSwitchingOverlay('company')
+        router.post(
+            `/app/companies/${clientTenantId}/switch`,
+            { brand_id: brandId, redirect: '/app/overview' },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                onSuccess: () => {
+                    window.location.href = '/app/overview'
+                },
+                onError: () => {
+                    window.location.href = '/app/overview'
+                },
+            }
+        )
     }
 
     const handleDeleteClick = (brandId, brandName) => {
@@ -157,12 +180,13 @@ export default function CompanyOverview({
                             <h1 className="text-3xl font-bold text-gray-900">Company Portal</h1>
                             <p className="mt-2 text-sm text-gray-600">{tenant?.name} organization</p>
                         </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3 sm:justify-end">
                         {plan?.name && (
                             <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
                                 {plan.name} Plan
                             </span>
                         )}
+                        <DashboardLinksRow links={dashLinks} variant="light" />
                         {canCreateBrand && (
                             <Link
                                 href="/app/brands/create"
@@ -175,7 +199,7 @@ export default function CompanyOverview({
                     </div>
                 </div>
 
-                <CompanyTabs />
+                <CompanyTabs showAgencyTab={false} />
 
                 {/* Company-wide metrics */}
                 <div className="mb-8">
@@ -360,6 +384,84 @@ export default function CompanyOverview({
                         ))}
                     </div>
                 </div>
+
+                {agency_managed_brands?.length > 0 && (
+                    <div className="mt-10">
+                        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
+                            Agency managed brands
+                        </h2>
+                        <p className="text-sm text-gray-500 mb-6">
+                            Brands at client companies linked to your agency. Open a workspace to work in that company context.
+                        </p>
+                        <div className="space-y-4">
+                            {agency_managed_brands.map((row) => {
+                                const brand = row.brand
+                                const key = `${row.client_tenant_id}-${brand.id}`
+                                return (
+                                    <div
+                                        key={key}
+                                        className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200 transition-colors hover:ring-gray-300"
+                                    >
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6">
+                                            <div className="flex items-center gap-4 min-w-0">
+                                                <div className="flex-shrink-0">
+                                                    <BrandAvatar
+                                                        logoPath={brand.logo_path}
+                                                        iconPath={brand.icon_path}
+                                                        icon={brand.icon}
+                                                        iconBgColor={brand.icon_bg_color}
+                                                        name={brand.name}
+                                                        primaryColor={brand.primary_color}
+                                                        size="lg"
+                                                    />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <h3 className="text-lg font-semibold text-gray-900 truncate">
+                                                            {brand.name}
+                                                        </h3>
+                                                        {brand.is_default && (
+                                                            <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                                                                Default
+                                                            </span>
+                                                        )}
+                                                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                                                            {row.client_name}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-500">
+                                                        <span>{brand.stats?.total_assets?.value?.toLocaleString() ?? 0} assets</span>
+                                                        <span>{formatStorage(brand.stats?.storage_mb?.value ?? 0)}</span>
+                                                        <span>
+                                                            {brand.stats?.download_links?.value?.toLocaleString() ?? 0} downloads this month
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenClientManagedBrand(row.client_tenant_id, brand.id)}
+                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                >
+                                                    Switch to this brand
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenClientManagedBrand(row.client_tenant_id, brand.id)}
+                                                    className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                                >
+                                                    Brand Overview
+                                                    <ChevronRightIcon className="ml-1 h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                )}
                 </div>
             </main>
 
