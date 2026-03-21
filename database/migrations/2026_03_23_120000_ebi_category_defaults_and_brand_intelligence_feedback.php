@@ -22,19 +22,21 @@ return new class extends Migration
             }
         });
 
-        Schema::create('brand_intelligence_feedback', function (Blueprint $table) {
-            $table->id();
-            $table->uuid('asset_id')->nullable();
-            $table->foreign('asset_id')->references('id')->on('assets')->nullOnDelete();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('brand_id')->nullable()->constrained()->nullOnDelete();
-            $table->string('type');
-            $table->string('rating');
-            $table->timestamp('created_at')->useCurrent();
+        if (! Schema::hasTable('brand_intelligence_feedback')) {
+            Schema::create('brand_intelligence_feedback', function (Blueprint $table) {
+                $table->id();
+                $table->uuid('asset_id')->nullable();
+                $table->foreign('asset_id')->references('id')->on('assets')->nullOnDelete();
+                $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+                $table->foreignId('brand_id')->nullable()->constrained()->nullOnDelete();
+                $table->string('type');
+                $table->string('rating');
+                $table->timestamp('created_at')->useCurrent();
 
-            $table->index(['tenant_id', 'created_at']);
-            $table->index('asset_id');
-        });
+                $table->index(['tenant_id', 'created_at']);
+                $table->index('asset_id');
+            });
+        }
     }
 
     public function down(): void
