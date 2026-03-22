@@ -6,12 +6,14 @@ import {
     DocumentTextIcon,
     ServerStackIcon,
     ComputerDesktopIcon,
+    RocketLaunchIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AdminLogViewer() {
     const { auth } = usePage().props
     const [activeTab, setActiveTab] = useState('web')
     const [logs, setLogs] = useState([])
+    const [deployPayload, setDeployPayload] = useState({ path: '', lines: [], error: null })
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
@@ -19,11 +21,22 @@ export default function AdminLogViewer() {
         fetch(`/app/admin/logs/${activeTab}`)
             .then((res) => res.json())
             .then((data) => {
-                setLogs(data.logs || [])
+                if (data.kind === 'deploy') {
+                    setDeployPayload({
+                        path: data.path || '',
+                        lines: data.lines || [],
+                        error: data.error || null,
+                    })
+                    setLogs([])
+                } else {
+                    setLogs(data.logs || [])
+                    setDeployPayload({ path: '', lines: [], error: null })
+                }
                 setLoading(false)
             })
             .catch(() => {
                 setLogs([])
+                setDeployPayload({ path: '', lines: [], error: 'Request failed.' })
                 setLoading(false)
             })
     }, [activeTab])
@@ -54,6 +67,8 @@ export default function AdminLogViewer() {
         return Object.entries(entry || {}).filter(([k]) => !skip.includes(k))
     }
 
+    const isDeploy = activeTab === 'deploy'
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
@@ -68,14 +83,16 @@ export default function AdminLogViewer() {
                         </Link>
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Admin Logs</h1>
                         <p className="mt-2 text-sm text-gray-700">
-                            Error and warning logs from web requests and queue workers (Redis-backed, last 50 entries)
+                            Web and worker errors/warnings (Redis, last 50). Deploy shows the last lines of the
+                            server deploy script log.
                         </p>
                     </div>
 
                     {/* Tabs */}
                     <div className="mb-6 border-b border-gray-200">
-                        <nav className="-mb-px flex space-x-8">
+                        <nav className="-mb-px flex flex-wrap gap-x-6 gap-y-1">
                             <button
+                                type="button"
                                 onClick={() => setActiveTab('web')}
                                 className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
                                     activeTab === 'web'
@@ -87,6 +104,7 @@ export default function AdminLogViewer() {
                                 Web Logs
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setActiveTab('worker')}
                                 className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
                                     activeTab === 'worker'
@@ -97,6 +115,18 @@ export default function AdminLogViewer() {
                                 <ServerStackIcon className="h-5 w-5" />
                                 Worker Logs
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('deploy')}
+                                className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
+                                    activeTab === 'deploy'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                <RocketLaunchIcon className="h-5 w-5" />
+                                Deploy
+                            </button>
                         </nav>
                     </div>
 
@@ -105,6 +135,29 @@ export default function AdminLogViewer() {
                         <div className="p-6">
                             {loading ? (
                                 <p className="text-sm text-gray-500">Loading...</p>
+                            ) : isDeploy ? (
+                                <>
+                                    {deployPayload.path && (
+                                        <p className="mb-3 text-xs text-gray-500 font-mono break-all">
+                                            {deployPayload.path}
+                                        </p>
+                                    )}
+                                    {deployPayload.error ? (
+                                        <div className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                            {deployPayload.error}
+                                        </div>
+                                    ) : deployPayload.lines.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                                            <DocumentTextIcon className="h-12 w-12 mb-4 text-gray-300" />
+                                            <p className="text-sm">Deploy log is empty</p>
+                                            <p className="mt-1 text-xs">Run a deploy to append output here</p>
+                                        </div>
+                                    ) : (
+                                        <pre className="max-h-[70vh] overflow-auto rounded-md bg-gray-900 p-4 text-left text-xs text-gray-100 whitespace-pre-wrap break-words">
+                                            {deployPayload.lines.join('\n')}
+                                        </pre>
+                                    )}
+                                </>
                             ) : logs.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-12 text-gray-500">
                                     <DocumentTextIcon className="h-12 w-12 mb-4 text-gray-300" />

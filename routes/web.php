@@ -331,7 +331,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/incidents/{incident}/resolve', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'resolve'])->name('admin.incidents.resolve');
     Route::post('/admin/support-tickets/{supportTicket}/resolve-and-reconcile', [\App\Http\Controllers\Admin\SupportTicketResolveController::class, 'resolveAndReconcile'])->name('admin.support-tickets.resolve-and-reconcile');
     Route::get('/admin/logs', [\App\Http\Controllers\Admin\AdminLogController::class, 'index'])->name('admin.logs.index');
-    Route::get('/admin/logs/{stream}', [\App\Http\Controllers\Admin\AdminLogController::class, 'api'])->name('admin.logs.api')->where('stream', 'web|worker');
+    Route::get('/admin/logs/{stream}', [\App\Http\Controllers\Admin\AdminLogController::class, 'api'])->name('admin.logs.api')->where('stream', 'web|worker|deploy');
     Route::get('/admin/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'index'])->name('admin.notifications');
     Route::post('/admin/notifications/seed', [\App\Http\Controllers\Admin\NotificationController::class, 'seed'])->name('admin.notifications.seed');
     Route::get('/admin/notifications/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'edit'])->name('admin.notifications.edit');

@@ -1070,8 +1070,7 @@ export default function AssetDrawer({
     // Use displayAsset (with live updates) instead of prop asset
     const categoryName = displayAsset.category?.name || 'Uncategorized'
 
-    // Check if user has permission to generate/retry thumbnails
-    const { can } = usePermission()
+    // Check if user has permission to generate/retry thumbnails (can from usePermission at top of drawer)
     const canRetryThumbnails = can('assets.retry_thumbnails')
     const canPublish = can('asset.publish')
     const canApproveMetadata = can('metadata.bypass_approval')

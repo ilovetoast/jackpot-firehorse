@@ -135,7 +135,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         { name: 'Brand Intelligence', description: 'EBI scores, breakdown, simulate (dev)', href: '/app/admin/brand-intelligence', icon: SparklesIcon },
         { name: 'System Status', description: 'Monitor system health', href: '/app/admin/system-status', icon: CogIcon },
         { name: 'Performance', description: 'Response timing, slow routes', href: '/app/admin/performance', icon: ClockIcon },
-        { name: 'Logs', description: 'Web & worker logs', href: '/app/admin/logs', icon: DocumentTextIcon },
+        { name: 'Logs', description: 'Web, worker & deploy logs', href: '/app/admin/logs', icon: DocumentTextIcon },
         { name: 'Failed Jobs', description: `${queue.failed_count ?? 0} failed`, href: '/app/admin/operations-center?tab=failed-jobs', icon: QueueListIcon },
         { name: 'Derivative Failures', description: `${failures.derivative_escalated ?? 0} escalated`, href: '/app/admin/derivative-failures', icon: ExclamationTriangleIcon },
         { name: 'Upload Failures', description: `${failures.upload_failures_24h ?? 0} (24h)`, href: '/app/admin/upload-failures', icon: CloudArrowUpIcon },
