@@ -41,7 +41,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.user.within.plan.limit' => \App\Http\Middleware\EnsureUserWithinPlanLimit::class,
             'restrict.collection.only' => \App\Http\Middleware\RestrictCollectionOnlyUser::class,
             'collect.asset_url_metrics' => \App\Http\Middleware\CollectAssetUrlMetrics::class,
-            'tenant.mail.branding' => \App\Http\Middleware\SetTenantMailBranding::class,
         ]);
 
         $middleware->redirectUsersTo('/');

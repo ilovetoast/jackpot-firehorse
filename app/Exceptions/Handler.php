@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -54,9 +55,14 @@ class Handler
 
         $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
 
-        $message = config('app.debug')
-            ? (string) ($e->getMessage() !== '' ? $e->getMessage() : 'Something went wrong.')
-            : 'Something went wrong.';
+        // Never expose container wiring (missing classes, bad bindings) in the Inertia SPA — not actionable for users.
+        if ($e instanceof BindingResolutionException) {
+            $message = 'Something went wrong.';
+        } else {
+            $message = config('app.debug')
+                ? (string) ($e->getMessage() !== '' ? $e->getMessage() : 'Something went wrong.')
+                : 'Something went wrong.';
+        }
 
         return new JsonResponse(['message' => $message, 'code' => $status], $status);
     }

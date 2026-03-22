@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Brand;
 use App\Models\Collection;
 use App\Models\Tenant;
+use App\Support\TenantMailBranding;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -27,6 +28,8 @@ class ResolveTenant
                     app()->instance('tenant', $tenant);
                 }
             }
+
+            $this->applyTenantMailBrandingForRequest();
 
             return $next($request);
         }
@@ -128,6 +131,8 @@ class ResolveTenant
                                     app()->instance('collection_only', true);
                                     app()->instance('collection', $collection);
 
+                                    $this->applyTenantMailBrandingForRequest();
+
                                     return $next($request);
                                 }
                             }
@@ -170,6 +175,8 @@ class ResolveTenant
                         if ($collection && $user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
                             app()->instance('collection_only', true);
                             app()->instance('collection', $collection);
+
+                            $this->applyTenantMailBrandingForRequest();
 
                             return $next($request);
                         }
@@ -226,6 +233,19 @@ class ResolveTenant
         // Bind brand to container
         app()->instance('brand', $brand);
 
+        $this->applyTenantMailBrandingForRequest();
+
         return $next($request);
+    }
+
+    /**
+     * Staging: fixed From address + tenant display name (see TenantMailBranding).
+     * Kept inside ResolveTenant so tenant routes do not depend on a separate middleware class.
+     */
+    private function applyTenantMailBrandingForRequest(): void
+    {
+        if (TenantMailBranding::enabled() && app()->bound('tenant')) {
+            TenantMailBranding::apply(app('tenant'));
+        }
     }
 }

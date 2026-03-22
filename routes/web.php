@@ -161,7 +161,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/errors/brand-disabled', [\App\Http\Controllers\ErrorController::class, 'brandDisabled'])->name('errors.brand-disabled');
 
     // Company settings (requires tenant to be selected). C12: RestrictCollectionOnlyUser gates collection-only users.
-    Route::middleware(['tenant', \App\Http\Middleware\SetTenantMailBranding::class, \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // GET /app → company overview (all brands, aggregated metrics)
         Route::get('', [\App\Http\Controllers\CompanyOverviewController::class, 'index'])->name('app');
         // Phase C12.0: Collection-only access landing (inside tenant so ResolveTenant can set collection_only)
@@ -473,7 +473,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('subscription.payment');
 
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
-    Route::middleware(['tenant', \App\Http\Middleware\SetTenantMailBranding::class, \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
