@@ -35,15 +35,8 @@ export function canMutatePreview(asset) {
 /**
  * Merges incoming asset data into previous asset state with field-level protection.
  * 
- * CRITICAL: Thumbnail fields are ALWAYS authoritative from incoming asset.
- * These fields must NEVER be preserved from prevAsset:
- * - preview_thumbnail_url
- * - final_thumbnail_url
- * - thumbnail_status
- * - thumbnail_version
- * - thumbnail_error
- * 
- * This ensures polling updates immediately replace UI state without flashes.
+ * Thumbnail fields: when `incoming` includes them (polling, processing), those values win.
+ * Partial updates (e.g. only `brand_intelligence`) omit thumbnail keys — then prev is kept.
  * 
  * @param {Object} prev - Previous asset state
  * @param {Object} incoming - Incoming asset update
@@ -68,18 +61,16 @@ export function mergeAsset(prev, incoming) {
         return prev
     }
     
-    // CRITICAL: Thumbnail fields MUST ALWAYS come from incoming asset
-    // Never preserve stale thumbnail state from prevAsset
-    // This ensures polling updates immediately replace UI state
+    // Thumbnail fields: incoming wins when the update includes them (polling, reprocess).
+    // Partial updates (e.g. only brand_intelligence) omit these keys — must keep prev, not null out.
     return {
         ...prev, // Preserve all previous fields
         ...incoming, // Overwrite with incoming data (e.g. brand_intelligence)
-        // Explicitly ensure thumbnail fields come from incoming (authoritative)
-        preview_thumbnail_url: incoming.preview_thumbnail_url ?? null,
-        final_thumbnail_url: incoming.final_thumbnail_url ?? null,
+        preview_thumbnail_url: incoming.preview_thumbnail_url ?? prev.preview_thumbnail_url ?? null,
+        final_thumbnail_url: incoming.final_thumbnail_url ?? prev.final_thumbnail_url ?? null,
         thumbnail_status: incoming.thumbnail_status ?? prev.thumbnail_status,
-        thumbnail_version: incoming.thumbnail_version ?? null,
-        thumbnail_error: incoming.thumbnail_error ?? null,
+        thumbnail_version: incoming.thumbnail_version ?? prev.thumbnail_version ?? null,
+        thumbnail_error: incoming.thumbnail_error ?? prev.thumbnail_error ?? null,
         is_pdf: incoming.is_pdf ?? prev.is_pdf ?? false,
         pdf_page_count: incoming.pdf_page_count ?? prev.pdf_page_count ?? null,
         first_page_url: incoming.first_page_url ?? prev.first_page_url ?? null,

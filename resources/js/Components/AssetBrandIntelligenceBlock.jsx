@@ -88,7 +88,9 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
 
     const applyBrandIntelligence = (payload) => {
         if (onAssetUpdate && asset?.id) {
+            // Merge with current asset so parents never receive a sparse object (preserves thumbnail URLs, etc.).
             onAssetUpdate({
+                ...asset,
                 id: asset.id,
                 brand_intelligence: payload,
             })

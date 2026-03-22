@@ -23,7 +23,7 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v3_embedding_fallback';
+    public const ENGINE_VERSION = 'v4_color_alignment';
 
     public const AI_USAGE_TYPE = 'brand_intelligence_ai';
 
@@ -37,6 +37,7 @@ class BrandIntelligenceEngine
         protected AIProviderInterface $aiProvider,
         protected AiMetadataGenerationService $aiMetadataGenerationService,
         protected AssetEmbeddingEnsureService $assetEmbeddingEnsureService,
+        protected BrandColorPaletteAlignmentEvaluator $brandColorPaletteAlignmentEvaluator,
     ) {}
 
     /**
@@ -222,6 +223,9 @@ class BrandIntelligenceEngine
         $withRefs['alignment_score_normalized'] = round($alignmentNumeric, 4);
         $withRefs['signal_count'] = $signalCount;
         $withRefs['signal_breakdown'] = $signalBreakdown;
+        $consumerSignals = $this->buildConsumerSignalBreakdown($asset, $brand, $signalBreakdown);
+        $withRefs['consumer_signal_breakdown'] = $consumerSignals['signals'];
+        $withRefs['color_alignment_detail'] = $consumerSignals['color_alignment_detail'];
         $withRefs['reference_tier_usage'] = $refBlock['reference_tier_usage'] ?? [
             'system' => 0,
             'promoted' => 0,
@@ -315,6 +319,9 @@ class BrandIntelligenceEngine
         $withRefs['alignment_score_normalized'] = null;
         $withRefs['signal_count'] = $signalCount;
         $withRefs['signal_breakdown'] = $signalBreakdown;
+        $consumerSignals = $this->buildConsumerSignalBreakdown($asset, $brand, $signalBreakdown);
+        $withRefs['consumer_signal_breakdown'] = $consumerSignals['signals'];
+        $withRefs['color_alignment_detail'] = $consumerSignals['color_alignment_detail'];
         $withRefs['reference_tier_usage'] = $this->referenceTierCountsForBrand($brand);
         $withRefs['reference_similarity'] = [
             'score' => null,
@@ -498,6 +505,27 @@ class BrandIntelligenceEngine
             'has_brand_colors' => $this->signalBrandHasColors($brand),
             'has_typography' => $this->signalBrandHasTypography($asset, $brand),
             'has_reference_similarity' => $this->signalReferenceSimilarityReady($asset, $brand),
+        ];
+    }
+
+    /**
+     * Drawer-facing signals: same keys as {@see computeEbiSignalBreakdown} but
+     * {@see has_brand_colors} uses tolerant ΔE vs dominant colors when data exists.
+     *
+     * @param  array<string, bool>  $signalBreakdown
+     * @return array{signals: array<string, bool>, color_alignment_detail: array<string, mixed>}
+     */
+    protected function buildConsumerSignalBreakdown(Asset $asset, Brand $brand, array $signalBreakdown): array
+    {
+        $detail = $this->brandColorPaletteAlignmentEvaluator->evaluate($asset, $brand);
+        $consumer = $signalBreakdown;
+        if (($detail['evaluated'] ?? false) === true && array_key_exists('aligned', $detail) && $detail['aligned'] !== null) {
+            $consumer['has_brand_colors'] = (bool) $detail['aligned'];
+        }
+
+        return [
+            'signals' => $consumer,
+            'color_alignment_detail' => $detail,
         ];
     }
 

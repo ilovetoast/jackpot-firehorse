@@ -4166,6 +4166,8 @@ export default function AssetDrawer({
                     onClose={() => setPromoteModalOpen(false)}
                     assetId={displayAsset.id}
                     initialType={promoteModalInitialType === 'guideline' ? 'guideline' : 'reference'}
+                    categories={categories}
+                    defaultCategoryName={displayAsset?.category?.name ?? null}
                     onSuccess={(payload) => {
                         if (onAssetUpdate) {
                             onAssetUpdate({ ...displayAsset, ...payload })

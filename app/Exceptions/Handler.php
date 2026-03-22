@@ -5,6 +5,7 @@ namespace App\Exceptions;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use InvalidArgumentException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Session\TokenMismatchException;
@@ -55,13 +56,20 @@ class Handler
 
         $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
 
-        // Never expose container wiring (missing classes, bad bindings) in the Inertia SPA — not actionable for users.
+        $message = 'Something went wrong.';
         if ($e instanceof BindingResolutionException) {
+            // Container wiring — never leak class names to the browser.
             $message = 'Something went wrong.';
-        } else {
-            $message = config('app.debug')
-                ? (string) ($e->getMessage() !== '' ? $e->getMessage() : 'Something went wrong.')
-                : 'Something went wrong.';
+        } elseif ($e instanceof InvalidArgumentException) {
+            $raw = (string) $e->getMessage();
+            // Laravel MailManager: undefined mailer name (misconfigured MAIL_MAILER).
+            if (str_contains($raw, 'Mailer [') && str_contains($raw, 'is not defined')) {
+                $message = 'Email could not be sent. Please try again in a few minutes.';
+            } elseif (config('app.debug') && $raw !== '') {
+                $message = $raw;
+            }
+        } elseif (config('app.debug')) {
+            $message = (string) ($e->getMessage() !== '' ? $e->getMessage() : 'Something went wrong.');
         }
 
         return new JsonResponse(['message' => $message, 'code' => $status], $status);

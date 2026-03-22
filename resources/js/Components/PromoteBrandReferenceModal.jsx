@@ -1,32 +1,63 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
  * Confirm promoting an asset into the brand style-reference pool (EBI).
+ * Type is fixed by which drawer button opened the modal — no tier/weight UI.
  *
  * @param {Object} props
  * @param {boolean} props.isOpen
  * @param {() => void} props.onClose
  * @param {string} props.assetId
  * @param {'reference'|'guideline'} props.initialType
+ * @param {Array<{ id?: number|string, name?: string }>} [props.categories]
+ * @param {string|null} [props.defaultCategoryName] — e.g. asset’s current category name for preselect
  * @param {(payload: { reference_promotion: { kind: string, tier: number, category: string|null } }) => void} props.onSuccess
  */
-export default function PromoteBrandReferenceModal({ isOpen, onClose, assetId, initialType = 'reference', onSuccess }) {
-    const [type, setType] = useState(initialType)
+export default function PromoteBrandReferenceModal({
+    isOpen,
+    onClose,
+    assetId,
+    initialType = 'reference',
+    categories = [],
+    defaultCategoryName = null,
+    onSuccess,
+}) {
+    const isGuideline = initialType === 'guideline'
+    const type = isGuideline ? 'guideline' : 'reference'
+
     const [category, setCategory] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
 
+    const categoryOptions = useMemo(() => {
+        const rows = Array.isArray(categories) ? categories : []
+        return rows
+            .map((c) => ({ id: c?.id, name: (c?.name || '').trim() }))
+            .filter((c) => c.name)
+            .sort((a, b) => a.name.localeCompare(b.name))
+    }, [categories])
+
     useEffect(() => {
         if (!isOpen) return
-        setType(initialType === 'guideline' ? 'guideline' : 'reference')
-        setCategory('')
         setError(null)
-    }, [isOpen, initialType])
+        const names = categoryOptions.map((c) => c.name)
+        const pref = (defaultCategoryName || '').trim()
+        if (pref && names.includes(pref)) {
+            setCategory(pref)
+        } else {
+            setCategory('')
+        }
+    }, [isOpen, initialType, categoryOptions, defaultCategoryName])
 
     if (!isOpen) {
         return null
     }
+
+    const title = isGuideline ? 'Add to brand guidelines' : 'Add as style reference'
+    const blurb = isGuideline
+        ? 'This asset will be used as a strong visual guideline when we evaluate brand alignment.'
+        : 'This asset will be used as inspiration when we evaluate brand alignment.'
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -79,7 +110,7 @@ export default function PromoteBrandReferenceModal({ isOpen, onClose, assetId, i
             />
             <div className="relative w-full max-w-md rounded-xl bg-white shadow-xl ring-1 ring-black/5">
                 <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-                    <h2 className="text-base font-semibold text-gray-900">Use as reference</h2>
+                    <h2 className="text-base font-semibold text-gray-900">{title}</h2>
                     <button
                         type="button"
                         className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
@@ -89,29 +120,30 @@ export default function PromoteBrandReferenceModal({ isOpen, onClose, assetId, i
                     </button>
                 </div>
                 <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4">
+                    <p className="text-sm text-gray-600 leading-relaxed">{blurb}</p>
+
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                        <select
-                            value={type}
-                            onChange={(e) => setType(e.target.value === 'guideline' ? 'guideline' : 'reference')}
-                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
-                            disabled={loading}
-                        >
-                            <option value="reference">Reference (tier 2, weight 0.6)</option>
-                            <option value="guideline">Brand guideline (tier 3, weight 1.0)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Category (optional)</label>
-                        <input
-                            type="text"
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
-                            placeholder="e.g. photography, social"
-                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
-                            disabled={loading}
-                            maxLength={255}
-                        />
+                        <label htmlFor="promote-category" className="block text-sm font-medium text-gray-700 mb-1">
+                            Category <span className="font-normal text-gray-500">(optional)</span>
+                        </label>
+                        {categoryOptions.length > 0 ? (
+                            <select
+                                id="promote-category"
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value)}
+                                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                disabled={loading}
+                            >
+                                <option value="">None</option>
+                                {categoryOptions.map((c) => (
+                                    <option key={c.id ?? c.name} value={c.name}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <p className="text-sm text-gray-500">No categories in this brand yet — you can still continue.</p>
+                        )}
                     </div>
                     {error && (
                         <p className="text-sm text-red-600" role="alert">
@@ -131,7 +163,7 @@ export default function PromoteBrandReferenceModal({ isOpen, onClose, assetId, i
                             disabled={loading}
                             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
                         >
-                            {loading ? 'Saving…' : 'Confirm'}
+                            {loading ? 'Saving…' : 'Add'}
                         </button>
                     </div>
                 </form>

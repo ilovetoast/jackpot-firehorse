@@ -28,11 +28,26 @@ const RECOMMENDATIONS = {
 }
 
 const SIGNAL_DEFS = [
-    { key: 'has_logo', label: 'Logo', Icon: PhotoIcon },
+    { key: 'has_logo', label: 'Logo (brand reference)', Icon: PhotoIcon },
     { key: 'has_brand_colors', label: 'Brand Colors', Icon: SwatchIcon },
     { key: 'has_typography', label: 'Typography', Icon: LanguageIcon },
     { key: 'has_reference_similarity', label: 'Visual Style', Icon: Squares2X2Icon },
 ]
+
+/** Backend signals are mostly brand/readiness checks, not “logo visible in this image”. */
+const SIGNAL_POSITIVE_LABEL = {
+    has_logo: 'In brand kit',
+    has_brand_colors: 'Close to palette',
+    has_typography: 'Detected',
+    has_reference_similarity: 'Ready',
+}
+
+const SIGNAL_NEGATIVE_LABEL = {
+    has_logo: 'No reference',
+    has_brand_colors: 'Off palette',
+    has_typography: 'Not detected',
+    has_reference_similarity: 'Not ready',
+}
 
 function normalizeAlignmentState(raw) {
     const s = (raw || '').toString().trim().toUpperCase().replace(/-/g, '_')
@@ -123,6 +138,7 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
         const signals =
             flat?.signals ??
             bi?.signal_breakdown ??
+            breakdown?.consumer_signal_breakdown ??
             breakdown?.signal_breakdown ??
             breakdown?.signals ??
             {}
@@ -232,9 +248,16 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                 </p>
             )}
 
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+                Logo / typography / visual style reflect brand setup and analysis readiness. Brand colors compare this
+                creative’s dominant colors to your palette (tolerant match), when extraction data exists.
+            </p>
+
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {SIGNAL_DEFS.map(({ key, label, Icon }) => {
                     const st = signalStatus(signals[key])
+                    const okLabel = SIGNAL_POSITIVE_LABEL[key] || 'Detected'
+                    const badLabel = SIGNAL_NEGATIVE_LABEL[key] || 'Not Detected'
                     return (
                         <div
                             key={key}
@@ -249,7 +272,7 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                     {st === 'detected' && (
                                         <>
                                             <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden />
-                                            <span className="text-xs font-medium text-emerald-700">Detected</span>
+                                            <span className="text-xs font-medium text-emerald-700">{okLabel}</span>
                                         </>
                                     )}
                                     {st === 'not_detected' && (
@@ -257,7 +280,7 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                             <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
                                                 <XMarkIcon className="h-3 w-3" aria-hidden />
                                             </span>
-                                            <span className="text-xs font-medium text-red-700">Not Detected</span>
+                                            <span className="text-xs font-medium text-red-700">{badLabel}</span>
                                         </>
                                     )}
                                     {st === 'unknown' && (
