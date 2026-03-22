@@ -244,3 +244,11 @@ Normal signup unchanged
 Agency flag unlocks features
 
 No need for separate auth system.
+
+---
+
+## Implementation (current codebase)
+
+- **Tenant fields:** `incubated_by_agency_id`, `incubated_at`, `incubation_expires_at` on `tenants` (see `Tenant` model). `incubation_expires_at` is **informational** in the agency dashboard; **no middleware or job revokes access when it passes** (see `AgencyPartnerProgramTest` “no logic enforces incubation expiration”).
+- **Agency tiers:** `agency_tiers.incubation_window_days` (and max incubated company/brand caps) are **nullable** in `AgencyTierSeeder` — `null` means no advisory limit in the UI. Enforcement is not wired yet.
+- **Default demo seed (`CompanyBrandSeeder`):** Velvet Hammer is the **primary agency** (company 1). The four client companies (St. Croix, Augusta, ACG, Victory) are **incubated** by that agency (`incubated_by_agency_id`), with `incubated_at` set and `incubation_expires_at` null (no countdown). There is **no separate end-client owner user** on those tenants: access is **tenant_agencies** + agency users on the client tenant; the agency primary user holds the tenant **`owner`** role on the client as **temporary steward** until an ownership transfer. Optional user `johndoe@example.com` is not attached to those companies.

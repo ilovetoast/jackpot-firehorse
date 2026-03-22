@@ -10,6 +10,7 @@ import {
     BookOpenIcon,
     CreditCardIcon,
     EnvelopeIcon,
+    InboxIcon,
     LockClosedIcon,
     FolderIcon,
     UserPlusIcon,
@@ -175,6 +176,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
             tools: [
                 { name: 'Agencies', icon: BuildingOfficeIcon, description: 'Manage agency partners and approvals', href: '/app/admin/agencies' },
                 { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
+                { name: 'Mail', icon: InboxIcon, description: 'Mail system overview & Mailpit (local)', href: '/app/admin/mail-system' },
                 { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
                 { name: 'System Categories', icon: FolderIcon, description: 'Manage system category templates', href: '/app/admin/system-categories' },
             ],

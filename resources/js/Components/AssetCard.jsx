@@ -538,6 +538,16 @@ export default function AssetCard({
                                 <DocumentTextIcon className="h-3 w-3" aria-label="Reference material" />
                             </span>
                         )}
+                        {!asset.deleted_at && asset.reference_promotion?.kind === 'guideline' && (
+                            <span className="inline-flex items-center rounded-md bg-violet-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Brand guideline reference">
+                                Guideline
+                            </span>
+                        )}
+                        {!asset.deleted_at && asset.reference_promotion?.kind === 'reference' && (
+                            <span className="inline-flex items-center rounded-md bg-sky-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Promoted style reference">
+                                Reference
+                            </span>
+                        )}
                         {/* Subtle unpublished icon (hidden when in trash) */}
                         {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
                         {!asset.deleted_at && !asset.archived_at && asset.is_published === false && (

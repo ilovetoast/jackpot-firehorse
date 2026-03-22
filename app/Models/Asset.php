@@ -7,6 +7,7 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
 use App\Jobs\FullPdfExtractionJob;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -564,6 +565,30 @@ class Asset extends Model
     }
 
     /**
+     * Category id from metadata (not a real column). Enables Eloquent `with('category')`.
+     */
+    protected function categoryId(): Attribute
+    {
+        return Attribute::get(function (): ?string {
+            $meta = $this->metadata ?? [];
+            $id = $meta['category_id'] ?? null;
+            if ($id === null || $id === '' || (is_string($id) && strtolower(trim($id)) === 'null')) {
+                return null;
+            }
+
+            return is_string($id) ? $id : (string) $id;
+        });
+    }
+
+    /**
+     * Category for this asset (metadata.category_id → categories.id).
+     */
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class, 'category_id', 'id');
+    }
+
+    /**
      * Get the user who uploaded this asset.
      */
     public function user(): BelongsTo
@@ -648,9 +673,17 @@ class Asset extends Model
     }
 
     /**
+     * User-promoted style reference row for this asset (one per brand).
+     */
+    public function brandReferenceAsset(): HasOne
+    {
+        return $this->hasOne(BrandReferenceAsset::class);
+    }
+
+    /**
      * Brand Intelligence fields for the asset drawer / grid (excludes raw numeric overall score).
      *
-     * @return array{level: string|null, confidence: float|null, breakdown_json: array}|null
+     * @return array{level: string|null, confidence: float|null, breakdown_json: array, alignment_state: ?string, signal_count: ?int, signal_breakdown: ?array, reference_tier_usage: ?array}|null
      */
     public function brandIntelligencePayloadForFrontend(): ?array
     {
@@ -659,10 +692,16 @@ class Asset extends Model
             return null;
         }
 
+        $bj = $row->breakdown_json ?? [];
+
         return [
             'level' => $row->level,
             'confidence' => $row->confidence,
-            'breakdown_json' => $row->breakdown_json ?? [],
+            'breakdown_json' => $bj,
+            'alignment_state' => $bj['alignment_state'] ?? null,
+            'signal_count' => $bj['signal_count'] ?? null,
+            'signal_breakdown' => $bj['signal_breakdown'] ?? null,
+            'reference_tier_usage' => $bj['reference_tier_usage'] ?? null,
         ];
     }
 
@@ -1019,28 +1058,6 @@ class Asset extends Model
         }
 
         return null;
-    }
-
-    /**
-     * Get the category for this asset.
-     *
-     * Categories are stored in asset metadata as category_id (JSON field).
-     * This accessor looks up the category based on the ID stored in metadata.
-     */
-    public function getCategoryAttribute(): ?Category
-    {
-        $metadata = $this->metadata ?? [];
-        $categoryId = $metadata['category_id'] ?? null;
-
-        if (! $categoryId) {
-            return null;
-        }
-
-        // Look up category by ID, scoped to the asset's tenant and brand
-        return Category::where('id', $categoryId)
-            ->where('tenant_id', $this->tenant_id)
-            ->where('brand_id', $this->brand_id)
-            ->first();
     }
 
     /**

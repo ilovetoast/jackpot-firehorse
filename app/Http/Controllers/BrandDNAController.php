@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
 use App\Models\BrandModelVersionAsset;
+use App\Jobs\GenerateBrandLogoVariantsJob;
 use App\Services\BrandDNA\BrandModelService;
 use App\Services\BrandDNA\BrandVisualReferenceSyncService;
 use Illuminate\Http\Request;
@@ -50,6 +51,7 @@ class BrandDNAController extends Controller
             $brandModel->update(['is_enabled' => (bool) $request->is_enabled]);
         }
 
+        $savedVersionId = null;
         if ($request->has('model_payload')) {
             $validated = $request->validate([
                 'model_payload' => 'required|array',
@@ -64,13 +66,20 @@ class BrandDNAController extends Controller
                 $version = BrandModelVersion::find($versionId);
                 if ($version && $version->brandModel->brand_id === $brand->id) {
                     $this->brandModelService->updateVersionPayload($brand, $version, $payload);
+                    $savedVersionId = $version->id;
                 }
             } elseif (! $activeVersion) {
                 $version = $this->brandModelService->createInitialVersion($brand, $payload, 'manual');
                 $this->brandModelService->activateVersion($version);
+                $savedVersionId = $version->id;
             } else {
-                $this->brandModelService->updateActiveVersionPayload($brand, $payload);
+                $updated = $this->brandModelService->updateActiveVersionPayload($brand, $payload);
+                $savedVersionId = $updated?->id;
             }
+        }
+
+        if ($savedVersionId !== null) {
+            GenerateBrandLogoVariantsJob::dispatch($brand->id, $savedVersionId);
         }
 
         return redirect()->route('brands.edit', ['brand' => $brand->id, 'tab' => 'brand_model'])

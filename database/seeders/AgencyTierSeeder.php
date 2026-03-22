@@ -38,6 +38,7 @@ class AgencyTierSeeder extends Seeder
                 'tier_order' => 3,
                 'activation_threshold' => 15,
                 'reward_percentage' => null,
+                // null = no advisory cap; incubation expiry is not enforced in app code (see AgencyPartnerProgramTest)
                 'max_incubated_companies' => null,
                 'max_incubated_brands' => null,
                 'incubation_window_days' => null,

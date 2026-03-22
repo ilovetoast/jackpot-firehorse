@@ -173,6 +173,8 @@ class BrandPipelineRunnerJob implements ShouldQueue
             'pages_total' => 1,
             'pages_processed' => 1,
         ]);
+
+        GenerateBrandLogoVariantsJob::dispatch($brand->id, $draft->id);
     }
 
     /**

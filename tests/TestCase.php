@@ -2,16 +2,27 @@
 
 namespace Tests;
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
 {
-    protected function setUp(): void
+    /**
+     * Must run BEFORE {@see RefreshDatabase} applies migrations. Laravel calls this from
+     * {@see BaseTestCase::setUp()} after the application is booted but before traits run.
+     *
+     * Previously we called {@see assertTestDatabaseIsIsolated()} after parent::setUp(), which is
+     * too late — RefreshDatabase had already run migrate:fresh on whatever DB was configured.
+     */
+    protected function setUpTraits(): void
     {
-        parent::setUp();
+        $uses = array_flip(class_uses_recursive(static::class));
+        if (isset($uses[RefreshDatabase::class])) {
+            $this->assertTestDatabaseIsIsolated();
+        }
 
-        $this->assertTestDatabaseIsIsolated();
+        parent::setUpTraits();
     }
 
     /**

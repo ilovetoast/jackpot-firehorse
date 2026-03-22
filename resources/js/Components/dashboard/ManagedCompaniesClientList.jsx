@@ -1,11 +1,20 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { router } from '@inertiajs/react'
-import { BuildingOffice2Icon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import {
+    BuildingOffice2Icon,
+    ChevronDownIcon,
+    ChevronRightIcon,
+} from '@heroicons/react/24/outline'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
+import ReadinessScoreDots from '../agency/ReadinessScoreDots'
+import AgencyReadinessChecklist from '../agency/AgencyReadinessChecklist'
+import { effortGlyph } from '../../utils/readinessTasks'
 
-function ManagedCompanyCard({ client, index, theme, brandColor }) {
+function ManagedCompanyCard({ client, index, theme, brandColor, showReadiness = false }) {
     const brands = Array.isArray(client.brands) ? client.brands : []
     const isDark = theme === 'dark'
+    const [expandedBrandId, setExpandedBrandId] = useState(null)
 
     const openWorkspace = (brandId) => {
         showWorkspaceSwitchingOverlay('company')
@@ -30,8 +39,8 @@ function ManagedCompanyCard({ client, index, theme, brandColor }) {
         : 'flex w-full flex-col gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 text-left shadow-sm transition-all duration-200 hover:border-indigo-200 hover:shadow-md focus-within:ring-2 focus-within:ring-indigo-500'
 
     const rowClass = isDark
-        ? 'group flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left transition hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30'
-        : 'group flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left transition hover:bg-indigo-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500'
+        ? 'group flex w-full min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left transition hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30'
+        : 'group flex w-full min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left transition hover:bg-indigo-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500'
 
     const labelClass = isDark ? 'text-[10px] font-medium uppercase tracking-wider text-white/35' : 'text-[10px] font-medium uppercase tracking-wider text-gray-400'
 
@@ -40,6 +49,11 @@ function ManagedCompanyCard({ client, index, theme, brandColor }) {
     const chevronClass = isDark
         ? 'h-5 w-5 shrink-0 text-white/30 transition group-hover:text-white/60'
         : 'h-5 w-5 shrink-0 text-gray-400 transition group-hover:text-indigo-600'
+
+    const toggleExpand = (e, brandId) => {
+        e.stopPropagation()
+        setExpandedBrandId((prev) => (prev === brandId ? null : brandId))
+    }
 
     return (
         <motion.div
@@ -87,30 +101,102 @@ function ManagedCompanyCard({ client, index, theme, brandColor }) {
                     </div>
 
                     {brands.length > 0 ? (
-                        <div className="mt-3 space-y-0.5">
+                        <div className="mt-3 space-y-1">
                             {brands.length > 1 && <p className={`${labelClass} mb-1.5 px-2`}>Brands</p>}
-                            {brands.map((b) => (
-                                <button
-                                    key={b.id}
-                                    type="button"
-                                    onClick={() => openWorkspace(b.id)}
-                                    className={rowClass}
-                                >
-                                    <span className="min-w-0 flex-1">
-                                        <span className={brandNameClass}>{b.name}</span>
-                                        {b.is_default ? (
-                                            <span
+                            {brands.map((b) => {
+                                const r = b.readiness
+                                const score = r?.readiness_score ?? 0
+                                const tasks = Array.isArray(r?.readiness_tasks) ? r.readiness_tasks : []
+                                const tooltip = r?.readiness_tooltip || ''
+                                const expanded = expandedBrandId === b.id
+
+                                return (
+                                    <div
+                                        key={b.id}
+                                        className={
+                                            isDark
+                                                ? 'rounded-lg border border-white/[0.06] bg-white/[0.02]'
+                                                : 'rounded-lg border border-gray-100 bg-gray-50/40'
+                                        }
+                                    >
+                                        <div className="flex items-stretch gap-0.5">
+                                            {showReadiness && (
+                                                <button
+                                                    type="button"
+                                                    className="flex shrink-0 items-center justify-center px-1.5 text-white/45 hover:text-white/80"
+                                                    aria-expanded={expanded}
+                                                    aria-label={expanded ? 'Collapse readiness' : 'Expand readiness'}
+                                                    onClick={(e) => toggleExpand(e, b.id)}
+                                                >
+                                                    <ChevronDownIcon
+                                                        className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                                                    />
+                                                </button>
+                                            )}
+                                            <button type="button" onClick={() => openWorkspace(b.id)} className={rowClass}>
+                                                <span className="min-w-0 flex-1 text-left">
+                                                    <span className={brandNameClass}>{b.name}</span>
+                                                    {b.is_default ? (
+                                                        <span
+                                                            className={
+                                                                isDark ? 'ml-2 text-xs text-white/40' : 'ml-2 text-xs text-gray-400'
+                                                            }
+                                                        >
+                                                            default
+                                                        </span>
+                                                    ) : null}
+                                                    {showReadiness && r && (
+                                                        <span className="mt-1 flex flex-wrap items-center gap-2">
+                                                            <ReadinessScoreDots score={score} title={tooltip} />
+                                                            <span
+                                                                className={
+                                                                    isDark
+                                                                        ? 'text-[11px] tabular-nums text-white/55'
+                                                                        : 'text-[11px] tabular-nums text-gray-600'
+                                                                }
+                                                                title={tooltip}
+                                                            >
+                                                                Readiness: {score}/5
+                                                            </span>
+                                                            {tasks.length > 0 ? (
+                                                                <span
+                                                                    className={`block w-full text-[11px] leading-snug sm:inline sm:max-w-[min(100%,28rem)] ${
+                                                                        isDark ? 'text-amber-200/85' : 'text-amber-800'
+                                                                    }`}
+                                                                >
+                                                                    {tasks.slice(0, 3).map((t, ti) => (
+                                                                        <span key={ti} className="mr-2 inline-flex items-center gap-1">
+                                                                            • {t.label} {effortGlyph(t.effort)}
+                                                                        </span>
+                                                                    ))}
+                                                                </span>
+                                                            ) : null}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <ChevronRightIcon className={chevronClass} aria-hidden />
+                                            </button>
+                                        </div>
+                                        {showReadiness && expanded && r && (
+                                            <div
                                                 className={
-                                                    isDark ? 'ml-2 text-xs text-white/40' : 'ml-2 text-xs text-gray-400'
+                                                    isDark
+                                                        ? 'border-t border-white/10 px-3 pb-3 pt-1'
+                                                        : 'border-t border-gray-100 px-3 pb-3 pt-1'
                                                 }
                                             >
-                                                default
-                                            </span>
-                                        ) : null}
-                                    </span>
-                                    <ChevronRightIcon className={chevronClass} aria-hidden />
-                                </button>
-                            ))}
+                                                <AgencyReadinessChecklist
+                                                    tenantId={client.id}
+                                                    brand={b}
+                                                    readiness={r}
+                                                    actions={b.actions}
+                                                    theme={theme}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
                         </div>
                     ) : (
                         <div className="mt-3 border-t border-gray-100 pt-3 dark:border-white/10">
@@ -134,8 +220,14 @@ function ManagedCompanyCard({ client, index, theme, brandColor }) {
 /**
  * Grid of client companies; each brand is a one-click row with chevron (no dropdown).
  * @param {'dark'|'light'} theme
+ * @param {boolean} props.showReadiness — agency dashboard: readiness + expandable checklist
  */
-export default function ManagedCompaniesClientList({ clients = [], brandColor = '#6366f1', theme = 'dark' }) {
+export default function ManagedCompaniesClientList({
+    clients = [],
+    brandColor = '#6366f1',
+    theme = 'dark',
+    showReadiness = false,
+}) {
     if (!clients.length) {
         return null
     }
@@ -149,7 +241,14 @@ export default function ManagedCompaniesClientList({ clients = [], brandColor = 
         >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {clients.map((c, i) => (
-                    <ManagedCompanyCard key={c.id} client={c} index={i} theme={theme} brandColor={brandColor} />
+                    <ManagedCompanyCard
+                        key={c.id}
+                        client={c}
+                        index={i}
+                        theme={theme}
+                        brandColor={brandColor}
+                        showReadiness={showReadiness}
+                    />
                 ))}
             </div>
         </motion.div>

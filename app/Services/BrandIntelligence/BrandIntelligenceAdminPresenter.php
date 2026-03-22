@@ -81,8 +81,8 @@ final class BrandIntelligenceAdminPresenter
      * @param  array<string, mixed>  $stored  Serialized stored score row (level, confidence, breakdown_json, …)
      * @param  array<string, mixed>  $simulated  Engine payload from dry-run
      * @return array{
-     *     current: array{level: string, confidence: float, reference_score: int|null, reference_normalized: float|null},
-     *     simulated: array{level: string, confidence: float, reference_score: int|null, reference_normalized: float|null},
+     *     current: array{level: string, confidence: float, reference_score: int|null, reference_normalized: float|null, alignment_state: string|null},
+     *     simulated: array{level: string, confidence: float, reference_score: int|null, reference_normalized: float|null, alignment_state: string|null},
      *     changes: list<string>
      * }
      */
@@ -124,18 +124,26 @@ final class BrandIntelligenceAdminPresenter
             $changes[] = 'Level changed';
         }
 
+        $oa = is_array($oldB) && isset($oldB['alignment_state']) ? (string) $oldB['alignment_state'] : null;
+        $na = is_array($newB) && isset($newB['alignment_state']) ? (string) $newB['alignment_state'] : null;
+        if ($oa !== null && $na !== null && $oa !== $na) {
+            $changes[] = 'Alignment state changed';
+        }
+
         return [
             'current' => [
                 'level' => $ol,
                 'confidence' => $oc,
                 'reference_score' => isset($oldRef['score']) && is_numeric($oldRef['score']) ? (int) $oldRef['score'] : null,
                 'reference_normalized' => is_numeric($oldNorm ?? null) ? (float) $oldNorm : null,
+                'alignment_state' => $oa,
             ],
             'simulated' => [
                 'level' => $nl,
                 'confidence' => $nc,
                 'reference_score' => isset($newRef['score']) && is_numeric($newRef['score']) ? (int) $newRef['score'] : null,
                 'reference_normalized' => is_numeric($newNorm ?? null) ? (float) $newNorm : null,
+                'alignment_state' => $na,
             ],
             'changes' => array_values(array_unique($changes)),
         ];

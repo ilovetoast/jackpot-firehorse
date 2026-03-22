@@ -1101,6 +1101,8 @@ function modelPayloadToForm(payload) {
             },
             show_logo_visual_treatment: visual.show_logo_visual_treatment !== false,
             logo_usage_guidelines: (visual.logo_usage_guidelines && typeof visual.logo_usage_guidelines === 'object') ? visual.logo_usage_guidelines : {},
+            auto_generate_logo_on_dark: visual.auto_generate_logo_on_dark === true,
+            auto_generate_logo_on_light: visual.auto_generate_logo_on_light === true,
         },
         beliefs: Array.isArray(identity.beliefs) ? identity.beliefs : [],
         values: Array.isArray(identity.values) ? identity.values : [],
@@ -1173,6 +1175,12 @@ function formToModelPayload(form, existingPayload) {
     visual.photography_style = form.expression?.brand_look ?? visual.photography_style
     if (form.standards?.show_logo_visual_treatment !== undefined) {
         visual.show_logo_visual_treatment = form.standards.show_logo_visual_treatment
+    }
+    if (form.standards?.auto_generate_logo_on_dark !== undefined) {
+        visual.auto_generate_logo_on_dark = form.standards.auto_generate_logo_on_dark
+    }
+    if (form.standards?.auto_generate_logo_on_light !== undefined) {
+        visual.auto_generate_logo_on_light = form.standards.auto_generate_logo_on_light
     }
     if (form.standards?.logo_usage_guidelines !== undefined) {
         visual.logo_usage_guidelines = form.standards.logo_usage_guidelines
@@ -2416,6 +2424,37 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             <div>
                                                 <span className="text-sm font-medium text-gray-900">Show visual treatment</span>
                                                 <p className="text-xs text-gray-500">Display logo proofs alongside each guideline in brand guidelines (e.g., stretched, rotated, cropped examples).</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="mb-6 p-4 rounded-lg bg-slate-50 ring-1 ring-slate-200/80">
+                                            <h5 className="text-sm font-semibold text-gray-900">Automated logo variants</h5>
+                                            <p className="text-xs text-gray-500 mt-0.5 mb-4">When enabled, the system generates missing raster variants from your primary logo after saves, uploads, or pipeline runs (white mark for dark backgrounds; primary-color wash for light). SVG logos are skipped.</p>
+                                            <div className="space-y-3">
+                                                <label className="flex items-start gap-3 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                        checked={!!modelPayload.standards?.auto_generate_logo_on_dark}
+                                                        onChange={(e) => setModelPayloadField('standards.auto_generate_logo_on_dark', e.target.checked)}
+                                                    />
+                                                    <span className="text-sm text-gray-800">
+                                                        <span className="font-medium">Auto-generate on-dark (white) logo</span>
+                                                        <span className="block text-xs text-gray-500 mt-0.5">Creates a white silhouette when no on-dark asset exists.</span>
+                                                    </span>
+                                                </label>
+                                                <label className="flex items-start gap-3 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                        checked={!!modelPayload.standards?.auto_generate_logo_on_light}
+                                                        onChange={(e) => setModelPayloadField('standards.auto_generate_logo_on_light', e.target.checked)}
+                                                    />
+                                                    <span className="text-sm text-gray-800">
+                                                        <span className="font-medium">Auto-generate on-light (primary color) logo</span>
+                                                        <span className="block text-xs text-gray-500 mt-0.5">Recolors the mark with your primary brand color when no on-light asset exists.</span>
+                                                    </span>
+                                                </label>
                                             </div>
                                         </div>
 

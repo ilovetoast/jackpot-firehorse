@@ -2,9 +2,10 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\Asset;
 use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
+use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -16,9 +17,13 @@ use Illuminate\Queue\SerializesModels;
  *
  * Email notification sent to approvers when an asset requires approval.
  */
-class AssetPendingApprovalNotification extends Mailable
+class AssetPendingApprovalNotification extends BaseMailable
 {
+    use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
+
+    /** @var string Event-driven / queued — gated in staging via {@see \App\Services\EmailGate} */
+    protected string $emailType = 'system';
 
     /**
      * Create a new message instance.
@@ -39,6 +44,8 @@ class AssetPendingApprovalNotification extends Mailable
      */
     public function envelope(): Envelope
     {
+        $this->applyTenantMailBranding($this->asset->tenant);
+
         return new Envelope(
             subject: 'Asset Pending Approval',
         );

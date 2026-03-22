@@ -389,7 +389,7 @@ class DeliverableController extends Controller
 
         // Paginate: server-driven pagination (36 per page); next_page_url built from request query so filters/category/sort preserved (match AssetController)
         $perPage = 36;
-        $paginator = $assetsQuery->with(['latestBrandIntelligenceScore'])->paginate($perPage);
+        $paginator = $assetsQuery->with(['latestBrandIntelligenceScore', 'brandReferenceAsset'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
         $t1 = microtime(true);
 
@@ -651,6 +651,7 @@ class DeliverableController extends Controller
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                     'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
+                    'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
                 ];
                 if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     Log::info('ASSET API RESPONSE URL', [

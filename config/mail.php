@@ -18,6 +18,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Automation / system emails
+    |--------------------------------------------------------------------------
+    |
+    | When false (default), mailables with emailType "system" are not sent.
+    | User-initiated mailables (emailType "user") always send. See docs/email-notifications.md.
+    |
+    */
+
+    'automations_enabled' => filter_var(env('MAIL_AUTOMATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |
@@ -113,6 +125,23 @@ return [
     'from' => [
         'address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
         'name' => env('MAIL_FROM_NAME', 'Example'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tenant mail branding (staging)
+    |--------------------------------------------------------------------------
+    |
+    | Single verified From domain; per-tenant display name and optional Reply-To.
+    | enabled: null = only when APP_ENV=staging; true/false to override (e.g. tests).
+    |
+    */
+
+    'tenant_branding' => [
+        'enabled' => ($v = env('MAIL_TENANT_BRANDING_ENABLED')) === null
+            ? null
+            : filter_var($v, FILTER_VALIDATE_BOOLEAN),
+        'from_address' => env('MAIL_STAGING_BRAND_FROM_ADDRESS', 'no-reply@staging-jackpot.velvetysoft.com'),
     ],
 
 ];

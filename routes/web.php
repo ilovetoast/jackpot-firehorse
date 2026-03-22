@@ -161,7 +161,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/errors/brand-disabled', [\App\Http\Controllers\ErrorController::class, 'brandDisabled'])->name('errors.brand-disabled');
 
     // Company settings (requires tenant to be selected). C12: RestrictCollectionOnlyUser gates collection-only users.
-    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+    Route::middleware(['tenant', \App\Http\Middleware\SetTenantMailBranding::class, \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // GET /app → company overview (all brands, aggregated metrics)
         Route::get('', [\App\Http\Controllers\CompanyOverviewController::class, 'index'])->name('app');
         // Phase C12.0: Collection-only access landing (inside tenant so ResolveTenant can set collection_only)
@@ -337,6 +337,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/notifications/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'edit'])->name('admin.notifications.edit');
     Route::put('/admin/notifications/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'update'])->name('admin.notifications.update');
     Route::get('/admin/email-test', [\App\Http\Controllers\Admin\EmailTestController::class, 'index'])->name('admin.email-test');
+    Route::get('/admin/mail-system', [\App\Http\Controllers\Admin\MailSystemController::class, 'index'])->name('admin.mail-system');
     Route::post('/admin/email-test/send', [\App\Http\Controllers\Admin\EmailTestController::class, 'send'])->name('admin.email-test.send');
     Route::get('/admin/email-test/log', [\App\Http\Controllers\Admin\EmailTestController::class, 'log'])->name('admin.email-test.log');
     Route::post('/admin/stripe/sync-subscription/{tenant}', [\App\Http\Controllers\SiteAdminController::class, 'syncSubscription'])->name('admin.stripe.sync-subscription');
@@ -472,7 +473,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('subscription.payment');
 
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
-    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+    Route::middleware(['tenant', \App\Http\Middleware\SetTenantMailBranding::class, \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
@@ -542,6 +543,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::delete('/api/assets/{asset}/tags/{tagId}', [\App\Http\Controllers\AssetTagController::class, 'destroy'])->name('api.assets.tags.destroy');
             Route::get('/api/assets/{asset}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'autocomplete'])->name('api.assets.tags.autocomplete');
             Route::get('/api/tenants/{tenant}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'tenantAutocomplete'])->name('api.tenants.tags.autocomplete');
+            Route::post('/api/brand-assets/{asset}/promote', [\App\Http\Controllers\Api\BrandAssetPromoteController::class, 'store'])->name('api.brand-assets.promote');
 
             // Pending AI Suggestions API (dashboard tile)
             Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');

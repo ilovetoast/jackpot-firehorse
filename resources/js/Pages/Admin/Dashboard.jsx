@@ -24,6 +24,7 @@ import {
     BookOpenIcon,
     BellIcon,
     EnvelopeIcon,
+    InboxIcon,
     LockClosedIcon,
     FolderIcon,
     ChevronDownIcon,
@@ -180,6 +181,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         ...(perms.canViewMetadataRegistry ? [{ name: 'Metadata Registry', description: 'System metadata fields', href: '/app/admin/metadata/registry', icon: TagIcon }] : []),
         { name: 'System Categories', description: 'Category templates', href: '/app/admin/system-categories', icon: FolderIcon },
         { name: 'Notifications', description: 'Email templates', href: '/app/admin/notifications', icon: BellIcon },
+        { name: 'Mail', description: 'Mail system & staging stats', href: '/app/admin/mail-system', icon: InboxIcon },
         { name: 'Email Test', description: 'Test email sending', href: '/app/admin/email-test', icon: EnvelopeIcon },
     ]
 

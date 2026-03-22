@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Brand;
+use App\Models\TenantAgency;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -12,17 +13,50 @@ use Illuminate\Support\Facades\Cache;
 class BrandInsightAI
 {
     /**
-     * Generate 1–2 human-readable insights from metrics.
+     * Generate 1–2 human-readable insights from metrics (rule-based LLM fallback).
      *
-     * @return array<string>
+     * @return array<int, string|array{text: string, priority?: string, type?: string}>
      */
-    public function generateInsights(array $metrics): array
+    public function generateInsights(array $metrics, ?Brand $brand = null): array
     {
         $insights = [];
+        $tenant = $brand?->tenant;
+        $totalAssets = (int) ($metrics['total_assets'] ?? 0);
+        $uploads7 = (int) ($metrics['uploads_last_7_days'] ?? 0);
+        $metaOk = ($metrics['metadata_completeness'] ?? 0) >= 0.9;
+        $aiOk = ($metrics['ai_completion_rate'] ?? 0) >= 0.9;
 
-        // Skip "stagnant" copy for brand-new libraries (0 assets) — not the same as an established brand going quiet
-        if (($metrics['total_assets'] ?? 0) > 0 && ($metrics['uploads_last_7_days'] ?? 0) === 0) {
-            $insights[] = 'No new content added this week — consider uploading fresh assets.';
+        if ($tenant?->is_agency) {
+            $linked = TenantAgency::where('agency_tenant_id', $tenant->id)->count();
+            if ($linked === 0) {
+                $insights[] = [
+                    'text' => 'Link client companies from your Agency dashboard so you can manage workspaces and readiness in one place.',
+                    'priority' => 'medium',
+                    'type' => 'agency_clients',
+                ];
+            } else {
+                $insights[] = [
+                    'text' => 'Review client companies on your Agency dashboard to open workspaces and keep each brand on track.',
+                    'priority' => 'medium',
+                    'type' => 'agency_clients',
+                ];
+            }
+        }
+
+        if ($totalAssets === 0) {
+            $insights[] = [
+                'text' => 'Kick off with Brand Guidelines or a first batch of hero assets so your library reflects the brand.',
+                'priority' => 'medium',
+                'type' => 'guidelines',
+            ];
+        } elseif ($totalAssets > 0 && $uploads7 === 0 && $totalAssets < 25) {
+            $insights[] = [
+                'text' => 'Build on your foundation — add a few new assets or refine Brand Guidelines to keep the story current.',
+                'priority' => 'medium',
+                'type' => 'guidelines',
+            ];
+        } elseif (($metrics['total_assets'] ?? 0) > 0 && $uploads7 === 0) {
+            $insights[] = 'Add fresh assets this week to keep the library active and discoverable.';
         }
 
         if (($metrics['shares_last_7_days'] ?? 0) > 10) {
@@ -39,11 +73,23 @@ class BrandInsightAI
             $insights[] = 'AI suggestions are pending review — completing them improves asset quality.';
         }
 
-        if (($metrics['uploads_last_7_days'] ?? 0) > 5) {
+        if ($uploads7 > 5) {
             $insights[] = 'Strong upload activity this week — keep the momentum going.';
         }
 
-        return array_slice($insights, 0, 2);
+        if ($metaOk && $aiOk && $totalAssets > 0 && count($insights) < 2) {
+            $insights[] = 'Metadata and AI workflows look strong — add new campaign assets to put that foundation to work.';
+        }
+
+        $flat = [];
+        foreach ($insights as $item) {
+            $flat[] = $item;
+            if (count($flat) >= 2) {
+                break;
+            }
+        }
+
+        return $flat;
     }
 
     /**
@@ -68,7 +114,7 @@ class BrandInsightAI
         return Cache::remember($cacheKey, 600, function () use ($brand) {
             $metrics = $this->gatherMetrics($brand);
 
-            return $this->generateInsights($metrics);
+            return $this->generateInsights($metrics, $brand);
         });
     }
 

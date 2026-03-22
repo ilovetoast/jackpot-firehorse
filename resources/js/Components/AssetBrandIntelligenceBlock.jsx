@@ -7,86 +7,10 @@ import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { SparklesIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
+import BrandSignalBreakdown from './BrandSignalBreakdown'
 
 const POLL_INTERVAL_MS = 1100
 const POLL_MAX_ATTEMPTS = 45
-
-function levelToBrandLabel(level) {
-    const l = (level || '').toLowerCase()
-    if (l === 'low') return 'Off Brand'
-    if (l === 'medium') return 'Somewhat On Brand'
-    if (l === 'high') return 'On Brand'
-    if (l === 'unknown') return 'Not enough data'
-    return null
-}
-
-/** Subtle headline tint by alignment level */
-function levelToHeadlineColorClass(level) {
-    const l = (level || '').toLowerCase()
-    if (l === 'high') return 'text-emerald-700'
-    if (l === 'medium') return 'text-amber-600'
-    if (l === 'low') return 'text-red-600'
-    if (l === 'unknown') return 'text-slate-600'
-    return 'text-slate-900'
-}
-
-function confidenceToLabel(confidence) {
-    if (typeof confidence !== 'number' || Number.isNaN(confidence)) return null
-    if (confidence > 0.8) return 'High confidence'
-    if (confidence >= 0.6) return 'Moderate confidence'
-    return 'Low confidence'
-}
-
-/** Muted label tint aligned with level */
-function levelToConfidenceLabelClass(level) {
-    const l = (level || '').toLowerCase()
-    if (l === 'high') return 'text-emerald-600/90'
-    if (l === 'medium') return 'text-amber-600/90'
-    if (l === 'low') return 'text-red-600/90'
-    if (l === 'unknown') return 'text-slate-500'
-    return 'text-slate-500'
-}
-
-/**
- * Max 2 bullets; reference-related first, then signal applicability.
- * Prefer persisted `breakdown_json.recommendations` when present.
- *
- * @param {object|null} breakdown
- * @returns {string[]}
- */
-function buildInsights(breakdown) {
-    if (!breakdown || typeof breakdown !== 'object') return []
-    if ((breakdown.level || '').toLowerCase() === 'high') {
-        return []
-    }
-    const persisted = breakdown.recommendations
-    if (Array.isArray(persisted) && persisted.length > 0) {
-        return persisted.slice(0, 2)
-    }
-
-    const out = []
-    const ref = breakdown.reference_similarity
-
-    if (ref?.used) {
-        const s = ref.score
-        if (typeof s === 'number' && s > 80) {
-            out.push('Strong visual alignment with brand style')
-        } else if (typeof s === 'number' && s < 50) {
-            out.push('Visual style differs from brand references')
-        }
-    } else {
-        out.push('No brand references available for comparison')
-    }
-
-    if (out.length < 2 && breakdown.applicability?.tone === false) {
-        out.push('No text detected — tone not evaluated')
-    }
-    if (out.length < 2 && breakdown.applicability?.typography === false) {
-        out.push('No typography detected')
-    }
-
-    return out.slice(0, 2)
-}
 
 /**
  * Poll until Brand Intelligence row exists (queue may finish after POST).
@@ -283,16 +207,6 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
         )
     }
 
-    const headline = levelToBrandLabel(bi.level) || 'Brand alignment'
-    const headlineColor = levelToHeadlineColorClass(bi.level)
-    const confLabel = confidenceToLabel(bi.confidence)
-    const confLabelColor = levelToConfidenceLabelClass(bi.level)
-    const refSim = breakdown?.reference_similarity
-    const showConfidenceLine =
-        confLabel &&
-        !(typeof bi.confidence === 'number' && bi.confidence < 0.6 && refSim && refSim.used === false)
-    const insights = buildInsights(breakdown)
-
     return (
         <div className="px-4 py-3 border-t border-gray-200">
             <div
@@ -308,22 +222,9 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                     Analyzing brand alignment…
                 </p>
             ) : (
-                <p className={`text-lg font-semibold leading-tight ${headlineColor}`}>{headline}</p>
-            )}
-            {!rescoreLoading && showConfidenceLine && (
-                <p className={`mt-1 text-xs ${confLabelColor}`}>{confLabel}</p>
-            )}
-            {!rescoreLoading && insights.length > 0 && (
-                <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
-                    {insights.map((line, i) => (
-                        <li key={i} className="flex gap-2">
-                            <span className="text-slate-400 select-none" aria-hidden>
-                                •
-                            </span>
-                            <span>{line}</span>
-                        </li>
-                    ))}
-                </ul>
+                <div className="mt-2">
+                    <BrandSignalBreakdown brandIntelligence={bi} />
+                </div>
             )}
             {!rescoreLoading &&
                 breakdown?.ai_insight?.text &&

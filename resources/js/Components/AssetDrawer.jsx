@@ -65,6 +65,7 @@ import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '.
 import { getAssetCategoryId } from '../utils/assetUtils'
 import { filterActiveCategories } from '../utils/categoryUtils'
 import { usePermission } from '../hooks/usePermission'
+import PromoteBrandReferenceModal from './PromoteBrandReferenceModal'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
 import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/solid'
@@ -91,6 +92,7 @@ export default function AssetDrawer({
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
     const categories = pageProps.categories ?? []
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const { can } = usePermission()
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
     /** One-shot: grid double-click initial zoom per drawer mount */
@@ -150,6 +152,8 @@ export default function AssetDrawer({
     const [showFinalizeFromBuilderModal, setShowFinalizeFromBuilderModal] = useState(false)
     const [finalizeCategoryId, setFinalizeCategoryId] = useState(null)
     const [finalizeLoading, setFinalizeLoading] = useState(false)
+    const [promoteModalOpen, setPromoteModalOpen] = useState(false)
+    const [promoteModalInitialType, setPromoteModalInitialType] = useState('reference')
 
     // Unified Operations: Unresolved incidents for asset (processing issues)
     const [assetIncidents, setAssetIncidents] = useState([])
@@ -2491,6 +2495,51 @@ export default function AssetDrawer({
                     <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} primaryColor={brandPrimary} />
                 )}
 
+                {can('brand_settings.manage') && displayAsset?.id && (
+                    <div className="border-t border-gray-200 px-4 py-4 md:px-6">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-2">Use as Reference</h3>
+                        {displayAsset.reference_promotion ? (
+                            <div className="flex items-center gap-2">
+                                <span
+                                    className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
+                                        displayAsset.reference_promotion.kind === 'guideline'
+                                            ? 'bg-violet-100 text-violet-800'
+                                            : 'bg-sky-100 text-sky-800'
+                                    }`}
+                                >
+                                    {displayAsset.reference_promotion.kind === 'guideline' ? 'Guideline' : 'Reference'}
+                                </span>
+                                {displayAsset.reference_promotion.category && (
+                                    <span className="text-xs text-gray-500">{displayAsset.reference_promotion.category}</span>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setPromoteModalInitialType('reference')
+                                        setPromoteModalOpen(true)
+                                    }}
+                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                >
+                                    Promote as Reference
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setPromoteModalInitialType('guideline')
+                                        setPromoteModalOpen(true)
+                                    }}
+                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                >
+                                    Add to Brand Guidelines
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {displayAsset?.id && (
                     <AssetBrandIntelligenceBlock asset={displayAsset} onAssetUpdate={onAssetUpdate} primaryColor={brandPrimary} />
                 )}
@@ -4108,6 +4157,23 @@ export default function AssetDrawer({
                         setTimeout(() => {
                             router.reload({ preserveState: true, preserveScroll: true })
                         }, 500)
+                    }}
+                />
+            )}
+
+            {promoteModalOpen && displayAsset?.id && (
+                <PromoteBrandReferenceModal
+                    isOpen={promoteModalOpen}
+                    onClose={() => setPromoteModalOpen(false)}
+                    assetId={displayAsset.id}
+                    initialType={promoteModalInitialType === 'guideline' ? 'guideline' : 'reference'}
+                    onSuccess={(payload) => {
+                        if (onAssetUpdate) {
+                            onAssetUpdate({ ...displayAsset, ...payload })
+                        }
+                        setToastMessage('Asset promoted to brand references')
+                        setToastType('success')
+                        setTimeout(() => setToastMessage(null), 4000)
                     }}
                 />
             )}

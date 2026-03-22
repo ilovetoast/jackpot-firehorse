@@ -88,14 +88,14 @@ class CompanyBrandSeeder extends Seeder
         );
         $initialCompany->update(['name' => 'Velvet Hammer']);
 
-        // Agency: premium plan (feature limits), Silver tier, approved
-        $silverTier = AgencyTier::where('name', 'Silver')->first();
+        // Agency: premium plan (feature limits), Platinum tier (highest seeded tier), approved
+        $platinumTier = AgencyTier::where('name', 'Platinum')->first();
         $initialCompany->update([
             'manual_plan_override' => 'premium',
             'is_agency' => true,
             'agency_approved_at' => now(),
             'agency_approved_by' => $initialUser->id,
-            'agency_tier_id' => $silverTier?->id,
+            'agency_tier_id' => $platinumTier?->id,
         ]);
 
         // Attach user 1 to the initial company as owner
@@ -183,9 +183,7 @@ class CompanyBrandSeeder extends Seeder
                 ->update(['removed_at' => now(), 'updated_at' => now()]);
         }
 
-        // John Doe: owner of each seeded client company (St. Croix, Augusta, ACG, Victory).
-        // msteele (user 1) is owner only on company 1 (Velvet Hammer).
-        // NOTE: This user should NEVER have site_owner role - only user ID 1 can be site_owner
+        // Optional demo user (not attached to agency-client tenants — incubation is agency-stewarded).
         $secondaryUser = User::firstOrCreate(
             ['email' => 'johndoe@example.com'],
             [
@@ -195,7 +193,6 @@ class CompanyBrandSeeder extends Seeder
             ]
         );
 
-        // Remove site_owner role if it was previously assigned (safety check)
         if ($secondaryUser->hasRole('site_owner')) {
             $secondaryUser->removeRole('site_owner');
         }
@@ -224,10 +221,13 @@ class CompanyBrandSeeder extends Seeder
                 $tenant->update(['name' => $companyName]);
             }
 
-            // Client companies are logically owned by the agency (supports spin-off testing)
+            // Incubated clients: agency is steward; no separate "client owner" user in default seed.
+            // Michael (user 1) becomes tenant `owner` after tenant_agencies attach (temporary steward until transfer).
             $tenant->update([
                 'incubated_by_agency_id' => $initialCompany->id,
                 'manual_plan_override' => $plan,
+                'incubated_at' => $tenant->incubated_at ?? now(),
+                'incubation_expires_at' => null,
             ]);
 
             // Get the first brand name we want
@@ -291,11 +291,20 @@ class CompanyBrandSeeder extends Seeder
                 );
             }
 
-            // John Doe: owner of each seeded client company (msteele is owner only on company 1 / Velvet Hammer)
             $tenant->load('brands');
-            $secondaryUser->setRoleForTenant($tenant, 'owner', true);
-            foreach ($tenant->brands as $brand) {
-                $secondaryUser->setRoleForBrand($brand, 'admin');
+
+            // Remove legacy demo "client owner" membership so the agency is the steward (re-seed safe)
+            DB::table('tenant_user')
+                ->where('user_id', $secondaryUser->id)
+                ->where('tenant_id', $tenant->id)
+                ->delete();
+            $clientBrandIds = $tenant->brands->pluck('id');
+            if ($clientBrandIds->isNotEmpty()) {
+                DB::table('brand_user')
+                    ->where('user_id', $secondaryUser->id)
+                    ->whereIn('brand_id', $clientBrandIds)
+                    ->whereNull('removed_at')
+                    ->update(['removed_at' => now(), 'updated_at' => now()]);
             }
 
             // Velvet Hammer (agency) → client tenant: explicit RBAC via tenant_agencies + agency-managed pivots
@@ -311,6 +320,9 @@ class CompanyBrandSeeder extends Seeder
                 $brandAssignments,
                 $initialUser
             );
+
+            // Temporary owner on the client tenant is the agency primary user (until ownership transfer to a client).
+            $initialUser->setRoleForTenant($tenant, 'owner', true);
         }
     }
 

@@ -2,13 +2,17 @@
 
 namespace App\Services\BrandIntelligence;
 
+use App\Enums\BrandAlignmentState;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceFeedback;
+use App\Models\BrandReferenceAsset;
 use App\Models\BrandVisualReference;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AiMetadataGenerationService;
+use Illuminate\Support\Collection;
+use App\Services\ImageEmbeddingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -19,7 +23,7 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v1_generative_validation';
+    public const ENGINE_VERSION = 'v3_embedding_fallback';
 
     public const AI_USAGE_TYPE = 'brand_intelligence_ai';
 
@@ -32,6 +36,7 @@ class BrandIntelligenceEngine
     public function __construct(
         protected AIProviderInterface $aiProvider,
         protected AiMetadataGenerationService $aiMetadataGenerationService,
+        protected AssetEmbeddingEnsureService $assetEmbeddingEnsureService,
     ) {}
 
     /**
@@ -56,6 +61,26 @@ class BrandIntelligenceEngine
             return null;
         }
 
+        $signalBreakdown = $this->computeEbiSignalBreakdown($asset, $brand);
+        $signalCount = $this->countTruthySignals($signalBreakdown);
+        if ($signalCount < 2) {
+            return $this->scoreAssetInsufficientEvidence($asset, $brand, $signalBreakdown, $signalCount, $dryRun);
+        }
+
+        $embeddedRow = $this->assetEmbeddingEnsureService->ensure($asset);
+        $assetVec = ($embeddedRow && ! empty($embeddedRow->embedding_vector))
+            ? array_values($embeddedRow->embedding_vector)
+            : [];
+
+        if ($this->shouldAbortScoringNoEmbeddingFallback($asset, $assetVec, $signalBreakdown)) {
+            Log::warning('[EBI] Scoring aborted: image asset has no embedding and identity fallback unavailable', [
+                'asset_id' => $asset->id,
+                'brand_id' => $brand->id,
+            ]);
+
+            return null;
+        }
+
         $signals = $this->detectAssetSignals($asset);
         $perAssetSignals = [[
             'asset_id' => $asset->id,
@@ -64,12 +89,9 @@ class BrandIntelligenceEngine
             'typography_applicable' => $signals['has_typography'],
         ]];
 
-        $refBlock = $this->buildReferenceSimilarityBreakdown($asset, $brand);
+        $refBlock = $this->buildReferenceSimilarityBreakdown($asset, $brand, $assetVec, $signalBreakdown);
         $rs = $refBlock['reference_similarity'];
-        $score = 50;
-        if (! empty($rs['used']) && isset($rs['score']) && is_numeric($rs['score'])) {
-            $score = (int) $rs['score'];
-        }
+        $score = $this->initialOverallScoreFromReferenceSimilarity($rs);
 
         $normalizedSim = $refBlock['normalized_similarity'];
         $refConfidence = $rs['confidence'] ?? 0.0;
@@ -82,7 +104,9 @@ class BrandIntelligenceEngine
             $score = max(0, min(100, $score));
         }
 
-        $confidence = $this->confidenceForSignals($signals);
+        $confidence = ReferenceSimilarityCalculator::bandToNumericConfidence(
+            $refBlock['confidence_band'] ?? 'low'
+        );
 
         $feedback = BrandIntelligenceFeedback::query()
             ->where('asset_id', $asset->id)
@@ -189,7 +213,20 @@ class BrandIntelligenceEngine
 
         $withRefs = $this->applySignalInterpretationToBreakdown($baseBreakdown, $signals);
         $withRefs['reference_similarity'] = $refBlock['reference_similarity'];
-        $level = $this->mapScoreToLevel($score, $signalStrength, $confidence, $domainRelevance);
+        $withRefs['confidence_band'] = $refBlock['confidence_band'] ?? 'low';
+        $withRefs['fallback_used'] = ! empty($refBlock['reference_similarity']['fallback_used']);
+        $alignmentNumeric = $this->alignmentNumericFromScoreAndReferences($score, $refBlock);
+        $alignmentState = BrandAlignmentState::fromNormalizedScore($alignmentNumeric);
+        $level = $alignmentState->toLegacyLevel();
+        $withRefs['alignment_state'] = $alignmentState->value;
+        $withRefs['alignment_score_normalized'] = round($alignmentNumeric, 4);
+        $withRefs['signal_count'] = $signalCount;
+        $withRefs['signal_breakdown'] = $signalBreakdown;
+        $withRefs['reference_tier_usage'] = $refBlock['reference_tier_usage'] ?? [
+            'system' => 0,
+            'promoted' => 0,
+            'guideline' => 0,
+        ];
         $withRefs['level'] = $level;
         $withRefs['signal_strength'] = $signalStrength;
         $withRefs['domain_relevance'] = [
@@ -241,6 +278,403 @@ class BrandIntelligenceEngine
             'engine_version' => self::ENGINE_VERSION,
             'asset_id' => $asset->id,
         ];
+    }
+
+    /**
+     * When fewer than two EBI gate signals are present, do not infer misalignment — guidance only.
+     *
+     * @param  array<string, bool>  $signalBreakdown
+     */
+    protected function scoreAssetInsufficientEvidence(
+        Asset $asset,
+        Brand $brand,
+        array $signalBreakdown,
+        int $signalCount,
+        bool $dryRun
+    ): array {
+        $signals = $this->detectAssetSignals($asset);
+        $perAssetSignals = [[
+            'asset_id' => $asset->id,
+            'signals' => $signals,
+            'tone_applicable' => $signals['has_text'],
+            'typography_applicable' => $signals['has_typography'],
+        ]];
+
+        $baseBreakdown = $this->mergeSignalBreakdown([
+            'source' => 'ebi_asset_score',
+            'scoring_basis' => self::SCORING_BASIS_SINGLE_ASSET,
+            'source_asset_id' => $asset->id,
+            'asset_ids_considered' => [$asset->id],
+        ], $perAssetSignals);
+
+        $withRefs = $this->applySignalInterpretationToBreakdown($baseBreakdown, $signals);
+        $confidence = 0.45;
+        $level = BrandAlignmentState::INSUFFICIENT_EVIDENCE->toLegacyLevel();
+
+        $withRefs['alignment_state'] = BrandAlignmentState::INSUFFICIENT_EVIDENCE->value;
+        $withRefs['alignment_score_normalized'] = null;
+        $withRefs['signal_count'] = $signalCount;
+        $withRefs['signal_breakdown'] = $signalBreakdown;
+        $withRefs['reference_tier_usage'] = $this->referenceTierCountsForBrand($brand);
+        $withRefs['reference_similarity'] = [
+            'score' => null,
+            'score_percent' => null,
+            'fallback_used' => false,
+            'confidence' => 0.0,
+            'reference_count' => 0,
+            'normalized' => null,
+            'used' => false,
+            'weighted' => true,
+            'top_match_ids' => [],
+            'variance' => null,
+            'style_only' => true,
+        ];
+        $withRefs['confidence_band'] = 'low';
+        $withRefs['fallback_used'] = false;
+        $withRefs['level'] = $level;
+        $withRefs['signal_strength'] = 0.0;
+        $withRefs['domain_relevance'] = ['score' => null, 'keyword' => null, 'embedding' => null];
+        $withRefs['insufficient_signal'] = true;
+        $withRefs['confidence_reason'] = [
+            'ebi_gate' => 'Fewer than 2 of: logo, brand colors, typography, reference similarity readiness',
+        ];
+        $withRefs['confidence'] = $confidence;
+        $withRefs['recommendations'] = $this->generateInsufficientEvidenceRecommendations($signalBreakdown);
+        $withRefs['generative_validation'] = ['used' => false, 'score' => null, 'confidence' => 0];
+        $withRefs['ai_used'] = false;
+        $withRefs['_gate_confidence'] = $confidence;
+        $withRefs['_gate_level'] = $level;
+
+        $aiInsightPayload = $this->generateAIInsight($asset, $withRefs, $dryRun);
+        unset($withRefs['_gate_confidence'], $withRefs['_gate_level']);
+
+        if ($aiInsightPayload !== null && isset($aiInsightPayload['ai_insight']['text'])) {
+            $withRefs['ai_insight'] = $aiInsightPayload['ai_insight'];
+        }
+
+        return [
+            'overall_score' => 50,
+            'confidence' => $confidence,
+            'level' => $level,
+            'breakdown_json' => $withRefs,
+            'ai_used' => ! empty($withRefs['ai_insight']),
+            'engine_version' => self::ENGINE_VERSION,
+            'asset_id' => $asset->id,
+        ];
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    protected function referenceTierCountsForBrand(Brand $brand): array
+    {
+        $base = fn () => BrandVisualReference::query()->where('brand_id', $brand->id);
+        if (Schema::hasColumn('brand_visual_references', 'reference_tier')) {
+            $counts = [
+                'system' => $base()->where('reference_tier', BrandVisualReference::TIER_SYSTEM)->count(),
+                'promoted' => $base()->where('reference_tier', BrandVisualReference::TIER_PROMOTED)->count(),
+                'guideline' => $base()->where('reference_tier', BrandVisualReference::TIER_GUIDELINE)->count(),
+            ];
+        } else {
+            $n = $base()->count();
+            $counts = ['system' => 0, 'promoted' => 0, 'guideline' => $n];
+        }
+
+        if (Schema::hasTable('brand_reference_assets')) {
+            foreach (BrandReferenceAsset::query()->where('brand_id', $brand->id)->get() as $bra) {
+                $t = (int) $bra->tier;
+                if ($t === BrandReferenceAsset::TIER_REFERENCE) {
+                    $counts['promoted']++;
+                } elseif ($t === BrandReferenceAsset::TIER_GUIDELINE) {
+                    $counts['guideline']++;
+                } else {
+                    $counts['system']++;
+                }
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Image assets without a stored embedding cannot use the similarity path; abort only when
+     * identity fallback (logo / colors / typography signals) cannot run either.
+     *
+     * @param  array<string, bool>  $signalBreakdown
+     */
+    protected function shouldAbortScoringNoEmbeddingFallback(Asset $asset, array $assetVec, array $signalBreakdown): bool
+    {
+        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''))) {
+            return false;
+        }
+        if ($assetVec !== []) {
+            return false;
+        }
+
+        return ! $this->identityFallbackAvailable($signalBreakdown);
+    }
+
+    /**
+     * @param  array<string, bool>  $signalBreakdown
+     */
+    protected function identityFallbackAvailable(array $signalBreakdown): bool
+    {
+        return ($signalBreakdown['has_logo'] ?? false)
+            || ($signalBreakdown['has_brand_colors'] ?? false)
+            || ($signalBreakdown['has_typography'] ?? false);
+    }
+
+    protected function initialOverallScoreFromReferenceSimilarity(array $rs): int
+    {
+        if (isset($rs['score_percent']) && is_numeric($rs['score_percent'])) {
+            return (int) $rs['score_percent'];
+        }
+        if (isset($rs['score']) && is_numeric($rs['score'])) {
+            $s = (float) $rs['score'];
+            if ($s >= 0.0 && $s <= 1.0) {
+                return (int) round($s * 100);
+            }
+
+            return (int) round($s);
+        }
+
+        return 50;
+    }
+
+    /**
+     * Style references with embeddings (identity / logo rows excluded).
+     */
+    protected function queryStyleReferencesWithEmbeddings(Brand $brand): Collection
+    {
+        $q = BrandVisualReference::query()
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector');
+
+        if (Schema::hasColumn('brand_visual_references', 'reference_type')) {
+            $q->where(function ($sub) {
+                $sub->where('reference_type', BrandVisualReference::REFERENCE_TYPE_STYLE)
+                    ->orWhere(function ($sub2) {
+                        $sub2->whereNull('reference_type')
+                            ->where('type', '!=', BrandVisualReference::TYPE_LOGO);
+                    });
+            });
+        } else {
+            $q->where('type', '!=', BrandVisualReference::TYPE_LOGO);
+        }
+
+        return $q->orderByDesc('id')->limit(120)->get()
+            ->filter(fn (BrandVisualReference $r) => $r->isStyleReferenceForSimilarity())
+            ->values();
+    }
+
+    /**
+     * @param  Collection<int, BrandVisualReference>  $refs
+     * @return array{system: int, promoted: int, guideline: int}
+     */
+    protected function aggregateTierUsage(Collection $refs): array
+    {
+        $tierUsage = ['system' => 0, 'promoted' => 0, 'guideline' => 0];
+        foreach ($refs as $r) {
+            $t = $r->reference_tier;
+            if ($t === BrandVisualReference::TIER_SYSTEM) {
+                $tierUsage['system']++;
+            } elseif ($t === BrandVisualReference::TIER_PROMOTED) {
+                $tierUsage['promoted']++;
+            } else {
+                $tierUsage['guideline']++;
+            }
+        }
+
+        return $tierUsage;
+    }
+
+    /**
+     * @return array{has_logo: bool, has_brand_colors: bool, has_typography: bool, has_reference_similarity: bool}
+     */
+    protected function computeEbiSignalBreakdown(Asset $asset, Brand $brand): array
+    {
+        return [
+            'has_logo' => $this->signalBrandHasLogo($brand),
+            'has_brand_colors' => $this->signalBrandHasColors($brand),
+            'has_typography' => $this->signalBrandHasTypography($asset, $brand),
+            'has_reference_similarity' => $this->signalReferenceSimilarityReady($asset, $brand),
+        ];
+    }
+
+    /**
+     * @param  array<string, bool>  $breakdown
+     */
+    protected function countTruthySignals(array $breakdown): int
+    {
+        return count(array_filter($breakdown, fn ($v) => $v === true));
+    }
+
+    protected function signalBrandHasLogo(Brand $brand): bool
+    {
+        return BrandVisualReference::query()
+            ->where('brand_id', $brand->id)
+            ->where('type', BrandVisualReference::TYPE_LOGO)
+            ->exists();
+    }
+
+    protected function signalBrandHasColors(Brand $brand): bool
+    {
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+        $visual = is_array($payload['visual'] ?? null) ? $payload['visual'] : [];
+        $colors = $visual['colors'] ?? $visual['palette'] ?? $visual['brand_colors'] ?? [];
+        if (! is_array($colors)) {
+            return false;
+        }
+        foreach ($colors as $c) {
+            if (is_string($c) && trim($c) !== '') {
+                return true;
+            }
+            if (is_array($c) && (! empty($c['hex']) || ! empty($c['value']) || ! empty($c['name']))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function signalBrandHasTypography(Asset $asset, Brand $brand): bool
+    {
+        if ($this->assetHasTypographyMetadata($asset)) {
+            return true;
+        }
+
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+        $typo = is_array($payload['typography'] ?? null) ? $payload['typography'] : [];
+        if (! empty($typo['primary_font']) || ! empty($typo['secondary_font'])) {
+            return true;
+        }
+        $fonts = $typo['fonts'] ?? [];
+        if (is_array($fonts) && count(array_filter($fonts)) > 0) {
+            return true;
+        }
+        $rules = is_array($payload['scoring_rules'] ?? null) ? $payload['scoring_rules'] : [];
+
+        return ! empty($rules['typography_keywords']);
+    }
+
+    protected function signalReferenceSimilarityReady(Asset $asset, Brand $brand): bool
+    {
+        $assetEmb = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
+        if (! $assetEmb || empty($assetEmb->embedding_vector)) {
+            return false;
+        }
+
+        $q = BrandVisualReference::query()
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector');
+
+        $candidates = $q->get()->filter(fn (BrandVisualReference $r) => $r->isStyleReferenceForSimilarity());
+
+        if ($candidates->isNotEmpty()) {
+            return true;
+        }
+
+        return count($this->collectPromotedBrandReferenceAssetEntries($brand)) > 0;
+    }
+
+    /**
+     * User-promoted style references: vectors live on asset_embeddings.
+     *
+     * @return list<array{pool: string, id: string, numeric_id: int, asset_id: string, vector: list<float>, weight: float, reference_tier: string}>
+     */
+    protected function collectPromotedBrandReferenceAssetEntries(Brand $brand): array
+    {
+        if (! Schema::hasTable('brand_reference_assets')) {
+            return [];
+        }
+
+        $rows = BrandReferenceAsset::query()
+            ->where('brand_id', $brand->id)
+            ->where('reference_type', BrandReferenceAsset::REFERENCE_TYPE_STYLE)
+            ->get();
+
+        $out = [];
+        foreach ($rows as $bra) {
+            $emb = AssetEmbedding::query()->where('asset_id', $bra->asset_id)->first();
+            if (! $emb || empty($emb->embedding_vector)) {
+                continue;
+            }
+
+            $out[] = [
+                'pool' => 'brand_reference_asset',
+                'id' => 'bra:'.$bra->id,
+                'numeric_id' => $bra->id,
+                'asset_id' => (string) $bra->asset_id,
+                'vector' => array_values($emb->embedding_vector),
+                'weight' => max(0.0, (float) $bra->weight),
+                'reference_tier' => match ((int) $bra->tier) {
+                    BrandReferenceAsset::TIER_REFERENCE => BrandVisualReference::TIER_PROMOTED,
+                    BrandReferenceAsset::TIER_GUIDELINE => BrandVisualReference::TIER_GUIDELINE,
+                    default => BrandVisualReference::TIER_SYSTEM,
+                },
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<array{reference_tier: string}>  $promotedEntries
+     * @param  array{system: int, promoted: int, guideline: int}  $tierUsage
+     * @return array{system: int, promoted: int, guideline: int}
+     */
+    protected function mergePromotedTierUsage(array $tierUsage, array $promotedEntries): array
+    {
+        foreach ($promotedEntries as $p) {
+            $t = $p['reference_tier'];
+            if ($t === BrandVisualReference::TIER_SYSTEM) {
+                $tierUsage['system']++;
+            } elseif ($t === BrandVisualReference::TIER_PROMOTED) {
+                $tierUsage['promoted']++;
+            } else {
+                $tierUsage['guideline']++;
+            }
+        }
+
+        return $tierUsage;
+    }
+
+    /**
+     * Prefer weighted style-reference similarity when available; else fall back to normalized overall score.
+     */
+    protected function alignmentNumericFromScoreAndReferences(int $score, array $refBlock): float
+    {
+        $norm = $refBlock['normalized_similarity'] ?? null;
+        if ($norm !== null && is_numeric($norm)) {
+            return max(0.0, min(1.0, (float) $norm));
+        }
+
+        return max(0.0, min(1.0, $score / 100.0));
+    }
+
+    /**
+     * @param  array<string, bool>  $signalBreakdown
+     * @return list<string>
+     */
+    protected function generateInsufficientEvidenceRecommendations(array $signalBreakdown): array
+    {
+        $hints = [];
+        if (! ($signalBreakdown['has_reference_similarity'] ?? false)) {
+            $hints[] = 'Add approved style reference images and ensure embeddings are generated so visual similarity can be measured.';
+        }
+        if (! ($signalBreakdown['has_brand_colors'] ?? false)) {
+            $hints[] = 'Define brand colors in your brand model to strengthen alignment signals.';
+        }
+        if (! ($signalBreakdown['has_typography'] ?? false)) {
+            $hints[] = 'Add typography to your brand guidelines or approve font metadata on assets when available.';
+        }
+        if (! ($signalBreakdown['has_logo'] ?? false)) {
+            $hints[] = 'Upload a logo reference to anchor identity checks.';
+        }
+
+        return array_slice($hints, 0, 2);
     }
 
     /**
@@ -665,42 +1099,21 @@ class BrandIntelligenceEngine
     }
 
     /**
-     * Compare asset embedding to brand visual reference embeddings (same brand, refs with embeddings).
-     * Top-5 mean of cosine similarities (noise filtered), variance for stability. Does not call compliance.
+     * Style-reference embeddings only; tier-weighted top-5; noise floor; variance + stability; identity fallback.
      *
-     * @return array{
-     *     reference_similarity: array{
-     *         score: int|null,
-     *         confidence: float,
-     *         reference_count: int,
-     *         normalized: float|null,
-     *         used: bool,
-     *         weighted: bool,
-     *         top_match_ids: list<int|string>,
-     *         variance: float|null
-     *     },
-     *     normalized_similarity: float|null,
-     *     reference_quality: array{has_primary: bool, reference_count: int, mean: float|null, variance: float|null},
-     *     reference_stability: array{consistent: bool},
-     *     reference_cluster: array{spread: float|null, tight_cluster: bool}
-     * }
+     * @param  array<string, bool>  $signalBreakdown
+     * @return array<string, mixed>
      */
-    protected function buildReferenceSimilarityBreakdown(Asset $asset, Brand $brand): array
+    protected function buildReferenceSimilarityBreakdown(Asset $asset, Brand $brand, array $assetVec, array $signalBreakdown): array
     {
-        $query = BrandVisualReference::query()
-            ->where('brand_id', $brand->id)
-            ->whereNotNull('embedding_vector');
-
-        if (Schema::hasColumn('brand_visual_references', 'is_primary')) {
-            $query->orderByDesc('is_primary');
-        }
-        if (Schema::hasColumn('brand_visual_references', 'weight')) {
-            $query->orderByDesc('weight');
-        }
-
-        $refs = $query->limit(30)->get();
-
-        $referenceCount = $refs->count();
+        $refs = $this->queryStyleReferencesWithEmbeddings($brand);
+        $promotedEntries = $this->collectPromotedBrandReferenceAssetEntries($brand);
+        $braTotal = Schema::hasTable('brand_reference_assets')
+            ? BrandReferenceAsset::query()->where('brand_id', $brand->id)->count()
+            : 0;
+        $referenceCount = $refs->count() + $braTotal;
+        $tierUsage = $this->mergePromotedTierUsage($this->aggregateTierUsage($refs), $promotedEntries);
+        $poolEligible = $refs->count() + count($promotedEntries);
 
         $hasPrimaryColumn = Schema::hasColumn('brand_visual_references', 'is_primary');
         $hasPrimary = $hasPrimaryColumn && $refs->contains(fn ($r) => (bool) ($r->is_primary ?? false));
@@ -712,35 +1125,37 @@ class BrandIntelligenceEngine
             'variance' => null,
         ];
 
-        $assetEmbedding = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
-        $assetVec = array_values($assetEmbedding?->embedding_vector ?? []);
+        $minRefs = ReferenceSimilarityCalculator::MIN_STYLE_REFERENCES_FOR_EMBEDDING;
 
-        $emptySimilarity = [
-            'score' => null,
-            'confidence' => 0.0,
-            'reference_count' => $referenceCount,
-            'normalized' => null,
-            'used' => false,
-            'weighted' => false,
-            'top_match_ids' => [],
-            'variance' => null,
-        ];
+        if ($poolEligible < $minRefs) {
+            Log::info('[EBI] Fallback: insufficient style references for embedding path', [
+                'brand_id' => $brand->id,
+                'reference_count' => $referenceCount,
+                'pool_eligible' => $poolEligible,
+                'min_required' => $minRefs,
+            ]);
 
-        $empty = [
-            'reference_similarity' => $emptySimilarity,
-            'normalized_similarity' => null,
-            'reference_quality' => $referenceQuality,
-            'reference_stability' => [
-                'consistent' => false,
-            ],
-            'reference_cluster' => [
-                'spread' => null,
-                'tight_cluster' => false,
-            ],
-        ];
+            return $this->buildIdentityFallbackReferenceBlock(
+                $referenceCount,
+                $tierUsage,
+                $signalBreakdown,
+                $referenceQuality,
+                'reference_count_below_threshold'
+            );
+        }
 
-        if (empty($assetVec) || $referenceCount === 0) {
-            return $empty;
+        if ($assetVec === []) {
+            Log::info('[EBI] Fallback: missing asset embedding vector', [
+                'asset_id' => $asset->id,
+            ]);
+
+            return $this->buildIdentityFallbackReferenceBlock(
+                $referenceCount,
+                $tierUsage,
+                $signalBreakdown,
+                $referenceQuality,
+                'missing_asset_embedding'
+            );
         }
 
         $pairScores = [];
@@ -751,43 +1166,69 @@ class BrandIntelligenceEngine
             }
             $sim = $this->cosineSimilarity($assetVec, $refVec);
             $sim = max(0.0, min(1.0, $sim));
+            if ($sim <= ReferenceSimilarityCalculator::NOISE_SIMILARITY_FLOOR) {
+                continue;
+            }
             $pairScores[] = [
-                'id' => $ref->id,
+                'id' => 'bvr:'.$ref->id,
                 'similarity' => $sim,
+                'weight' => $ref->effectiveWeight(),
+            ];
+        }
+        foreach ($promotedEntries as $p) {
+            $refVec = $p['vector'];
+            if ($refVec === [] || ! $this->isSameVectorLength($assetVec, $refVec)) {
+                continue;
+            }
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            $sim = max(0.0, min(1.0, $sim));
+            if ($sim <= ReferenceSimilarityCalculator::NOISE_SIMILARITY_FLOOR) {
+                continue;
+            }
+            $pairScores[] = [
+                'id' => $p['id'],
+                'similarity' => $sim,
+                'weight' => $p['weight'],
             ];
         }
 
-        $pairScores = array_values(array_filter(
-            $pairScores,
-            fn (array $m) => $m['similarity'] > 0.35
-        ));
-
         if ($pairScores === []) {
-            return $empty;
+            Log::info('[EBI] Fallback: no valid reference pairs after noise filter or dimension mismatch', [
+                'asset_id' => $asset->id,
+                'brand_id' => $brand->id,
+            ]);
+
+            return $this->buildIdentityFallbackReferenceBlock(
+                $referenceCount,
+                $tierUsage,
+                $signalBreakdown,
+                $referenceQuality,
+                'no_valid_pairs'
+            );
         }
 
         usort($pairScores, fn ($a, $b) => $b['similarity'] <=> $a['similarity']);
-        $topMatches = array_slice($pairScores, 0, 5);
-        $top = array_column($topMatches, 'similarity');
-
-        $aggregate = array_sum($top) / count($top);
-
-        $normalized = max(0.0, min(1.0, $aggregate));
-        $scoreInt = (int) round($normalized * 100);
-
-        $variance = $this->computeVariance($top);
-
-        $clusterSpread = max($top) - min($top);
-
-        $validRefCount = count($pairScores);
-        $confidence = round(min(1.0, 0.35 + 0.15 * min($validRefCount, 4)), 2);
-
-        if (count($top) < 3) {
-            $confidence = 0.3;
+        $topMatches = array_slice($pairScores, 0, ReferenceSimilarityCalculator::TOP_N);
+        $weights = array_column($topMatches, 'weight');
+        $sims = array_column($topMatches, 'similarity');
+        $weightSum = array_sum($weights);
+        if ($weightSum < 1e-10) {
+            return $this->buildIdentityFallbackReferenceBlock(
+                $referenceCount,
+                $tierUsage,
+                $signalBreakdown,
+                $referenceQuality,
+                'zero_weight_sum'
+            );
         }
 
-        $confidence = max(0.0, min(1.0, round($confidence, 2)));
+        $aggregate = ReferenceSimilarityCalculator::weightedMean($sims, $weights);
+        $aggregate = max(0.0, min(1.0, $aggregate));
+        $variance = ReferenceSimilarityCalculator::populationVariance($sims);
+        $stabilityLabel = ReferenceSimilarityCalculator::stabilityLabel($variance);
+        $band = ReferenceSimilarityCalculator::confidenceBand(true, false, $variance);
 
+        $clusterSpread = count($sims) > 0 ? max($sims) - min($sims) : 0.0;
         $topMatchIds = array_map(fn ($m) => $m['id'], $topMatches);
 
         $referenceQuality['mean'] = round($aggregate, 2);
@@ -795,45 +1236,85 @@ class BrandIntelligenceEngine
 
         return [
             'reference_similarity' => [
-                'score' => $scoreInt,
-                'confidence' => $confidence,
-                'reference_count' => $referenceCount,
-                'normalized' => round($normalized, 2),
                 'used' => true,
-                'weighted' => false,
+                'fallback_used' => false,
+                'score' => round($aggregate, 4),
+                'score_percent' => (int) round($aggregate * 100),
+                'normalized' => round($aggregate, 4),
+                'confidence' => ReferenceSimilarityCalculator::bandToNumericConfidence($band),
+                'reference_count' => $referenceCount,
+                'weighted' => true,
                 'top_match_ids' => $topMatchIds,
-                'variance' => round($variance, 3),
+                'variance' => round($variance, 4),
+                'stability' => $stabilityLabel,
+                'style_only' => true,
             ],
-            'normalized_similarity' => $normalized,
+            'normalized_similarity' => $aggregate,
             'reference_quality' => $referenceQuality,
             'reference_stability' => [
-                'consistent' => $variance < 0.01,
+                'consistent' => $variance < ReferenceSimilarityCalculator::VARIANCE_STABILITY_THRESHOLD,
+                'stability' => $stabilityLabel,
+                'variance' => round($variance, 4),
             ],
             'reference_cluster' => [
                 'spread' => round($clusterSpread, 3),
                 'tight_cluster' => $clusterSpread < 0.15,
             ],
+            'reference_tier_usage' => $tierUsage,
+            'confidence_band' => $band,
         ];
     }
 
     /**
-     * Population variance of numeric values (0 if fewer than 2 values).
-     *
-     * @param  list<float>  $values
+     * @param  array{has_primary: bool, reference_count: int, mean: float|null, variance: float|null}  $referenceQuality
      */
-    private function computeVariance(array $values): float
-    {
-        if (count($values) < 2) {
-            return 0.0;
-        }
+    protected function buildIdentityFallbackReferenceBlock(
+        int $referenceCount,
+        array $tierUsage,
+        array $signalBreakdown,
+        array $referenceQuality,
+        string $reason
+    ): array {
+        $fb = ReferenceSimilarityCalculator::identityFallbackScore($signalBreakdown);
 
-        $mean = array_sum($values) / count($values);
-        $sum = 0.0;
-        foreach ($values as $v) {
-            $sum += ($v - $mean) ** 2;
-        }
+        Log::info('[EBI] Identity fallback scoring', [
+            'reason' => $reason,
+            'fallback_score' => $fb,
+            'reference_count' => $referenceCount,
+        ]);
 
-        return $sum / count($values);
+        $referenceQuality['mean'] = round($fb, 2);
+        $referenceQuality['variance'] = null;
+
+        return [
+            'reference_similarity' => [
+                'used' => false,
+                'fallback_used' => true,
+                'score' => round($fb, 4),
+                'score_percent' => (int) round($fb * 100),
+                'normalized' => round($fb, 4),
+                'confidence' => ReferenceSimilarityCalculator::bandToNumericConfidence('low'),
+                'reference_count' => $referenceCount,
+                'weighted' => false,
+                'top_match_ids' => [],
+                'variance' => null,
+                'stability' => null,
+                'style_only' => true,
+            ],
+            'normalized_similarity' => $fb,
+            'reference_quality' => $referenceQuality,
+            'reference_stability' => [
+                'consistent' => false,
+                'stability' => 'diverse',
+                'variance' => null,
+            ],
+            'reference_cluster' => [
+                'spread' => null,
+                'tight_cluster' => false,
+            ],
+            'reference_tier_usage' => $tierUsage,
+            'confidence_band' => 'low',
+        ];
     }
 
     /**
@@ -844,6 +1325,10 @@ class BrandIntelligenceEngine
      */
     public function generateRecommendations(array $breakdown): array
     {
+        if (($breakdown['alignment_state'] ?? null) === BrandAlignmentState::INSUFFICIENT_EVIDENCE->value) {
+            return ['recommendations' => $breakdown['recommendations'] ?? []];
+        }
+
         if (($breakdown['level'] ?? null) === 'high') {
             return ['recommendations' => []];
         }
@@ -868,17 +1353,24 @@ class BrandIntelligenceEngine
 
         $ref = $breakdown['reference_similarity'] ?? [];
         $used = ! empty($ref['used']);
-        $refScore = isset($ref['score']) && is_numeric($ref['score']) ? (int) $ref['score'] : null;
+        $refPercent = isset($ref['score_percent']) && is_numeric($ref['score_percent'])
+            ? (int) $ref['score_percent']
+            : (isset($ref['score']) && is_numeric($ref['score']) && (float) $ref['score'] <= 1.0
+                ? (int) round((float) $ref['score'] * 100)
+                : (isset($ref['score']) && is_numeric($ref['score']) ? (int) $ref['score'] : null));
 
         $referenceMessage = null;
-        if ($used && $refScore !== null) {
-            if ($refScore < 50) {
-                $referenceMessage = 'Visual style differs from brand — consider aligning with approved imagery';
-            } elseif ($refScore <= 75) {
+        $align = $breakdown['alignment_state'] ?? null;
+        if ($align === BrandAlignmentState::INSUFFICIENT_EVIDENCE->value) {
+            $referenceMessage = null;
+        } elseif ($used && $refPercent !== null) {
+            if ($align === BrandAlignmentState::OFF_BRAND->value || $refPercent < 40) {
+                $referenceMessage = 'Visual style differs from brand — consider aligning with approved style references';
+            } elseif ($align === BrandAlignmentState::PARTIAL_ALIGNMENT->value || $refPercent <= 70) {
                 $referenceMessage = 'Visual style partially aligns — refine to better match brand look';
             }
         } else {
-            $referenceMessage = 'Add brand reference images to improve alignment';
+            $referenceMessage = 'Add brand style reference images to improve alignment measurement';
         }
 
         $app = $breakdown['applicability'] ?? [];
@@ -1029,7 +1521,7 @@ class BrandIntelligenceEngine
     }
 
     /**
-     * Mean of top-5 cosine similarities vs brand visual reference embeddings (0–1 per pair, aligned with reference scoring).
+     * Style-reference embeddings only; top-5 weighted by reference tier weight.
      */
     private function computeEmbeddingDomainRelevance(Asset $asset, Brand $brand): ?float
     {
@@ -1043,37 +1535,61 @@ class BrandIntelligenceEngine
 
         $assetVec = array_values($assetEmbedding->embedding_vector ?? []);
 
-        $refs = BrandVisualReference::query()
+        $q = BrandVisualReference::query()
             ->where('brand_id', $brand->id)
-            ->whereNotNull('embedding_vector')
-            ->limit(25)
-            ->get();
+            ->whereNotNull('embedding_vector');
 
-        if ($refs->isEmpty()) {
-            return null;
+        if (Schema::hasColumn('brand_visual_references', 'reference_type')) {
+            $q->where(function ($sub) {
+                $sub->where('reference_type', BrandVisualReference::REFERENCE_TYPE_STYLE)
+                    ->orWhere(function ($sub2) {
+                        $sub2->whereNull('reference_type')
+                            ->where('type', '!=', BrandVisualReference::TYPE_LOGO);
+                    });
+            });
+        } else {
+            $q->where('type', '!=', BrandVisualReference::TYPE_LOGO);
         }
 
-        $scores = [];
+        $refs = $q->limit(30)->get()->filter(fn (BrandVisualReference $r) => $r->isStyleReferenceForSimilarity());
 
+        $promotedEntries = $this->collectPromotedBrandReferenceAssetEntries($brand);
+
+        $pairs = [];
         foreach ($refs as $ref) {
             $refVec = array_values($ref->embedding_vector ?? []);
             if (! $this->isSameVectorLength($assetVec, $refVec)) {
                 continue;
             }
 
-            $sim = $this->cosineSimilarity($assetVec, $refVec);
-            $scores[] = max(0.0, min(1.0, $sim));
+            $sim = max(0.0, min(1.0, $this->cosineSimilarity($assetVec, $refVec)));
+            $pairs[] = ['sim' => $sim, 'w' => $ref->effectiveWeight()];
+        }
+        foreach ($promotedEntries as $p) {
+            $refVec = $p['vector'];
+            if (! $this->isSameVectorLength($assetVec, $refVec)) {
+                continue;
+            }
+            $sim = max(0.0, min(1.0, $this->cosineSimilarity($assetVec, $refVec)));
+            $pairs[] = ['sim' => $sim, 'w' => $p['weight']];
         }
 
-        if ($scores === []) {
+        if ($pairs === []) {
             return null;
         }
 
-        rsort($scores, SORT_NUMERIC);
+        usort($pairs, fn ($a, $b) => $b['sim'] <=> $a['sim']);
+        $top = array_slice($pairs, 0, 5);
+        $wSum = array_sum(array_column($top, 'w'));
+        if ($wSum < 1e-10) {
+            return null;
+        }
+        $acc = 0.0;
+        foreach ($top as $p) {
+            $acc += $p['sim'] * $p['w'];
+        }
 
-        $top = array_slice($scores, 0, 5);
-
-        return round(array_sum($top) / count($top), 2);
+        return round($acc / $wSum, 2);
     }
 
     /**
@@ -1255,11 +1771,8 @@ class BrandIntelligenceEngine
             return [];
         }
 
-        $refs = BrandVisualReference::query()
-            ->where('brand_id', $brand->id)
-            ->whereNotNull('embedding_vector')
-            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
-            ->get();
+        $refs = $this->queryStyleReferencesWithEmbeddings($brand);
+        $promotedEntries = $this->collectPromotedBrandReferenceAssetEntries($brand);
 
         $assetEmbedding = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
         $assetVec = array_values($assetEmbedding?->embedding_vector ?? []);
@@ -1279,6 +1792,18 @@ class BrandIntelligenceEngine
             $sim = $this->cosineSimilarity($assetVec, $refVec);
             $rows[] = [
                 'reference_asset_id' => (string) $ref->asset_id,
+                'cosine' => $sim,
+                'score_int' => (int) round(max(0.0, min(1.0, $sim)) * 100),
+            ];
+        }
+        foreach ($promotedEntries as $p) {
+            $refVec = $p['vector'];
+            if ($refVec === [] || count($refVec) !== count($assetVec)) {
+                continue;
+            }
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            $rows[] = [
+                'reference_asset_id' => (string) $p['asset_id'],
                 'cosine' => $sim,
                 'score_int' => (int) round(max(0.0, min(1.0, $sim)) * 100),
             ];

@@ -22,6 +22,7 @@ class Tenant extends Model
      */
     protected $fillable = [
         'name',
+        'email',
         'slug',
         'uuid', // Phase 5: Canonical storage path isolation (tenants/{uuid}/assets/...)
         'timezone',

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\BrandDNA\Builder\BrandGuidelinesBuilderSteps;
+use App\Jobs\GenerateBrandLogoVariantsJob;
 use App\Jobs\BrandPipelineRunnerJob;
 use App\Jobs\BrandPipelineSnapshotJob;
 use App\Jobs\ExtractPdfTextJob;
@@ -419,6 +420,10 @@ class BrandDNABuilderController extends Controller
 
         $this->recordBuilderStepCompleted($draft, $validated['step_key']);
 
+        if (in_array($validated['step_key'], [BrandGuidelinesBuilderSteps::STEP_STANDARDS, BrandGuidelinesBuilderSteps::STEP_EXPRESSION], true)) {
+            GenerateBrandLogoVariantsJob::dispatch($brand->id, $draft->id);
+        }
+
         return response()->json([
             'draft_version' => [
                 'id' => $draft->id,
@@ -629,6 +634,10 @@ class BrandDNABuilderController extends Controller
             } else {
                 $extra['crawled_logo_asset'] = $assetData;
             }
+        }
+
+        if ($context === 'logo_reference') {
+            GenerateBrandLogoVariantsJob::dispatch($brand->id, $draft->id);
         }
 
         return response()->json(array_merge(['attached' => true, 'count' => $count], $extra));

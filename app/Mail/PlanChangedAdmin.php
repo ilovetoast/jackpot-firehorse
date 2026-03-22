@@ -2,19 +2,23 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\NotificationTemplate;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
+use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 use Carbon\Carbon;
 
-class PlanChangedAdmin extends Mailable
+class PlanChangedAdmin extends BaseMailable
 {
+    use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
+
+    protected string $emailType = 'system';
 
     public $tenant;
     public $oldPlan;
@@ -51,6 +55,8 @@ class PlanChangedAdmin extends Mailable
      */
     public function envelope(): Envelope
     {
+        $this->applyTenantMailBranding($this->tenant);
+
         $subject = $this->template 
             ? $this->template->render([
                 'tenant_name' => $this->tenant->name,

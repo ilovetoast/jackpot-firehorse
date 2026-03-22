@@ -37,6 +37,10 @@ composer test:db-fresh
 
 Tests use `DB_DATABASE=testing` (`phpunit.xml` + `tests/bootstrap.php` forces it before autoload + `.env.testing`). Your main dev database must never be the target of `RefreshDatabase`.
 
+**Config cache:** If `bootstrap/cache/config.php` exists, it can freeze `DB_DATABASE` to your dev DB; `tests/bootstrap.php` deletes that file before loading Laravel so PHPUnit env wins. Do not run tests while relying on a stale config cache for DB name.
+
+**Guard order:** `Tests\TestCase` asserts an isolated test DB in `setUpTraits()` *before* `RefreshDatabase` runs — never move that check to after `parent::setUp()`.
+
 **Agents: never run** `php vendor/bin/phpunit` **on the host** outside Sail if the host `.env` could point PHPUnit at the same MySQL database name as development — use `./vendor/bin/sail test` or ensure `tests/bootstrap.php` is the PHPUnit bootstrap (see `phpunit.xml`).
 
 See `docs/TESTING_DATABASE.md`.

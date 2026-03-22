@@ -1145,11 +1145,12 @@ class AssetMetadataController extends Controller
 
         $fresh = Asset::query()
             ->whereKey($asset->id)
-            ->with('latestBrandIntelligenceScore')
+            ->with(['latestBrandIntelligenceScore', 'brandReferenceAsset'])
             ->firstOrFail();
 
         return response()->json([
             'brand_intelligence' => $fresh->brandIntelligencePayloadForFrontend(),
+            'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
         ]);
     }
 

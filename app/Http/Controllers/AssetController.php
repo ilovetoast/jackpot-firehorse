@@ -497,7 +497,7 @@ class AssetController extends Controller
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
         // Eager load relations used in the map to avoid N+1 and lazy-load errors on load_more (page 2+)
         $perPage = 36;
-        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion', 'tenant', 'latestBrandIntelligenceScore'])->paginate($perPage);
+        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion', 'tenant', 'latestBrandIntelligenceScore', 'brandReferenceAsset'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
         $t1 = microtime(true);
 
@@ -815,6 +815,7 @@ class AssetController extends Controller
                         'builder_staged' => (bool) ($asset->builder_staged ?? false),
                         // Brand Intelligence (EBI): human-readable drawer payload (no raw overall score)
                         'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
+                        'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
                     ];
                     if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         Log::info('ASSET API RESPONSE URL', [
@@ -866,6 +867,7 @@ class AssetController extends Controller
                         'analysis_status' => 'uploading',
                         'health_status' => 'healthy',
                         'brand_intelligence' => null,
+                        'reference_promotion' => null,
                     ];
                 }
             })

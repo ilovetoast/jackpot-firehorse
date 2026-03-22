@@ -2,12 +2,13 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\Download;
 use App\Models\Tenant;
 use App\Services\DownloadPublicPageBrandingResolver;
 use App\Services\PlanService;
 use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
+use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -16,8 +17,9 @@ use Illuminate\Queue\SerializesModels;
  * D-SHARE: Email sent when user shares a download link via the share page.
  * Template selection mirrors branding logic: FREE plan uses Jackpot promo, PAID uses brand or neutral.
  */
-class DownloadShareEmail extends Mailable
+class DownloadShareEmail extends BaseMailable
 {
+    use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
 
     public function __construct(
@@ -29,6 +31,8 @@ class DownloadShareEmail extends Mailable
 
     public function envelope(): Envelope
     {
+        $this->applyTenantMailBranding($this->tenant);
+
         $planService = app(PlanService::class);
         $plan = $planService->getCurrentPlan($this->tenant);
         $isFree = $plan === 'free';

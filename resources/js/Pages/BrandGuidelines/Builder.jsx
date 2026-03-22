@@ -4201,6 +4201,35 @@ export default function BrandGuidelinesBuilder({
                                                 <FieldCard title="Logo Variants">
                                                     <p className="text-white/60 text-sm mb-5">Upload or generate alternate versions of your logo for different contexts.</p>
 
+                                                    <div className="mb-5 space-y-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                                                        <p className="text-[11px] font-medium uppercase tracking-wide text-white/45">Automated generation</p>
+                                                        <p className="text-[10px] text-white/40 -mt-1 mb-2">When enabled, background jobs create missing variants from your primary logo (raster only) after uploads, pipeline runs, or when you save these settings.</p>
+                                                        <label className="flex items-start gap-3 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/40"
+                                                                checked={!!payload.visual?.auto_generate_logo_on_dark}
+                                                                onChange={(e) => updatePayload('visual', 'auto_generate_logo_on_dark', e.target.checked)}
+                                                            />
+                                                            <span className="text-xs text-white/75">
+                                                                <span className="font-medium text-white/90">On dark (white mark)</span>
+                                                                <span className="block text-white/45 mt-0.5">Generate a white silhouette for dark backgrounds when no on-dark asset is set.</span>
+                                                            </span>
+                                                        </label>
+                                                        <label className="flex items-start gap-3 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/40"
+                                                                checked={!!payload.visual?.auto_generate_logo_on_light}
+                                                                onChange={(e) => updatePayload('visual', 'auto_generate_logo_on_light', e.target.checked)}
+                                                            />
+                                                            <span className="text-xs text-white/75">
+                                                                <span className="font-medium text-white/90">On light (primary color)</span>
+                                                                <span className="block text-white/45 mt-0.5">Recolor the mark with your primary brand color for light surfaces when no on-light asset is set.</span>
+                                                            </span>
+                                                        </label>
+                                                    </div>
+
                                                     {logoVariantBanner && (
                                                         <div
                                                             className={`mb-5 rounded-xl border overflow-hidden ${

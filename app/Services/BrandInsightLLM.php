@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\AITaskType;
 use App\Models\Brand;
+use App\Models\TenantAgency;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -23,7 +24,11 @@ class BrandInsightLLM
 
     public const CACHE_KEY_SUFFIX = ':ai-insights-v2';
 
-    public const VALID_TYPES = ['suggestions', 'metadata', 'activity', 'sharing', 'rights', 'ai_tags', 'ai_categories'];
+    public const VALID_TYPES = [
+        'suggestions', 'metadata', 'activity', 'sharing', 'rights', 'ai_tags', 'ai_categories',
+        'guidelines', // Brand Guidelines / DNA builder
+        'agency_clients', // Agency: client companies & agency dashboard
+    ];
 
     public function __construct(
         protected AIService $aiService,
@@ -46,12 +51,19 @@ class BrandInsightLLM
 
         return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL_MINUTES), function () use ($brand, $signals) {
             $metrics = $this->brandInsightAI->getMetricsForBrand($brand);
+            $ta = (int) ($metrics['total_assets'] ?? 0);
+            $u7 = (int) ($metrics['uploads_last_7_days'] ?? 0);
+            $metricsContext = array_merge($metrics, [
+                'is_agency' => (bool) $brand->tenant?->is_agency,
+                'early_stage_library' => $ta === 0 || ($ta < 25 && $u7 === 0),
+            ]);
             try {
                 $insights = $this->generateInsights($brand, $metrics, $signals);
                 if (! empty($insights)) {
                     $insights = $this->postProcessInsights($insights, $signals);
+                    $insights = $this->enrichInsightHrefs($insights, $brand);
 
-                    return $this->applyConfidenceFiltering($insights, $metrics);
+                    return $this->applyConfidenceFiltering($insights, $metricsContext);
                 }
             } catch (\Throwable $e) {
                 Log::warning('[BrandInsightLLM] AI call failed, falling back to rule-based', [
@@ -74,7 +86,7 @@ class BrandInsightLLM
      */
     public function generateInsights(Brand $brand, array $metrics, array $signals = []): array
     {
-        $payload = $this->buildInsightPayload($metrics);
+        $payload = $this->buildInsightPayload($brand, $metrics);
         $prompt = $this->buildPrompt($payload, $signals);
 
         $tenant = $brand->tenant;
@@ -109,8 +121,31 @@ class BrandInsightLLM
             'activity' => '/app/assets',
             'sharing' => '/app/downloads',
             'rights' => '/app/insights/overview?tab=rights',
+            'agency_clients' => '/app/agency/dashboard',
             default => '/app/insights/overview',
         };
+    }
+
+    /**
+     * Deterministic hrefs for insight types that need brand id or fixed agency routes.
+     *
+     * @param  array<array{text: string, priority: string, type?: string, href?: string}>  $insights
+     * @return array<array{text: string, priority: string, type?: string, href?: string}>
+     */
+    protected function enrichInsightHrefs(array $insights, Brand $brand): array
+    {
+        foreach ($insights as &$insight) {
+            $type = $insight['type'] ?? null;
+            if ($type === 'guidelines') {
+                $insight['href'] = '/app/brands/'.$brand->id.'/brand-guidelines/builder';
+            } elseif ($type === 'agency_clients') {
+                $insight['href'] = '/app/agency/dashboard';
+            } elseif (empty($insight['href']) && $type && in_array($type, self::VALID_TYPES, true)) {
+                $insight['href'] = $this->mapInsightTypeToHref($type);
+            }
+        }
+
+        return $insights;
     }
 
     /**
@@ -129,6 +164,8 @@ class BrandInsightLLM
             'metadata' => 'metadata',
             'activity' => 'activity',
             'rights' => 'rights',
+            'guidelines' => 'guidelines',
+            'agency_clients' => 'agency_clients',
         ];
         foreach ($signals as $s) {
             $cat = $s['context']['category'] ?? null;
@@ -146,11 +183,20 @@ class BrandInsightLLM
      * @param  array<string, mixed>  $metrics
      * @return array<string, mixed>
      */
-    protected function buildInsightPayload(array $metrics): array
+    protected function buildInsightPayload(Brand $brand, array $metrics): array
     {
+        $tenant = $brand->tenant;
+        $linkedClientCompanies = 0;
+        if ($tenant && $tenant->is_agency) {
+            $linkedClientCompanies = TenantAgency::where('agency_tenant_id', $tenant->id)->count();
+        }
+
+        $totalAssets = (int) ($metrics['total_assets'] ?? 0);
+        $uploads7 = (int) ($metrics['uploads_last_7_days'] ?? 0);
+
         return [
-            'total_assets' => (int) ($metrics['total_assets'] ?? 0),
-            'uploads_last_7_days' => (int) ($metrics['uploads_last_7_days'] ?? 0),
+            'total_assets' => $totalAssets,
+            'uploads_last_7_days' => $uploads7,
             'uploads_last_30_days' => (int) ($metrics['uploads_last_30_days'] ?? 0),
             'shares_last_7_days' => (int) ($metrics['shares_last_7_days'] ?? 0),
             'shares_trend' => $metrics['shares_trend'] ?? null,
@@ -159,6 +205,10 @@ class BrandInsightLLM
             'ai_tags_pending' => (int) ($metrics['ai_tags_pending'] ?? 0),
             'ai_categories_pending' => (int) ($metrics['ai_categories_pending'] ?? 0),
             'ai_completion_rate' => (float) ($metrics['ai_completion_rate'] ?? 1),
+            'is_agency' => (bool) ($tenant?->is_agency),
+            'linked_client_company_count' => $linkedClientCompanies,
+            // Small or quiet library — prefer encouraging “first steps” copy over “absence / disengagement”
+            'early_stage_library' => $totalAssets === 0 || ($totalAssets < 25 && $uploads7 === 0),
         ];
     }
 
@@ -193,6 +243,11 @@ Your job:
 - DO NOT list counts already shown
 - Focus on impact and next step
 
+Tone (critical):
+- If "early_stage_library" is true OR total_assets is 0: do NOT frame anything as absence, lack, disengagement, risk of falling behind, or "no recent uploads" as a problem. Instead PROMOTE a positive next step: define or refine Brand Guidelines (Brand DNA builder), and/or invite uploading a first small batch of hero assets so the library tells the brand story. Use type "guidelines" or "activity".
+- If "is_agency" is true: reserve at least ONE insight for the agency workflow when helpful — e.g. opening the Agency dashboard to review, onboard, or manage linked client companies (especially if linked_client_company_count is 0 or still growing). Use type "agency_clients". If linked_client_company_count is already substantial, you may focus the second insight on brand work instead.
+- If metadata_completeness and ai_completion_rate are both high (e.g. ≥ 0.9): celebrate the strong foundation and suggest the NEXT creative step (new campaign assets, seasonal refresh, guidelines polish) — do NOT scold the team to "maintain" or imply disengagement.
+
 Rules:
 - Max 1 sentence per insight
 - Be specific and actionable
@@ -208,10 +263,10 @@ Metrics:
 
 Return JSON only (no markdown, no code block):
 [
-  { "text": "...", "priority": "high|medium|low", "type": "suggestions|ai_tags|ai_categories|metadata|activity|sharing|rights" }
+  { "text": "...", "priority": "high|medium|low", "type": "suggestions|ai_tags|ai_categories|metadata|activity|sharing|rights|guidelines|agency_clients" }
 ]
 
-type must be one of: suggestions, ai_tags, ai_categories, metadata, activity, sharing, rights. We map types to routes server-side.
+type must be one of: suggestions, ai_tags, ai_categories, metadata, activity, sharing, rights, guidelines, agency_clients. We map types to routes server-side.
 PROMPT;
     }
 
@@ -291,6 +346,10 @@ PROMPT;
             if (preg_match('/you\s+have\s+suggestions?\s+to\s+review/i', $text)) {
                 continue;
             }
+            // Drop fear-based / absence framing the product no longer wants in overview insights
+            if (preg_match('/\b(absence|disengagement|lack of recent|no recent uploads?|hinder(s)? content growth)\b/i', $text)) {
+                continue;
+            }
             $filtered[] = $insight;
         }
 
@@ -314,12 +373,20 @@ PROMPT;
     protected function applyConfidenceFiltering(array $insights, array $metrics): array
     {
         $boosts = [];
+        $early = (bool) ($metrics['early_stage_library'] ?? false);
         if (($metrics['ai_suggestions_pending'] ?? 0) > 0) {
             $boosts['suggestions'] = 10;
             $boosts['ai_tags'] = 10;
             $boosts['ai_categories'] = 10;
         }
-        if (($metrics['total_assets'] ?? 0) > 0 && ($metrics['uploads_last_7_days'] ?? 0) === 0) {
+        // Prefer encouraging "guidelines / first assets" over generic activity nudges on small or quiet libraries
+        if ($early) {
+            $boosts['guidelines'] = 11;
+        }
+        if (($metrics['is_agency'] ?? false)) {
+            $boosts['agency_clients'] = 10;
+        }
+        if (($metrics['total_assets'] ?? 0) > 0 && ($metrics['uploads_last_7_days'] ?? 0) === 0 && ! $early) {
             $boosts['activity'] = 8;
         }
         if (($metrics['metadata_completeness'] ?? 1) < 0.5) {
@@ -351,16 +418,31 @@ PROMPT;
      */
     protected function fallbackToRuleBased(Brand $brand, array $metrics): array
     {
-        $strings = $this->brandInsightAI->generateInsights($metrics);
+        $items = $this->brandInsightAI->generateInsights($metrics, $brand);
         $result = [];
-        foreach ($strings as $text) {
-            $result[] = [
-                'text' => $text,
-                'priority' => 'medium',
+        foreach ($items as $item) {
+            if (is_string($item)) {
+                $result[] = [
+                    'text' => $item,
+                    'priority' => 'medium',
+                ];
+
+                continue;
+            }
+            if (! is_array($item) || empty($item['text'])) {
+                continue;
+            }
+            $row = [
+                'text' => (string) $item['text'],
+                'priority' => $item['priority'] ?? 'medium',
             ];
+            if (! empty($item['type']) && in_array($item['type'], self::VALID_TYPES, true)) {
+                $row['type'] = $item['type'];
+            }
+            $result[] = $row;
         }
 
-        return $result;
+        return $this->enrichInsightHrefs($result, $brand);
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
+use App\Models\BrandReferenceAsset;
 use App\Models\BrandVisualReference;
 use App\Models\Category;
 use App\Models\StorageBucket;
@@ -82,6 +83,15 @@ class AssetEmbeddingTest extends TestCase
             'region' => 'us-east-1',
         ]);
 
+        BrandVisualReference::withoutEvents(function () {
+            BrandVisualReference::create([
+                'brand_id' => $this->brand->id,
+                'asset_id' => null,
+                'type' => BrandVisualReference::TYPE_LOGO,
+                'embedding_vector' => null,
+            ]);
+        });
+
         $meta = $this->createMock(AiMetadataGenerationService::class);
         $meta->method('fetchThumbnailForVisionAnalysis')->willReturn(null);
         $this->app->instance(AiMetadataGenerationService::class, $meta);
@@ -131,6 +141,25 @@ class AssetEmbeddingTest extends TestCase
     }
 
     /**
+     * @param  list<float>  $vec
+     */
+    protected function seedStyleReferences(Brand $brand, Asset $asset, array $vec, int $count = 3): void
+    {
+        BrandVisualReference::withoutEvents(function () use ($brand, $asset, $vec, $count) {
+            for ($i = 0; $i < $count; $i++) {
+                BrandVisualReference::create([
+                    'brand_id' => $brand->id,
+                    'asset_id' => $asset->id,
+                    'embedding_vector' => $vec,
+                    'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+                    'reference_type' => BrandVisualReference::REFERENCE_TYPE_STYLE,
+                    'reference_tier' => BrandVisualReference::TIER_GUIDELINE,
+                ]);
+            }
+        });
+    }
+
+    /**
      * Asset embedding is generated when job runs (mocked to avoid API calls).
      */
     public function test_asset_embedding_is_generated(): void
@@ -171,12 +200,7 @@ class AssetEmbeddingTest extends TestCase
             'model' => 'test',
         ]);
 
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $vec,
-            'type' => BrandVisualReference::TYPE_LOGO,
-        ]);
+        $this->seedStyleReferences($this->brand, $asset, $vec, 3);
 
         $engine = app(BrandIntelligenceEngine::class);
         $result = $engine->scoreAsset($asset->fresh());
@@ -184,7 +208,8 @@ class AssetEmbeddingTest extends TestCase
         $this->assertNotNull($result);
         $ref = $result['breakdown_json']['reference_similarity'] ?? [];
         $this->assertTrue($ref['used'] ?? false);
-        $this->assertSame(100, $ref['score'] ?? 0);
+        $this->assertFalse($ref['fallback_used'] ?? true);
+        $this->assertSame(100, $ref['score_percent'] ?? 0);
     }
 
     /**
@@ -203,12 +228,7 @@ class AssetEmbeddingTest extends TestCase
             'model' => 'test',
         ]);
 
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $vec,
-            'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
-        ]);
+        $this->seedStyleReferences($this->brand, $asset, $vec, 3);
 
         $engine = app(BrandIntelligenceEngine::class);
         $result = $engine->scoreAsset($asset->fresh());
@@ -216,8 +236,8 @@ class AssetEmbeddingTest extends TestCase
         $this->assertNotNull($result);
         $ref = $result['breakdown_json']['reference_similarity'] ?? [];
         $this->assertTrue($ref['used'] ?? false);
-        $this->assertGreaterThanOrEqual(0, $ref['score'] ?? -1);
-        $this->assertLessThanOrEqual(100, $ref['score'] ?? 101);
+        $this->assertGreaterThanOrEqual(0, $ref['score_percent'] ?? -1);
+        $this->assertLessThanOrEqual(100, $ref['score_percent'] ?? 101);
     }
 
     /**
@@ -231,24 +251,13 @@ class AssetEmbeddingTest extends TestCase
         $vec = array_fill(0, 64, 1.0 / 8);
         $centroid = $vec;
 
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $vec,
-            'type' => BrandVisualReference::TYPE_LOGO,
-        ]);
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $vec,
-            'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
-        ]);
-
         AssetEmbedding::create([
             'asset_id' => $asset->id,
             'embedding_vector' => $centroid,
             'model' => 'test',
         ]);
+
+        $this->seedStyleReferences($this->brand, $asset, $vec, 3);
 
         $engine = app(BrandIntelligenceEngine::class);
         $result = $engine->scoreAsset($asset->fresh());
@@ -256,55 +265,185 @@ class AssetEmbeddingTest extends TestCase
         $this->assertNotNull($result);
         $ref = $result['breakdown_json']['reference_similarity'] ?? [];
         $this->assertTrue($ref['used'] ?? false);
-        $this->assertSame(100, $ref['score'] ?? 0);
+        $this->assertSame(100, $ref['score_percent'] ?? 0);
     }
 
     /**
-     * Centroid similarity: score differs when centroid (average of refs) differs from single reference.
+     * Matching reference pool yields higher similarity than an orthogonal pool (requires ≥3 style refs).
      */
-    public function test_centroid_similarity_differs_from_single_reference(): void
+    public function test_embedding_similarity_higher_when_refs_match_asset_than_mismatched(): void
     {
         $asset = $this->createImageAsset();
-
-        // Ref1: [1,0,0,...], Ref2: [0,1,0,...] -> centroid = [0.5, 0.5, 0, ...]
         $dim = 64;
-        $ref1 = array_fill(0, $dim, 0);
-        $ref1[0] = 1;
-        $ref2 = array_fill(0, $dim, 0);
-        $ref2[1] = 1;
 
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $ref1,
-            'type' => BrandVisualReference::TYPE_LOGO,
-        ]);
-        BrandVisualReference::create([
-            'brand_id' => $this->brand->id,
-            'asset_id' => $asset->id,
-            'embedding_vector' => $ref2,
-            'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
-        ]);
+        $assetVec = array_fill(0, $dim, 0.0);
+        $assetVec[0] = 1.0;
+        $an = sqrt(array_sum(array_map(fn ($x) => $x * $x, $assetVec)));
+        $assetVec = array_map(fn ($x) => $x / $an, $assetVec);
 
-        // Asset matches ref1 only (not centroid)
         AssetEmbedding::create([
             'asset_id' => $asset->id,
-            'embedding_vector' => $ref1,
+            'embedding_vector' => $assetVec,
             'model' => 'test',
         ]);
 
+        $this->seedStyleReferences($this->brand, $asset, $assetVec, 3);
+
         $engine = app(BrandIntelligenceEngine::class);
-        $resultTwoRefs = $engine->scoreAsset($asset->fresh());
+        $high = $engine->scoreAsset($asset->fresh());
 
-        BrandVisualReference::where('brand_id', $this->brand->id)
-            ->where('type', BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE)
-            ->delete();
-        $resultOneRef = $engine->scoreAsset($asset->fresh());
+        BrandVisualReference::where('brand_id', $this->brand->id)->delete();
 
-        $this->assertNotNull($resultTwoRefs);
-        $this->assertNotNull($resultOneRef);
-        $scoreTwoRefs = $resultTwoRefs['breakdown_json']['reference_similarity']['score'] ?? -1;
-        $scoreOneRef = $resultOneRef['breakdown_json']['reference_similarity']['score'] ?? -1;
-        $this->assertNotEquals($scoreOneRef, $scoreTwoRefs, 'Reference pool size should change similarity');
+        $bad = array_fill(0, $dim, 0.0);
+        $bad[$dim - 1] = 1.0;
+        $bn = sqrt(array_sum(array_map(fn ($x) => $x * $x, $bad)));
+        $bad = array_map(fn ($x) => $x / $bn, $bad);
+
+        $this->seedStyleReferences($this->brand, $asset, $bad, 3);
+
+        $low = $engine->scoreAsset($asset->fresh());
+
+        $this->assertNotNull($high);
+        $this->assertNotNull($low);
+        $highPct = $high['breakdown_json']['reference_similarity']['score_percent'] ?? 0;
+        $lowPct = $low['breakdown_json']['reference_similarity']['score_percent'] ?? 0;
+        $this->assertGreaterThan($lowPct, $highPct);
+    }
+
+    public function test_fallback_used_when_style_reference_count_below_three(): void
+    {
+        $asset = $this->createImageAsset();
+        $vec = array_fill(0, 64, 1.0 / 8);
+
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $vec,
+            'model' => 'test',
+        ]);
+
+        $this->seedStyleReferences($this->brand, $asset, $vec, 2);
+
+        $engine = app(BrandIntelligenceEngine::class);
+        $result = $engine->scoreAsset($asset->fresh());
+
+        $this->assertNotNull($result);
+        $ref = $result['breakdown_json']['reference_similarity'] ?? [];
+        $this->assertFalse($ref['used'] ?? true);
+        $this->assertTrue($ref['fallback_used'] ?? false);
+    }
+
+    public function test_scoring_uses_promoted_brand_reference_assets(): void
+    {
+        $dim = 64;
+        $parallel = array_fill(0, $dim, 0.0);
+        $parallel[0] = 1.0;
+        $pn = sqrt(array_sum(array_map(fn ($x) => $x * $x, $parallel)));
+        $parallel = array_map(fn ($x) => $x / $pn, $parallel);
+
+        $ortho = array_fill(0, $dim, 0.0);
+        $ortho[1] = 1.0;
+        $on = sqrt(array_sum(array_map(fn ($x) => $x * $x, $ortho)));
+        $ortho = array_map(fn ($x) => $x / $on, $ortho);
+
+        $scored = $this->createImageAsset();
+        AssetEmbedding::create([
+            'asset_id' => $scored->id,
+            'embedding_vector' => $parallel,
+            'model' => 'test',
+        ]);
+
+        $vectors = [$ortho, $parallel, $parallel];
+        foreach ($vectors as $vec) {
+            $a = $this->createImageAsset();
+            AssetEmbedding::create([
+                'asset_id' => $a->id,
+                'embedding_vector' => $vec,
+                'model' => 'test',
+            ]);
+            BrandReferenceAsset::create([
+                'brand_id' => $this->brand->id,
+                'asset_id' => $a->id,
+                'reference_type' => BrandReferenceAsset::REFERENCE_TYPE_STYLE,
+                'tier' => BrandReferenceAsset::TIER_REFERENCE,
+                'weight' => 0.6,
+                'created_by' => $this->user->id,
+            ]);
+        }
+
+        $engine = app(BrandIntelligenceEngine::class);
+        $result = $engine->scoreAsset($scored->fresh());
+
+        $ref = $result['breakdown_json']['reference_similarity'] ?? [];
+        $this->assertTrue($ref['used'] ?? false);
+        $this->assertFalse($ref['fallback_used'] ?? true);
+    }
+
+    public function test_tier_weighting_affects_reference_similarity_score(): void
+    {
+        $dim = 64;
+        $parallel = array_fill(0, $dim, 0.0);
+        $parallel[0] = 1.0;
+        $pn = sqrt(array_sum(array_map(fn ($x) => $x * $x, $parallel)));
+        $parallel = array_map(fn ($x) => $x / $pn, $parallel);
+
+        // Weak match: cosine ~0.25 with $parallel (above NOISE_SIMILARITY_FLOOR 0.2, below strong matches)
+        $weak = array_fill(0, $dim, 0.0);
+        $weak[0] = 0.25;
+        $weak[1] = sqrt(1.0 - 0.25 * 0.25);
+        $wn = sqrt(array_sum(array_map(fn ($x) => $x * $x, $weak)));
+        $weak = array_map(fn ($x) => $x / $wn, $weak);
+
+        $run = function (bool $badRefAsGuideline) use ($parallel, $weak) {
+            BrandReferenceAsset::where('brand_id', $this->brand->id)->delete();
+
+            $scored = $this->createImageAsset();
+            AssetEmbedding::create([
+                'asset_id' => $scored->id,
+                'embedding_vector' => $parallel,
+                'model' => 'test',
+            ]);
+
+            $vectors = [$weak, $parallel, $parallel];
+            foreach ($vectors as $idx => $vec) {
+                $a = $this->createImageAsset();
+                AssetEmbedding::create([
+                    'asset_id' => $a->id,
+                    'embedding_vector' => $vec,
+                    'model' => 'test',
+                ]);
+                $isBad = $idx === 0;
+                if ($isBad && $badRefAsGuideline) {
+                    BrandReferenceAsset::create([
+                        'brand_id' => $this->brand->id,
+                        'asset_id' => $a->id,
+                        'reference_type' => BrandReferenceAsset::REFERENCE_TYPE_STYLE,
+                        'tier' => BrandReferenceAsset::TIER_GUIDELINE,
+                        'weight' => 1.0,
+                        'created_by' => $this->user->id,
+                    ]);
+                } else {
+                    BrandReferenceAsset::create([
+                        'brand_id' => $this->brand->id,
+                        'asset_id' => $a->id,
+                        'reference_type' => BrandReferenceAsset::REFERENCE_TYPE_STYLE,
+                        'tier' => BrandReferenceAsset::TIER_REFERENCE,
+                        'weight' => 0.6,
+                        'created_by' => $this->user->id,
+                    ]);
+                }
+            }
+
+            $engine = app(BrandIntelligenceEngine::class);
+
+            return $engine->scoreAsset($scored->fresh());
+        };
+
+        $whenBadIsGuideline = $run(true);
+        $whenBadIsReference = $run(false);
+
+        $pctGuideline = $whenBadIsGuideline['breakdown_json']['reference_similarity']['score_percent'] ?? 0;
+        $pctReference = $whenBadIsReference['breakdown_json']['reference_similarity']['score_percent'] ?? 0;
+
+        $this->assertGreaterThan($pctGuideline, $pctReference);
     }
 }

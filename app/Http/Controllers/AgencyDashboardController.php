@@ -8,6 +8,7 @@ use App\Models\AgencyPartnerReward;
 use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
+use App\Services\Agency\BrandReadinessService;
 use App\Support\DashboardLinks;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -91,14 +92,17 @@ class AgencyDashboardController extends Controller
                 ];
             });
 
-        // Get incubated clients (tenants incubated by this agency)
-        $incubatedClients = Tenant::where('incubated_by_agency_id', $tenant->id)
-            ->whereNull('incubated_at') // Not yet transferred/activated
-            ->orWhere(function ($query) use ($tenant) {
-                $query->where('incubated_by_agency_id', $tenant->id)
-                    ->whereNotNull('incubated_at')
-                    ->whereDoesntHave('ownershipTransfers', function ($q) {
-                        $q->where('status', OwnershipTransferStatus::COMPLETED);
+        // Incubated = still linked to this agency and no completed ownership transfer yet.
+        // (incubated_at null = legacy rows; set = explicit window start — expiry is advisory only, not enforced.)
+        $incubatedClients = Tenant::query()
+            ->where('incubated_by_agency_id', $tenant->id)
+            ->where(function ($query) {
+                $query->whereNull('incubated_at')
+                    ->orWhere(function ($q) {
+                        $q->whereNotNull('incubated_at')
+                            ->whereDoesntHave('ownershipTransfers', function ($q2) {
+                                $q2->where('status', OwnershipTransferStatus::COMPLETED);
+                            });
                     });
             })
             ->get(['id', 'name', 'slug', 'incubated_at', 'incubation_expires_at'])
@@ -183,6 +187,80 @@ class AgencyDashboardController extends Controller
         $companyController = app(CompanyController::class);
         $managedClients = $companyController->managedAgencyClientsForUser($user, $tenant);
 
+        $brandIds = collect($managedClients)
+            ->pluck('brands')
+            ->flatten(1)
+            ->pluck('id')
+            ->unique()
+            ->filter()
+            ->values()
+            ->all();
+
+        $readinessById = app(BrandReadinessService::class)->forBrandIds($brandIds);
+
+        $readinessSummary = [
+            'brand_count' => count($brandIds),
+            'brands_missing_references' => 0,
+            'brands_missing_typography' => 0,
+            'brands_missing_assets' => 0,
+        ];
+        foreach ($readinessById as $data) {
+            $c = $data['criteria'] ?? [];
+            if (! ($c['has_sufficient_references'] ?? false)) {
+                $readinessSummary['brands_missing_references']++;
+            }
+            if (! ($c['has_typography'] ?? false)) {
+                $readinessSummary['brands_missing_typography']++;
+            }
+            if (! ($c['has_sufficient_assets'] ?? false)) {
+                $readinessSummary['brands_missing_assets']++;
+            }
+        }
+
+        foreach ($managedClients as $i => $client) {
+            foreach ($client['brands'] as $j => $b) {
+                $bid = $b['id'];
+                $r = $readinessById[$bid] ?? [
+                    'readiness_score' => 0,
+                    'readiness_tasks' => [],
+                    'readiness_tooltip' => 'Readiness data unavailable.',
+                    'reference_alert' => null,
+                    'criteria' => [
+                        'has_identity_basics' => false,
+                        'has_typography' => false,
+                        'has_sufficient_assets' => false,
+                        'has_sufficient_references' => false,
+                        'has_photography_guidelines' => false,
+                    ],
+                    'counts' => ['assets' => 0, 'tier23_references' => 0],
+                ];
+                $managedClients[$i]['brands'][$j]['readiness'] = $r;
+                $managedClients[$i]['brands'][$j]['actions'] = [
+                    'guidelines_builder_path' => '/app/brands/'.$bid.'/brand-guidelines/builder',
+                    'assets_path' => '/app/assets',
+                    'reference_materials_path' => '/app/assets?source=reference_materials',
+                ];
+            }
+        }
+
+        $readinessBrands = [];
+        foreach ($managedClients as $client) {
+            foreach ($client['brands'] as $b) {
+                $readinessBrands[] = [
+                    'tenant_id' => $client['id'],
+                    'tenant_name' => $client['name'],
+                    'tenant_slug' => $client['slug'],
+                    'brand' => $b,
+                ];
+            }
+        }
+        usort($readinessBrands, function ($a, $b) {
+            $sa = $a['brand']['readiness']['readiness_score'] ?? 0;
+            $sb = $b['brand']['readiness']['readiness_score'] ?? 0;
+
+            return $sa <=> $sb;
+        });
+
         $tenant->loadMissing('defaultBrand');
         $defaultBrand = $tenant->defaultBrand;
         $brandForLinks = app()->bound('brand') ? app('brand') : null;
@@ -239,6 +317,8 @@ class AgencyDashboardController extends Controller
                 'pending' => $pendingReferrals,
             ],
             'managed_clients' => $managedClients,
+            'brands_readiness' => $readinessBrands,
+            'readiness_summary' => $readinessSummary,
             'managed_agency' => $managedAgency,
             'dashboard_links' => $dashboardLinks,
         ]);

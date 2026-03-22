@@ -22,6 +22,7 @@ use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
@@ -111,6 +112,14 @@ class AppServiceProvider extends ServiceProvider
 
         // Unified Operations: Capture queue failures for asset-processing jobs
         Event::listen(JobFailed::class, QueueFailureListener::class);
+
+        // Tenant mail branding: reset between queued jobs so long-lived workers do not leak From config.
+        Queue::before(static function (): void {
+            \App\Support\TenantMailBranding::reset();
+        });
+        Queue::after(static function (): void {
+            \App\Support\TenantMailBranding::reset();
+        });
 
         // Brand insight cache: bust on download/share creation
         \App\Models\Download::created(function ($download) {

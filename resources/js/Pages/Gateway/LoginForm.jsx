@@ -1,14 +1,20 @@
 import { useForm, usePage } from '@inertiajs/react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { firstError } from '../../utils/inertiaErrors'
 
 export default function LoginForm({ context, onToggleRegister }) {
-    const { theme } = usePage().props
+    const { theme, errors: sharedErrors = {} } = usePage().props
 
-    const { data, setData, post, processing, errors } = useForm({
+    const { data, setData, post, processing, errors: formErrors } = useForm({
         email: '',
         password: '',
         remember: false,
     })
+
+    const errors = useMemo(
+        () => ({ ...sharedErrors, ...formErrors }),
+        [sharedErrors, formErrors],
+    )
 
     const [focusedField, setFocusedField] = useState(null)
 
@@ -22,9 +28,12 @@ export default function LoginForm({ context, onToggleRegister }) {
     const inputBorder = (field) =>
         focusedField === field
             ? `${primary}88`
-            : errors[field]
+            : firstError(errors[field])
                 ? '#ef444488'
                 : 'rgba(255,255,255,0.08)'
+
+    const emailError = firstError(errors.email)
+    const passwordError = firstError(errors.password)
 
     return (
         <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>
@@ -67,9 +76,13 @@ export default function LoginForm({ context, onToggleRegister }) {
                         className="w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500"
                         style={{ borderColor: inputBorder('email') }}
                         aria-label="Email"
+                        aria-invalid={emailError ? 'true' : 'false'}
+                        aria-describedby={emailError ? 'login-email-error' : undefined}
                     />
-                    {errors.email && (
-                        <p className="mt-1.5 text-xs text-red-400/90">{errors.email}</p>
+                    {emailError && (
+                        <p id="login-email-error" role="alert" className="mt-1.5 text-xs text-red-400/90">
+                            {emailError}
+                        </p>
                     )}
                 </div>
 
@@ -85,9 +98,13 @@ export default function LoginForm({ context, onToggleRegister }) {
                         className="w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500"
                         style={{ borderColor: inputBorder('password') }}
                         aria-label="Password"
+                        aria-invalid={passwordError ? 'true' : 'false'}
+                        aria-describedby={passwordError ? 'login-password-error' : undefined}
                     />
-                    {errors.password && (
-                        <p className="mt-1.5 text-xs text-red-400/90">{errors.password}</p>
+                    {passwordError && (
+                        <p id="login-password-error" className="mt-1.5 text-xs text-red-400/90">
+                            {passwordError}
+                        </p>
                     )}
                 </div>
 

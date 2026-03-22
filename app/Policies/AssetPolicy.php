@@ -70,6 +70,23 @@ class AssetPolicy
     }
 
     /**
+     * Promote asset to brand style reference pool (EBI).
+     */
+    public function promoteToReference(User $user, Asset $asset): bool
+    {
+        if (! $this->view($user, $asset)) {
+            return false;
+        }
+
+        $brand = $asset->getRelationValue('brand');
+        if ($brand && method_exists($user, 'hasPermissionForBrand')) {
+            return $user->hasPermissionForBrand($brand, 'brand_settings.manage');
+        }
+
+        return $user->can('manage brands');
+    }
+
+    /**
      * Determine if the user can retry thumbnail generation for the asset.
      *
      * Users can retry thumbnails if they:

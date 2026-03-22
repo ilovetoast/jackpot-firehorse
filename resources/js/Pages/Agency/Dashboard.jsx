@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { usePage, Link, router } from '@inertiajs/react'
 import {
     TrophyIcon,
@@ -8,16 +9,27 @@ import {
     ExclamationTriangleIcon,
     SparklesIcon,
     LinkIcon,
+    Squares2X2Icon,
+    ClipboardDocumentCheckIcon,
+    ArrowTrendingUpIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import ManagedCompaniesClientList from '../../Components/dashboard/ManagedCompaniesClientList'
+import AgencyReadinessTabGrid from '../../Components/agency/AgencyReadinessTabGrid'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 /**
  * Agency Dashboard — cinematic shell aligned with Overview; READ-ONLY partner metrics.
  */
+const DASH_TABS = [
+    { id: 'overview', label: 'Overview', icon: Squares2X2Icon },
+    { id: 'readiness', label: 'Readiness', icon: ClipboardDocumentCheckIcon },
+    { id: 'clients', label: 'Clients', icon: BuildingOfficeIcon },
+    { id: 'progress', label: 'Progress', icon: ArrowTrendingUpIcon },
+]
+
 export default function AgencyDashboard({
     auth,
     tenant,
@@ -26,9 +38,14 @@ export default function AgencyDashboard({
     clients = {},
     referrals = {},
     managed_clients = [],
+    brands_readiness = [],
+    readiness_summary = null,
     managed_agency = null,
     dashboard_links = {},
 }) {
+    const [dashTab, setDashTab] = useState('overview')
+    const [readinessToast, setReadinessToast] = useState(null)
+    const [readinessAnimateKey, setReadinessAnimateKey] = useState(0)
     const page = usePage()
     const { auth: authFromPage } = page.props
     const brandColor = authFromPage?.activeBrand?.primary_color || '#6366f1'
@@ -82,6 +99,57 @@ export default function AgencyDashboard({
 
     const hasExpiringSoon = incubated.some((client) => client.expiring_soon)
 
+    useEffect(() => {
+        if (!brands_readiness?.length) {
+            return
+        }
+        const map = {}
+        brands_readiness.forEach((row) => {
+            map[row.brand.id] = row.brand.readiness?.readiness_score ?? 0
+        })
+        const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('agency_readiness_snapshot') : null
+        if (raw) {
+            try {
+                const prev = JSON.parse(raw)
+                Object.keys(map).forEach((id) => {
+                    const idn = Number(id)
+                    const before = prev[id] ?? prev[idn]
+                    const after = map[idn]
+                    if (typeof before === 'number' && typeof after === 'number' && after > before) {
+                        setReadinessToast(`Readiness improved: ${before}/5 → ${after}/5`)
+                        setReadinessAnimateKey((k) => k + 1)
+                    }
+                })
+            } catch {
+                // ignore
+            }
+        }
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('agency_readiness_snapshot', JSON.stringify(map))
+        }
+    }, [brands_readiness])
+
+    useEffect(() => {
+        if (!readinessToast) {
+            return
+        }
+        const t = setTimeout(() => setReadinessToast(null), 4500)
+        return () => clearTimeout(t)
+    }, [readinessToast])
+
+    useEffect(() => {
+        if (dashTab !== 'readiness') {
+            return
+        }
+        const onVis = () => {
+            if (document.visibilityState === 'visible') {
+                router.reload({ only: ['brands_readiness', 'managed_clients', 'readiness_summary'] })
+            }
+        }
+        document.addEventListener('visibilitychange', onVis)
+        return () => document.removeEventListener('visibilitychange', onVis)
+    }, [dashTab])
+
     const glassPanel =
         'rounded-xl bg-gradient-to-br from-white/[0.07] to-white/[0.02] ring-1 ring-white/10 backdrop-blur-sm'
     const statLabel = 'text-[10px] font-medium uppercase tracking-wider text-white/40'
@@ -118,6 +186,14 @@ export default function AgencyDashboard({
                 <div className="pointer-events-none absolute inset-0 min-h-screen bg-gradient-to-b from-black/20 via-transparent to-black/55" />
 
                 <main className="relative z-10">
+                    {readinessToast && (
+                        <div
+                            className="fixed bottom-6 left-1/2 z-[100] max-w-md -translate-x-1/2 rounded-lg border border-emerald-500/30 bg-emerald-950/95 px-4 py-3 text-center text-sm text-emerald-100 shadow-lg ring-1 ring-emerald-500/20"
+                            role="status"
+                        >
+                            {readinessToast}
+                        </div>
+                    )}
                     <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pt-28 lg:px-12">
                         <header className="mb-8 w-full max-w-none">
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
@@ -142,66 +218,37 @@ export default function AgencyDashboard({
                             </div>
                         </header>
 
-                        {/* Linked client companies (tenant_agencies) — same data as former Managed companies page */}
-                        <section className="mb-10">
-                            <div className="mb-3 flex items-center gap-2">
-                                <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
-                                    Managed companies
-                                </span>
-                            </div>
-                            <div className={`${glassPanel} p-6 sm:p-8`}>
-                                <p className="text-sm text-white/60">
-                                    Client workspaces linked to{' '}
-                                    <span className="font-medium text-white/55">{managed_agency?.name ?? 'your agency'}</span>.
-                                    Each brand row opens that workspace in one click.
-                                </p>
-                                {managed_agency?.name && (
-                                    <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-4">
-                                        <p className="text-[10px] font-medium uppercase tracking-wide text-white/40">
-                                            Your agency workspace
-                                        </p>
-                                        <p className="mt-1 text-sm text-white/50">
-                                            Open your agency home at the default brand overview ({managed_agency.default_brand?.name ?? 'home'}).
-                                        </p>
+                        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+                            <nav
+                                className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-48 lg:flex-col"
+                                aria-label="Agency dashboard sections"
+                            >
+                                {DASH_TABS.map((t) => {
+                                    const Icon = t.icon
+                                    const active = dashTab === t.id
+                                    return (
                                         <button
+                                            key={t.id}
                                             type="button"
-                                            onClick={openAgencyDefaultOverview}
-                                            className="mt-3 inline-flex items-center text-sm font-semibold text-white/90 underline decoration-white/30 underline-offset-2 hover:decoration-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded"
+                                            onClick={() => setDashTab(t.id)}
+                                            className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
+                                                active
+                                                    ? 'bg-white/10 text-white ring-1 ring-white/15'
+                                                    : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
+                                            }`}
                                         >
-                                            {managed_agency.default_brand?.name
-                                                ? `Open ${managed_agency.default_brand.name} overview`
-                                                : 'Open agency overview'}
+                                            <Icon className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+                                            {t.label}
                                         </button>
-                                    </div>
-                                )}
-                                {managed_clients.length > 0 ? (
-                                    <div className="mt-6">
-                                        <ManagedCompaniesClientList
-                                            clients={managed_clients}
-                                            theme="dark"
-                                            brandColor={brandColor}
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
-                                        <p className="text-sm text-white/55">No linked client companies yet.</p>
-                                        <p className="mt-2 text-xs text-white/35">
-                                            Link clients from{' '}
-                                            <Link
-                                                href="/app/companies/settings#agencies"
-                                                className="font-medium text-white/70 underline decoration-white/25 underline-offset-2 hover:text-white"
-                                            >
-                                                Company settings → Agencies
-                                            </Link>
-                                            .
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-                        </section>
+                                    )
+                                })}
+                            </nav>
 
+                            <div className="min-w-0 flex-1 space-y-8">
+                        {dashTab === 'overview' && (
+                            <>
                         {/* Tier card */}
-                        <div className={`${glassPanel} p-6 sm:p-8 mb-8`}>
+                        <div className={`${glassPanel} p-6 sm:p-8 mb-0`}>
                             <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="flex items-start gap-4">
                                     <div
@@ -320,7 +367,93 @@ export default function AgencyDashboard({
                                 </div>
                             ))}
                         </div>
+                            </>
+                        )}
 
+                        {dashTab === 'readiness' && (
+                            <section>
+                                <div className="mb-3 flex items-center gap-2">
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                                        Brand readiness
+                                    </span>
+                                </div>
+                                <div className={`${glassPanel} p-6 sm:p-8`}>
+                                    <p className="mb-4 text-sm text-white/60">
+                                        Task-first: open a client workspace from the checklist or quick links. Lowest scores are listed first.
+                                    </p>
+                                    <AgencyReadinessTabGrid
+                                        brandsReadiness={brands_readiness}
+                                        brandColor={brandColor}
+                                        readinessSummary={readiness_summary}
+                                        readinessAnimateKey={readinessAnimateKey}
+                                    />
+                                </div>
+                            </section>
+                        )}
+
+                        {dashTab === 'clients' && (
+                            <section className="mb-2">
+                                <div className="mb-3 flex items-center gap-2">
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                                        Managed companies
+                                    </span>
+                                </div>
+                                <div className={`${glassPanel} p-6 sm:p-8`}>
+                                    <p className="text-sm text-white/60">
+                                        Client workspaces linked to{' '}
+                                        <span className="font-medium text-white/55">{managed_agency?.name ?? 'your agency'}</span>.
+                                        Expand a brand for readiness checklist; the row opens that workspace.
+                                    </p>
+                                    {managed_agency?.name && (
+                                        <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-4">
+                                            <p className="text-[10px] font-medium uppercase tracking-wide text-white/40">
+                                                Your agency workspace
+                                            </p>
+                                            <p className="mt-1 text-sm text-white/50">
+                                                Open your agency home at the default brand overview (
+                                                {managed_agency.default_brand?.name ?? 'home'}).
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={openAgencyDefaultOverview}
+                                                className="mt-3 inline-flex items-center rounded text-sm font-semibold text-white/90 underline decoration-white/30 underline-offset-2 hover:decoration-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                                            >
+                                                {managed_agency.default_brand?.name
+                                                    ? `Open ${managed_agency.default_brand.name} overview`
+                                                    : 'Open agency overview'}
+                                            </button>
+                                        </div>
+                                    )}
+                                    {managed_clients.length > 0 ? (
+                                        <div className="mt-6">
+                                            <ManagedCompaniesClientList
+                                                clients={managed_clients}
+                                                theme="dark"
+                                                brandColor={brandColor}
+                                                showReadiness
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
+                                            <p className="text-sm text-white/55">No linked client companies yet.</p>
+                                            <p className="mt-2 text-xs text-white/35">
+                                                Link clients from{' '}
+                                                <Link
+                                                    href="/app/companies/settings#agencies"
+                                                    className="font-medium text-white/70 underline decoration-white/25 underline-offset-2 hover:text-white"
+                                                >
+                                                    Company settings → Agencies
+                                                </Link>
+                                                .
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        )}
+
+                        {dashTab === 'progress' && (
+                            <>
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                             {/* Rewards */}
                             <div className={`${glassPanel} overflow-hidden`}>
@@ -561,6 +694,11 @@ export default function AgencyDashboard({
                                 </div>
                             </div>
                         )}
+                            </>
+                        )}
+
+                        </div>
+                        </div>
 
                         <footer className="mt-12 border-t border-white/10 pt-8 text-center text-xs text-white/30">
                             <span>Jackpot</span> © {new Date().getFullYear()} —{' '}

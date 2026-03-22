@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Services\BrandGateway\BrandContextResolver;
+use App\Services\BrandGateway\BrandThemeBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -11,12 +13,23 @@ use Inertia\Response;
 
 class ForgotPasswordController extends Controller
 {
+    public function __construct(
+        protected BrandContextResolver $contextResolver,
+        protected BrandThemeBuilder $themeBuilder
+    ) {}
+
     /**
      * Show the forgot password page.
      */
-    public function show(): Response
+    public function show(Request $request): Response
     {
-        return Inertia::render('Auth/ForgotPassword');
+        $context = $this->contextResolver->resolve($request);
+        $theme = $this->themeBuilder->buildFromGatewayContext($context);
+
+        return Inertia::render('Auth/ForgotPassword', [
+            'context' => $context,
+            'theme' => $theme,
+        ]);
     }
 
     /**

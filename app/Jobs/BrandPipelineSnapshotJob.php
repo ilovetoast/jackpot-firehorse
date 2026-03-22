@@ -55,6 +55,10 @@ class BrandPipelineSnapshotJob implements ShouldQueue
             'draft_id' => $run->brand_model_version_id,
             'pages_total' => $run->pages_total,
         ]);
+
+        if ($run->brand_id && $run->brand_model_version_id) {
+            GenerateBrandLogoVariantsJob::dispatch($run->brand_id, $run->brand_model_version_id);
+        }
     }
 
     public function failed(?\Throwable $exception): void

@@ -114,8 +114,22 @@ class TenantMetadataRegistryController extends Controller
             ->active()
             ->ordered()
             ->orderBy('name')
-            ->get()
-            ->filter(fn ($category) => $category->isActive())
+            ->get();
+
+        // Batch template existence (avoids N+1 exists() on system_categories per category — see Category::isActive / systemTemplateExists)
+        $systemTemplateExistsByCategoryId = Category::templateExistsLookupForCategories($categories);
+
+        $categories = $categories
+            ->filter(function (Category $category) use ($systemTemplateExistsByCategoryId) {
+                if (! $category->id || $category->deleted_at) {
+                    return false;
+                }
+                if ($category->is_system) {
+                    return $systemTemplateExistsByCategoryId[$category->id] ?? false;
+                }
+
+                return true;
+            })
             ->map(function ($category) {
                 $accessRules = [];
                 if ($category->is_private && ! $category->is_system) {

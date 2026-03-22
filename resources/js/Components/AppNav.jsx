@@ -849,20 +849,6 @@ export default function AppNav({ brand, tenant, variant }) {
                                         {/* Company + Brand Portals — Switch Company dropdown, then Company Portal + Brand Portal */}
                                         {(hasAnyCompanyAccess || (activeBrand && hasAnyBrandAccess && !collectionOnly)) && (
                                         <div className="px-4 py-2 border-b border-gray-200">
-                                            {showAgencyQuickLink && (
-                                                <div className="mb-2 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
-                                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                        Agency
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={goAgencyDashboardFromMenu}
-                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                                                    >
-                                                        Agency dashboard
-                                                    </button>
-                                                </div>
-                                            )}
                                             {/* Switch Company — collapsible dropdown, scrollable for many companies */}
                                             {hasMultipleCompanies && (
                                                 <div className="mb-2">
@@ -933,6 +919,18 @@ export default function AppNav({ brand, tenant, variant }) {
                                                     Company Portal
                                                 </Link>
                                             </PermissionGate>
+                                            {showAgencyQuickLink && (
+                                                <button
+                                                    type="button"
+                                                    onClick={goAgencyDashboardFromMenu}
+                                                    className="flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    <svg className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .414-.336.75-.75.75h-4.5a.75.75 0 01-.75-.75v-4.25m0-4.15v4.15m0-4.15a2.25 2.25 0 00-2.25-2.25h-13.5a2.25 2.25 0 00-2.25 2.25v4.15m0 0v4.25c0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75v-4.25m0-4.15V9.75m0 0a2.25 2.25 0 012.25-2.25h13.5a2.25 2.25 0 012.25 2.25V9.75m0 0V14.25" />
+                                                    </svg>
+                                                    Agency Portal
+                                                </button>
+                                            )}
                                             {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                                 <PermissionGate permission="brand_settings.manage">
                                                     <Link

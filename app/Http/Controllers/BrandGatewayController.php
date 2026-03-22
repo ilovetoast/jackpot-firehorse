@@ -459,15 +459,7 @@ class BrandGatewayController extends Controller
      */
     protected function buildThemeFromContext(array $context): array
     {
-        $tenant = isset($context['tenant']['id'])
-            ? Tenant::with('defaultBrand')->find($context['tenant']['id'])
-            : null;
-
-        $brand = isset($context['brand']['id'])
-            ? Brand::find($context['brand']['id'])
-            : null;
-
-        return $this->themeBuilder->build($tenant, $brand);
+        return $this->themeBuilder->buildFromGatewayContext($context);
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\BrandModelVersion;
 use App\Models\BrandVisualReference;
 use App\Models\BrandModelVersionAsset;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Syncs visual references from brand_model_version_assets (version pivot)
@@ -34,12 +35,24 @@ class BrandVisualReferenceSyncService
 
             foreach ($pivotRows as $row) {
                 $type = $this->mapReferenceType($row->reference_type);
-                $ref = BrandVisualReference::create([
+                $create = [
                     'brand_id' => $brand->id,
                     'asset_id' => $row->asset_id,
                     'embedding_vector' => null,
                     'type' => $type,
-                ]);
+                ];
+                if (Schema::hasColumn('brand_visual_references', 'reference_type')) {
+                    $create['reference_type'] = $type === BrandVisualReference::TYPE_LOGO
+                        ? BrandVisualReference::REFERENCE_TYPE_IDENTITY
+                        : BrandVisualReference::REFERENCE_TYPE_STYLE;
+                }
+                if (Schema::hasColumn('brand_visual_references', 'reference_tier')) {
+                    $create['reference_tier'] = BrandVisualReference::TIER_GUIDELINE;
+                }
+                if (Schema::hasColumn('brand_visual_references', 'weight')) {
+                    $create['weight'] = BrandVisualReference::TIER_WEIGHT_DEFAULTS[BrandVisualReference::TIER_GUIDELINE];
+                }
+                $ref = BrandVisualReference::create($create);
                 GenerateAssetEmbeddingJob::dispatch($row->asset_id, $ref->id);
             }
         });

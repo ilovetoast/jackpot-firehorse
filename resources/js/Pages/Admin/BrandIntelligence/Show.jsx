@@ -25,11 +25,16 @@ function kv(label, value) {
     )
 }
 
-function levelToBrandLabel(level) {
+function alignmentStateLabel(alignmentState, level) {
+    const a = (alignmentState || '').toLowerCase()
+    if (a === 'on_brand') return 'On brand'
+    if (a === 'partial_alignment') return 'Partial alignment'
+    if (a === 'off_brand') return 'Off brand'
+    if (a === 'insufficient_evidence') return 'Insufficient evidence'
     const l = (level || '').toLowerCase()
-    if (l === 'low') return 'Off Brand'
-    if (l === 'medium') return 'Somewhat On Brand'
-    if (l === 'high') return 'On Brand'
+    if (l === 'low') return 'Off brand'
+    if (l === 'medium') return 'Somewhat on brand'
+    if (l === 'high') return 'On brand'
     return level || '—'
 }
 
@@ -82,6 +87,8 @@ export default function BrandIntelligenceShow({
     const refs = breakdown.reference_similarity ?? {}
     const signals = breakdown.signals ?? {}
     const recs = breakdown.recommendations ?? []
+    const ebiSignals = breakdown.signal_breakdown ?? {}
+    const tierUsage = breakdown.reference_tier_usage ?? {}
 
     const runSimulate = async () => {
         setSimError(null)
@@ -166,7 +173,12 @@ export default function BrandIntelligenceShow({
                     {score ? (
                         <div className="space-y-6 mb-6">
                             <Section title="A. Summary">
-                                {kv('Level', `${levelToBrandLabel(score.level)} (${score.level})`)}
+                                {kv(
+                                    'Alignment state',
+                                    `${alignmentStateLabel(breakdown.alignment_state, score.level)} (${breakdown.alignment_state ?? '—'})`
+                                )}
+                                {kv('Level (legacy)', `${alignmentStateLabel(breakdown.alignment_state, score.level)} (${score.level})`)}
+                                {kv('Signal count', breakdown.signal_count != null ? String(breakdown.signal_count) : '—')}
                                 {kv('Confidence', formatConf(score.confidence))}
                                 {kv('Stored engine version', score.engine_version ?? '—')}
                                 {score.engine_version && engineVersion && score.engine_version !== engineVersion && (
@@ -180,6 +192,10 @@ export default function BrandIntelligenceShow({
                             </Section>
 
                             <Section title="B. Signals">
+                                {kv('EBI gate: has_logo', String(ebiSignals.has_logo ?? '—'))}
+                                {kv('EBI gate: has_brand_colors', String(ebiSignals.has_brand_colors ?? '—'))}
+                                {kv('EBI gate: has_typography', String(ebiSignals.has_typography ?? '—'))}
+                                {kv('EBI gate: has_reference_similarity', String(ebiSignals.has_reference_similarity ?? '—'))}
                                 {kv('has_text', String(signals.has_text ?? '—'))}
                                 {kv('has_typography', String(signals.has_typography ?? '—'))}
                                 {kv('has_visual', String(signals.has_visual ?? '—'))}
@@ -215,6 +231,11 @@ export default function BrandIntelligenceShow({
                                 {kv('confidence', refs.confidence != null ? String(refs.confidence) : '—')}
                                 {kv('normalized', refs.normalized != null ? String(refs.normalized) : '—')}
                                 {kv('reference_count', refs.reference_count != null ? String(refs.reference_count) : '—')}
+                                {kv('style_only', String(refs.style_only ?? '—'))}
+                                {kv('weighted', String(refs.weighted ?? '—'))}
+                                {kv('tier usage (system)', tierUsage.system != null ? String(tierUsage.system) : '—')}
+                                {kv('tier usage (promoted)', tierUsage.promoted != null ? String(tierUsage.promoted) : '—')}
+                                {kv('tier usage (guideline)', tierUsage.guideline != null ? String(tierUsage.guideline) : '—')}
                             </Section>
 
                             <Section title="D. AI insight (stored)">
@@ -314,7 +335,8 @@ export default function BrandIntelligenceShow({
                                                 <div className="space-y-1 text-slate-800">
                                                     <div>
                                                         <span className="text-slate-500">Score label: </span>
-                                                        {levelToBrandLabel(simDelta.current?.level)} ({formatConf(simDelta.current?.confidence)})
+                                                        {alignmentStateLabel(simDelta.current?.alignment_state, simDelta.current?.level)} (
+                                                        {formatConf(simDelta.current?.confidence)})
                                                     </div>
                                                     <div className="text-xs text-slate-600 font-mono">
                                                         level={simDelta.current?.level} · conf={formatConf(simDelta.current?.confidence)}
@@ -326,7 +348,8 @@ export default function BrandIntelligenceShow({
                                                 <div className="space-y-1 text-slate-800">
                                                     <div>
                                                         <span className="text-slate-500">Score label: </span>
-                                                        {levelToBrandLabel(simDelta.simulated?.level)} ({formatConf(simDelta.simulated?.confidence)})
+                                                        {alignmentStateLabel(simDelta.simulated?.alignment_state, simDelta.simulated?.level)} (
+                                                        {formatConf(simDelta.simulated?.confidence)})
                                                     </div>
                                                     <div className="text-xs text-slate-600 font-mono">
                                                         level={simDelta.simulated?.level} · conf={formatConf(simDelta.simulated?.confidence)}

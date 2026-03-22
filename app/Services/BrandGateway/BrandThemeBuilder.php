@@ -45,6 +45,22 @@ class BrandThemeBuilder
         ];
     }
 
+    /**
+     * Build theme from the serialized gateway context array (tenant/brand ids).
+     */
+    public function buildFromGatewayContext(array $context): array
+    {
+        $tenant = isset($context['tenant']['id'])
+            ? Tenant::with('defaultBrand')->find($context['tenant']['id'])
+            : null;
+
+        $brand = isset($context['brand']['id'])
+            ? Brand::find($context['brand']['id'])
+            : null;
+
+        return $this->build($tenant, $brand);
+    }
+
     private function resolveMode(?Tenant $tenant, ?Brand $brand): string
     {
         if ($brand) {

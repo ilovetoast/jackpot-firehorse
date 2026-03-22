@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon } from '@heroicons/react/24/outline'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 
 /**
@@ -78,7 +78,7 @@ export default function DashboardLinksRow({ links = {}, variant = 'dark', classN
                 {dashLinks.company && (
                     <Link href={dashLinks.company} className={dashboardLinkClass}>
                         Company
-                        <ArrowTopRightOnSquareIcon
+                        <ChevronRightIcon
                             className="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-70"
                             aria-hidden
                         />
@@ -94,7 +94,7 @@ export default function DashboardLinksRow({ links = {}, variant = 'dark', classN
                         {dashLinks.agency_switch_tenant_id ? (
                             <button type="button" onClick={goAgency} className={`${dashboardLinkClass} bg-transparent border-0 p-0 cursor-pointer`}>
                                 Agency
-                                <ArrowTopRightOnSquareIcon
+                                <ChevronRightIcon
                                     className="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-70"
                                     aria-hidden
                                 />
@@ -102,7 +102,7 @@ export default function DashboardLinksRow({ links = {}, variant = 'dark', classN
                         ) : (
                             <Link href={dashLinks.agency} className={dashboardLinkClass}>
                                 Agency
-                                <ArrowTopRightOnSquareIcon
+                                <ChevronRightIcon
                                     className="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-70"
                                     aria-hidden
                                 />
@@ -118,7 +118,7 @@ export default function DashboardLinksRow({ links = {}, variant = 'dark', classN
                 {dashLinks.brand && (
                     <Link href={dashLinks.brand} className={dashboardLinkClass}>
                         Brand
-                        <ArrowTopRightOnSquareIcon
+                        <ChevronRightIcon
                             className="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-70"
                             aria-hidden
                         />

@@ -1,10 +1,11 @@
 import { useForm, usePage } from '@inertiajs/react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { firstError } from '../../utils/inertiaErrors'
 
 export default function RegisterForm({ context, onToggleLogin }) {
-    const { theme } = usePage().props
+    const { theme, errors: sharedErrors = {} } = usePage().props
 
-    const { data, setData, post, processing, errors } = useForm({
+    const { data, setData, post, processing, errors: formErrors } = useForm({
         first_name: '',
         last_name: '',
         email: '',
@@ -12,6 +13,11 @@ export default function RegisterForm({ context, onToggleLogin }) {
         password_confirmation: '',
         company_name: '',
     })
+
+    const errors = useMemo(
+        () => ({ ...sharedErrors, ...formErrors }),
+        [sharedErrors, formErrors],
+    )
 
     const [focusedField, setFocusedField] = useState(null)
 
@@ -25,7 +31,7 @@ export default function RegisterForm({ context, onToggleLogin }) {
     const inputBorder = (field) =>
         focusedField === field
             ? `${primary}88`
-            : errors[field]
+            : firstError(errors[field])
                 ? '#ef444488'
                 : 'rgba(255,255,255,0.08)'
 
@@ -70,8 +76,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
                             className={inputClass}
                             style={{ borderColor: inputBorder('first_name') }}
                         />
-                        {errors.first_name && (
-                            <p className="mt-1 text-xs text-red-400/90">{errors.first_name}</p>
+                        {firstError(errors.first_name) && (
+                            <p className="mt-1 text-xs text-red-400/90">{firstError(errors.first_name)}</p>
                         )}
                     </div>
                     <div>
@@ -86,8 +92,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
                             className={inputClass}
                             style={{ borderColor: inputBorder('last_name') }}
                         />
-                        {errors.last_name && (
-                            <p className="mt-1 text-xs text-red-400/90">{errors.last_name}</p>
+                        {firstError(errors.last_name) && (
+                            <p className="mt-1 text-xs text-red-400/90">{firstError(errors.last_name)}</p>
                         )}
                     </div>
                 </div>
@@ -104,8 +110,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         className={inputClass}
                         style={{ borderColor: inputBorder('email') }}
                     />
-                    {errors.email && (
-                        <p className="mt-1 text-xs text-red-400/90">{errors.email}</p>
+                    {firstError(errors.email) && (
+                        <p className="mt-1 text-xs text-red-400/90">{firstError(errors.email)}</p>
                     )}
                 </div>
 
@@ -120,8 +126,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         className={inputClass}
                         style={{ borderColor: inputBorder('company_name') }}
                     />
-                    {errors.company_name && (
-                        <p className="mt-1 text-xs text-red-400/90">{errors.company_name}</p>
+                    {firstError(errors.company_name) && (
+                        <p className="mt-1 text-xs text-red-400/90">{firstError(errors.company_name)}</p>
                     )}
                 </div>
 
@@ -137,8 +143,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         className={inputClass}
                         style={{ borderColor: inputBorder('password') }}
                     />
-                    {errors.password && (
-                        <p className="mt-1 text-xs text-red-400/90">{errors.password}</p>
+                    {firstError(errors.password) && (
+                        <p className="mt-1 text-xs text-red-400/90">{firstError(errors.password)}</p>
                     )}
                 </div>
 

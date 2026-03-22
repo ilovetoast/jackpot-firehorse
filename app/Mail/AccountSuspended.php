@@ -2,17 +2,19 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\NotificationTemplate;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
+use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class AccountSuspended extends Mailable
+class AccountSuspended extends BaseMailable
 {
+    use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
 
     public $tenant;
@@ -38,6 +40,8 @@ class AccountSuspended extends Mailable
      */
     public function envelope(): Envelope
     {
+        $this->applyTenantMailBranding($this->tenant);
+
         $subject = $this->template 
             ? $this->template->render([
                 'tenant_name' => $this->tenant->name ?? config('app.name'),
