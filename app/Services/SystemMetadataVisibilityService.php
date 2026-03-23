@@ -144,6 +144,40 @@ class SystemMetadataVisibilityService
     }
 
     /**
+     * Batch-load field IDs that are suppressed (is_visible = false) for a system category.
+     *
+     * Use this instead of repeated {@see isSuppressedForCategory} calls to avoid N+1 queries
+     * (e.g. metadata-schema and other paths that filter many fields at once).
+     *
+     * @param  list<int|string>  $fieldIds
+     * @return list<int>
+     */
+    public function getSuppressedFieldIdsForSystemCategory(int $systemCategoryId, array $fieldIds): array
+    {
+        $fieldIds = array_values(array_unique(array_filter(array_map(static function ($id) {
+            if ($id === null || $id === '') {
+                return null;
+            }
+
+            return is_numeric($id) ? (int) $id : null;
+        }, $fieldIds), static fn ($id) => $id !== null)));
+
+        if ($fieldIds === []) {
+            return [];
+        }
+
+        return DB::table('metadata_field_category_visibility')
+            ->where('system_category_id', $systemCategoryId)
+            ->where('is_visible', false)
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->pluck('metadata_field_id')
+            ->unique()
+            ->values()
+            ->map(static fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
      * Check if a field is suppressed for a system category.
      *
      * @param int $fieldId Metadata field ID

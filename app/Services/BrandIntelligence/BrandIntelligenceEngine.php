@@ -25,7 +25,7 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v6_logo_color_guards';
+    public const ENGINE_VERSION = 'v7_creative_copy_parallel';
 
     /** Cosine similarity vs brand logo reference embeddings above this counts as logo present. */
     public const LOGO_EMBEDDING_SIMILARITY_THRESHOLD = 0.72;
@@ -47,6 +47,7 @@ class BrandIntelligenceEngine
         protected AssetEmbeddingEnsureService $assetEmbeddingEnsureService,
         protected BrandColorPaletteAlignmentEvaluator $brandColorPaletteAlignmentEvaluator,
         protected AssetContextClassifier $assetContextClassifier,
+        protected CreativeIntelligenceAnalyzer $creativeIntelligenceAnalyzer,
     ) {}
 
     /**
@@ -298,6 +299,8 @@ class BrandIntelligenceEngine
         $withRefs['style_deviation_reason'] = $styleDeviationReason;
         $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
 
+        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $score);
+
         $recs = $this->generateRecommendations($withRefs);
         $withRefs['recommendations'] = $recs['recommendations'];
 
@@ -311,6 +314,9 @@ class BrandIntelligenceEngine
         $aiUsed = ($generativeValidationPayload['used'] ?? false) === true;
         if ($aiInsightPayload !== null && isset($aiInsightPayload['ai_insight']['text'])) {
             $withRefs['ai_insight'] = $aiInsightPayload['ai_insight'];
+            $aiUsed = true;
+        }
+        if (($withRefs['ebi_ai_trace']['creative_ai_ran'] ?? false) === true) {
             $aiUsed = true;
         }
         $withRefs['ai_used'] = $aiUsed;
@@ -396,6 +402,10 @@ class BrandIntelligenceEngine
         $withRefs['context_type'] = $assetContextType->value;
         $withRefs['style_deviation_reason'] = null;
         $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
+
+        $insufficientScore = 50;
+        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $insufficientScore);
+
         $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
         $withRefs['_gate_confidence'] = $confidence;
         $withRefs['_gate_level'] = $level;
@@ -407,14 +417,116 @@ class BrandIntelligenceEngine
             $withRefs['ai_insight'] = $aiInsightPayload['ai_insight'];
         }
 
+        $aiUsedInsufficient = ! empty($withRefs['ai_insight'])
+            || (($withRefs['ebi_ai_trace']['creative_ai_ran'] ?? false) === true);
+
         return [
             'overall_score' => 50,
             'confidence' => $confidence,
             'level' => $level,
             'breakdown_json' => $withRefs,
-            'ai_used' => ! empty($withRefs['ai_insight']),
+            'ai_used' => $aiUsedInsufficient,
             'engine_version' => self::ENGINE_VERSION,
             'asset_id' => $asset->id,
+        ];
+    }
+
+    /**
+     * Parallel creative vision + copy layer (additive; optional small penalty only on explicit DNA conflict).
+     *
+     * @param  array<string, mixed>  $withRefs
+     */
+    protected function mergeCreativeIntelligenceLayer(
+        Asset $asset,
+        Brand $brand,
+        array &$withRefs,
+        AssetContextType $assetContextType,
+        bool $dryRun,
+        int &$score,
+    ): void {
+        $layer = $this->creativeIntelligenceAnalyzer->analyze($asset, $brand, $assetContextType, $dryRun);
+
+        $withRefs['creative_analysis'] = $layer['creative_analysis'];
+        $withRefs['copy_alignment'] = $layer['copy_alignment'];
+        $withRefs['context_analysis'] = array_merge(
+            [
+                'context_type_heuristic' => $assetContextType->value,
+                'context_type_ai' => null,
+                'scene_type' => null,
+                'lighting_type' => null,
+                'mood' => null,
+            ],
+            is_array($layer['context_analysis'] ?? null) ? $layer['context_analysis'] : []
+        );
+        $withRefs['visual_alignment_ai'] = $layer['visual_alignment_ai'];
+        $withRefs['overall_summary'] = $layer['overall_summary'] ?? null;
+        $withRefs['brand_copy_conflict'] = (bool) ($layer['brand_copy_conflict'] ?? false);
+        $withRefs['ebi_ai_trace'] = is_array($layer['ebi_ai_trace'] ?? null) ? $layer['ebi_ai_trace'] : [];
+
+        $withRefs['visual_alignment'] = [
+            'alignment_state' => $withRefs['alignment_state'] ?? null,
+            'alignment_score_normalized' => $withRefs['alignment_score_normalized'] ?? null,
+            'level' => $withRefs['level'] ?? null,
+            'label' => 'Visual (references & identity)',
+        ];
+
+        $withRefs['dimension_weights'] = $this->computeCreativeDimensionWeights($assetContextType, $layer);
+
+        if (($layer['ebi_ai_trace']['creative_ai_ran'] ?? false) === true && ! $dryRun) {
+            $this->logBrandIntelligenceAiUsage($asset);
+        }
+
+        if (
+            ($layer['brand_copy_conflict'] ?? false) === true
+            && ($withRefs['copy_alignment']['alignment_state'] ?? '') === 'off_brand'
+        ) {
+            $score = max(0, $score - 5);
+        }
+    }
+
+    /**
+     * Relative emphasis for UI / narrative (does not drive embedding score directly).
+     *
+     * @param  array<string, mixed>  $layer
+     * @return array{visual: float, copy: float, context: float}
+     */
+    protected function computeCreativeDimensionWeights(AssetContextType $context, array $layer): array
+    {
+        $copyExtracted = (bool) ($layer['ebi_ai_trace']['copy_extracted'] ?? false);
+
+        $visual = 0.55;
+        $copy = 0.25;
+        $ctx = 0.2;
+
+        if (in_array($context, [AssetContextType::DIGITAL_AD, AssetContextType::SOCIAL_POST], true)) {
+            $visual = 0.4;
+            $copy = 0.45;
+            $ctx = 0.15;
+        } elseif ($context === AssetContextType::LIFESTYLE) {
+            $visual = 0.7;
+            $copy = 0.1;
+            $ctx = 0.2;
+        } elseif ($context === AssetContextType::PRODUCT_HERO) {
+            $visual = 0.6;
+            $copy = 0.2;
+            $ctx = 0.2;
+        }
+
+        if (! $copyExtracted) {
+            $visual += $copy * 0.7;
+            $ctx += $copy * 0.3;
+            $copy = 0.0;
+        }
+
+        $sum = $visual + $copy + $ctx;
+        if ($sum <= 0) {
+            return ['visual' => 1.0, 'copy' => 0.0, 'context' => 0.0];
+        }
+
+        return [
+            'visual' => round($visual / $sum, 3),
+            'copy' => round($copy / $sum, 3),
+            'context' => round($ctx / $sum, 3),
         ];
     }
 

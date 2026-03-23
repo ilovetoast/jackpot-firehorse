@@ -81,6 +81,55 @@ const CONFIDENCE_SEGMENTS = 10
 
 const CONFIDENCE_FILL = { low: 0.3, moderate: 0.6, high: 0.9 }
 
+function shortenCreativeText(str, max = 40) {
+    if (typeof str !== 'string') return '—'
+    const t = str.trim()
+    if (t === '') return '—'
+    return t.length <= max ? t : `${t.slice(0, Math.max(0, max - 1))}…`
+}
+
+function copyAlignmentCompact(state) {
+    if (!state || state === 'not_applicable') return '—'
+    const map = {
+        aligned: 'aligned',
+        partial: 'partial',
+        off_brand: 'off',
+        insufficient: 'low',
+        not_applicable: '—',
+    }
+    return map[state] || state.replace(/_/g, ' ')
+}
+
+function visualRowLabel(breakdown) {
+    const va = breakdown?.visual_alignment
+    if (va?.level) return String(va.level).replace(/_/g, ' ')
+    const st = normalizeAlignmentState(breakdown?.alignment_state) || alignmentStateFromLegacyLevel(breakdown?.level)
+    return st ? st.replace(/_/g, ' ') : '—'
+}
+
+function contextRowLabel(b) {
+    const ctx = b?.context_analysis
+    if (!ctx || typeof ctx !== 'object') return '—'
+    const ai = ctx.context_type_ai
+    const h = ctx.context_type_heuristic
+    if (typeof ai === 'string' && ai.trim() !== '') return shortenCreativeText(ai, 28)
+    if (typeof h === 'string' && h.trim() !== '') return shortenCreativeText(h, 28)
+    if (typeof ctx.scene_type === 'string' && ctx.scene_type.trim() !== '') return shortenCreativeText(ctx.scene_type, 28)
+    return '—'
+}
+
+function hasCreativeIntelligencePanel(b) {
+    if (!b || typeof b !== 'object') return false
+    return (
+        b.ebi_ai_trace != null ||
+        b.overall_summary != null ||
+        b.creative_analysis != null ||
+        b.dimension_weights != null ||
+        b.copy_alignment != null ||
+        b.context_analysis != null
+    )
+}
+
 function normalizeConfidenceBand(bi, explicit) {
     if (explicit === 'low' || explicit === 'moderate' || explicit === 'high') {
         return explicit
@@ -218,6 +267,21 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
     const { alignment_state, confidenceBand, signals, reference_tier_usage, signal_score, breakdown, confidence } =
         normalized
 
+    const creativePanel = useMemo(() => {
+        if (!hasCreativeIntelligencePanel(breakdown)) return null
+        const trace = breakdown.ebi_ai_trace && typeof breakdown.ebi_ai_trace === 'object' ? breakdown.ebi_ai_trace : {}
+        return {
+            overall: typeof breakdown.overall_summary === 'string' ? breakdown.overall_summary : null,
+            visual: breakdown.visual_alignment,
+            visualAi: breakdown.visual_alignment_ai,
+            copy: breakdown.copy_alignment,
+            context: breakdown.context_analysis,
+            creative: breakdown.creative_analysis,
+            weights: breakdown.dimension_weights,
+            trace,
+        }
+    }, [breakdown])
+
     const missingSummary = useMemo(() => buildMissingSummary(signals), [signals])
 
     const tone = overallTone(alignment_state, typeof signal_score === 'number' ? signal_score : 0)
@@ -255,7 +319,9 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
 
     return (
         <div className="rounded-lg border border-slate-200/90 bg-white/95 shadow-sm ring-1 ring-slate-100/80">
-            <div className="max-h-[100px] overflow-hidden px-2.5 pt-2 pb-1.5">
+            <div
+                className={`overflow-hidden px-2.5 pt-2 pb-1.5 ${creativePanel ? 'max-h-[128px]' : 'max-h-[100px]'}`}
+            >
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -294,6 +360,30 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                         ) : (
                             <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-slate-500">
                                 Core signals look complete.
+                            </p>
+                        )}
+                        {creativePanel && (
+                            <p
+                                className="mt-0.5 line-clamp-1 text-[9px] leading-snug text-slate-600"
+                                title={
+                                    creativePanel.overall ||
+                                    [creativePanel.trace?.skip_reason].filter(Boolean).join(' ') ||
+                                    undefined
+                                }
+                            >
+                                <span className="font-medium text-slate-700">Creative</span>
+                                <span className="text-slate-300"> · </span>
+                                <span className="text-slate-500">Overall</span>{' '}
+                                {shortenCreativeText(creativePanel.overall, 32)}
+                                <span className="text-slate-300"> · </span>
+                                <span className="text-slate-500">Visual</span> {visualRowLabel(breakdown)}
+                                <span className="text-slate-300"> · </span>
+                                <span className="text-slate-500">Copy</span>{' '}
+                                {creativePanel.copy?.score != null && !Number.isNaN(Number(creativePanel.copy.score))
+                                    ? `${Math.round(Number(creativePanel.copy.score))}%`
+                                    : copyAlignmentCompact(creativePanel.copy?.alignment_state)}{' '}
+                                <span className="text-slate-300">·</span>{' '}
+                                <span className="text-slate-500">Context</span> {contextRowLabel(breakdown)}
                             </p>
                         )}
                     </div>
@@ -341,6 +431,122 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                 )
                             })}
                         </div>
+
+                        {creativePanel && (
+                            <div className="mt-2 rounded-md border border-violet-100/90 bg-violet-50/35 px-2 py-1.5">
+                                <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-900/90">
+                                    Creative intelligence
+                                </div>
+                                <dl className="mt-1.5 space-y-1.5 text-[10px] text-slate-700">
+                                    <div>
+                                        <dt className="font-medium text-slate-600">Overall</dt>
+                                        <dd className="mt-0.5 leading-snug text-slate-800">
+                                            {creativePanel.overall ? (
+                                                creativePanel.overall
+                                            ) : (
+                                                <span className="text-slate-500">No summary yet.</span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt className="font-medium text-slate-600">Visual</dt>
+                                        <dd className="mt-0.5 leading-snug">
+                                            {creativePanel.visual?.label && (
+                                                <span className="text-slate-500">{creativePanel.visual.label}: </span>
+                                            )}
+                                            <span className="text-slate-800">{visualRowLabel(breakdown)}</span>
+                                            {creativePanel.visualAi?.summary && (
+                                                <p className="mt-0.5 text-slate-600">{creativePanel.visualAi.summary}</p>
+                                            )}
+                                            {creativePanel.visualAi?.fit_score != null && (
+                                                <span className="text-slate-500">
+                                                    {' '}
+                                                    (AI fit ~{Math.round(Number(creativePanel.visualAi.fit_score))}%)
+                                                </span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt className="font-medium text-slate-600">Copy</dt>
+                                        <dd className="mt-0.5 leading-snug text-slate-800">
+                                            {creativePanel.copy?.score != null && !Number.isNaN(Number(creativePanel.copy.score))
+                                                ? `${Math.round(Number(creativePanel.copy.score))}% · `
+                                                : null}
+                                            {copyAlignmentCompact(creativePanel.copy?.alignment_state)}
+                                            {creativePanel.copy?.confidence != null && (
+                                                <span className="text-slate-500">
+                                                    {' '}
+                                                    · conf {Math.round(Number(creativePanel.copy.confidence) * 100)}%
+                                                </span>
+                                            )}
+                                        </dd>
+                                        {Array.isArray(creativePanel.copy?.reasons) && creativePanel.copy.reasons.length > 0 && (
+                                            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[9px] text-slate-600">
+                                                {creativePanel.copy.reasons.slice(0, 6).map((r, i) => (
+                                                    <li key={i}>{r}</li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                        {creativePanel.creative && (
+                                            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-slate-600">
+                                                {creativePanel.creative.headline_text && (
+                                                    <span>
+                                                        <span className="text-slate-500">Headline:</span> {creativePanel.creative.headline_text}
+                                                    </span>
+                                                )}
+                                                {creativePanel.creative.supporting_text && (
+                                                    <span>
+                                                        <span className="text-slate-500">Support:</span> {creativePanel.creative.supporting_text}
+                                                    </span>
+                                                )}
+                                                {creativePanel.creative.cta_text && (
+                                                    <span>
+                                                        <span className="text-slate-500">CTA:</span> {creativePanel.creative.cta_text}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <dt className="font-medium text-slate-600">Context</dt>
+                                        <dd className="mt-0.5 leading-snug text-slate-800">
+                                            {creativePanel.context?.context_type_ai ?? creativePanel.context?.context_type_heuristic ?? '—'}
+                                            {creativePanel.context?.scene_type && (
+                                                <span className="text-slate-600"> · {creativePanel.context.scene_type}</span>
+                                            )}
+                                            {creativePanel.context?.lighting_type && (
+                                                <span className="text-slate-600"> · {creativePanel.context.lighting_type}</span>
+                                            )}
+                                            {creativePanel.context?.mood && (
+                                                <span className="text-slate-600"> · {creativePanel.context.mood}</span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                    {creativePanel.weights && (
+                                        <div className="border-t border-violet-100/80 pt-1.5 text-[9px] text-slate-500">
+                                            Weights (visual / copy / context): {creativePanel.weights.visual ?? '—'} ·{' '}
+                                            {creativePanel.weights.copy ?? '—'} · {creativePanel.weights.context ?? '—'}
+                                        </div>
+                                    )}
+                                    {creativePanel.trace && Object.keys(creativePanel.trace).length > 0 && (
+                                        <div className="border-t border-violet-100/80 pt-1.5 font-mono text-[9px] text-slate-500">
+                                            <span>
+                                                AI: {creativePanel.trace.creative_ai_ran ? 'yes' : 'no'}
+                                            </span>
+                                            {' · '}
+                                            <span>copy extracted: {creativePanel.trace.copy_extracted ? 'yes' : 'no'}</span>
+                                            {' · '}
+                                            <span>copy scored: {creativePanel.trace.copy_alignment_scored ? 'yes' : 'no'}</span>
+                                            {creativePanel.trace.skip_reason && (
+                                                <span className="block text-slate-600">
+                                                    skip: {String(creativePanel.trace.skip_reason)}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </dl>
+                            </div>
+                        )}
 
                         <div className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[10px] text-slate-600">
                             <span className="font-medium text-slate-700">Confidence</span>

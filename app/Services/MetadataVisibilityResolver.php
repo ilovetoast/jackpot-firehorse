@@ -65,6 +65,20 @@ class MetadataVisibilityResolver
             }
         }
 
+        // Phase C2: Batch system category suppression to avoid N+1 (metadata_field_category_visibility per field)
+        $systemSuppressedByFieldId = [];
+        if ($category !== null && $category->system_category_id !== null) {
+            $fieldIdsForSystem = collect($fields)->pluck('field_id')->filter()->unique()->values()->all();
+            if (!empty($fieldIdsForSystem)) {
+                foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategory(
+                    $category->system_category_id,
+                    $fieldIdsForSystem
+                ) as $suppressedId) {
+                    $systemSuppressedByFieldId[(int) $suppressedId] = true;
+                }
+            }
+        }
+
         // Filter out suppressed fields
         $visibleFields = [];
         foreach ($fields as $field) {
@@ -86,12 +100,8 @@ class MetadataVisibilityResolver
                 $systemCategoryId = $category->system_category_id;
 
                 if ($systemCategoryId !== null) {
-                    $isSystemVisible = $this->visibilityService->isVisibleForCategory(
-                        $field['field_id'],
-                        $systemCategoryId
-                    );
-
-                    if (!$isSystemVisible) {
+                    $fid = (int) $field['field_id'];
+                    if (isset($systemSuppressedByFieldId[$fid])) {
                         continue;
                     }
                 }
@@ -119,6 +129,17 @@ class MetadataVisibilityResolver
             return $fields;
         }
 
+        $fieldIds = collect($fields)->pluck('field_id')->filter()->unique()->values()->all();
+        $systemSuppressedByFieldId = [];
+        if (!empty($fieldIds)) {
+            foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategory(
+                $systemCategoryId,
+                $fieldIds
+            ) as $suppressedId) {
+                $systemSuppressedByFieldId[(int) $suppressedId] = true;
+            }
+        }
+
         // Filter out suppressed fields
         $visibleFields = [];
         foreach ($fields as $field) {
@@ -129,15 +150,12 @@ class MetadataVisibilityResolver
                 continue;
             }
 
-            // Check if field is visible for this category
-            $isVisible = $this->visibilityService->isVisibleForCategory(
-                $field['field_id'],
-                $systemCategoryId
-            );
-
-            if ($isVisible) {
-                $visibleFields[] = $field;
+            $fid = (int) $field['field_id'];
+            if (isset($systemSuppressedByFieldId[$fid])) {
+                continue;
             }
+
+            $visibleFields[] = $field;
         }
 
         return $visibleFields;

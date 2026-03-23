@@ -277,9 +277,33 @@ export default function BrandIntelligenceShow({
                                 )}
                             </Section>
 
+                            {(breakdown.overall_summary ||
+                                breakdown.creative_analysis ||
+                                breakdown.copy_alignment ||
+                                breakdown.ebi_ai_trace) && (
+                                <Section title="F. Creative intelligence (parallel)">
+                                    {kv('overall_summary', breakdown.overall_summary ?? '—')}
+                                    {kv('visual_alignment (wrapper)', JSON.stringify(breakdown.visual_alignment ?? null))}
+                                    {kv('visual_alignment_ai', JSON.stringify(breakdown.visual_alignment_ai ?? null))}
+                                    {kv('copy_alignment', JSON.stringify(breakdown.copy_alignment ?? null))}
+                                    {kv('context_analysis', JSON.stringify(breakdown.context_analysis ?? null))}
+                                    {kv('dimension_weights', JSON.stringify(breakdown.dimension_weights ?? null))}
+                                    {kv('brand_copy_conflict', String(breakdown.brand_copy_conflict ?? false))}
+                                    {kv('ebi_ai_trace', JSON.stringify(breakdown.ebi_ai_trace ?? null))}
+                                    <details className="mt-2">
+                                        <summary className="cursor-pointer text-xs font-medium text-slate-600">
+                                            creative_analysis (full)
+                                        </summary>
+                                        <div className="mt-2 text-xs overflow-auto max-h-64">
+                                            <JsonView value={breakdown.creative_analysis ?? {}} collapsed={1} />
+                                        </div>
+                                    </details>
+                                </Section>
+                            )}
+
                             <details className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                                 <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-                                    F. Raw breakdown JSON
+                                    G. Raw breakdown JSON
                                 </summary>
                                 <div className="mt-3 text-xs overflow-auto max-h-[32rem]">
                                     <JsonView value={breakdown} collapsed={2} />
