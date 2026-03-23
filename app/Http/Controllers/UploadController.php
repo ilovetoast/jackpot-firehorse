@@ -1676,7 +1676,7 @@ class UploadController extends Controller
             }
             $title = $item['title'] ?? null;
             $resolvedFilename = $item['resolved_filename'] ?? null;
-            
+            $editorPublishDescription = null;
 
             $uploadSession = null; // Initialize for use in catch blocks
             
@@ -2086,7 +2086,16 @@ class UploadController extends Controller
                                 }
                             }
 
-                            // Validate all provided field keys are in the allowlist
+                            // Generative editor publish notes (EditorAssetBridgeController) — not schema fields
+                            if (array_key_exists('editor_publish_description', $metadataFields)) {
+                                $editorPublishDescription = $metadataFields['editor_publish_description'];
+                                unset($metadataFields['editor_publish_description']);
+                            }
+
+                            // Drop keys not in upload schema (e.g. legacy editor composition: source, document, …)
+                            $metadataFields = array_intersect_key($metadataFields, array_flip($allowedFieldKeys));
+
+                            // Validate remaining keys (subset of allowlist)
                             $invalidKeys = array_diff(array_keys($metadataFields), $allowedFieldKeys);
                             if (!empty($invalidKeys)) {
                                 throw new \InvalidArgumentException(
@@ -2138,6 +2147,22 @@ class UploadController extends Controller
                             'skip_ai_tagging' => $skipAiTagging,
                             'skip_ai_metadata' => $skipAiMetadata,
                         ]);
+                    }
+
+                    // Generative editor publish modal: description is not a schema field; store on asset JSON metadata.
+                    if ($editorPublishDescription !== null && $editorPublishDescription !== '' && $asset && $asset->id) {
+                        $note = is_string($editorPublishDescription)
+                            ? $editorPublishDescription
+                            : (is_scalar($editorPublishDescription) ? (string) $editorPublishDescription : '');
+                        if ($note !== '') {
+                            $asset->refresh();
+                            $currentMetadata = $asset->metadata ?? [];
+                            if (! is_array($currentMetadata)) {
+                                $currentMetadata = [];
+                            }
+                            $currentMetadata['editor_publish_description'] = $note;
+                            $asset->update(['metadata' => $currentMetadata]);
+                        }
                     }
 
                     // IMPORTANT:

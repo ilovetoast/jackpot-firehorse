@@ -180,7 +180,7 @@ class EditorAssetBridgeController extends Controller
             abort(404);
         }
 
-        if ($asset->type !== AssetType::ASSET) {
+        if (! in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)) {
             abort(404);
         }
 
@@ -219,9 +219,10 @@ class EditorAssetBridgeController extends Controller
     }
 
     /**
-     * GET /app/api/assets?limit=50
+     * GET /app/api/assets?limit=50&asset_type=asset|deliverable&category_id=
      *
-     * Image library assets for the editor picker (published lifecycle by default).
+     * Image assets for the editor picker: library (ASSET) or executions (DELIVERABLE).
+     * Optional category_id filters metadata.category_id (Photography, Print, etc.).
      */
     public function index(Request $request): JsonResponse
     {
@@ -234,16 +235,39 @@ class EditorAssetBridgeController extends Controller
         }
 
         $limit = min(50, max(1, (int) $request->query('limit', 50)));
+        $typeParam = strtolower((string) $request->query('asset_type', 'asset'));
+        $assetType = $typeParam === 'deliverable' ? AssetType::DELIVERABLE : AssetType::ASSET;
 
         $query = Asset::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
+            ->where('type', $assetType)
             ->normalIntakeOnly()
             ->excludeBuilderStaged()
             ->where(function ($q) {
                 $q->where('mime_type', 'like', 'image/%');
             });
+
+        $categoryFilterId = $request->query('category_id');
+        if ($categoryFilterId !== null && $categoryFilterId !== '') {
+            $cid = (int) $categoryFilterId;
+            if ($cid > 0) {
+                $filterCategory = Category::query()
+                    ->where('id', $cid)
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->where('asset_type', $assetType)
+                    ->active()
+                    ->visible()
+                    ->first();
+                if ($filterCategory) {
+                    $query->where(function ($q) use ($cid) {
+                        $q->where('metadata->category_id', $cid)
+                            ->orWhere('metadata->category_id', (string) $cid);
+                    });
+                }
+            }
+        }
 
         $this->lifecycleResolver->apply($query, null, $user, $tenant, $brand);
 
@@ -260,7 +284,7 @@ class EditorAssetBridgeController extends Controller
         $defaultCategory = Category::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::ASSET)
+            ->where('asset_type', $assetType)
             ->active()
             ->visible()
             ->ordered()
@@ -310,7 +334,7 @@ class EditorAssetBridgeController extends Controller
             return response()->json(['error' => 'Not found'], 404);
         }
 
-        if ($asset->type !== AssetType::ASSET) {
+        if (! in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 

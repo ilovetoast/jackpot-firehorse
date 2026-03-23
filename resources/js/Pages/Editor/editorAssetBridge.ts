@@ -85,9 +85,26 @@ export async function fetchEditorPublishCategories(): Promise<EditorPublishCateg
     return res.json()
 }
 
-export async function fetchEditorAssets(limit = 50): Promise<EditorAssetsResponse> {
+export type FetchEditorAssetsOptions = {
+    /** Library (default) vs executions / deliverables */
+    assetType?: 'asset' | 'deliverable'
+    /** Filter by DAM category (metadata.category_id), e.g. Photography, Print */
+    categoryId?: number
+}
+
+export async function fetchEditorAssets(
+    limit = 50,
+    options?: FetchEditorAssetsOptions
+): Promise<EditorAssetsResponse> {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-    const res = await fetch(`/app/api/assets?limit=${limit}`, {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (options?.assetType === 'deliverable') {
+        params.set('asset_type', 'deliverable')
+    }
+    if (options?.categoryId != null && Number.isFinite(options.categoryId) && options.categoryId > 0) {
+        params.set('category_id', String(Math.floor(options.categoryId)))
+    }
+    const res = await fetch(`/app/api/assets?${params.toString()}`, {
         headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },
         credentials: 'same-origin',
     })
@@ -223,8 +240,10 @@ export async function promoteCompositionToAsset(
     if (desc) {
         fd.append('description', desc)
     }
+    // Only category upload-schema field keys (plus server-side editor_publish_description).
+    // Do not merge buildPromotionMetadata() here — keys like source, document, layers_count
+    // are not in the resolved upload schema and finalize rejects the whole manifest.
     const mergedMeta: Record<string, unknown> = {
-        ...buildPromotionMetadata(doc),
         ...(options?.fieldMetadata ?? {}),
     }
     fd.append('metadata', JSON.stringify(mergedMeta))
@@ -249,7 +268,7 @@ export async function promoteCompositionToAsset(
         const msg = (data as { message?: string })?.message || text
         throw new Error(msg)
     }
-    const results = (data as { results?: Array<{ status?: string; asset_id?: number }> }).results
+    const results = (data as { results?: Array<{ status?: string; asset_id?: number | string }> }).results
     const first = results?.[0]
     if (first?.status === 'failed') {
         throw new Error('Asset creation failed')

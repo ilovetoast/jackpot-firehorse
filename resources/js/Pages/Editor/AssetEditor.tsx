@@ -84,6 +84,7 @@ import {
     fetchEditorPublishCategories,
     fetchEditorPublishMetadataSchema,
     promoteCompositionToAsset,
+    type EditorPublishCategory,
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
 import { captureCompositionThumbnailBase64 } from './editorCompositionThumbnail'
@@ -842,6 +843,11 @@ export default function AssetEditor() {
     const [extraDamAssets, setExtraDamAssets] = useState<DamPickerAsset[]>([])
     const [damLoading, setDamLoading] = useState(false)
     const [damError, setDamError] = useState<string | null>(null)
+    const [pickerCategories, setPickerCategories] = useState<EditorPublishCategory[]>([])
+    const [pickerCategoriesLoading, setPickerCategoriesLoading] = useState(false)
+    /** Library (ASSET) vs executions (DELIVERABLE) in the image picker */
+    const [pickerScope, setPickerScope] = useState<'library' | 'executions'>('library')
+    const [pickerCategoryFilterId, setPickerCategoryFilterId] = useState<number | ''>('')
     const [promoteSaving, setPromoteSaving] = useState(false)
     const [promoteError, setPromoteError] = useState<string | null>(null)
     const [promoteOk, setPromoteOk] = useState(false)
@@ -998,6 +1004,12 @@ export default function AssetEditor() {
         }
         return m
     }, [damAssets, extraDamAssets])
+
+    const pickerCategoriesForScope = useMemo(() => {
+        return pickerCategories.filter((c) =>
+            pickerScope === 'library' ? c.asset_type === 'asset' : c.asset_type === 'deliverable'
+        )
+    }, [pickerCategories, pickerScope])
 
     const dirty = useMemo(
         () => JSON.stringify(document) !== lastSavedSerialized,
@@ -1886,13 +1898,46 @@ export default function AssetEditor() {
         if (!pickerOpen) {
             return
         }
+        let cancelled = false
+        setPickerCategoriesLoading(true)
+        fetchEditorPublishCategories()
+            .then((r) => {
+                if (!cancelled) {
+                    setPickerCategories(r.categories ?? [])
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setPickerCategories([])
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setPickerCategoriesLoading(false)
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [pickerOpen])
+
+    useEffect(() => {
+        if (!pickerOpen) {
+            return
+        }
         setDamLoading(true)
         setDamError(null)
-        fetchEditorAssets(50)
+        const assetType = pickerScope === 'executions' ? 'deliverable' : 'asset'
+        const categoryId =
+            pickerCategoryFilterId === '' ? undefined : Math.floor(Number(pickerCategoryFilterId))
+        fetchEditorAssets(80, {
+            assetType,
+            categoryId: categoryId !== undefined && categoryId > 0 ? categoryId : undefined,
+        })
             .then((r) => setDamAssets(r.assets))
             .catch((e) => setDamError(e instanceof Error ? e.message : 'Failed to load assets'))
             .finally(() => setDamLoading(false))
-    }, [pickerOpen])
+    }, [pickerOpen, pickerScope, pickerCategoryFilterId])
 
     const openPickerForAddImage = useCallback(() => {
         setPickerMode('add')
@@ -1955,6 +2000,8 @@ export default function AssetEditor() {
         setReplaceLayerId(null)
         setReferencePickerLayerId(null)
         setReferenceSelectionIds([])
+        setPickerScope('library')
+        setPickerCategoryFilterId('')
     }, [])
 
     const removeReferenceAsset = useCallback(
@@ -5758,7 +5805,7 @@ export default function AssetEditor() {
                     aria-modal="true"
                     aria-label="Choose asset"
                 >
-                    <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+                    <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
                         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                 {pickerMode === 'references'
@@ -5775,6 +5822,73 @@ export default function AssetEditor() {
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
+                        </div>
+                        <div className="border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    Source
+                                </span>
+                                <div className="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-gray-600">
+                                    <button
+                                        type="button"
+                                        className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+                                            pickerScope === 'library'
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                                        }`}
+                                        onClick={() => {
+                                            setPickerScope('library')
+                                            setPickerCategoryFilterId('')
+                                        }}
+                                    >
+                                        Library
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+                                            pickerScope === 'executions'
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                                        }`}
+                                        onClick={() => {
+                                            setPickerScope('executions')
+                                            setPickerCategoryFilterId('')
+                                        }}
+                                    >
+                                        Executions
+                                    </button>
+                                </div>
+                                <label className="ml-auto flex items-center gap-1.5 text-[10px] text-gray-600 dark:text-gray-400">
+                                    <span className="whitespace-nowrap">Category</span>
+                                    <select
+                                        className="max-w-[200px] rounded border border-gray-300 bg-white py-1 pl-1.5 pr-6 text-[11px] text-gray-800 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                                        value={pickerCategoryFilterId === '' ? '' : String(pickerCategoryFilterId)}
+                                        onChange={(e) => {
+                                            const v = e.target.value
+                                            setPickerCategoryFilterId(v === '' ? '' : Number(v))
+                                        }}
+                                        disabled={pickerCategoriesLoading || pickerCategoriesForScope.length === 0}
+                                    >
+                                        <option value="">All categories</option>
+                                        {pickerCategoriesForScope.map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
+                            <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+                                <a
+                                    href={pickerScope === 'executions' ? '/app/executions' : '/app/assets'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-medium text-indigo-600 underline decoration-indigo-400/60 underline-offset-2 hover:text-indigo-500 dark:text-indigo-400"
+                                >
+                                    Open {pickerScope === 'executions' ? 'Executions' : 'Assets'}
+                                </a>{' '}
+                                in a new tab to upload or manage files, then return here and refresh the list.
+                            </p>
                         </div>
                         <div className="min-h-[200px] flex-1 overflow-y-auto p-4">
                             {pickerMode === 'references' && (
