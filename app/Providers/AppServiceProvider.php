@@ -20,8 +20,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -77,6 +79,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Validate Vite manifest requirement based on environment
         $this->validateViteManifest();
+
+        // Avoid Symfony IncompleteDsnException: User is not set (Mailtrap SDK requires MAILTRAP_API_KEY).
+        $this->fallbackMailtrapSdkWhenApiKeyMissing();
 
         // Register model observers for automation triggers
         \App\Models\Ticket::observe(\App\Observers\TicketObserver::class);
@@ -140,6 +145,32 @@ class AppServiceProvider extends ServiceProvider
                 throw new RuntimeException('Schema::hasColumn() is forbidden during HTTP lifecycle.');
             });
         }
+    }
+
+    /**
+     * Mailtrap Sending API builds a Symfony Mailer DSN whose "user" is the API key
+     * ({@see config('services.mailtrap-sdk.apiKey')} from MAILTRAP_API_KEY or MAILTRAP_API_TOKEN).
+     * If the default mailer is mailtrap-sdk but the key is empty, sending mail throws
+     * {@see \Symfony\Component\Mailer\Exception\IncompleteDsnException} ("User is not set").
+     * Fall back to the log driver so flows like forgot-password do not 500; ops should set the key or MAIL_MAILER.
+     */
+    protected function fallbackMailtrapSdkWhenApiKeyMissing(): void
+    {
+        if (config('mail.default') !== 'mailtrap-sdk') {
+            return;
+        }
+
+        $apiKey = config('services.mailtrap-sdk.apiKey');
+        if (is_string($apiKey) && trim($apiKey) !== '') {
+            return;
+        }
+
+        Log::warning(
+            'MAIL_MAILER is mailtrap-sdk but Mailtrap API credentials are empty; falling back to log mailer. '
+            .'Set MAILTRAP_API_KEY or MAILTRAP_API_TOKEN (https://mailtrap.io/api-tokens) or use MAIL_MAILER=smtp/ses/log.'
+        );
+
+        Config::set('mail.default', 'log');
     }
 
     /**
