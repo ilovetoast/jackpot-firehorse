@@ -1475,11 +1475,14 @@ class AssetController extends Controller
                 'brand_id' => $brand->id,
             ]);
 
+            // 200 so background polling does not trigger global error UI / red network noise
             return response()->json([
                 'active_jobs' => [],
                 'stale_count' => 0,
+                'fetched_at' => now()->toIso8601String(),
+                'degraded' => true,
                 'error' => 'Failed to fetch processing jobs',
-            ], 500);
+            ]);
         }
     }
 
@@ -1646,7 +1649,8 @@ class AssetController extends Controller
 
             return response()->json([
                 'assets' => [],
-            ], 500);
+                'degraded' => true,
+            ]);
         }
     }
 
@@ -1682,6 +1686,10 @@ class AssetController extends Controller
         $tenant = app('tenant');
         $brand = app('brand');
 
+        if (! $tenant || ! $brand) {
+            return $this->processingStatusDegradedJson($asset);
+        }
+
         // Verify asset belongs to tenant and brand
         if ($asset->tenant_id !== $tenant->id) {
             return response()->json([
@@ -1695,42 +1703,81 @@ class AssetController extends Controller
             ], 404);
         }
 
-        // Refresh asset to ensure we have the latest thumbnail_status from database
-        $asset->refresh();
+        try {
+            // Refresh asset to ensure we have the latest thumbnail_status from database
+            $asset->refresh();
 
-        // Get thumbnail status from Asset model
-        // thumbnail_status is the source of truth for thumbnail generation state
-        // Values: 'pending', 'processing', 'completed', 'failed' (ThumbnailStatus enum)
+            // Get thumbnail status from Asset model
+            // thumbnail_status is the source of truth for thumbnail generation state
+            // Values: 'pending', 'processing', 'completed', 'failed' (ThumbnailStatus enum)
+            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status->value
+                : ($asset->thumbnail_status ?? 'pending');
+
+            // Generate distinct thumbnail URLs for preview and final (CDN URLs)
+            $metadata = $asset->metadata ?? [];
+            $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+
+            $finalThumbnailUrl = null;
+            $thumbnailVersion = null;
+
+            // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+            if ($thumbnailStatus === 'completed') {
+                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+                if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
+                    $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
+                }
+            }
+
+            return response()->json([
+                'thumbnail_status' => $thumbnailStatus,
+                'preview_thumbnail_url' => $previewThumbnailUrl,
+                'final_thumbnail_url' => $finalThumbnailUrl,
+                'thumbnail_version' => $thumbnailVersion,
+                'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
+                'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
+                'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                'pdf_page_count' => $asset->pdf_page_count,
+                'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::warning('[AssetController::processingStatus] Degraded JSON response (thumbnail poll)', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->processingStatusDegradedJson($asset);
+        }
+    }
+
+    /**
+     * Safe 200 for background thumbnail polling when delivery URLs or context fail.
+     */
+    protected function processingStatusDegradedJson(Asset $asset): JsonResponse
+    {
+        try {
+            $asset->refresh();
+        } catch (\Throwable) {
+            // keep model as bound
+        }
+
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');
-
-        // Generate distinct thumbnail URLs for preview and final (CDN URLs)
         $metadata = $asset->metadata ?? [];
-        $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
-
-        $finalThumbnailUrl = null;
-        $thumbnailVersion = null;
-
-        // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-        if ($thumbnailStatus === 'completed') {
-            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $finalThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
-            if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
-            }
-        }
 
         return response()->json([
             'thumbnail_status' => $thumbnailStatus,
-            'preview_thumbnail_url' => $previewThumbnailUrl,
-            'final_thumbnail_url' => $finalThumbnailUrl,
-            'thumbnail_version' => $thumbnailVersion,
-            'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
-            'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
-            'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+            'preview_thumbnail_url' => null,
+            'final_thumbnail_url' => null,
+            'thumbnail_version' => null,
+            'thumbnail_url' => null,
+            'thumbnails_generated_at' => null,
+            'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null,
             'pdf_page_count' => $asset->pdf_page_count,
             'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+            'degraded' => true,
         ], 200);
     }
 

@@ -36,11 +36,44 @@ function isInertiaAxiosRequest(error) {
 }
 
 /**
+ * Background polls (thumbnails, presence, notifications) should not surface the global error modal
+ * when the server is briefly unavailable — callers already handle empty / retry locally.
+ */
+function axiosRequestPathname(error) {
+    const raw = error.config?.url || ''
+    if (!raw) return ''
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        try {
+            return new URL(raw).pathname
+        } catch {
+            return raw.split('?')[0]
+        }
+    }
+    return raw.split('?')[0]
+}
+
+function isBackgroundPollAxiosRequest(error) {
+    const p = axiosRequestPathname(error)
+    if (!p) return false
+    if (p === '/app/assets/processing' || p.endsWith('/assets/processing')) return true
+    if (p.includes('/assets/thumbnail-status/batch')) return true
+    if (/\/assets\/[^/]+\/processing-status$/.test(p)) return true
+    if (p.includes('/api/notifications')) return true
+    if (p.includes('/api/downloads/poll')) return true
+    if (p.includes('/presence/heartbeat')) return true
+    if (p.includes('/presence/online')) return true
+    return false
+}
+
+/**
  * Axios error hook — skips Inertia page visits (handled by inertiaGlobalErrorHandling),
  * 403 (permission modal), 422 (forms), 419 (CSRF retry).
  */
 export function showGlobalErrorFromAxios(error) {
     if (isInertiaAxiosRequest(error)) {
+        return
+    }
+    if (isBackgroundPollAxiosRequest(error)) {
         return
     }
 

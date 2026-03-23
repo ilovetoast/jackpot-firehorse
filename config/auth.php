@@ -62,7 +62,19 @@ return [
     'providers' => [
         'users' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', App\Models\User::class),
+            /*
+             * AUTH_MODEL must be an existing PHP class (e.g. App\Models\User).
+             * A bad deploy value like "hash" (confused with HASH_DRIVER / bcrypt) causes
+             * ReflectionException: Class "hash" does not exist when building the auth provider.
+             */
+            'model' => (static function () {
+                $default = \App\Models\User::class;
+                $model = env('AUTH_MODEL', $default);
+
+                return is_string($model) && $model !== '' && class_exists($model)
+                    ? $model
+                    : $default;
+            })(),
         ],
 
         // 'users' => [
