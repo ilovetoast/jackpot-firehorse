@@ -107,7 +107,7 @@ class EditorAssetBridgeController extends Controller
             abort(404);
         }
 
-        if ($asset->type !== AssetType::ASSET) {
+        if (! $this->editorMayStreamOriginalFile($asset)) {
             abort(404);
         }
 
@@ -121,6 +121,44 @@ class EditorAssetBridgeController extends Controller
         }
 
         return $this->streamS3KeyToResponse($asset, $key, 'private, max-age=300');
+    }
+
+    /**
+     * Brand Guidelines font uploads are often type REFERENCE (builder-staged typography).
+     * Allow streaming those bytes for FontFace; normal library assets stay ASSET/DELIVERABLE.
+     */
+    private function editorMayStreamOriginalFile(Asset $asset): bool
+    {
+        if (in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)) {
+            return true;
+        }
+
+        return $asset->type === AssetType::REFERENCE && $this->assetIsFontBinary($asset);
+    }
+
+    private function assetIsFontBinary(Asset $asset): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_starts_with($mime, 'font/')) {
+            return true;
+        }
+        if (in_array($mime, [
+            'application/font-woff',
+            'application/font-woff2',
+            'application/vnd.ms-opentype',
+            'application/x-font-ttf',
+            'application/x-font-otf',
+        ], true)) {
+            return true;
+        }
+
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        if (in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true)) {
+            return true;
+        }
+
+        return $mime === 'application/octet-stream'
+            && in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true);
     }
 
     /**

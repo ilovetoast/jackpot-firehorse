@@ -10,6 +10,16 @@ import type { BrandContext } from './documentModel'
 const loadedStylesheetUrls = new Set<string>()
 const loadedFontFaceKeys = new Set<string>()
 
+const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true
+
+function logBrandFont(...args: unknown[]): void {
+    const force =
+        typeof window !== 'undefined' && window.localStorage?.getItem('debugBrandFonts') === '1'
+    if (isDev || force) {
+        console.info('[EditorBrandFonts]', ...args)
+    }
+}
+
 function fontFaceKey(assetId: number, weight: string, style: string): string {
     return `${assetId}:${weight}:${style}`
 }
@@ -60,12 +70,14 @@ async function injectFontFaceFromAsset(
 ): Promise<void> {
     const key = fontFaceKey(assetId, weight, style)
     if (loadedFontFaceKeys.has(key)) {
+        logBrandFont('skip (already loaded)', { family, assetId, weight, style })
         return
     }
     loadedFontFaceKeys.add(key)
 
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
     const url = `/app/api/assets/${assetId}/file`
+    logBrandFont('fetch font bytes', { url, family, weight, style })
     const res = await fetch(url, {
         credentials: 'same-origin',
         headers: {
@@ -74,11 +86,13 @@ async function injectFontFaceFromAsset(
         },
     })
     if (!res.ok) {
+        logBrandFont('fetch failed', { url, status: res.status, family })
         loadedFontFaceKeys.delete(key)
         return
     }
     const buf = await res.arrayBuffer()
     if (buf.byteLength === 0) {
+        logBrandFont('empty response', { url, family })
         loadedFontFaceKeys.delete(key)
         return
     }
@@ -90,7 +104,9 @@ async function injectFontFaceFromAsset(
         })
         await face.load()
         document.fonts.add(face)
-    } catch {
+        logBrandFont('FontFace registered', { family, bytes: buf.byteLength })
+    } catch (e) {
+        logBrandFont('FontFace load error', { family, error: e })
         loadedFontFaceKeys.delete(key)
     }
 }
@@ -101,6 +117,7 @@ async function injectFontFaceFromAsset(
  */
 export async function loadEditorBrandTypography(typography: BrandContext['typography'] | undefined): Promise<void> {
     if (!typography) {
+        logBrandFont('load skipped: no typography on brand context')
         return
     }
 
@@ -108,17 +125,56 @@ export async function loadEditorBrandTypography(typography: BrandContext['typogr
         ? typography.stylesheet_urls
         : (typography.font_urls ?? []).filter((u) => u && isLikelyStylesheetUrl(u))
 
-    const sheetTasks = sheetList.map((u) => injectStylesheet(u))
     const faces = typography.font_face_sources ?? []
+    logBrandFont('loadEditorBrandTypography', {
+        stylesheets: sheetList.length,
+        fontFaceSources: faces.length,
+        canvasPrimary: typography.canvas_primary_font_family ?? null,
+    })
+    if (faces.length === 0) {
+        logBrandFont(
+            'no font_face_sources — check brand DNA font file URLs match /assets/{id}/download or /file; licensed fonts will not fetch'
+        )
+    }
+
+    const sheetTasks = sheetList.map((u) => injectStylesheet(u))
     const faceTasks = faces.map((f) =>
         injectFontFaceFromAsset(f.family, f.asset_id, f.weight ?? '400', f.style ?? 'normal')
     )
 
     await Promise.all([...sheetTasks, ...faceTasks])
+    logBrandFont('loadEditorBrandTypography done')
 }
 
 function firstFontFamilyToken(fontFamily: string): string {
     return fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '')
+}
+
+/**
+ * Quote a single family name when needed so CSS `font-family` matches {@link FontFace} registration.
+ * Unquoted `RBNo3.1 Bold` is parsed as two families and never matches one face.
+ */
+export function quoteCssFontFamilyName(name: string): string {
+    const n = name.trim().replace(/^["']|["']$/g, '')
+    if (!n) {
+        return name
+    }
+    if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(n)) {
+        return n
+    }
+    return `"${n.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/** Apply quoting to the first family in a stack; keep fallbacks after the first comma as-is. */
+export function formatCssFontFamilyStack(stack: string): string {
+    const comma = stack.indexOf(',')
+    const head = comma >= 0 ? stack.slice(0, comma).trim() : stack.trim()
+    const tail = comma >= 0 ? stack.slice(comma) : ''
+    if (!head) {
+        return stack
+    }
+    const quoted = quoteCssFontFamilyName(head)
+    return tail ? `${quoted}${tail}` : quoted
 }
 
 function fontFamilyTokensMatch(a: string, b: string): boolean {
@@ -231,8 +287,9 @@ export async function ensureCanvasFontLoaded(
         return
     }
     const w = fontWeight ?? 400
+    const famQuoted = quoteCssFontFamilyName(fam)
     try {
-        await document.fonts.load(`${w} ${fontSizePx}px ${fam}`)
+        await document.fonts.load(`${w} ${fontSizePx}px ${famQuoted}`)
     } catch {
         /* ignore */
     }

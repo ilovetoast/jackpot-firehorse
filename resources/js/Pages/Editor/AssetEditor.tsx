@@ -87,7 +87,11 @@ import {
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
 import { captureCompositionThumbnailBase64 } from './editorCompositionThumbnail'
-import { ensureCanvasFontLoaded, resolveCanvasFontFamily } from './editorBrandFonts'
+import {
+    ensureCanvasFontLoaded,
+    formatCssFontFamilyStack,
+    resolveCanvasFontFamily,
+} from './editorBrandFonts'
 import {
     duplicateCompositionApi,
     fetchCompositionSummaries,
@@ -371,6 +375,7 @@ function TextLayerEditable({
     layerHeightRef.current = layer.transform.height
     const autoFit = layer.style.autoFit === true
     const resolvedFontFamily = resolveCanvasFontFamily(brandContext, layer.style.fontFamily)
+    const cssFontFamilyStack = formatCssFontFamilyStack(resolvedFontFamily)
 
     const flushTextDebounced = useCallback(() => {
         if (debounceTimerRef.current) {
@@ -429,6 +434,7 @@ function TextLayerEditable({
         layer.style.fontWeight,
         layer.style.fontFamily,
         resolvedFontFamily,
+        cssFontFamilyStack,
         layer.style.lineHeight,
         layer.style.letterSpacing,
         measureEl,
@@ -445,7 +451,7 @@ function TextLayerEditable({
             layer.transform.height,
             layer.style.fontSize,
             {
-                fontFamily: fitFamily,
+                fontFamily: formatCssFontFamilyStack(fitFamily),
                 fontWeight: layer.style.fontWeight,
                 lineHeight: layer.style.lineHeight,
                 letterSpacing: layer.style.letterSpacing,
@@ -459,6 +465,7 @@ function TextLayerEditable({
         autoFit,
         brandContext,
         resolvedFontFamily,
+        cssFontFamilyStack,
         layer.id,
         layer.content,
         layer.transform.width,
@@ -500,6 +507,7 @@ function TextLayerEditable({
         }
     }, [
         resolvedFontFamily,
+        cssFontFamilyStack,
         layer.style.fontSize,
         layer.style.fontWeight,
         editing,
@@ -508,7 +516,7 @@ function TextLayerEditable({
     ])
 
     const textStyle: CSSProperties = {
-        fontFamily: resolvedFontFamily,
+        fontFamily: cssFontFamilyStack,
         fontSize: layer.style.fontSize,
         fontWeight: layer.style.fontWeight ?? 400,
         lineHeight: `${lh}`,
@@ -5627,7 +5635,7 @@ export default function AssetEditor() {
                                     ) : (
                                         <>
                                             {publishCategories.some((c) => c.asset_type === 'asset') && (
-                                                <optgroup label="Library">
+                                                <optgroup label="Asset">
                                                     {publishCategories
                                                         .filter((c) => c.asset_type === 'asset')
                                                         .map((c) => (
@@ -5638,7 +5646,7 @@ export default function AssetEditor() {
                                                 </optgroup>
                                             )}
                                             {publishCategories.some((c) => c.asset_type === 'deliverable') && (
-                                                <optgroup label="Deliverables">
+                                                <optgroup label="Executions">
                                                     {publishCategories
                                                         .filter((c) => c.asset_type === 'deliverable')
                                                         .map((c) => (
