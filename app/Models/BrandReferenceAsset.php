@@ -25,6 +25,7 @@ class BrandReferenceAsset extends Model
         'tier',
         'weight',
         'category',
+        'context_type',
         'created_by',
     ];
 
@@ -65,6 +66,7 @@ class BrandReferenceAsset extends Model
             'kind' => $this->promotionKind(),
             'tier' => (int) $this->tier,
             'category' => $this->category,
+            'context_type' => $this->context_type,
         ];
     }
 }

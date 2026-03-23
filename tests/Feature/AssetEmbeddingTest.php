@@ -209,7 +209,8 @@ class AssetEmbeddingTest extends TestCase
         $ref = $result['breakdown_json']['reference_similarity'] ?? [];
         $this->assertTrue($ref['used'] ?? false);
         $this->assertFalse($ref['fallback_used'] ?? true);
-        $this->assertSame(100, $ref['score_percent'] ?? 0);
+        // Identity/style blend: logo-only identity (0.4) + perfect style (1.0) → 0.4×0.7 + 1.0×0.3 = 58%
+        $this->assertSame(58, $ref['score_percent'] ?? 0);
     }
 
     /**
@@ -265,7 +266,7 @@ class AssetEmbeddingTest extends TestCase
         $this->assertNotNull($result);
         $ref = $result['breakdown_json']['reference_similarity'] ?? [];
         $this->assertTrue($ref['used'] ?? false);
-        $this->assertSame(100, $ref['score_percent'] ?? 0);
+        $this->assertSame(58, $ref['score_percent'] ?? 0);
     }
 
     /**

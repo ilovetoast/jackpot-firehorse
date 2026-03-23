@@ -73,4 +73,10 @@ class ReferenceSimilarityCalculatorTest extends TestCase
         $this->assertSame('consistent', ReferenceSimilarityCalculator::stabilityLabel(0.005));
         $this->assertSame('diverse', ReferenceSimilarityCalculator::stabilityLabel(0.02));
     }
+
+    public function test_blend_identity_and_style(): void
+    {
+        $b = ReferenceSimilarityCalculator::blendIdentityAndStyle(1.0, 0.0, 0.3);
+        $this->assertEqualsWithDelta(0.7, $b, 0.0001);
+    }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Services\BrandReference;
 
+use App\Enums\AssetContextType;
 use App\Models\Asset;
 use App\Models\BrandReferenceAsset;
 use App\Models\User;
@@ -13,10 +14,11 @@ final class PromoteBrandReferenceAssetService
 {
     /**
      * @param  'reference'|'guideline'  $type
+     * @param  ?string  $contextType  Optional {@see AssetContextType} value for EBI context matching
      *
      * @throws ValidationException
      */
-    public function promote(Asset $asset, User $user, string $type, ?string $category = null): BrandReferenceAsset
+    public function promote(Asset $asset, User $user, string $type, ?string $category = null, ?string $contextType = null): BrandReferenceAsset
     {
         if (! in_array($type, ['reference', 'guideline'], true)) {
             throw ValidationException::withMessages(['type' => ['Invalid promotion type.']]);
@@ -38,8 +40,19 @@ final class PromoteBrandReferenceAssetService
             ]);
         }
 
+        $ctx = null;
+        if ($contextType !== null && $contextType !== '') {
+            $enum = AssetContextType::tryFromString($contextType);
+            if ($enum === null) {
+                throw ValidationException::withMessages([
+                    'context_type' => ['Invalid context type.'],
+                ]);
+            }
+            $ctx = $enum->value;
+        }
+
         try {
-            return DB::transaction(function () use ($asset, $user, $brandId, $tier, $weight, $category) {
+            return DB::transaction(function () use ($asset, $user, $brandId, $tier, $weight, $category, $ctx) {
                 return BrandReferenceAsset::create([
                     'brand_id' => $brandId,
                     'asset_id' => $asset->id,
@@ -47,6 +60,7 @@ final class PromoteBrandReferenceAssetService
                     'tier' => $tier,
                     'weight' => $weight,
                     'category' => $category !== null && $category !== '' ? $category : null,
+                    'context_type' => $ctx,
                     'created_by' => $user->id,
                 ]);
             });

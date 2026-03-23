@@ -27,8 +27,22 @@ export default function PromoteBrandReferenceModal({
     const type = isGuideline ? 'guideline' : 'reference'
 
     const [category, setCategory] = useState('')
+    const [contextType, setContextType] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+
+    const contextTypeOptions = useMemo(
+        () => [
+            { value: '', label: 'Any context (matches all assets)' },
+            { value: 'product_hero', label: 'Product / hero' },
+            { value: 'lifestyle', label: 'Lifestyle' },
+            { value: 'digital_ad', label: 'Digital ad' },
+            { value: 'social_post', label: 'Social post' },
+            { value: 'logo_only', label: 'Logo / lockup' },
+            { value: 'other', label: 'Other' },
+        ],
+        [],
+    )
 
     const categoryOptions = useMemo(() => {
         const rows = Array.isArray(categories) ? categories : []
@@ -48,6 +62,7 @@ export default function PromoteBrandReferenceModal({
         } else {
             setCategory('')
         }
+        setContextType('')
     }, [isOpen, initialType, categoryOptions, defaultCategoryName])
 
     if (!isOpen) {
@@ -77,6 +92,7 @@ export default function PromoteBrandReferenceModal({
                 body: JSON.stringify({
                     type,
                     category: category.trim() || null,
+                    context_type: contextType.trim() || null,
                 }),
             })
             const data = await res.json().catch(() => ({}))
@@ -122,6 +138,24 @@ export default function PromoteBrandReferenceModal({
                 <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4">
                     <p className="text-sm text-gray-600 leading-relaxed">{blurb}</p>
 
+                    <div>
+                        <label htmlFor="promote-context-type" className="block text-sm font-medium text-gray-700 mb-1">
+                            Creative context <span className="font-normal text-gray-500">(optional)</span>
+                        </label>
+                        <select
+                            id="promote-context-type"
+                            value={contextType}
+                            onChange={(e) => setContextType(e.target.value)}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mb-4"
+                            disabled={loading}
+                        >
+                            {contextTypeOptions.map((o) => (
+                                <option key={o.value || 'any'} value={o.value}>
+                                    {o.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                     <div>
                         <label htmlFor="promote-category" className="block text-sm font-medium text-gray-700 mb-1">
                             Category <span className="font-normal text-gray-500">(optional)</span>

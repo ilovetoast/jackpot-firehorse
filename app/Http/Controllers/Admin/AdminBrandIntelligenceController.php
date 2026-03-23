@@ -58,7 +58,10 @@ class AdminBrandIntelligenceController extends Controller
             ->whereNull('execution_id')
             ->whereNotNull('asset_id')
             ->with([
-                'asset' => fn ($q) => $q->withTrashed()->with(['brand:id,name']),
+                'asset' => fn ($q) => $q->withTrashed()->with([
+                    'brand:id,name',
+                    'category:id,name',
+                ]),
             ])
             ->orderByDesc('updated_at')
             ->paginate($perPage)

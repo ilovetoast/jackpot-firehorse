@@ -39,6 +39,7 @@ class BrandVisualReference extends Model
         'reference_type',
         'reference_tier',
         'weight',
+        'context_type',
     ];
 
     protected function casts(): array

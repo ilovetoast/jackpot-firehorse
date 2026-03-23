@@ -29,10 +29,10 @@ function alignmentStateLabel(alignmentState, level) {
     const a = (alignmentState || '').toLowerCase()
     if (a === 'on_brand') return 'On brand'
     if (a === 'partial_alignment') return 'Partial alignment'
-    if (a === 'off_brand') return 'Off brand'
-    if (a === 'insufficient_evidence') return 'Insufficient evidence'
+    if (a === 'off_brand') return 'Diverges from guidelines'
+    if (a === 'insufficient_evidence') return 'Not enough data'
     const l = (level || '').toLowerCase()
-    if (l === 'low') return 'Off brand'
+    if (l === 'low') return 'Diverges from guidelines'
     if (l === 'medium') return 'Somewhat on brand'
     if (l === 'high') return 'On brand'
     return level || '—'

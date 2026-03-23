@@ -145,6 +145,25 @@ class BrandAssetPromoteTest extends TestCase
         ]);
     }
 
+    public function test_promote_accepts_optional_context_type(): void
+    {
+        $asset = $this->createAsset();
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson('/app/api/brand-assets/'.$asset->id.'/promote', [
+                'type' => 'reference',
+                'context_type' => 'lifestyle',
+            ]);
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('brand_reference_assets', [
+            'brand_id' => $this->brand->id,
+            'asset_id' => $asset->id,
+            'context_type' => 'lifestyle',
+        ]);
+    }
+
     public function test_duplicate_promote_returns_validation_error(): void
     {
         $asset = $this->createAsset();

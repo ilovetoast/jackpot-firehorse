@@ -18,7 +18,7 @@ const ALIGNMENT_SUBTITLES = {
     ON_BRAND: 'Strong alignment with brand',
     PARTIAL_ALIGNMENT: 'Partial alignment detected',
     OFF_BRAND: 'Diverges from brand',
-    INSUFFICIENT_EVIDENCE: 'Not enough data to evaluate',
+    INSUFFICIENT_EVIDENCE: 'Not enough data',
 }
 
 const RECOMMENDATIONS = {
@@ -175,9 +175,16 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
 
     const { alignment_state, confidenceBand, signals, reference_tier_usage, signal_score, breakdown } = normalized
 
-    const subtitle =
-        (alignment_state && ALIGNMENT_SUBTITLES[alignment_state]) ||
-        'Brand alignment evaluation'
+    const subtitle = useMemo(() => {
+        const reason = breakdown?.style_deviation_reason
+        if (alignment_state === 'PARTIAL_ALIGNMENT' && reason) {
+            return 'Different Style Detected'
+        }
+        if (alignment_state && ALIGNMENT_SUBTITLES[alignment_state]) {
+            return ALIGNMENT_SUBTITLES[alignment_state]
+        }
+        return 'Brand alignment evaluation'
+    }, [alignment_state, breakdown?.style_deviation_reason])
 
     const badgeClass = useMemo(() => {
         switch (alignment_state) {
@@ -236,7 +243,11 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                     <span
                         className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ${badgeClass}`}
                     >
-                        {alignment_state.replace(/_/g, ' ')}
+                        {alignment_state === 'PARTIAL_ALIGNMENT' && breakdown?.style_deviation_reason
+                            ? 'Different style'
+                            : alignment_state === 'INSUFFICIENT_EVIDENCE'
+                              ? 'Not enough data'
+                              : alignment_state.replace(/_/g, ' ')}
                     </span>
                 )}
             </div>

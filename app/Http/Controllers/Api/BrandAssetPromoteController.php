@@ -23,13 +23,15 @@ class BrandAssetPromoteController extends Controller
         $validated = $request->validate([
             'type' => 'required|string|in:reference,guideline',
             'category' => 'nullable|string|max:255',
+            'context_type' => 'nullable|string|max:32',
         ]);
 
         $bra = $promoteService->promote(
             $assetModel,
             $request->user(),
             $validated['type'],
-            $validated['category'] ?? null
+            $validated['category'] ?? null,
+            $validated['context_type'] ?? null
         );
 
         return response()->json([
@@ -42,6 +44,7 @@ class BrandAssetPromoteController extends Controller
                 'tier' => $bra->tier,
                 'weight' => $bra->weight,
                 'category' => $bra->category,
+                'context_type' => $bra->context_type,
                 'reference_promotion' => $bra->toFrontendArray(),
             ],
         ], 201);

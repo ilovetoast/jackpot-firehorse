@@ -15,6 +15,15 @@ final class ReferenceSimilarityCalculator
 
     public const VARIANCE_STABILITY_THRESHOLD = 0.01;
 
+    /** Minimum context-matched style references before we trust style weight fully. */
+    public const MIN_CONTEXT_MATCHED_REFS = 3;
+
+    /** Default blend: identity vs style (see Brand Intelligence context-aware scoring). */
+    public const DEFAULT_STYLE_WEIGHT = 0.3;
+
+    /** When context pool is thin, rely more on identity signals. */
+    public const LOW_REF_STYLE_WEIGHT = 0.1;
+
     /**
      * @param  array<string, bool>  $signalBreakdown  has_logo, has_brand_colors, has_typography
      */
@@ -91,5 +100,30 @@ final class ReferenceSimilarityCalculator
             'low' => 0.42,
             default => 0.45,
         };
+    }
+
+    /**
+     * Blend identity (logo/colors/typography signal strength) with style (embedding) similarity.
+     *
+     * @param  float  $styleWeight  Fraction applied to style (e.g. 0.3); identity gets (1 - styleWeight).
+     */
+    public static function blendIdentityAndStyle(float $identity, float $style, float $styleWeight): float
+    {
+        $styleWeight = max(0.0, min(1.0, $styleWeight));
+        $identityWeight = 1.0 - $styleWeight;
+
+        return max(0.0, min(1.0, $identity * $identityWeight + $style * $styleWeight));
+    }
+
+    /**
+     * When references disagree (high variance), slightly widen the acceptable style channel before blending.
+     */
+    public static function varianceStyleBoost(float $variance): float
+    {
+        if ($variance <= self::VARIANCE_STABILITY_THRESHOLD) {
+            return 0.0;
+        }
+
+        return min(0.12, ($variance - (float) self::VARIANCE_STABILITY_THRESHOLD) * 1.5);
     }
 }

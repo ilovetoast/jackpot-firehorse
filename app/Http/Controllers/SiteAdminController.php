@@ -2136,6 +2136,52 @@ class SiteAdminController extends Controller
     }
 
     /**
+     * Read up to the last $lineLimit lines from a large file without loading it entirely into memory.
+     *
+     * @return list<string>
+     */
+    private function tailLogFileLines(string $path, int $lineLimit, int $maxBytesFromEnd = 8388608): array
+    {
+        if (! is_readable($path)) {
+            return [];
+        }
+
+        $size = filesize($path);
+        if ($size === false || $size === 0) {
+            return [];
+        }
+
+        $readLength = (int) min($size, $maxBytesFromEnd);
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            return [];
+        }
+
+        try {
+            if ($readLength < $size) {
+                fseek($fh, -$readLength, SEEK_END);
+            }
+            $data = stream_get_contents($fh);
+        } finally {
+            fclose($fh);
+        }
+
+        if ($data === false || $data === '') {
+            return [];
+        }
+
+        $lines = explode("\n", $data);
+        if ($readLength < $size) {
+            array_shift($lines);
+        }
+        if (count($lines) > $lineLimit) {
+            $lines = array_slice($lines, -$lineLimit);
+        }
+
+        return array_values($lines);
+    }
+
+    /**
      * Get recent webhook events from logs.
      */
     private function getRecentWebhookEvents(int $limit = 50): array
@@ -2148,8 +2194,8 @@ class SiteAdminController extends Controller
         }
 
         try {
-            // Read last N lines of log file
-            $lines = array_slice(file($logFile), -1000); // Read last 1000 lines for context
+            // Tail last ~1000 lines only — loading the full file with file() OOMs on large logs.
+            $lines = $this->tailLogFileLines($logFile, 1000);
             $lines = array_reverse($lines); // Most recent first
 
             foreach ($lines as $line) {
