@@ -1228,7 +1228,7 @@ const REFERENCE_CATEGORIES = [
     { key: 'graphics', label: 'Graphics', contextCategory: 'graphics' },
 ]
 
-function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange }) {
+function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange, noTopDivider = false }) {
     const [activeCategory, setActiveCategory] = useState('photography')
     const [categoryAssets, setCategoryAssets] = useState({})
 
@@ -1299,10 +1299,10 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
     const activeCatDef = REFERENCE_CATEGORIES.find((c) => c.key === activeCategory) || REFERENCE_CATEGORIES[0]
 
     return (
-        <div className="pt-6 border-t border-gray-200">
+        <div className={noTopDivider ? '' : 'pt-6 border-t border-gray-200'}>
             <div className="mb-4">
-                <h4 className="text-sm font-semibold text-gray-900">Visual References</h4>
-                <p className="text-xs text-gray-500 mt-0.5">Select reference images by category for brand guidelines and scoring.</p>
+                <h4 className="text-sm font-semibold text-gray-900">Reference categories</h4>
+                <p className="text-xs text-gray-500 mt-0.5">Select reference images by category for guidelines and on-brand alignment.</p>
             </div>
             <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1">
                 {REFERENCE_CATEGORIES.map((cat) => {
@@ -1339,7 +1339,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange 
                     onChange={(e) => handleScoringToggle(activeCatDef.key, e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
                 />
-                <span className="text-xs text-gray-600">Use <strong>{activeCatDef.label}</strong> for brand scoring</span>
+                <span className="text-xs text-gray-600">Use <strong>{activeCatDef.label}</strong> for alignment checks</span>
             </label>
         </div>
     )
@@ -1353,7 +1353,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const canAccessCategoriesAndFields = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
-    const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'scoring', 'presentation', 'research']
+    const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'alignment', 'references', 'presentation', 'research']
     const ALL_TABS = ['identity', 'workspace', 'public-site', ...DNA_TABS, 'members']
     const getInitialTab = () => {
         if (typeof window === 'undefined') return 'identity'
@@ -1361,6 +1361,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         const tabParam = params.get('tab')
         if (tabParam === 'brand-portal') return 'public-site'
         if (tabParam === 'brand_model' || tabParam === 'brand-dna') return 'strategy'
+        if (tabParam === 'scoring') return 'alignment'
         if (ALL_TABS.includes(tabParam)) return tabParam
         return 'identity'
     }
@@ -1752,7 +1753,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     { id: 'positioning', label: 'Positioning' },
                                     { id: 'expression', label: 'Expression' },
                                     { id: 'standards', label: 'Standards' },
-                                    { id: 'scoring', label: 'Scoring' },
+                                    { id: 'alignment', label: 'Alignment' },
+                                    { id: 'references', label: 'References' },
                                     { id: 'presentation', label: 'Presentation' },
                                     { id: 'research', label: 'Research' },
                                 ].map((item) => (
@@ -2018,7 +2020,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
-                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'scoring' || activeTab === 'presentation' || activeTab === 'research') ? (
+                ) : (activeTab === 'strategy' || activeTab === 'positioning' || activeTab === 'expression' || activeTab === 'standards' || activeTab === 'alignment' || activeTab === 'references' || activeTab === 'presentation' || activeTab === 'research') ? (
                 /* DNA tabs: separate form, saves to model_payload */
                 <form onSubmit={handleSaveDna} className="mt-8 space-y-8">
                     {activeTab === 'strategy' && (
@@ -2172,6 +2174,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 {/* FontManager in dark container */}
                                 <div className="mt-6 rounded-xl bg-[#14131a] border border-white/10 p-5">
                                     <FontManager
+                                        brandId={brand.id}
                                         fonts={modelPayload.standards?.fonts || []}
                                         onChange={(fonts) => {
                                             setModelPayloadField('standards.fonts', fonts)
@@ -2384,25 +2387,19 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
 
-                        {/* ——— Visual References & Logo Usage ——— */}
+                        {/* ——— Logo usage ——— (visual reference imagery lives under Brand DNA → References) */}
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-2">
-                                    <h2 className="text-xl font-semibold text-gray-900">Visual References & Logo Usage</h2>
+                                    <h2 className="text-xl font-semibold text-gray-900">Logo usage</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Reference imagery for scoring and logo usage guidelines.
+                                        Rules and proofs for how your logo appears in guidelines. Reference images for Brand Intelligence live in{' '}
+                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Brand DNA → References</button>.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
-                                    {/* Visual References by Category */}
-                                    <VisualReferenceCategoryPicker
-                                        brandId={brand.id}
-                                        referenceCategories={modelPayload.standards?.reference_categories || {}}
-                                        onChange={(updated) => setModelPayloadField('standards.reference_categories', updated)}
-                                    />
-
                                     {/* Logo Usage Guidelines */}
-                                    <div className="pt-6 border-t border-gray-200">
+                                    <div>
                                         <div className="flex items-center justify-between mb-4">
                                             <div>
                                                 <h4 className="text-sm font-semibold text-gray-900">Logo Usage Guidelines</h4>
@@ -2634,14 +2631,15 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </div>
                     )}
 
-                    {activeTab === 'scoring' && (
-                    <div id="scoring" className="scroll-mt-8">
+                    {activeTab === 'alignment' && (
+                    <div id="alignment" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
                             <div className="px-6 py-10 sm:px-10 sm:py-12">
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Brand DNA rules</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Configure fonts, colors, and keywords used by analysis. Asset scores use Brand Intelligence (EBI), not legacy dimension weights.
+                                        Configure fonts, colors, and keywords used by Brand Intelligence. Visual reference images are chosen under{' '}
+                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">References</button>.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
@@ -2651,6 +2649,33 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
                                     {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
 
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                                        {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    )}
+
+                    {activeTab === 'references' && (
+                    <div id="references" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Visual references</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed max-w-2xl">
+                                        Pick example assets that represent your brand look. When enabled per category, they anchor Brand Intelligence when measuring on-brand alignment. Typography, color, and keyword rules live under{' '}
+                                        <button type="button" onClick={() => { setActiveTab('alignment'); updateTabInUrl('alignment') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Alignment</button>.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
+                                    <VisualReferenceCategoryPicker
+                                        brandId={brand.id}
+                                        referenceCategories={modelPayload.standards?.reference_categories || {}}
+                                        onChange={(updated) => setModelPayloadField('standards.reference_categories', updated)}
+                                        noTopDivider
+                                    />
                                     <button type="submit" disabled={dnaSaving} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>

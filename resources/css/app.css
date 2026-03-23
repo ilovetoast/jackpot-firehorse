@@ -61,6 +61,19 @@
         animation: bucket-count-bump 0.45s ease-out;
     }
 
+    /* Generative editor: new result image */
+    @keyframes editor-gen-fade-in {
+        from {
+            opacity: 0.88;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+    .editor-gen-fade-in {
+        animation: editor-gen-fade-in 0.45s ease-out;
+    }
+
     /* Thin scrollbar for navigation panels */
     .scrollbar-thin {
         scrollbar-width: thin;

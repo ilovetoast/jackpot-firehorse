@@ -50,6 +50,20 @@ return [
         'api_key' => env('ANTHROPIC_API_KEY'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Google Gemini (Generative Language API)
+    |--------------------------------------------------------------------------
+    |
+    | Used for native image generation (Nano Banana: gemini-2.5-flash-image,
+    | gemini-3.1-flash-image-preview, gemini-3-pro-image-preview). Set GEMINI_API_KEY
+    | from Google AI Studio: https://aistudio.google.com/apikey
+    |
+    */
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+    ],
+
 
     /*
     |--------------------------------------------------------------------------
@@ -142,6 +156,46 @@ return [
             ],
             'active' => true,
             'notes' => 'Native PDF support for single-pass brand guidelines extraction',
+        ],
+        /*
+         * Gemini native image generation (Nano Banana). Costs are approximate token rates;
+         * verify against https://ai.google.dev/pricing — image output is billed as tokens.
+         */
+        'gemini-3-pro-image-preview' => [
+            'provider' => 'gemini',
+            'model_name' => 'gemini-3-pro-image-preview',
+            'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
+            'recommended_use' => ['creative', 'image_generation'],
+            'default_cost_per_token' => [
+                'input' => 0.000002,   // placeholder; align with current Gemini pricing
+                'output' => 0.000012,
+            ],
+            'active' => true,
+            'notes' => 'Nano Banana Pro — highest fidelity / complex prompts (gemini-3-pro-image-preview)',
+        ],
+        'gemini-3.1-flash-image-preview' => [
+            'provider' => 'gemini',
+            'model_name' => 'gemini-3.1-flash-image-preview',
+            'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
+            'recommended_use' => ['creative', 'image_generation'],
+            'default_cost_per_token' => [
+                'input' => 0.00000035,
+                'output' => 0.0000014,
+            ],
+            'active' => true,
+            'notes' => 'Nano Banana 2 — fast, high-volume image generation',
+        ],
+        'gemini-2.5-flash-image' => [
+            'provider' => 'gemini',
+            'model_name' => 'gemini-2.5-flash-image',
+            'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
+            'recommended_use' => ['creative', 'image_generation'],
+            'default_cost_per_token' => [
+                'input' => 0.0000003,
+                'output' => 0.0000012,
+            ],
+            'active' => true,
+            'notes' => 'Nano Banana — speed/efficiency (gemini-2.5-flash-image)',
         ],
     ],
 
@@ -410,6 +464,16 @@ PROMPT
             'allowed_actions' => ['read'],
             'permissions' => [
                 // Tenant-scoped, system-triggered on dashboard load
+            ],
+        ],
+        'editor_copy_assistant' => [
+            'name' => 'Editor Copy Assistant',
+            'description' => 'Generates and refines marketing copy in the generative asset editor (text layers)',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // User-triggered from editor; tenant + user attribution via AIService
             ],
         ],
     ],

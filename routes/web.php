@@ -538,6 +538,32 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/assets/{asset}/tags/suggestions/{candidateId}/accept', [\App\Http\Controllers\AssetMetadataController::class, 'acceptTagSuggestion'])->name('assets.tags.suggestions.accept');
             Route::post('/assets/{asset}/tags/suggestions/{candidateId}/dismiss', [\App\Http\Controllers\AssetMetadataController::class, 'dismissTagSuggestion'])->name('assets.tags.suggestions.dismiss');
 
+            // Generative editor — DAM bridge (list + promote export). Static paths before /api/assets/{asset}.
+            Route::get('/api/assets/categories', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'categories'])->name('api.editor.assets.categories');
+            Route::get('/api/assets/{asset}/file', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'file'])->name('api.editor.assets.file');
+            Route::get('/api/assets/{asset}/thumbnail', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'thumbnail'])->name('api.editor.assets.thumbnail');
+            Route::get('/api/assets', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'index'])->name('api.editor.assets.index');
+            Route::post('/api/assets', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'store'])->name('api.editor.assets.store');
+            Route::get('/api/assets/{asset}', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'show'])->name('api.editor.assets.show');
+
+            // Generative editor — image generation stub + usage (static paths before dynamic)
+            Route::get('/api/generate-image/usage', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'usage'])->name('api.editor.generate-image.usage');
+            Route::get('/api/generate-image/stub', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'stub'])->name('api.editor.generate-image.stub');
+            Route::get('/api/generate-image/proxy/{token}', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'proxyImage'])->where('token', '[a-f0-9]{32}')->name('api.editor.generate-image.proxy');
+            Route::post('/api/generate-image', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'generate'])->name('api.editor.generate-image');
+            Route::get('/api/editor/brand-context', [\App\Http\Controllers\Editor\EditorBrandContextController::class, 'show'])->name('api.editor.brand-context');
+            Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
+
+            // Generative editor — compositions + version history
+            Route::get('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'index'])->name('api.editor.compositions.index');
+            Route::post('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'store'])->name('api.editor.compositions.store');
+            Route::get('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'show'])->whereNumber('id')->name('api.editor.compositions.show');
+            Route::put('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'update'])->whereNumber('id')->name('api.editor.compositions.update');
+            Route::post('/api/compositions/{id}/duplicate', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'duplicate'])->whereNumber('id')->name('api.editor.compositions.duplicate');
+            Route::get('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsIndex'])->whereNumber('id')->name('api.editor.compositions.versions.index');
+            Route::post('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsStore'])->whereNumber('id')->name('api.editor.compositions.versions.store');
+            Route::get('/api/compositions/{id}/versions/{versionId}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsShow'])->whereNumber('id')->whereNumber('versionId')->name('api.editor.compositions.versions.show');
+
             // Phase J.2.3: Tag UX API endpoints
             Route::get('/api/assets/{asset}/tags', [\App\Http\Controllers\AssetTagController::class, 'index'])->name('api.assets.tags.index');
             Route::post('/api/assets/{asset}/tags', [\App\Http\Controllers\AssetTagController::class, 'store'])->name('api.assets.tags.store');

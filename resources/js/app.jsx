@@ -77,12 +77,13 @@ if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPw
     }
 }
 
-const pages = import.meta.glob('./Pages/**/*.jsx', { eager: false })
+const pages = import.meta.glob('./Pages/**/*.{jsx,tsx}', { eager: false })
 
 createInertiaApp({
     resolve: async name => {
-        const path = `./Pages/${name}.jsx`
-        const component = pages[path]
+        const pathJsx = `./Pages/${name}.jsx`
+        const pathTsx = `./Pages/${name}.tsx`
+        const component = pages[pathJsx] ?? pages[pathTsx]
         if (!component) {
             throw new Error(`Page not found: ${name}`)
         }

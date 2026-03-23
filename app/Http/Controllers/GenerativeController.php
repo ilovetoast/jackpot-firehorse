@@ -17,8 +17,6 @@ class GenerativeController extends Controller
         $user = Auth::user();
         $tenant = app('tenant');
 
-        return Inertia::render('Generative/Index', [
-            'generative_items' => [], // Empty for now - tmp page
-        ]);
+        return Inertia::render('Editor/AssetEditor', []);
     }
 }

@@ -13,6 +13,7 @@ use App\Listeners\QueueFailureListener;
 use App\Listeners\SendAssetPendingApprovalNotification;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\AnthropicProvider;
+use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Auth\Events\Login;
@@ -52,6 +53,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(OpenAIProvider::class, function ($app) {
             return new OpenAIProvider;
         });
+
+        if (config('ai.gemini.api_key')) {
+            $this->app->singleton(GeminiProvider::class, function ($app) {
+                return new GeminiProvider;
+            });
+        }
 
         $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {
             return new ImageEmbeddingService;

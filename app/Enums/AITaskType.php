@@ -66,6 +66,9 @@ class AITaskType
     // Brand insights: LLM-generated actionable insights from analytics metrics
     public const BRAND_INSIGHTS = 'brand_insights';
 
+    /** Asset editor — inline marketing copy assist (text layers) */
+    public const EDITOR_COPY_ASSIST = 'editor_copy_assist';
+
     /**
      * Get all task types as an array.
      *
@@ -95,6 +98,7 @@ class AITaskType
             self::PDF_DOCUMENT_STRUCTURE,
             self::BRAND_PDF_EXTRACTION,
             self::BRAND_INSIGHTS,
+            self::EDITOR_COPY_ASSIST,
         ];
     }
     

@@ -7,6 +7,7 @@
  * 3. External CSS URL — paste a Google Fonts or self-hosted stylesheet link
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { extractFontMetadataFromFile, mergeFontMetadataIntoDraft } from '@/utils/fontFileMetadata'
 import { Dialog } from '@headlessui/react'
 import {
     PlusIcon,
@@ -211,19 +212,155 @@ function GoogleFontsPicker({ onSelect, existingFonts = [] }) {
     )
 }
 
+const FONT_FILE_ACCEPT = '.woff2,.woff,.otf,.ttf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/font-woff2,application/x-font-otf,application/x-font-ttf,application/octet-stream'
+
 // ——— Font Edit Modal ———
-function FontEditModal({ open, onClose, font, onSave }) {
+function FontEditModal({ open, onClose, font, onSave, brandId = null }) {
     const [draft, setDraft] = useState(font || emptyFont())
     const [styleInput, setStyleInput] = useState('')
     const [fileUrlInput, setFileUrlInput] = useState('')
     const [fontSearch, setFontSearch] = useState('')
     const [showFontPicker, setShowFontPicker] = useState(false)
+    const [uploadingFile, setUploadingFile] = useState(false)
+    const [uploadBatchLabel, setUploadBatchLabel] = useState(null)
+    const [uploadError, setUploadError] = useState(null)
+    const [dragActive, setDragActive] = useState(false)
+    const fontFileInputRef = useRef(null)
+    const wasOpenRef = useRef(false)
+
+    useEffect(() => {
+        if (open && !wasOpenRef.current) {
+            setDraft(font || emptyFont())
+            setUploadError(null)
+            setStyleInput('')
+            setFileUrlInput('')
+            setDragActive(false)
+        }
+        wasOpenRef.current = open
+    }, [open, font])
 
     const update = (key, val) => setDraft((d) => ({ ...d, [key]: val }))
     const addStyle = () => { const t = styleInput.trim(); if (t && !draft.styles.includes(t)) update('styles', [...draft.styles, t]); setStyleInput('') }
     const removeStyle = (s) => update('styles', draft.styles.filter((x) => x !== s))
     const addFileUrl = () => { const t = fileUrlInput.trim(); if (t && !draft.file_urls.includes(t)) update('file_urls', [...draft.file_urls, t]); setFileUrlInput('') }
     const removeFileUrl = (u) => update('file_urls', draft.file_urls.filter((x) => x !== u))
+
+    const appendFileUrl = (url) => {
+        const t = url.trim()
+        if (!t) return
+        setDraft((d) => (d.file_urls.includes(t) ? d : { ...d, file_urls: [...d.file_urls, t] }))
+    }
+
+    const isFontLikeFile = (f) => /\.(woff2?|ttf|otf|eot)$/i.test(f.name)
+
+    const uploadOneFontFile = async (file) => {
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+        const meta = await extractFontMetadataFromFile(file)
+        setDraft((d) => mergeFontMetadataIntoDraft(d, meta))
+
+        const initRes = await fetch('/app/uploads/initiate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                file_name: file.name,
+                file_size: file.size,
+                mime_type: file.type || 'application/octet-stream',
+                brand_id: brandId,
+                builder_staged: true,
+                builder_context: 'typography_reference',
+            }),
+        })
+        if (!initRes.ok) {
+            const err = await initRes.json().catch(() => ({}))
+            throw new Error(err.message || err.error || `Could not start upload (${initRes.status})`)
+        }
+        const initData = await initRes.json()
+        const { upload_url, upload_session_id, upload_key } = initData
+        if (!upload_url) throw new Error('No upload URL returned')
+
+        const putRes = await fetch(upload_url, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+        })
+        if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`)
+
+        const finalRes = await fetch('/app/assets/upload/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                manifest: [{
+                    upload_key: upload_key ?? `temp/uploads/${upload_session_id}/original`,
+                    expected_size: file.size,
+                    resolved_filename: file.name,
+                }],
+            }),
+        })
+        if (!finalRes.ok) throw new Error(`Finalize failed (${finalRes.status})`)
+        const finalData = await finalRes.json()
+        const result = finalData.results?.[0]
+        const assetId = result?.asset_id ?? result?.id
+        if (!assetId) throw new Error('No asset created')
+
+        let downloadPath = `/app/assets/${assetId}/download`
+        if (typeof route === 'function') {
+            try {
+                downloadPath = route('assets.download', { asset: assetId })
+            } catch {
+                /* ziggy optional */
+            }
+        }
+        const absolute = downloadPath.startsWith('http') ? downloadPath : `${window.location.origin}${downloadPath}`
+        appendFileUrl(absolute)
+    }
+
+    const handleFontFiles = async (fileList) => {
+        if (!brandId) return
+        const files = Array.from(fileList || []).filter(isFontLikeFile)
+        if (!files.length) return
+        setUploadingFile(true)
+        setUploadError(null)
+        setUploadBatchLabel(files.length > 1 ? `1/${files.length}` : null)
+        try {
+            for (let i = 0; i < files.length; i++) {
+                if (files.length > 1) setUploadBatchLabel(`${i + 1}/${files.length}`)
+                await uploadOneFontFile(files[i])
+            }
+        } catch (err) {
+            setUploadError(err instanceof Error ? err.message : 'Upload failed')
+        } finally {
+            setUploadingFile(false)
+            setUploadBatchLabel(null)
+        }
+    }
+
+    const handleFontFileSelected = async (e) => {
+        const list = e.target.files
+        e.target.value = ''
+        if (!list?.length || !brandId) return
+        await handleFontFiles(list)
+    }
+
+    const onDropZoneDragOver = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!brandId) return
+        setDragActive(true)
+    }
+    const onDropZoneDragLeave = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragActive(false)
+    }
+    const onDropZoneDrop = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragActive(false)
+        if (!brandId) return
+        handleFontFiles(e.dataTransfer?.files)
+    }
 
     const handleSave = () => {
         if (!draft.name.trim()) return
@@ -256,6 +393,43 @@ function FontEditModal({ open, onClose, font, onSave }) {
                     </div>
 
                     <div className="p-5 space-y-5">
+                        <div
+                            onDragOver={onDropZoneDragOver}
+                            onDragLeave={onDropZoneDragLeave}
+                            onDrop={onDropZoneDrop}
+                            className={`rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+                                !brandId
+                                    ? 'border-white/10 bg-white/[0.02] opacity-60'
+                                    : dragActive
+                                      ? 'border-indigo-400/70 bg-indigo-500/10'
+                                      : 'border-white/20 bg-white/[0.03] hover:border-white/30'
+                            }`}
+                        >
+                            <DocumentArrowUpIcon className="w-8 h-8 mx-auto text-white/35 mb-2" />
+                            <p className="text-sm text-white/80 font-medium">Drop font files here</p>
+                            <p className="text-[11px] text-white/40 mt-1 mb-3">WOFF2, WOFF, OTF, TTF — multiple files for different weights</p>
+                            {brandId ? (
+                                <button
+                                    type="button"
+                                    disabled={uploadingFile}
+                                    onClick={() => fontFileInputRef.current?.click()}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-xs font-medium text-white/90 hover:bg-white/15 disabled:opacity-50"
+                                >
+                                    <DocumentArrowUpIcon className="w-4 h-4" />
+                                    {uploadingFile
+                                        ? uploadBatchLabel
+                                            ? `Uploading ${uploadBatchLabel}…`
+                                            : 'Uploading…'
+                                        : 'Choose files'}
+                                </button>
+                            ) : (
+                                <span className="text-[11px] text-amber-400/90">Save the brand first to upload files.</span>
+                            )}
+                            <p className="text-[10px] text-white/30 mt-3 leading-relaxed">
+                                We read the font’s name table when possible and fill family &amp; styles from the file (and filename).
+                            </p>
+                        </div>
+
                         <div>
                             <label className="block text-xs text-white/60 mb-1.5">Font Family Name</label>
                             <div className="relative">
@@ -336,9 +510,40 @@ function FontEditModal({ open, onClose, font, onSave }) {
 
                         <div>
                             <label className="block text-xs text-white/60 mb-1.5">Font Files <span className="text-white/30">(WOFF2, OTF, TTF)</span></label>
-                            <div className="flex gap-2">
-                                <input type="url" value={fileUrlInput} onChange={(e) => setFileUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addFileUrl() } }} placeholder="https://... .woff2" className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-white/30" />
-                                <button type="button" onClick={addFileUrl} className="px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 text-sm transition-colors"><DocumentArrowUpIcon className="w-4 h-4" /></button>
+                            <p className="mb-2 text-[11px] text-white/35 leading-relaxed">
+                                One file per weight is normal for licensed families. <strong className="text-white/50">Upload</strong> each file from your computer, or paste a public HTTPS URL, then <span className="text-white/50">Add</span> — you can attach many files to this font. Use clear filenames (e.g. RBNo3.1-Book.otf) so they match the weights listed above.
+                            </p>
+                            <input
+                                ref={fontFileInputRef}
+                                type="file"
+                                accept={FONT_FILE_ACCEPT}
+                                multiple
+                                className="hidden"
+                                onChange={handleFontFileSelected}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                                {brandId ? (
+                                    <button
+                                        type="button"
+                                        disabled={uploadingFile}
+                                        onClick={() => fontFileInputRef.current?.click()}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-xs font-medium text-white/90 hover:bg-white/15 disabled:opacity-50"
+                                    >
+                                        <DocumentArrowUpIcon className="w-4 h-4" />
+                                        {uploadingFile
+                                            ? uploadBatchLabel
+                                                ? `Uploading ${uploadBatchLabel}…`
+                                                : 'Uploading…'
+                                            : 'Upload file(s)'}
+                                    </button>
+                                ) : (
+                                    <span className="text-[11px] text-amber-400/90">Upload requires a saved brand context.</span>
+                                )}
+                            </div>
+                            {uploadError && <p className="text-[11px] text-red-400/90">{uploadError}</p>}
+                            <div className="flex gap-2 mt-2">
+                                <input type="url" value={fileUrlInput} onChange={(e) => setFileUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addFileUrl() } }} placeholder="Or paste https://.../RBNo3.1-Book.otf" className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-white/30" />
+                                <button type="button" title="Add file URL" onClick={addFileUrl} className="px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 text-sm transition-colors">Add URL</button>
                             </div>
                             {draft.file_urls.length > 0 && (
                                 <div className="mt-2 space-y-1">
@@ -389,7 +594,7 @@ function RolePickerInline({ value, onChange }) {
 }
 
 // ——— Main FontManager ———
-export default function FontManager({ fonts = [], onChange, suggestions = [], onApplySuggestion }) {
+export default function FontManager({ fonts = [], onChange, suggestions = [], onApplySuggestion, brandId = null }) {
     const [editingIdx, setEditingIdx] = useState(null)
     const [isAdding, setIsAdding] = useState(false)
     const [showGooglePicker, setShowGooglePicker] = useState(false)
@@ -569,11 +774,12 @@ export default function FontManager({ fonts = [], onChange, suggestions = [], on
                     onClose={() => setEditingIdx(null)}
                     font={typeof fontsList[editingIdx] === 'string' ? { ...emptyFont(), name: fontsList[editingIdx] } : fontsList[editingIdx]}
                     onSave={handleSave}
+                    brandId={brandId}
                 />
             )}
 
             {isAdding && (
-                <FontEditModal open={true} onClose={() => setIsAdding(false)} font={null} onSave={handleSave} />
+                <FontEditModal open={true} onClose={() => setIsAdding(false)} font={null} onSave={handleSave} brandId={brandId} />
             )}
         </div>
     )

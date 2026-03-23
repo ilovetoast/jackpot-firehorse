@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\AnthropicProvider;
+use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use Illuminate\Support\Facades\Log;
 
@@ -86,6 +87,14 @@ class AIService
             }
         }
 
+        if (config('ai.gemini.api_key')) {
+            try {
+                $this->providers['gemini'] = new GeminiProvider();
+            } catch (\Throwable $e) {
+                Log::warning('[AIService] GeminiProvider failed to initialize', ['error' => $e->getMessage()]);
+            }
+        }
+
         $this->defaultProvider = $this->providers[$defaultProviderName]
             ?? reset($this->providers) ?: null;
     }
@@ -117,6 +126,7 @@ class AIService
      *   - cost: Estimated cost in USD
      *   - tokens_in: Input tokens used
      *   - tokens_out: Output tokens used
+     *   - metadata: Provider metadata (e.g. Gemini image generation includes inline_images)
      * @throws \Exception If agent doesn't exist, permissions fail, or API call fails
      */
     public function executeAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
@@ -324,6 +334,7 @@ class AIService
                 'tokens_in' => $response['tokens_in'],
                 'tokens_out' => $response['tokens_out'],
                 'model' => $actualModelName,
+                'metadata' => $response['metadata'] ?? [],
             ];
         } catch (\Exception $e) {
             // Mark agent run as failed

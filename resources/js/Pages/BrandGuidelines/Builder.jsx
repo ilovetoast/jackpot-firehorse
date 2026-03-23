@@ -4434,6 +4434,7 @@ export default function BrandGuidelinesBuilder({
                                             <FieldCard title="Typography">
                                                 {isAiPopulated(typography.primary_font) && <AiFieldBadge field={typography.primary_font} className="mb-2" />}
                                                 <FontManager
+                                                    brandId={brand.id}
                                                     fonts={unwrapValue(typography.fonts) || []}
                                                     onChange={(fonts) => {
                                                         updatePayload('typography', 'fonts', fonts)
