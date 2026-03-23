@@ -106,7 +106,9 @@ export default function BrandDebugOverlay({ image: _image, debug, enabled }) {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-[10px] text-slate-500">
-                                        {ref.id ? String(ref.id).slice(0, 8)}…
+                                        {ref.id
+                                            ? `${String(ref.id).slice(0, 8)}…`
+                                            : '—'}
                                     </p>
                                     <p className="text-xs font-semibold text-slate-800">
                                         {typeof ref.similarity === 'number' && !Number.isNaN(ref.similarity)
