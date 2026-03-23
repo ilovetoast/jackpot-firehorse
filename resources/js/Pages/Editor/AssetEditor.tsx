@@ -349,6 +349,7 @@ function TextLayerEditable({
     editing,
     assistLoading,
     brandContext,
+    brandFontsEpoch = 0,
     onChange,
     onStopEdit,
     onTextHeightChange,
@@ -358,6 +359,8 @@ function TextLayerEditable({
     editing: boolean
     assistLoading?: boolean
     brandContext: BrandContext | null
+    /** Increments after brand @font-face / FontFace registration completes. */
+    brandFontsEpoch?: number
     onChange: (text: string) => void
     onStopEdit: () => void
     onTextHeightChange: (height: number) => void
@@ -513,6 +516,7 @@ function TextLayerEditable({
         editing,
         layer.content,
         measureEl,
+        brandFontsEpoch,
     ])
 
     const textStyle: CSSProperties = {
@@ -823,6 +827,8 @@ export default function AssetEditor() {
     const [referenceSelectionIds, setReferenceSelectionIds] = useState<string[]>([])
     const [brandContext, setBrandContext] = useState<BrandContext | null>(null)
     const [brandFontsLoading, setBrandFontsLoading] = useState(false)
+    /** Bumps when licensed brand fonts finish registering so text layers re-run font loading/measure. */
+    const [brandFontsEpoch, setBrandFontsEpoch] = useState(0)
     const [copyAssistLoadingId, setCopyAssistLoadingId] = useState<string | null>(null)
     const [copyAssistSuggestions, setCopyAssistSuggestions] = useState<CopySuggestionVariant[]>([])
     const [copyAssistScore, setCopyAssistScore] = useState<CopyScore | null>(null)
@@ -1193,6 +1199,7 @@ export default function AssetEditor() {
         void loadEditorBrandTypography(typo).then(() => {
             if (!cancelled) {
                 setBrandFontsLoading(false)
+                setBrandFontsEpoch((n) => n + 1)
             }
         })
         return () => {
@@ -3698,6 +3705,7 @@ export default function AssetEditor() {
                                                 editing={editingTextLayerId === layer.id}
                                                 assistLoading={copyAssistLoadingId === layer.id}
                                                 brandContext={brandContext}
+                                                brandFontsEpoch={brandFontsEpoch}
                                                 onChange={(text) =>
                                                     updateLayer(layer.id, (l) =>
                                                         isTextLayer(l) ? { ...l, content: text } : l

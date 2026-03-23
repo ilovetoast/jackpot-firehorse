@@ -84,7 +84,8 @@ export type TextLayer = BaseLayer & {
 /** Server-built list for FontFace + /api/assets/{id}/file (same-origin); asset IDs from Brand DNA only. */
 export type EditorFontFaceSource = {
     family: string
-    asset_id: number
+    /** Integer (legacy) or UUID string — matches {@link Asset} keys. */
+    asset_id: number | string
     weight: string
     style: string
 }

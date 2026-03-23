@@ -53,7 +53,7 @@ class EditorBrandContextController extends Controller
                 ?? null,
             'secondary_font' => $settings['typography']['secondary_font'] ?? null,
             'font_urls' => [],
-            /** @var list<array{family: string, asset_id: int, weight: string, style: string}> */
+            /** @var list<array{family: string, asset_id: int|string, weight: string, style: string}> */
             'font_face_sources' => [],
             /** Google Fonts / self-hosted CSS only (not binary font files). */
             'stylesheet_urls' => [],
@@ -136,15 +136,31 @@ class EditorBrandContextController extends Controller
 
                 $typography['font_face_sources'] = $this->buildFontFaceSourcesFromTypography($pt);
                 /** Same `family` string as FontFace registration for the primary licensed upload (editor canvas). */
-                $typography['canvas_primary_font_family'] = $this->canvasPrimaryFontFamily($pt);
+                $typography['canvas_primary_font_family'] = $this->canvasPrimaryFontFamily($pt)
+                    ?? $this->canvasPrimaryFontFamilyFromGoogle($pt);
+                // Licensed file URLs may live only on typography.font_urls / merged lists — not under fonts[].file_urls.
+                // Those rows must still produce font_face_sources or the editor never GETs /app/api/assets/{id}/file.
+                $this->augmentFontFaceSourcesFromDownloadUrls(
+                    $typography,
+                    $typography['font_urls'],
+                    $typography['canvas_primary_font_family'] ?? $typography['primary_font']
+                );
                 $stylesheetCandidates = array_merge(
                     $typography['font_urls'],
+                    $this->googleFontStylesheetUrlsFromTypography($pt),
                     $this->collectExternalFontStylesheets($pt)
                 );
                 $typography['stylesheet_urls'] = $this->filterStylesheetUrls($stylesheetCandidates);
                 $typography['font_urls'] = $typography['stylesheet_urls'];
             }
         }
+
+        // Settings-only (or legacy) typography: binary URLs may never have been mapped via model_payload.typography.fonts.
+        $this->augmentFontFaceSourcesFromDownloadUrls(
+            $typography,
+            $typography['font_urls'],
+            $typography['canvas_primary_font_family'] ?? $typography['primary_font']
+        );
 
         $sheetMerge = array_merge($typography['font_urls'], $typography['stylesheet_urls']);
         $typography['stylesheet_urls'] = $this->filterStylesheetUrls($sheetMerge);
@@ -162,7 +178,7 @@ class EditorBrandContextController extends Controller
 
     /**
      * @param  array<string, mixed>  $payloadTypography  model_payload.typography
-     * @return list<array{family: string, asset_id: int, weight: string, style: string}>
+     * @return list<array{family: string, asset_id: int|string, weight: string, style: string}>
      */
     private function buildFontFaceSourcesFromTypography(array $payloadTypography): array
     {
@@ -208,16 +224,70 @@ class EditorBrandContextController extends Controller
         return $out;
     }
 
-    private function parseAssetIdFromFontUrl(string $url): ?int
+    /**
+     * Add FontFace sources for any asset-backed font URL not already covered by
+     * {@see buildFontFaceSourcesFromTypography} (e.g. URLs listed only on typography.font_urls).
+     *
+     * @param  array<string, mixed>  $typography
+     * @param  list<string>  $urls
+     */
+    private function augmentFontFaceSourcesFromDownloadUrls(array &$typography, array $urls, ?string $preferredFamily = null): void
     {
+        $familyFallback = trim((string) ($preferredFamily ?? $typography['primary_font'] ?? ''));
+        if ($familyFallback === '') {
+            $familyFallback = 'Brand font';
+        }
+
+        $existing = [];
+        foreach ($typography['font_face_sources'] as $row) {
+            if (isset($row['asset_id'], $row['weight'], $row['style'])) {
+                $existing[(string) $row['asset_id'].':'.$row['weight'].':'.$row['style']] = true;
+            }
+        }
+
+        foreach ($urls as $u) {
+            if (! is_string($u) || $u === '') {
+                continue;
+            }
+            if ($this->isLikelyStylesheetFontUrl($u)) {
+                continue;
+            }
+            $assetId = $this->parseAssetIdFromFontUrl($u);
+            if ($assetId === null) {
+                continue;
+            }
+            $base = strtolower(basename(parse_url($u, PHP_URL_PATH) ?? ''));
+            $style = str_contains($base, 'italic') ? 'italic' : 'normal';
+            $weight = $this->guessFontWeightFromFilename($base) ?? '400';
+            $key = $assetId.':'.$weight.':'.$style;
+            if (isset($existing[$key])) {
+                continue;
+            }
+            $typography['font_face_sources'][] = [
+                'family' => $familyFallback,
+                'asset_id' => $assetId,
+                'weight' => $weight,
+                'style' => $style,
+            ];
+            $existing[$key] = true;
+        }
+    }
+
+    /**
+     * Assets use UUID primary keys ({@see Asset::HasUuids}); URLs may be /assets/{uuid}/download or legacy int ids.
+     */
+    private function parseAssetIdFromFontUrl(string $url): ?string
+    {
+        $uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
         $patterns = [
-            '#/assets/(\d+)/download#',
-            '#/assets/(\d+)/file#',
+            '#/assets/('.$uuid.')/(?:download|file)#',
+            '#/assets/(\d+)/(?:download|file)#',
+            '#/api/assets/('.$uuid.')/(?:file|download)#',
             '#/api/assets/(\d+)/(?:file|download)#',
         ];
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $url, $m)) {
-                return (int) $m[1];
+                return $m[1];
             }
         }
 
@@ -286,6 +356,97 @@ class EditorBrandContextController extends Controller
 
         if (count($licensed) === 1) {
             return $licensed[0]['name'];
+        }
+
+        return null;
+    }
+
+    /**
+     * Google Fonts from Brand DNA do not persist CSS URLs in file_urls — only the family name + source.
+     * Emit the same css2 URLs as {@see FontManager}'s googleFontCssUrl so the editor can inject stylesheets.
+     *
+     * @param  array<string, mixed>  $payloadTypography
+     * @return list<string>
+     */
+    private function googleFontStylesheetUrlsFromTypography(array $payloadTypography): array
+    {
+        $fonts = $payloadTypography['fonts'] ?? null;
+        if (! is_array($fonts)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($fonts as $fontEntry) {
+            if (! is_array($fontEntry)) {
+                continue;
+            }
+            if (($fontEntry['source'] ?? '') !== 'google') {
+                continue;
+            }
+            $name = trim((string) ($fontEntry['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $out[] = 'https://fonts.googleapis.com/css2?family='.rawurlencode($name).':wght@300;400;500;600;700&display=swap';
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Primary canvas family when the primary typeface is a Google Font (no uploaded asset / font_face_sources).
+     *
+     * @param  array<string, mixed>  $payloadTypography
+     */
+    private function canvasPrimaryFontFamilyFromGoogle(array $payloadTypography): ?string
+    {
+        $fonts = $payloadTypography['fonts'] ?? null;
+        if (! is_array($fonts)) {
+            return null;
+        }
+
+        $primaryLabel = isset($payloadTypography['primary_font'])
+            ? trim((string) $payloadTypography['primary_font'])
+            : '';
+
+        $google = [];
+        foreach ($fonts as $fontEntry) {
+            if (! is_array($fontEntry)) {
+                continue;
+            }
+            if (($fontEntry['source'] ?? '') !== 'google') {
+                continue;
+            }
+            $name = trim((string) ($fontEntry['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $google[] = [
+                'name' => $name,
+                'role' => (string) ($fontEntry['role'] ?? ''),
+            ];
+        }
+
+        if ($google === []) {
+            return null;
+        }
+
+        if ($primaryLabel !== '') {
+            foreach ($google as $row) {
+                if (strcasecmp($row['name'], $primaryLabel) === 0) {
+                    return $row['name'];
+                }
+            }
+        }
+
+        foreach ($google as $row) {
+            if (in_array($row['role'], ['primary', 'display'], true)) {
+                return $row['name'];
+            }
+        }
+
+        if (count($google) === 1) {
+            return $google[0]['name'];
         }
 
         return null;

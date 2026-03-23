@@ -20,8 +20,8 @@ function logBrandFont(...args: unknown[]): void {
     }
 }
 
-function fontFaceKey(assetId: number, weight: string, style: string): string {
-    return `${assetId}:${weight}:${style}`
+function fontFaceKey(assetId: number | string, weight: string, style: string): string {
+    return `${String(assetId)}:${weight}:${style}`
 }
 
 function isLikelyBinaryFontUrl(url: string): boolean {
@@ -64,7 +64,7 @@ function injectStylesheet(url: string): Promise<void> {
 
 async function injectFontFaceFromAsset(
     family: string,
-    assetId: number,
+    assetId: number | string,
     weight: string,
     style: string
 ): Promise<void> {
@@ -133,7 +133,7 @@ export async function loadEditorBrandTypography(typography: BrandContext['typogr
     })
     if (faces.length === 0) {
         logBrandFont(
-            'no font_face_sources — check brand DNA font file URLs match /assets/{id}/download or /file; licensed fonts will not fetch'
+            'no font_face_sources — check brand DNA font file URLs match /assets/{id}/download (UUID or numeric) or /file; licensed fonts will not fetch'
         )
     }
 
@@ -148,6 +148,38 @@ export async function loadEditorBrandTypography(typography: BrandContext['typogr
 
 function firstFontFamilyToken(fontFamily: string): string {
     return fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '')
+}
+
+/**
+ * Google Fonts register one family name (e.g. "Bebas Neue"); labels often include a weight ("Bebas Neue Bold").
+ * Strip trailing weight/style words so `font-family` matches @font-face from the stylesheet.
+ */
+function stripTrailingWeightFromFamilyName(name: string): string {
+    let n = name.trim()
+    const weightSuffix =
+        /\s+(Bold|Semi\s*Bold|SemiBold|Medium|Regular|Light|Black|Heavy|Thin|Extra\s*Bold|Extrabold|Italic|Oblique|Roman|Normal|Book)$/i
+    for (let i = 0; i < 4; i++) {
+        const next = n.replace(weightSuffix, '').trim()
+        if (next === n) {
+            break
+        }
+        n = next
+    }
+    return n || name
+}
+
+function normalizeStylesheetPrimaryFontFamily(cssFontFamily: string): string {
+    const first = firstFontFamilyToken(cssFontFamily)
+    if (!first) {
+        return cssFontFamily
+    }
+    const stripped = stripTrailingWeightFromFamilyName(first)
+    if (stripped === first) {
+        return cssFontFamily
+    }
+    const comma = cssFontFamily.indexOf(',')
+    const rest = comma >= 0 ? cssFontFamily.slice(comma) : ''
+    return `${stripped}${rest}`
 }
 
 /**
@@ -211,7 +243,14 @@ export function resolveCanvasFontFamily(
     cssFontFamily: string
 ): string {
     const faces = brand?.typography?.font_face_sources
+    const typo = brand?.typography
+    const hasStylesheets =
+        (typo?.stylesheet_urls?.length ?? 0) > 0 || (typo?.font_urls?.length ?? 0) > 0
     if (!faces?.length) {
+        // Google / external CSS fonts: family in DNA may include weight words; CSS @font-face uses base family only.
+        if (hasStylesheets) {
+            return normalizeStylesheetPrimaryFontFamily(cssFontFamily)
+        }
         return cssFontFamily
     }
 

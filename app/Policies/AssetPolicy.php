@@ -3,6 +3,8 @@
 namespace App\Policies;
 
 use App\Models\Asset;
+use App\Models\Brand;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Roles\PermissionMap;
 
@@ -38,7 +40,7 @@ class AssetPolicy
 
         // User must be assigned to the brand (or be tenant admin/owner), or have collection-only access to a collection containing this asset
         if ($asset->brand_id) {
-            $tenant = $asset->getRelationValue('tenant');
+            $tenant = $this->tenantForAsset($asset);
             if (! $tenant) {
                 return false;
             }
@@ -50,7 +52,7 @@ class AssetPolicy
             }
 
             // Phase MI-1: Check active brand membership
-            $brand = $asset->getRelationValue('brand');
+            $brand = $this->brandForAsset($asset);
             if ($brand && $user->activeBrandMembership($brand)) {
                 return true;
             }
@@ -78,7 +80,7 @@ class AssetPolicy
             return false;
         }
 
-        $brand = $asset->getRelationValue('brand');
+        $brand = $this->brandForAsset($asset);
         if ($brand && method_exists($user, 'hasPermissionForBrand')) {
             return $user->hasPermissionForBrand($brand, 'brand_settings.manage');
         }
@@ -107,8 +109,8 @@ class AssetPolicy
         }
 
         // Check permission for retrying thumbnails
-        $tenant = $asset->tenant;
-        if (! $user->hasPermissionForTenant($tenant, 'assets.retry_thumbnails')) {
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant || ! $user->hasPermissionForTenant($tenant, 'assets.retry_thumbnails')) {
             return false;
         }
 
@@ -129,13 +131,14 @@ class AssetPolicy
         }
 
         if ($asset->builder_staged && ($asset->builder_context ?? '') === 'guidelines_pdf') {
-            $brand = $asset->brand ?? $asset->getRelationValue('brand');
+            $brand = $this->brandForAsset($asset);
             if ($brand && \Illuminate\Support\Facades\Gate::forUser($user)->allows('update', $brand)) {
                 return true;
             }
         }
 
-        $tenantRole = $user->getRoleForTenant($asset->tenant);
+        $tenant = $this->tenantForAsset($asset);
+        $tenantRole = $tenant ? $user->getRoleForTenant($tenant) : null;
 
         return in_array($tenantRole, ['owner', 'admin'], true);
     }
@@ -183,13 +186,17 @@ class AssetPolicy
             return false;
         }
 
-        $tenant = $asset->tenant;
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
 
         // Admins and brand managers: full delete permission
         if ($user->hasPermissionForTenant($tenant, 'assets.delete')) {
             return true;
         }
-        if ($asset->brand_id && $user->hasPermissionForBrand($asset->brand, 'assets.delete')) {
+        $brand = $this->brandForAsset($asset);
+        if ($asset->brand_id && $brand && $user->hasPermissionForBrand($brand, 'assets.delete')) {
             return true;
         }
 
@@ -219,14 +226,19 @@ class AssetPolicy
         }
 
         // Check permission for publishing assets
-        $tenant = $asset->tenant;
-        
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
+
+        $brand = $this->brandForAsset($asset);
+
         // Check tenant-level permission first
         $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.publish');
         
         // If no tenant permission, check brand-level permission (if asset has a brand)
-        if (!$hasTenantPermission && $asset->brand_id) {
-            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.publish');
+        if (!$hasTenantPermission && $asset->brand_id && $brand) {
+            $hasTenantPermission = $user->hasPermissionForBrand($brand, 'asset.publish');
         }
         
         if (!$hasTenantPermission) {
@@ -244,14 +256,13 @@ class AssetPolicy
         }
 
         // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
+        if ($asset->brand_id && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
                 // Phase MI-1: Check active brand membership
-                if (!$user->activeBrandMembership($asset->brand)) {
+                if (!$user->activeBrandMembership($brand)) {
                     return false;
                 }
             }
@@ -259,8 +270,7 @@ class AssetPolicy
 
         // Phase J.3.1: Contributors cannot publish assets when approval is enabled
         // Check if brand requires contributor approval
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
+        if ($asset->brand_id && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
             $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
             
@@ -283,8 +293,8 @@ class AssetPolicy
             
             // Check brand role if asset has a brand
             $brandRole = null;
-            if ($asset->brand_id) {
-                $membership = $user->activeBrandMembership($asset->brand);
+            if ($asset->brand_id && $brand) {
+                $membership = $user->activeBrandMembership($brand);
                 $brandRole = $membership['role'] ?? null;
             }
             
@@ -317,14 +327,19 @@ class AssetPolicy
         }
 
         // Check permission for unpublishing assets
-        $tenant = $asset->tenant;
-        
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
+
+        $brand = $this->brandForAsset($asset);
+
         // Check tenant-level permission first
         $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.unpublish');
         
         // If no tenant permission, check brand-level permission (if asset has a brand)
-        if (!$hasTenantPermission && $asset->brand_id) {
-            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.unpublish');
+        if (!$hasTenantPermission && $asset->brand_id && $brand) {
+            $hasTenantPermission = $user->hasPermissionForBrand($brand, 'asset.unpublish');
         }
         
         if (!$hasTenantPermission) {
@@ -332,14 +347,13 @@ class AssetPolicy
         }
 
         // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
+        if ($asset->brand_id && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
                 // Phase MI-1: Check active brand membership
-                if (!$user->activeBrandMembership($asset->brand)) {
+                if (!$user->activeBrandMembership($brand)) {
                     return false;
                 }
             }
@@ -365,14 +379,19 @@ class AssetPolicy
         }
 
         // Check permission for archiving assets
-        $tenant = $asset->tenant;
-        
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
+
+        $brand = $this->brandForAsset($asset);
+
         // Check tenant-level permission first
         $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.archive');
         
         // If no tenant permission, check brand-level permission (if asset has a brand)
-        if (!$hasTenantPermission && $asset->brand_id) {
-            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.archive');
+        if (!$hasTenantPermission && $asset->brand_id && $brand) {
+            $hasTenantPermission = $user->hasPermissionForBrand($brand, 'asset.archive');
         }
         
         if (!$hasTenantPermission) {
@@ -386,8 +405,7 @@ class AssetPolicy
 
         // Phase J.3.1: Contributors cannot archive assets when approval is enabled
         // Check if brand requires contributor approval
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
+        if ($asset->brand_id && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
             $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
             
@@ -403,14 +421,13 @@ class AssetPolicy
         }
 
         // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
-        if ($asset->brand_id) {
-            $brand = $asset->brand;
+        if ($asset->brand_id && $brand) {
             $tenantRole = $user->getRoleForTenant($tenant);
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
                 // Phase MI-1: Check active brand membership
-                if (!$user->activeBrandMembership($asset->brand)) {
+                if (!$user->activeBrandMembership($brand)) {
                     return false;
                 }
             }
@@ -429,7 +446,10 @@ class AssetPolicy
         if (!$this->view($user, $asset)) {
             return false;
         }
-        $tenant = $asset->tenant;
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
         $tenantRole = $user->getRoleForTenant($tenant);
 
         return in_array($tenantRole, ['admin', 'owner']);
@@ -455,14 +475,16 @@ class AssetPolicy
         if (! $user) {
             return false;
         }
-        $tenant = $asset?->tenant ?? app('tenant');
+        $tenant = $asset !== null
+            ? $this->tenantForAsset($asset)
+            : (app()->bound('tenant') ? app('tenant') : null);
         if (! $tenant || ! $user->belongsToTenant($tenant->id)) {
             return false;
         }
         if (in_array($user->getRoleForTenant($tenant), ['admin', 'owner'], true)) {
             return true;
         }
-        $brand = $asset?->brand ?? (app()->bound('brand') ? app('brand') : null);
+        $brand = ($asset !== null ? $this->brandForAsset($asset) : null) ?? (app()->bound('brand') ? app('brand') : null);
         if ($brand && $user->hasPermissionForBrand($brand, 'assets.delete')) {
             return true;
         }
@@ -477,9 +499,43 @@ class AssetPolicy
         if (! $user->belongsToTenant($asset->tenant_id)) {
             return false;
         }
-        $tenant = $asset->tenant;
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
         $tenantRole = $user->getRoleForTenant($tenant);
 
         return in_array($tenantRole, ['admin', 'owner'], true);
+    }
+
+    /**
+     * Resolve tenant without lazy-loading {@see Asset::$tenant} (lazy loading is disabled app-wide).
+     */
+    private function tenantForAsset(Asset $asset): ?Tenant
+    {
+        $bound = app()->bound('tenant') ? app('tenant') : null;
+        if ($bound instanceof Tenant && (int) $bound->id === (int) $asset->tenant_id) {
+            return $bound;
+        }
+
+        return Tenant::query()->find($asset->tenant_id);
+    }
+
+    /**
+     * Resolve brand without lazy-loading {@see Asset::$brand}.
+     */
+    private function brandForAsset(Asset $asset): ?Brand
+    {
+        if (! $asset->brand_id) {
+            return null;
+        }
+        $bound = app()->bound('brand') ? app('brand') : null;
+        if ($bound instanceof Brand
+            && (int) $bound->id === (int) $asset->brand_id
+            && (int) $bound->tenant_id === (int) $asset->tenant_id) {
+            return $bound;
+        }
+
+        return Brand::query()->find($asset->brand_id);
     }
 }
