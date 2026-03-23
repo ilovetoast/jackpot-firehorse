@@ -14,6 +14,7 @@ use App\Models\AssetMetric;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Download;
+use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
@@ -22,6 +23,7 @@ use App\Services\PlanService;
 use App\Support\AssetVariant;
 use App\Support\DashboardLinks;
 use App\Support\DeliveryContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -881,15 +883,8 @@ class DashboardController extends Controller
 
         $theme = app(BrandThemeBuilder::class)->build($tenant, $brand);
 
-        // Brand insight signals (What Needs Attention) — cached 5 min
-        $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
-
-        // Momentum data (aggregated, last 7 days)
-        $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
-
-        // AI insights (LLM-generated, cached 30 min; fallback to rule-based on failure)
-        // Pass full signals so LLM can reinforce (not duplicate) and insights inherit correct hrefs
-        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
+        // Brand Intelligence insights: loaded async on Overview/Index (see /app/overview/insights) to avoid blocking TTFB.
+        $insightsDeferred = $view === 'Overview/Index';
 
         // Collage assets: best visual quality first (compliance score), then most viewed.
         // Match main Assets library: published, non-archived, normal intake, not builder-staged, type=asset (excludes reference/research materials).
@@ -1006,11 +1001,46 @@ class DashboardController extends Controller
             // Phase J.3: Contributor-specific counts (informational only)
             'contributor_pending_count' => $contributorPendingCount, // Contributor's own pending assets
             'contributor_rejected_count' => $contributorRejectedCount, // Contributor's own rejected assets
-            'brand_signals' => $brandSignals, // Cinematic Overview: What Needs Attention (permission-filtered)
-            'momentum_data' => $momentumData, // Recent Momentum (aggregated counts)
-            'ai_insights' => $aiInsights, // LLM insights (cached 30 min; fallback to rule-based)
+            'brand_signals' => [], // Filled client-side when insights_deferred (Overview/Index)
+            'momentum_data' => [],
+            'ai_insights' => [],
+            'insights_deferred' => $insightsDeferred,
             'dashboard_links' => $dashboardLinks, // Subtle header links on cinematic Overview (permission-gated)
         ]);
+    }
+
+    /**
+     * JSON: brand signals, momentum, and AI insights for the cinematic overview (deferred load).
+     */
+    public function insightsJson(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $tenant || ! $brand || ! $user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $payload = $this->buildBrandInsightsPayload($brand, $user);
+
+        return response()->json($payload);
+    }
+
+    /**
+     * @return array{brand_signals: mixed, momentum_data: mixed, ai_insights: mixed}
+     */
+    protected function buildBrandInsightsPayload(\App\Models\Brand $brand, User $user): array
+    {
+        $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
+        $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
+        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
+
+        return [
+            'brand_signals' => $brandSignals,
+            'momentum_data' => $momentumData,
+            'ai_insights' => $aiInsights,
+        ];
     }
 
     /**

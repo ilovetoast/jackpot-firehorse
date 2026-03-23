@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import AppHead from '../../Components/AppHead'
@@ -35,6 +36,7 @@ export default function Overview({
     brand_signals = [],
     momentum_data = {},
     ai_insights = [],
+    insights_deferred = false,
     dashboard_links = {},
 }) {
     const page = usePage()
@@ -75,6 +77,52 @@ export default function Overview({
     const downloadsCount = stats?.download_links?.value ?? 0
     const executionsCount = stats?.executions_count ?? 0
     const aiReviews = pending_ai_suggestions?.total ?? 0
+
+    const [brandSignalsState, setBrandSignalsState] = useState(brand_signals)
+    const [momentumDataState, setMomentumDataState] = useState(momentum_data)
+    const [aiInsightsState, setAiInsightsState] = useState(ai_insights)
+    const [insightsLoading, setInsightsLoading] = useState(Boolean(insights_deferred))
+
+    useEffect(() => {
+        setBrandSignalsState(brand_signals)
+        setMomentumDataState(momentum_data)
+        setAiInsightsState(ai_insights)
+    }, [brand?.id, brand_signals, momentum_data, ai_insights])
+
+    useEffect(() => {
+        if (!insights_deferred) {
+            setInsightsLoading(false)
+            return
+        }
+        const ac = new AbortController()
+        let cancelled = false
+        setInsightsLoading(true)
+        fetch('/app/overview/insights', {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            signal: ac.signal,
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+                if (cancelled || !data) return
+                setBrandSignalsState(data.brand_signals ?? [])
+                setMomentumDataState(data.momentum_data ?? {})
+                setAiInsightsState(data.ai_insights ?? [])
+            })
+            .catch(() => {
+                /* keep empty; overview still usable */
+            })
+            .finally(() => {
+                if (!cancelled) setInsightsLoading(false)
+            })
+        return () => {
+            cancelled = true
+            ac.abort()
+        }
+    }, [insights_deferred, brand?.id])
 
     // Everyone sees assets + executions
     // Managers/admins see the full set
@@ -196,20 +244,32 @@ export default function Overview({
                             </div>
                         )}
 
+                        {/* Deferred insights: lightweight placeholder while signals + LLM load after first paint */}
+                        {insights_deferred && insightsLoading && (
+                            <div
+                                className="animate-pulse space-y-3"
+                                aria-busy="true"
+                                aria-label="Loading brand insights"
+                            >
+                                <div className="h-24 rounded-xl bg-white/[0.06] ring-1 ring-white/[0.06]" />
+                                <div className="h-20 rounded-xl bg-white/[0.04] ring-1 ring-white/[0.05]" />
+                            </div>
+                        )}
+
                         {/* Active signals — What Needs Attention (permission-filtered, no empty block) */}
-                        {brand_signals?.length > 0 && (
+                        {brandSignalsState?.length > 0 && (
                             <ActiveSignals
-                                signals={brand_signals}
-                                insights={ai_insights}
+                                signals={brandSignalsState}
+                                insights={aiInsightsState}
                                 brandColor={brandColor}
                                 permissions={permissions}
                             />
                         )}
 
                         {/* AI Insights — only show orphans (insights that don't match any signal) */}
-                        {ai_insights?.length > 0 && brand_signals?.length > 0 && (() => {
+                        {aiInsightsState?.length > 0 && brandSignalsState?.length > 0 && (() => {
                             const signalTypes = new Set(
-                                brand_signals
+                                brandSignalsState
                                     .map((s) => {
                                         const c = s?.context?.category
                                         if (c === 'ai_suggestions') return 'suggestions'
@@ -217,15 +277,15 @@ export default function Overview({
                                     })
                                     .filter(Boolean)
                             )
-                            const orphans = ai_insights.filter((ins) => !ins.type || !signalTypes.has(ins.type))
+                            const orphans = aiInsightsState.filter((ins) => !ins.type || !signalTypes.has(ins.type))
                             return orphans.length > 0 ? <AIInsights insights={orphans} /> : null
                         })()}
-                        {ai_insights?.length > 0 && (!brand_signals || brand_signals.length === 0) && (
-                            <AIInsights insights={ai_insights} />
+                        {aiInsightsState?.length > 0 && (!brandSignalsState || brandSignalsState.length === 0) && (
+                            <AIInsights insights={aiInsightsState} />
                         )}
 
                         {/* Recent Momentum — aggregated, meaningful */}
-                        <RecentMomentum data={momentum_data} />
+                        <RecentMomentum data={momentumDataState} />
 
                         {/* Agency: client companies linked via tenant_agencies */}
                         {showManagedCompanies && (

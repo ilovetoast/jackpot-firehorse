@@ -477,6 +477,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
+            Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
             Route::get('/dashboard', fn () => redirect()->route('insights.overview'))->name('dashboard'); // Deprecated: redirect to Insights
 
             // Asset routes (tenant-scoped)

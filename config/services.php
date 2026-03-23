@@ -51,4 +51,16 @@ return [
         'secret' => env('STRIPE_SECRET'),
     ],
 
+    /*
+    | Mailtrap Email Sending API (railsware/mailtrap-php). Required when MAIL_MAILER=mailtrap-sdk.
+    | The API token is passed as the Symfony Mailer DSN "user"; if empty you get IncompleteDsnException: User is not set.
+    | @see https://docs.mailtrap.io/developers
+    | @see https://mailtrap.io/api-tokens
+    */
+    'mailtrap-sdk' => [
+        'host' => env('MAILTRAP_HOST', 'send.api.mailtrap.io'),
+        'apiKey' => env('MAILTRAP_API_KEY'),
+        'inboxId' => env('MAILTRAP_INBOX_ID'),
+    ],
+
 ];
