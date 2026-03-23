@@ -10,6 +10,7 @@ use App\Models\Brand;
 use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandReferenceAsset;
 use App\Models\BrandVisualReference;
+use App\Models\PdfTextExtraction;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AiMetadataGenerationService;
 use Illuminate\Support\Collection;
@@ -24,7 +25,13 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v5_context_aware';
+    public const ENGINE_VERSION = 'v6_logo_color_guards';
+
+    /** Cosine similarity vs brand logo reference embeddings above this counts as logo present. */
+    public const LOGO_EMBEDDING_SIMILARITY_THRESHOLD = 0.72;
+
+    /** Populated during {@see computeEbiSignalBreakdown()} for logging and API breakdown. */
+    protected ?array $lastLogoDetectionDetail = null;
 
     public const AI_USAGE_TYPE = 'brand_intelligence_ai';
 
@@ -97,12 +104,15 @@ class BrandIntelligenceEngine
         $rs = $refBlock['reference_similarity'];
         $score = $this->initialOverallScoreFromReferenceSimilarity($rs);
 
+        $styleRefCount = (int) ($refBlock['reference_quality']['reference_count'] ?? 0);
+        $suppressStyleMismatchPenalty = $styleRefCount < ReferenceSimilarityCalculator::MIN_STYLE_REFERENCES_FOR_EMBEDDING;
+
         $normalizedSim = $refBlock['normalized_similarity'];
         $refConfidence = $rs['confidence'] ?? 0.0;
         if ($normalizedSim !== null && $refConfidence > 0.5) {
             if ($normalizedSim > 0.8) {
                 $score += 5;
-            } elseif ($normalizedSim < 0.4) {
+            } elseif ($normalizedSim < 0.4 && ! $suppressStyleMismatchPenalty) {
                 $score -= 5;
             }
             $score = max(0, min(100, $score));
@@ -164,10 +174,12 @@ class BrandIntelligenceEngine
         }
         $confidence = max(0.0, min(1.0, round($confidence, 2)));
 
-        if ($domainRelevance < 0.3) {
-            $score -= 15;
-        } elseif ($domainRelevance < 0.5) {
-            $score -= 8;
+        if (! $suppressStyleMismatchPenalty) {
+            if ($domainRelevance < 0.3) {
+                $score -= 15;
+            } elseif ($domainRelevance < 0.5) {
+                $score -= 8;
+            }
         }
         $score = max(0, min(100, $score));
 
@@ -191,7 +203,7 @@ class BrandIntelligenceEngine
             $gv = $this->runGenerativeValidation($asset, $brand, $dryRun);
             if ($gv !== null) {
                 $aiScore = $gv['score'] / 100.0;
-                if ($aiScore < 0.4) {
+                if ($aiScore < 0.4 && ! $suppressStyleMismatchPenalty) {
                     $score -= 10;
                 }
                 $score = max(0, min(100, $score));
@@ -220,6 +232,10 @@ class BrandIntelligenceEngine
         $withRefs['identity_style_blend'] = $refBlock['identity_style_blend'] ?? null;
         $withRefs['confidence_band'] = $refBlock['confidence_band'] ?? 'low';
         $withRefs['fallback_used'] = ! empty($refBlock['reference_similarity']['fallback_used']);
+        $withRefs['style_mismatch_penalty_suppressed'] = $suppressStyleMismatchPenalty;
+
+        $consumerSignals = $this->buildConsumerSignalBreakdown($asset, $brand, $signalBreakdown);
+
         $alignmentNumeric = $this->alignmentNumericFromScoreAndReferences($score, $refBlock);
         $alignmentState = BrandAlignmentState::fromNormalizedScore($alignmentNumeric);
         $styleDeviationReason = null;
@@ -229,12 +245,22 @@ class BrandIntelligenceEngine
             $styleDeviationReason = 'Visual style differs from references while brand identity signals (logo, colors, typography) remain strong.';
             $alignmentNumeric = max($alignmentNumeric, 0.41);
         }
+        if ($alignmentState === BrandAlignmentState::OFF_BRAND
+            && $this->triStrongIdentitySignals($consumerSignals['signals'])) {
+            Log::info('[EBI] Tri-signal override: OFF_BRAND → PARTIAL_ALIGNMENT (logo+colors+typography)', [
+                'asset_id' => $asset->id,
+                'brand_id' => $brand->id,
+            ]);
+            $alignmentState = BrandAlignmentState::PARTIAL_ALIGNMENT;
+            $alignmentNumeric = max($alignmentNumeric, 0.41);
+            $styleDeviationReason = $styleDeviationReason
+                ?? 'Core brand elements (logo, colors, typography) agree; visual tone may differ from references.';
+        }
         $level = $alignmentState->toLegacyLevel();
         $withRefs['alignment_state'] = $alignmentState->value;
         $withRefs['alignment_score_normalized'] = round($alignmentNumeric, 4);
         $withRefs['signal_count'] = $signalCount;
         $withRefs['signal_breakdown'] = $signalBreakdown;
-        $consumerSignals = $this->buildConsumerSignalBreakdown($asset, $brand, $signalBreakdown);
         $withRefs['consumer_signal_breakdown'] = $consumerSignals['signals'];
         $withRefs['color_alignment_detail'] = $consumerSignals['color_alignment_detail'];
         $withRefs['reference_tier_usage'] = $refBlock['reference_tier_usage'] ?? [
@@ -270,9 +296,12 @@ class BrandIntelligenceEngine
         $withRefs['confidence'] = $confidence;
         $withRefs['context_type'] = $assetContextType->value;
         $withRefs['style_deviation_reason'] = $styleDeviationReason;
+        $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
 
         $recs = $this->generateRecommendations($withRefs);
         $withRefs['recommendations'] = $recs['recommendations'];
+
+        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
 
         $withRefs['_gate_confidence'] = $confidence;
         $withRefs['_gate_level'] = $level;
@@ -366,6 +395,8 @@ class BrandIntelligenceEngine
         $withRefs['ai_used'] = false;
         $withRefs['context_type'] = $assetContextType->value;
         $withRefs['style_deviation_reason'] = null;
+        $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
+        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
         $withRefs['_gate_confidence'] = $confidence;
         $withRefs['_gate_level'] = $level;
 
@@ -517,8 +548,10 @@ class BrandIntelligenceEngine
      */
     protected function computeEbiSignalBreakdown(Asset $asset, Brand $brand): array
     {
+        $this->lastLogoDetectionDetail = $this->buildLogoDetectionDetail($asset, $brand);
+
         return [
-            'has_logo' => $this->signalBrandHasLogo($brand),
+            'has_logo' => $this->lastLogoDetectionDetail['has_logo'],
             'has_brand_colors' => $this->signalBrandHasColors($brand),
             'has_typography' => $this->signalBrandHasTypography($asset, $brand),
             'has_reference_similarity' => $this->signalReferenceSimilarityReady($asset, $brand),
@@ -554,12 +587,172 @@ class BrandIntelligenceEngine
         return count(array_filter($breakdown, fn ($v) => $v === true));
     }
 
-    protected function signalBrandHasLogo(Brand $brand): bool
+    /**
+     * Asset-level logo signal: brand name in OCR/text OR cosine similarity to a stored logo reference embedding.
+     *
+     * @return array{
+     *     has_logo: bool,
+     *     ocr_matched: bool,
+     *     ocr_token: string|null,
+     *     embedding_similarity: float|null,
+     *     logo_reference_id: int|string|null
+     * }
+     */
+    protected function buildLogoDetectionDetail(Asset $asset, Brand $brand): array
     {
-        return BrandVisualReference::query()
+        $ocr = $this->brandNameFoundInAssetText($asset, $brand);
+        $emb = $this->maxCosineToBrandLogoReferences($asset, $brand);
+
+        $hasLogo = $ocr['matched'] === true
+            || (($emb['similarity'] ?? null) !== null && (float) $emb['similarity'] >= self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD);
+
+        if ($ocr['matched'] === true) {
+            Log::debug('[EBI] Logo signal via OCR/text match', [
+                'asset_id' => $asset->id,
+                'brand_id' => $brand->id,
+                'token' => $ocr['token'] ?? null,
+            ]);
+        }
+        if (($emb['similarity'] ?? null) !== null && (float) $emb['similarity'] >= self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD) {
+            Log::debug('[EBI] Logo signal via embedding vs logo reference', [
+                'asset_id' => $asset->id,
+                'brand_id' => $brand->id,
+                'similarity' => $emb['similarity'],
+                'logo_reference_id' => $emb['reference_id'] ?? null,
+            ]);
+        }
+
+        return [
+            'has_logo' => $hasLogo,
+            'ocr_matched' => $ocr['matched'] === true,
+            'ocr_token' => $ocr['token'] ?? null,
+            'embedding_similarity' => $emb['similarity'],
+            'logo_reference_id' => $emb['reference_id'] ?? null,
+        ];
+    }
+
+    /**
+     * @return array{matched: bool, token: string|null}
+     */
+    protected function brandNameFoundInAssetText(Asset $asset, Brand $brand): array
+    {
+        $haystack = $this->collectAssetTextHaystack($asset);
+        if ($haystack === '') {
+            return ['matched' => false, 'token' => null];
+        }
+
+        foreach ($this->brandNameSearchTokens($brand) as $token) {
+            if ($token === '') {
+                continue;
+            }
+            if (mb_stripos($haystack, $token, 0, 'UTF-8') !== false) {
+                return ['matched' => true, 'token' => $token];
+            }
+        }
+
+        return ['matched' => false, 'token' => null];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function brandNameSearchTokens(Brand $brand): array
+    {
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+        $short = is_array($payload['brand'] ?? null) ? ($payload['brand']['short_name'] ?? null) : null;
+
+        $raw = array_filter([
+            trim((string) $brand->name),
+            trim((string) $brand->slug),
+            is_string($short) ? trim($short) : null,
+        ]);
+
+        $tokens = [];
+        foreach ($raw as $r) {
+            if ($r === '') {
+                continue;
+            }
+            $tokens[] = mb_strtolower($r, 'UTF-8');
+            if (str_contains($r, '-') || str_contains($r, '_')) {
+                $tokens[] = mb_strtolower(str_replace(['-', '_'], ' ', $r), 'UTF-8');
+            }
+        }
+
+        $tokens = array_values(array_unique(array_filter($tokens, fn ($t) => mb_strlen($t, 'UTF-8') >= 2)));
+
+        return $tokens;
+    }
+
+    protected function collectAssetTextHaystack(Asset $asset): string
+    {
+        $parts = [
+            (string) ($asset->title ?? ''),
+            (string) ($asset->original_filename ?? ''),
+        ];
+        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
+        foreach (['extracted_text', 'ocr_text', 'vision_ocr', 'detected_text'] as $k) {
+            if (! empty($meta[$k]) && is_string($meta[$k])) {
+                $parts[] = $meta[$k];
+            }
+        }
+        if (Schema::hasTable('pdf_text_extractions')) {
+            $ext = PdfTextExtraction::query()
+                ->where('asset_id', $asset->id)
+                ->orderByDesc('id')
+                ->first();
+            if ($ext && is_string($ext->extracted_text ?? null) && trim($ext->extracted_text) !== '') {
+                $parts[] = $ext->extracted_text;
+            }
+        }
+
+        return mb_strtolower(trim(implode("\n", array_filter($parts))), 'UTF-8');
+    }
+
+    /**
+     * @return array{similarity: float|null, reference_id: int|string|null}
+     */
+    protected function maxCosineToBrandLogoReferences(Asset $asset, Brand $brand): array
+    {
+        $row = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
+        if (! $row || empty($row->embedding_vector)) {
+            return ['similarity' => null, 'reference_id' => null];
+        }
+        $vec = array_values($row->embedding_vector);
+
+        $q = BrandVisualReference::query()
             ->where('brand_id', $brand->id)
             ->where('type', BrandVisualReference::TYPE_LOGO)
-            ->exists();
+            ->whereNotNull('embedding_vector');
+
+        $best = null;
+        $bestId = null;
+        foreach ($q->cursor() as $ref) {
+            $refVec = array_values($ref->embedding_vector ?? []);
+            if ($refVec === [] || count($refVec) !== count($vec)) {
+                continue;
+            }
+            $c = $this->cosineSimilarity($vec, $refVec);
+            if ($best === null || $c > $best) {
+                $best = $c;
+                $bestId = $ref->id;
+            }
+        }
+
+        return [
+            'similarity' => $best !== null ? round((float) $best, 4) : null,
+            'reference_id' => $bestId,
+        ];
+    }
+
+    /**
+     * @param  array<string, bool>  $signals  Consumer-facing (post color evaluation).
+     */
+    protected function triStrongIdentitySignals(array $signals): bool
+    {
+        return ($signals['has_logo'] ?? false) === true
+            && ($signals['has_brand_colors'] ?? false) === true
+            && ($signals['has_typography'] ?? false) === true;
     }
 
     protected function signalBrandHasColors(Brand $brand): bool
@@ -1512,9 +1705,9 @@ class BrandIntelligenceEngine
             $referenceMessage = null;
         } elseif ($used && $refPercent !== null) {
             if ($align === BrandAlignmentState::PARTIAL_ALIGNMENT->value && ! empty($breakdown['style_deviation_reason'])) {
-                $referenceMessage = 'Different style detected versus references — core brand identity still reads strong.';
+                $referenceMessage = 'This asset aligns with core brand elements but differs in visual tone from current references.';
             } elseif ($align === BrandAlignmentState::OFF_BRAND->value || $refPercent < 40) {
-                $referenceMessage = 'Visual style differs from brand — consider aligning with approved style references';
+                $referenceMessage = 'This asset aligns with core brand elements but differs in visual tone from current references.';
             } elseif ($align === BrandAlignmentState::PARTIAL_ALIGNMENT->value || $refPercent <= 70) {
                 $referenceMessage = 'Visual style partially aligns — refine to better match brand look';
             }
@@ -1969,5 +2162,149 @@ class BrandIntelligenceEngine
         usort($rows, fn ($a, $b) => $b['cosine'] <=> $a['cosine']);
 
         return array_slice($rows, 0, max(1, $limit));
+    }
+
+    /**
+     * Visualization payload for the asset drawer debug overlay (coordinates normalized 0–1).
+     *
+     * @param  array<string, mixed>  $withRefs
+     * @return array{
+     *     color_regions: list<array<string, mixed>>,
+     *     logo_detections: list<array<string, mixed>>,
+     *     attention_map: string|null,
+     *     top_references: list<array{id: string, similarity: float}>
+     * }
+     */
+    protected function buildBrandIntelligenceDebugPayload(Asset $asset, Brand $brand, array $withRefs): array
+    {
+        $meta = is_array($asset->metadata) ? $asset->metadata : [];
+        $ebi = is_array($meta['ebi_debug'] ?? null) ? $meta['ebi_debug'] : [];
+
+        $base = [
+            'color_regions' => $this->heuristicColorRegionsFromAssetMetadata($asset),
+            'logo_detections' => $this->heuristicLogoDetectionsFromDetail($withRefs['logo_detection'] ?? []),
+            'attention_map' => null,
+            'top_references' => $this->buildTopReferencesDebugList($asset, $brand),
+        ];
+
+        if (isset($ebi['color_regions']) && is_array($ebi['color_regions'])) {
+            $base['color_regions'] = array_values($ebi['color_regions']);
+        }
+        if (isset($ebi['logo_detections']) && is_array($ebi['logo_detections'])) {
+            $base['logo_detections'] = array_values($ebi['logo_detections']);
+        }
+        if (array_key_exists('attention_map', $ebi)) {
+            $v = $ebi['attention_map'];
+            $base['attention_map'] = is_string($v) && $v !== '' ? $v : null;
+        }
+        if (isset($ebi['top_references']) && is_array($ebi['top_references'])) {
+            $base['top_references'] = array_values($ebi['top_references']);
+        }
+
+        return $base;
+    }
+
+    /**
+     * Approximate dominant-color regions using known metadata bundles (center / subject / high_contrast).
+     *
+     * @return list<array{x: float, y: float, width: float, height: float, color: string, score: float}>
+     */
+    protected function heuristicColorRegionsFromAssetMetadata(Asset $asset): array
+    {
+        $meta = is_array($asset->metadata) ? $asset->metadata : [];
+        $boxes = [
+            'center' => ['x' => 0.35, 'y' => 0.32, 'width' => 0.3, 'height' => 0.28],
+            'subject' => ['x' => 0.18, 'y' => 0.12, 'width' => 0.64, 'height' => 0.56],
+            'high_contrast' => ['x' => 0.08, 'y' => 0.06, 'width' => 0.84, 'height' => 0.38],
+        ];
+        $bundles = [
+            'dominant_colors_center' => 'center',
+            'dominant_colors_subject' => 'subject',
+            'dominant_colors_high_contrast' => 'high_contrast',
+        ];
+        $out = [];
+        foreach ($bundles as $key => $region) {
+            $raw = $meta[$key] ?? null;
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                $raw = is_array($decoded) ? $decoded : null;
+            }
+            if (! is_array($raw)) {
+                continue;
+            }
+            $b = $boxes[$region] ?? $boxes['center'];
+            foreach ($raw as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $hexRaw = $row['hex'] ?? null;
+                if (! is_string($hexRaw) || trim($hexRaw) === '') {
+                    continue;
+                }
+                $digits = strtoupper(ltrim(trim($hexRaw), '#'));
+                if (strlen($digits) !== 6 || ! ctype_xdigit($digits)) {
+                    continue;
+                }
+                $cov = $row['coverage'] ?? null;
+                $score = is_numeric($cov) ? (float) $cov : 0.55;
+                $score = max(0.0, min(1.0, $score));
+                $out[] = array_merge($b, [
+                    'color' => '#'.$digits,
+                    'score' => round($score, 4),
+                ]);
+            }
+        }
+
+        return array_slice($out, 0, 12);
+    }
+
+    /**
+     * @param  array<string, mixed>  $logoDetection
+     * @return list<array{x: float, y: float, width: float, height: float, method: string, confidence: float}>
+     */
+    protected function heuristicLogoDetectionsFromDetail(array $logoDetection): array
+    {
+        $out = [];
+        if (($logoDetection['ocr_matched'] ?? false) === true) {
+            $out[] = [
+                'x' => 0.03,
+                'y' => 0.04,
+                'width' => 0.55,
+                'height' => 0.11,
+                'method' => 'OCR',
+                'confidence' => 0.82,
+            ];
+        }
+        $emb = $logoDetection['embedding_similarity'] ?? null;
+        if ($emb !== null && is_numeric($emb) && (float) $emb >= self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD) {
+            $c = max(0.0, min(1.0, (float) $emb));
+            $out[] = [
+                'x' => 0.42,
+                'y' => 0.08,
+                'width' => 0.52,
+                'height' => 0.22,
+                'method' => 'Embedding',
+                'confidence' => round($c, 4),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<array{id: string, similarity: float}>
+     */
+    protected function buildTopReferencesDebugList(Asset $asset, Brand $brand): array
+    {
+        $rows = $this->topReferenceMatchesForAdmin($asset, 5);
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'id' => (string) $r['reference_asset_id'],
+                'similarity' => round((float) $r['cosine'], 4),
+            ];
+        }
+
+        return $out;
     }
 }

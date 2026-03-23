@@ -68,6 +68,12 @@ The thumbnail pipeline supports the following file types:
 - **preview**: LQIP (blurred, small)
 - **thumb**, **medium**, **large**: Standard styles. Medium preserves transparency for logos (no gray block on public pages).
 
+### LQIP (blur preview) storage and API
+
+- **Not blurhash**: the placeholder is a **tiny blurred WebP/JPEG** on S3, path stored at `metadata.preview_thumbnails.preview.path`.
+- **Delivery**: `AssetVariant::THUMB_PREVIEW` → `preview_thumbnail_url` / `thumbnail_preview` on asset JSON (same CDN URL rules as other variants).
+- **Early persist (2026-03)**: `ThumbnailGenerationService` uploads the preview style **first**, then **merges `preview_thumbnails` into asset metadata immediately** (and into the current `AssetVersion` when versioning is used). Previously, metadata was only written when the job finished, so the grid had no LQIP for the entire `PROCESSING` window. Final job completion still writes the full `thumbnails` + `preview_thumbnails` blob as before.
+
 ### Key Components
 
 1. **GenerateThumbnailsJob** (`app/Jobs/GenerateThumbnailsJob.php`)

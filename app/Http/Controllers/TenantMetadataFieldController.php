@@ -198,8 +198,20 @@ class TenantMetadataFieldController extends Controller
             'group_key' => 'nullable|string|max:255',
         ]);
 
+        $fieldRecord = DB::table('metadata_fields')
+            ->where('id', $field)
+            ->first();
+
+        if (! $fieldRecord) {
+            return response()->json(['error' => 'Field not found'], 404);
+        }
+
         try {
-            $this->fieldService->updateField($tenant, $field, $validated);
+            if (($fieldRecord->scope ?? null) === 'system') {
+                $this->fieldService->updateSystemField($field, $validated);
+            } else {
+                $this->fieldService->updateField($tenant, $field, $validated);
+            }
             MetadataCache::bumpVersion($tenant->id);
 
             return response()->json([

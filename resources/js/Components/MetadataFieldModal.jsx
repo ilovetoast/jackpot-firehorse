@@ -449,7 +449,28 @@ export default function MetadataFieldModal({
                     )
                     await Promise.all(visibilityPromises)
                 }
-                
+
+                // System fields: persist select/multiselect options (global metadata_options rows)
+                if (requiresOptions && !formData.option_editing_restricted) {
+                    const opts = prepareOptionsForSubmit(formData.options)
+                    const optionsResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': csrfToken || '',
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ options: opts }),
+                    })
+                    if (!optionsResponse.ok) {
+                        const errData = await optionsResponse.json().catch(() => ({}))
+                        setErrors(errData.errors || { error: errData.error || 'Failed to save options' })
+                        setSubmitting(false)
+                        return
+                    }
+                }
+
                 onSuccess?.()
                 onClose()
             } else if (isEditing) {
@@ -655,7 +676,8 @@ export default function MetadataFieldModal({
                     </div>
                     {isSystemField && isEditing && (
                         <p className="px-4 py-2 text-xs text-amber-600 bg-amber-50 border-b border-amber-100">
-                            System fields: Only AI eligibility and category visibility can be modified.
+                            System fields: Field key and type cannot change. You can update AI eligibility, category
+                            visibility, and for select fields the option list when it appears below.
                         </p>
                     )}
 

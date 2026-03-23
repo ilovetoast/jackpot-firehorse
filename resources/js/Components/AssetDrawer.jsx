@@ -42,7 +42,7 @@
  * @param {Array} props.assets - Array of all assets (for carousel navigation)
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
@@ -63,6 +63,8 @@ import PDFViewer from './PDFViewer'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
+
+const BrandDebugOverlay = lazy(() => import('./BrandDebugOverlay'))
 import { filterActiveCategories } from '../utils/categoryUtils'
 import { usePermission } from '../hooks/usePermission'
 import PromoteBrandReferenceModal from './PromoteBrandReferenceModal'
@@ -536,6 +538,29 @@ export default function AssetDrawer({
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
 
+    const drawerCategory = useMemo(() => {
+        const cid = getAssetCategoryId(displayAsset)
+        if (cid == null) {
+            return null
+        }
+        return categories.find((c) => String(c.id) === String(cid)) ?? null
+    }, [categories, displayAsset])
+
+    const ebiEnabledForAsset = drawerCategory?.ebi_enabled === true
+
+    const brandDebugPreviewUrl = useMemo(
+        () =>
+            displayAsset?.final_thumbnail_url ||
+            displayAsset?.thumbnail_url ||
+            displayAsset?.preview_thumbnail_url ||
+            null,
+        [
+            displayAsset?.final_thumbnail_url,
+            displayAsset?.thumbnail_url,
+            displayAsset?.preview_thumbnail_url,
+        ],
+    )
+
     // Fetch unresolved incidents when display asset changes (Unified Operations)
     useEffect(() => {
         if (!displayAsset?.id) {
@@ -596,7 +621,22 @@ export default function AssetDrawer({
     const [pdfFullExtractionLoading, setPdfFullExtractionLoading] = useState(false)
     const [pdfFullExtractionRequested, setPdfFullExtractionRequested] = useState(false)
     const pdfPollTimeoutRef = useRef(null)
-    
+
+    const [debugMode, setDebugMode] = useState(false)
+    const [debugOverlayHold, setDebugOverlayHold] = useState(false)
+    useEffect(() => {
+        if (debugMode) {
+            setDebugOverlayHold(true)
+            return
+        }
+        const t = setTimeout(() => setDebugOverlayHold(false), 320)
+        return () => clearTimeout(t)
+    }, [debugMode])
+
+    useEffect(() => {
+        setDebugMode(false)
+    }, [displayAsset?.id])
+
     // Phase V-1: Video view URL state (for gallery view)
     const [videoViewUrl, setVideoViewUrl] = useState(null)
     const [videoViewUrlLoading, setVideoViewUrlLoading] = useState(false)
@@ -1762,6 +1802,35 @@ export default function AssetDrawer({
                     
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in — responsive width */}
                     <div className="w-full max-w-full min-w-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative aspect-video">
+                        {ebiEnabledForAsset && displayAsset?.brand_intelligence && (
+                            <button
+                                type="button"
+                                onClick={() => setDebugMode((v) => !v)}
+                                className={`absolute right-2 top-2 z-40 rounded border px-2 py-1 text-xs font-medium shadow-sm backdrop-blur-sm pointer-events-auto transition-colors ${
+                                    debugMode
+                                        ? 'border-amber-400 bg-amber-50 text-amber-900'
+                                        : 'border-slate-200 bg-white/90 text-slate-700 hover:bg-white'
+                                }`}
+                                aria-pressed={debugMode}
+                            >
+                                Debug
+                            </button>
+                        )}
+                        {(debugMode || debugOverlayHold) && ebiEnabledForAsset && displayAsset?.brand_intelligence && (
+                            <div
+                                className={`pointer-events-none absolute inset-0 z-30 transition-opacity duration-300 ease-out ${
+                                    debugMode ? 'opacity-100' : 'opacity-0'
+                                }`}
+                            >
+                                <Suspense fallback={null}>
+                                    <BrandDebugOverlay
+                                        image={brandDebugPreviewUrl}
+                                        debug={displayAsset.brand_intelligence.debug}
+                                        enabled={debugMode}
+                                    />
+                                </Suspense>
+                            </div>
+                        )}
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >

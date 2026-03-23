@@ -47,6 +47,17 @@ import AssetPlaceholder from './AssetPlaceholder'
 // Enables graceful fallback when thumbnails are processing or missing from S3
 const failedThumbnailUrls = new Set()
 
+/**
+ * LQIP URL for image assets only (tiny blurred preview on S3).
+ * PDF/video/docs may still have backend preview paths; grid keeps file-type / poster behavior for those.
+ */
+function lqipPreviewUrlForAsset(asset) {
+    const mime = (asset?.mime_type || '').toLowerCase()
+    if (!mime.startsWith('image/')) {
+        return null
+    }
+    return asset?.preview_thumbnail_url ?? null
+}
 
 export default function ThumbnailPreview({
     asset,
@@ -88,22 +99,24 @@ export default function ThumbnailPreview({
         : asset?.final_thumbnail_url
 
     // SVG fallback: when no thumbnails exist, use the original SVG file (renders natively)
-    const svgOriginalFallback = isSvg && !effectiveFinalUrl && !asset?.preview_thumbnail_url
+    const lqipUrl = lqipPreviewUrlForAsset(asset)
+
+    const svgOriginalFallback = isSvg && !effectiveFinalUrl && !lqipUrl
         ? (asset?.original || null)
         : null
 
     // Lock the URL on first render for grid, but allow updates for drawer
     const [lockedUrl, setLockedUrl] = useState(() => {
-        // Determine initial URL: final > preview > SVG original > null
+        // Determine initial URL: final > LQIP (images only) > SVG original > null
         const initialFinal = effectiveFinalUrl
-        const initialPreview = asset?.preview_thumbnail_url
+        const initialPreview = lqipUrl
         return initialFinal || initialPreview || svgOriginalFallback || null
     })
     
     // Also lock the type (final vs preview) at mount time
     const [lockedType, setLockedType] = useState(() => {
         if (asset?.final_thumbnail_url) return 'final'
-        if (asset?.preview_thumbnail_url) return 'preview'
+        if (lqipUrl) return 'preview'
         return null
     })
     
@@ -114,7 +127,7 @@ export default function ThumbnailPreview({
     useEffect(() => {
         if (asset) {
             const newFinal = effectiveFinalUrl
-            const newPreview = asset?.preview_thumbnail_url
+            const newPreview = lqipPreviewUrlForAsset(asset)
             const newUrl = newFinal || newPreview || null
             const assetIdChanged = prevAssetIdRef.current !== asset?.id
             
@@ -144,18 +157,18 @@ export default function ThumbnailPreview({
             // Asset became null (drawer closed) - reset tracking
             prevAssetIdRef.current = null
         }
-    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, thumbnailVersion, lockedUrl])
+    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, asset?.mime_type, thumbnailVersion, lockedUrl])
     
     // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
     useEffect(() => {
-        if (lockedUrl && lockedType === 'preview' && !asset?.preview_thumbnail_url && !asset?.final_thumbnail_url) {
+        if (lockedUrl && lockedType === 'preview' && !lqipPreviewUrlForAsset(asset) && !asset?.final_thumbnail_url) {
             // Preview was removed - clear locked URL to show icon
             setLockedUrl(null)
             setLockedType(null)
             setImageLoaded(false)
             setImageError(false)
         }
-    }, [lockedUrl, lockedType, asset?.preview_thumbnail_url, asset?.final_thumbnail_url])
+    }, [lockedUrl, lockedType, asset?.preview_thumbnail_url, asset?.mime_type, asset?.final_thumbnail_url])
     
     // Determine if locked URL is final or preview (based on what was locked at mount)
     const lockedIsFinal = lockedType === 'final'
@@ -252,7 +265,7 @@ export default function ThumbnailPreview({
         }
         if (isPreview) {
             setImageLoaded(false)
-            if (!asset?.preview_thumbnail_url && !asset?.final_thumbnail_url) {
+            if (!lqipPreviewUrlForAsset(asset) && !asset?.final_thumbnail_url) {
                 setLockedUrl(null)
                 setLockedType(null)
                 setImageError(false)
@@ -272,10 +285,10 @@ export default function ThumbnailPreview({
     }
 
     /* ------------------------------------------------------------
-       PRIORITY 0 — FAILED STATE: Show icon immediately if thumbnail failed
-       If thumbnail generation failed, show icon even if URL exists (broken/corrupted file)
+       PRIORITY 0 — FAILED STATE: Show icon when no usable URL
+       If LQIP was persisted (image + preview_thumbnail_url), still show blur before icon.
     ------------------------------------------------------------ */
-    if (isFailed || hasThumbnailError) {
+    if ((isFailed || hasThumbnailError) && !effectiveFinalUrl && !lqipUrl) {
         return (
             <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
                 <AssetPlaceholder

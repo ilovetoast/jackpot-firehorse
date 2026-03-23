@@ -710,6 +710,14 @@ class AssetController extends Controller
                         : ($asset->thumbnail_status ?? 'pending');
 
                     $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+                    if (config('app.debug') && str_starts_with((string) ($asset->mime_type ?? ''), 'image/')
+                        && in_array($thumbnailStatus, ['processing', 'pending'], true) && ! $previewThumbnailUrl) {
+                        Log::debug('[AssetGrid] No LQIP URL while thumbnail pending/processing', [
+                            'asset_id' => $asset->id,
+                            'thumbnail_status' => $thumbnailStatus,
+                            'has_preview_metadata' => ! empty($metadata['preview_thumbnails']['preview']['path'] ?? null),
+                        ]);
+                    }
                     $finalThumbnailUrl = null;
                     $thumbnailVersion = null;
                     $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'

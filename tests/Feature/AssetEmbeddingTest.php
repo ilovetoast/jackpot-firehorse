@@ -120,7 +120,8 @@ class AssetEmbeddingTest extends TestCase
             'upload_session_id' => $session->id,
             'status' => AssetStatus::VISIBLE,
             'type' => AssetType::DELIVERABLE,
-            'title' => 'Test Image',
+            // Include brand name so EBI logo OCR signal matches (asset-level logo detection).
+            'title' => ($this->brand->name ?? 'Test').' test image',
             'original_filename' => 'test.jpg',
             'mime_type' => 'image/jpeg',
             'size_bytes' => 1024,

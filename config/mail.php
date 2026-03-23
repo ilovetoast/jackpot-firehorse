@@ -70,16 +70,20 @@ return [
         | the same transport as "smtp" with MAIL_HOST / MAIL_PORT / credentials.
         |
         */
+        // 'mailtrap' => [
+        //     'transport' => 'smtp',
+        //     'scheme' => env('MAIL_SCHEME'),
+        //     'url' => env('MAIL_URL'),
+        //     'host' => env('MAIL_HOST', 'sandbox.smtp.mailtrap.io'),
+        //     'port' => env('MAIL_PORT', 2525),
+        //     'username' => env('MAIL_USERNAME'),
+        //     'password' => env('MAIL_PASSWORD'),
+        //     'timeout' => null,
+        //     'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+        // ],
+
         'mailtrap' => [
-            'transport' => 'smtp',
-            'scheme' => env('MAIL_SCHEME'),
-            'url' => env('MAIL_URL'),
-            'host' => env('MAIL_HOST', 'sandbox.smtp.mailtrap.io'),
-            'port' => env('MAIL_PORT', 2525),
-            'username' => env('MAIL_USERNAME'),
-            'password' => env('MAIL_PASSWORD'),
-            'timeout' => null,
-            'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+            'transport' => 'mailtrap',
         ],
 
         'ses' => [

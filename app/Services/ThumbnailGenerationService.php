@@ -490,6 +490,12 @@ class ThumbnailGenerationService
                             'width' => $previewInfo['width'] ?? null,
                             'height' => $previewInfo['height'] ?? null,
                         ]);
+
+                        // LQIP: persist preview_thumbnails to DB immediately so the API can expose
+                        // preview_thumbnail_url while final thumb/medium/large are still generating.
+                        // Previously metadata was only written at job completion, so the grid saw no blur
+                        // for the entire PROCESSING window (see docs/THUMBNAIL_PIPELINE.md).
+                        $this->persistEarlyLqipMetadata($asset, $previewThumbnails, $version);
                         
                         // Clean up local preview thumbnail
                         @unlink($previewPath);
@@ -643,6 +649,48 @@ class ThumbnailGenerationService
             if (file_exists($tempPath)) {
                 @unlink($tempPath);
             }
+        }
+    }
+
+    /**
+     * Write preview (LQIP) paths to asset metadata as soon as the tiny blurred file is on S3.
+     *
+     * Without this, GenerateThumbnailsJob only persisted thumbnails at the end of the job, so
+     * preview_thumbnail_url was null for the whole PROCESSING interval and the grid showed icons.
+     * Final metadata merge at job completion overwrites/aligns the same keys.
+     */
+    protected function persistEarlyLqipMetadata(Asset $asset, array $previewThumbnails, ?AssetVersion $version = null): void
+    {
+        if (empty($previewThumbnails['preview']['path'])) {
+            return;
+        }
+
+        $merge = ['preview_thumbnails' => $previewThumbnails];
+
+        try {
+            if ($version !== null) {
+                $version->refresh();
+                $version->update([
+                    'metadata' => array_merge($version->metadata ?? [], $merge),
+                ]);
+            }
+
+            $asset->refresh();
+            $asset->update([
+                'metadata' => array_merge($asset->metadata ?? [], $merge),
+            ]);
+
+            Log::debug('[LQIP] Early persist: preview_thumbnails available before final thumbnails finish', [
+                'asset_id' => $asset->id,
+                'version_id' => $version?->id,
+                'preview_path' => $previewThumbnails['preview']['path'],
+            ]);
+        } catch (\Throwable $e) {
+            // Non-fatal: final job completion still writes preview_thumbnails
+            Log::warning('[ThumbnailGenerationService] Early LQIP metadata persist failed (non-fatal)', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

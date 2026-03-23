@@ -371,6 +371,110 @@ class TenantMetadataFieldService
     }
 
     /**
+     * Update a global (scope=system) metadata field — e.g. option lists for photo_type, logo_type.
+     * Does not use tenant_id on the field row; callers must still be authorized tenant admins.
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
+     */
+    public function updateSystemField(int $fieldId, array $data): bool
+    {
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->where('scope', 'system')
+            ->whereNull('archived_at')
+            ->first();
+
+        if (! $field) {
+            throw new \InvalidArgumentException("System field {$fieldId} not found.");
+        }
+
+        $updateData = [];
+        if (isset($data['system_label'])) {
+            $updateData['system_label'] = $data['system_label'];
+        }
+        if (isset($data['applies_to'])) {
+            $updateData['applies_to'] = $data['applies_to'];
+        }
+        if (isset($data['is_filterable'])) {
+            $updateData['is_filterable'] = $data['is_filterable'];
+        }
+        if (isset($data['show_on_upload'])) {
+            $updateData['show_on_upload'] = $data['show_on_upload'];
+        }
+        if (isset($data['show_on_edit'])) {
+            $updateData['show_on_edit'] = $data['show_on_edit'];
+        }
+        if (isset($data['show_in_filters'])) {
+            $updateData['show_in_filters'] = $data['show_in_filters'];
+        }
+        if (isset($data['group_key'])) {
+            $updateData['group_key'] = $data['group_key'];
+        }
+        if (isset($data['ai_eligible'])) {
+            $updateData['ai_eligible'] = $data['ai_eligible'];
+        }
+
+        if (isset($data['options']) && is_array($data['options'])) {
+            if (MetadataOptionEditGuard::isRestricted($field)) {
+                throw ValidationException::withMessages([
+                    'options' => ['This field uses a system-managed display and does not support manual options.'],
+                ]);
+            }
+
+            if (! in_array($field->type, ['select', 'multiselect'], true)) {
+                throw ValidationException::withMessages([
+                    'options' => ['Options can only be set for select or multiselect fields.'],
+                ]);
+            }
+
+            if ($data['options'] === []) {
+                throw ValidationException::withMessages([
+                    'options' => ['At least one option is required.'],
+                ]);
+            }
+
+            DB::table('metadata_options')
+                ->where('metadata_field_id', $fieldId)
+                ->delete();
+
+            foreach ($data['options'] as $option) {
+                $systemLabel = $option['system_label'] ?? $option['label'] ?? '';
+                DB::table('metadata_options')->insert([
+                    'metadata_field_id' => $fieldId,
+                    'value' => $option['value'],
+                    'system_label' => $systemLabel,
+                    'color' => $this->normalizeOptionColor($option['color'] ?? null),
+                    'icon' => $this->normalizeOptionIcon($option['icon'] ?? null),
+                    'is_system' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+        if ($updateData !== []) {
+            $updateData['updated_at'] = now();
+            DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->update($updateData);
+        } elseif (isset($data['options']) && is_array($data['options'])) {
+            DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->update(['updated_at' => now()]);
+        }
+
+        Log::info('System metadata field updated', [
+            'field_id' => $fieldId,
+            'field_key' => $field->key,
+            'options_updated' => isset($data['options']) && is_array($data['options']),
+        ]);
+
+        return true;
+    }
+
+    /**
      * Get a single tenant metadata field.
      *
      * @param Tenant $tenant

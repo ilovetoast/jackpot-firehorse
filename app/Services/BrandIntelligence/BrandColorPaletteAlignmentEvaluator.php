@@ -5,6 +5,7 @@ namespace App\Services\BrandIntelligence;
 use App\Models\Asset;
 use App\Models\Brand;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Compares asset dominant colors (from image analysis) to the brand palette using ΔE76
@@ -35,16 +36,18 @@ final class BrandColorPaletteAlignmentEvaluator
      *     brand_colors_available: bool,
      *     asset_colors_available: bool,
      *     mean_min_delta_e: float|null,
-     *     per_brand_min_delta_e: list<float>
+     *     per_brand_min_delta_e: list<float>,
+     *     color_signal_source: string|null
      * }
      */
     public function evaluate(Asset $asset, Brand $brand): array
     {
         $brandHexes = $this->extractBrandPaletteHexes($brand);
-        $assetColors = $this->extractAssetDominantColors($asset);
+        $assetColorsGlobal = $this->extractAssetDominantColors($asset);
+        $assetColorsRegional = $this->extractRegionalPriorityColors($asset);
 
         $brandOk = count($brandHexes) > 0;
-        $assetOk = count($assetColors) > 0;
+        $assetOk = count($assetColorsGlobal) > 0 || count($assetColorsRegional) > 0;
 
         if (! $brandOk || ! $assetOk) {
             return [
@@ -55,6 +58,7 @@ final class BrandColorPaletteAlignmentEvaluator
                 'asset_colors_available' => $assetOk,
                 'mean_min_delta_e' => null,
                 'per_brand_min_delta_e' => [],
+                'color_signal_source' => null,
             ];
         }
 
@@ -66,8 +70,134 @@ final class BrandColorPaletteAlignmentEvaluator
             }
         }
 
+        $trySets = [];
+        if ($assetColorsRegional !== []) {
+            $trySets['regional'] = $assetColorsRegional;
+        }
+        if ($assetColorsGlobal !== []) {
+            $trySets['global'] = $assetColorsGlobal;
+        }
+
+        $bestAligned = false;
+        $bestMean = null;
+        $bestPerBrand = [];
+        $bestOpposite = false;
+        $winningSource = null;
+
+        foreach ($trySets as $label => $assetColors) {
+            $assetLabs = $this->assetRowsToLabs($assetColors);
+            if ($brandLabs === [] || $assetLabs === []) {
+                continue;
+            }
+
+            $perBrandMin = [];
+            foreach ($brandLabs as $bLab) {
+                $min = null;
+                foreach ($assetLabs as $a) {
+                    $d = $this->deltaE76($bLab, $a['lab']);
+                    $min = $min === null ? $d : min($min, $d);
+                }
+                $perBrandMin[] = (float) $min;
+            }
+
+            $meanMin = array_sum($perBrandMin) / max(1, count($perBrandMin));
+            $opposite = $this->detectOppositePalette($brandHexes, $assetColors);
+
+            $strongHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_STRONG));
+            $closeHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_CLOSE));
+
+            $aligned = ! $opposite
+                && (
+                    $meanMin <= self::DELTA_E_CLOSE
+                    || ($closeHits >= max(1, (int) ceil(count($perBrandMin) * 0.5)) && $meanMin <= self::DELTA_E_AVG_FAIL)
+                    || ($strongHits >= 1 && $meanMin <= self::DELTA_E_AVG_FAIL + 6)
+                );
+
+            if (! $opposite && $meanMin > self::DELTA_E_AVG_FAIL && $closeHits === 0) {
+                $aligned = false;
+            }
+
+            if ($aligned) {
+                $bestAligned = true;
+                $bestMean = $meanMin;
+                $bestPerBrand = $perBrandMin;
+                $bestOpposite = $opposite;
+                $winningSource = $label;
+                break;
+            }
+
+            if ($bestMean === null || $meanMin < $bestMean) {
+                $bestMean = $meanMin;
+                $bestPerBrand = $perBrandMin;
+                $bestOpposite = $opposite;
+                $winningSource = $label;
+            }
+        }
+
+        if ($bestMean === null) {
+            return [
+                'evaluated' => false,
+                'aligned' => null,
+                'opposite_palette' => false,
+                'brand_colors_available' => $brandOk,
+                'asset_colors_available' => $assetOk,
+                'mean_min_delta_e' => null,
+                'per_brand_min_delta_e' => [],
+                'color_signal_source' => null,
+            ];
+        }
+
+        $meanMin = $bestMean;
+        $perBrandMin = $bestPerBrand;
+        $opposite = $bestOpposite;
+
+        $strongHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_STRONG));
+        $closeHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_CLOSE));
+
+        $aligned = $bestAligned;
+        if (! $aligned) {
+            $aligned = ! $opposite
+                && (
+                    $meanMin <= self::DELTA_E_CLOSE
+                    || ($closeHits >= max(1, (int) ceil(count($perBrandMin) * 0.5)) && $meanMin <= self::DELTA_E_AVG_FAIL)
+                    || ($strongHits >= 1 && $meanMin <= self::DELTA_E_AVG_FAIL + 6)
+                );
+
+            if (! $opposite && $meanMin > self::DELTA_E_AVG_FAIL && $closeHits === 0) {
+                $aligned = false;
+            }
+        }
+
+        $signalSource = $aligned && $winningSource !== null ? $winningSource : ($winningSource ?? 'global');
+
+        if ($aligned) {
+            Log::debug('[EBI] Color palette evaluation', [
+                'asset_id' => $asset->id,
+                'color_signal_source' => $signalSource,
+                'mean_min_delta_e' => round($meanMin, 2),
+            ]);
+        }
+
+        return [
+            'evaluated' => true,
+            'aligned' => $aligned,
+            'opposite_palette' => $opposite,
+            'brand_colors_available' => true,
+            'asset_colors_available' => true,
+            'mean_min_delta_e' => round($meanMin, 2),
+            'per_brand_min_delta_e' => array_map(fn (float $v) => round($v, 2), $perBrandMin),
+            'color_signal_source' => $signalSource,
+        ];
+    }
+
+    /**
+     * @param  list<array{hex: string, coverage?: float}>  $rows
+     * @return list<array{lab: array{0: float, 1: float, 2: float}, weight: float}>
+     */
+    private function assetRowsToLabs(array $rows): array
+    {
         $assetLabs = [];
-        foreach ($assetColors as $row) {
+        foreach ($rows as $row) {
             $hex = $row['hex'] ?? null;
             if (! is_string($hex)) {
                 continue;
@@ -81,54 +211,87 @@ final class BrandColorPaletteAlignmentEvaluator
             }
         }
 
-        if ($brandLabs === [] || $assetLabs === []) {
-            return [
-                'evaluated' => false,
-                'aligned' => null,
-                'opposite_palette' => false,
-                'brand_colors_available' => $brandOk,
-                'asset_colors_available' => $assetOk,
-                'mean_min_delta_e' => null,
-                'per_brand_min_delta_e' => [],
-            ];
-        }
+        return $assetLabs;
+    }
 
-        $perBrandMin = [];
-        foreach ($brandLabs as $bLab) {
-            $min = null;
-            foreach ($assetLabs as $a) {
-                $d = $this->deltaE76($bLab, $a['lab']);
-                $min = $min === null ? $d : min($min, $d);
-            }
-            $perBrandMin[] = (float) $min;
-        }
-
-        $meanMin = array_sum($perBrandMin) / max(1, count($perBrandMin));
-        $opposite = $this->detectOppositePalette($brandHexes, $assetColors);
-
-        $strongHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_STRONG));
-        $closeHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_CLOSE));
-
-        $aligned = ! $opposite
-            && (
-                $meanMin <= self::DELTA_E_CLOSE
-                || ($closeHits >= max(1, (int) ceil(count($perBrandMin) * 0.5)) && $meanMin <= self::DELTA_E_AVG_FAIL)
-                || ($strongHits >= 1 && $meanMin <= self::DELTA_E_AVG_FAIL + 6)
-            );
-
-        if (! $opposite && $meanMin > self::DELTA_E_AVG_FAIL && $closeHits === 0) {
-            $aligned = false;
-        }
-
-        return [
-            'evaluated' => true,
-            'aligned' => $aligned,
-            'opposite_palette' => $opposite,
-            'brand_colors_available' => true,
-            'asset_colors_available' => true,
-            'mean_min_delta_e' => round($meanMin, 2),
-            'per_brand_min_delta_e' => array_map(fn (float $v) => round($v, 2), $perBrandMin),
+    /**
+     * Prefer center / high-contrast / subject crops when present in metadata (pipeline may populate these keys).
+     *
+     * @return list<array{hex: string, coverage?: float}>
+     */
+    private function extractRegionalPriorityColors(Asset $asset): array
+    {
+        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
+        $regionWeights = [
+            'center' => 1.85,
+            'subject' => 1.75,
+            'high_contrast' => 1.55,
+            'global' => 1.0,
+            'edge' => 0.55,
         ];
+
+        $out = [];
+        $bundles = [
+            'dominant_colors_center' => 'center',
+            'dominant_colors_subject' => 'subject',
+            'dominant_colors_high_contrast' => 'high_contrast',
+        ];
+        foreach ($bundles as $key => $region) {
+            $raw = $meta[$key] ?? null;
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                $raw = is_array($decoded) ? $decoded : null;
+            }
+            if (! is_array($raw)) {
+                continue;
+            }
+            $w = $regionWeights[$region] ?? 1.0;
+            foreach ($raw as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $hex = $row['hex'] ?? null;
+                if (! is_string($hex)) {
+                    continue;
+                }
+                $norm = $this->normalizeHex($hex);
+                if ($norm === null) {
+                    continue;
+                }
+                $cov = $row['coverage'] ?? null;
+                $base = is_numeric($cov) ? (float) $cov : 1.0;
+                $out[] = ['hex' => $norm, 'coverage' => $base * $w];
+            }
+        }
+
+        $global = $this->extractAssetDominantColors($asset);
+        foreach ($global as $row) {
+            $region = isset($row['region']) && is_string($row['region']) ? $row['region'] : 'global';
+            $rw = $regionWeights[$region] ?? $regionWeights['global'];
+            $cov = isset($row['coverage']) && is_numeric($row['coverage']) ? (float) $row['coverage'] : 1.0;
+            $hex = $row['hex'] ?? null;
+            if (is_string($hex)) {
+                $norm = $this->normalizeHex($hex);
+                if ($norm !== null) {
+                    $out[] = ['hex' => $norm, 'coverage' => $cov * $rw];
+                }
+            }
+        }
+
+        if ($out === [] && $global !== []) {
+            foreach (array_slice($global, 0, 3) as $row) {
+                $hex = $row['hex'] ?? null;
+                if (is_string($hex)) {
+                    $norm = $this->normalizeHex($hex);
+                    if ($norm !== null) {
+                        $cov = isset($row['coverage']) && is_numeric($row['coverage']) ? (float) $row['coverage'] : 1.0;
+                        $out[] = ['hex' => $norm, 'coverage' => $cov * 1.35];
+                    }
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**

@@ -225,7 +225,7 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                 </p>
             ) : (
                 <div className="mt-2">
-                    <BrandSignalBreakdown brandIntelligence={bi} />
+                    <BrandSignalBreakdown brandIntelligence={bi} brandId={asset?.brand_id ?? asset?.brand?.id} />
                 </div>
             )}
             {!rescoreLoading &&

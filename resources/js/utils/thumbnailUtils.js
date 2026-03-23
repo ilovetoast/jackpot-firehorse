@@ -236,9 +236,10 @@ export function getThumbnailState(asset, retryCount = 0) {
         }
     }
     
-    // Priority 2: Preview thumbnail (temporary, low-quality)
-    // Only use preview if status is not failed/skipped (allows preview during processing)
-    if (asset?.preview_thumbnail_url && thumbnailStatus !== 'failed' && thumbnailStatus !== 'skipped') {
+    // Priority 2: Preview thumbnail (temporary, low-quality / LQIP)
+    // Use whenever the API exposes a URL. Even if thumbnail_status is failed, a tiny blur may
+    // have been persisted early (partial pipeline); grid should still prefer it over icon for images.
+    if (asset?.preview_thumbnail_url && thumbnailStatus !== 'skipped') {
         return {
             state: 'PENDING', // Still processing, but preview available
             thumbnailUrl: asset.preview_thumbnail_url,

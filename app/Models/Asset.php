@@ -6,6 +6,8 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use App\Jobs\FullPdfExtractionJob;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -683,7 +685,7 @@ class Asset extends Model
     /**
      * Brand Intelligence fields for the asset drawer / grid (excludes raw numeric overall score).
      *
-     * @return array{level: string|null, confidence: float|null, breakdown_json: array, alignment_state: ?string, signal_count: ?int, signal_breakdown: ?array, reference_tier_usage: ?array}|null
+     * @return array{level: string|null, confidence: float|null, breakdown_json: array, alignment_state: ?string, signal_count: ?int, signal_breakdown: ?array, reference_tier_usage: ?array, debug: ?array}|null
      */
     public function brandIntelligencePayloadForFrontend(): ?array
     {
@@ -702,7 +704,46 @@ class Asset extends Model
             'signal_count' => $bj['signal_count'] ?? null,
             'signal_breakdown' => $bj['signal_breakdown'] ?? null,
             'reference_tier_usage' => $bj['reference_tier_usage'] ?? null,
+            'debug' => $this->hydrateBrandIntelligenceDebug(is_array($bj['debug'] ?? null) ? $bj['debug'] : null),
         ];
+    }
+
+    /**
+     * Add signed thumbnail URLs to debug top references for the app UI.
+     *
+     * @param  array<string, mixed>|null  $debug
+     * @return array<string, mixed>|null
+     */
+    protected function hydrateBrandIntelligenceDebug(?array $debug): ?array
+    {
+        if ($debug === null) {
+            return null;
+        }
+
+        $refs = $debug['top_references'] ?? null;
+        if (! is_array($refs) || $refs === []) {
+            return $debug;
+        }
+
+        $hydrated = [];
+        foreach ($refs as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $id = $row['id'] ?? null;
+            $thumbnail = null;
+            if (is_string($id) && $id !== '') {
+                $refAsset = static::query()->whereKey($id)->first();
+                if ($refAsset !== null) {
+                    $url = $refAsset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+                    $thumbnail = $url !== '' ? $url : null;
+                }
+            }
+            $hydrated[] = array_merge($row, ['thumbnail' => $thumbnail]);
+        }
+        $debug['top_references'] = $hydrated;
+
+        return $debug;
     }
 
     /**
