@@ -82,8 +82,8 @@ return [
         //     'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         // ],
 
-        'mailtrap' => [
-            'transport' => 'mailtrap',
+        'mailtrap-sdk' => [
+            'transport' => 'mailtrap-sdk',
         ],
 
         'ses' => [

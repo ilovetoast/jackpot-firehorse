@@ -2,32 +2,28 @@ import { useEffect, useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
- * Confirm promoting an asset into the brand style-reference pool (EBI).
- * Type is fixed by which drawer button opened the modal — no tier/weight UI.
+ * Promote an asset into the brand style-reference pool (EBI).
+ * One primary path (style reference) with optional upgrade to guideline tier via checkbox.
  *
  * @param {Object} props
  * @param {boolean} props.isOpen
  * @param {() => void} props.onClose
  * @param {string} props.assetId
- * @param {'reference'|'guideline'} props.initialType
  * @param {Array<{ id?: number|string, name?: string }>} [props.categories]
- * @param {string|null} [props.defaultCategoryName] — e.g. asset’s current category name for preselect
+ * @param {string|null} [props.defaultCategoryName]
  * @param {(payload: { reference_promotion: { kind: string, tier: number, category: string|null } }) => void} props.onSuccess
  */
 export default function PromoteBrandReferenceModal({
     isOpen,
     onClose,
     assetId,
-    initialType = 'reference',
     categories = [],
     defaultCategoryName = null,
     onSuccess,
 }) {
-    const isGuideline = initialType === 'guideline'
-    const type = isGuideline ? 'guideline' : 'reference'
-
     const [category, setCategory] = useState('')
     const [contextType, setContextType] = useState('')
+    const [alsoAddToGuidelines, setAlsoAddToGuidelines] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
 
@@ -55,6 +51,7 @@ export default function PromoteBrandReferenceModal({
     useEffect(() => {
         if (!isOpen) return
         setError(null)
+        setAlsoAddToGuidelines(false)
         const names = categoryOptions.map((c) => c.name)
         const pref = (defaultCategoryName || '').trim()
         if (pref && names.includes(pref)) {
@@ -63,16 +60,13 @@ export default function PromoteBrandReferenceModal({
             setCategory('')
         }
         setContextType('')
-    }, [isOpen, initialType, categoryOptions, defaultCategoryName])
+    }, [isOpen, categoryOptions, defaultCategoryName])
 
     if (!isOpen) {
         return null
     }
 
-    const title = isGuideline ? 'Add to brand guidelines' : 'Add as style reference'
-    const blurb = isGuideline
-        ? 'This asset will be used as a strong visual guideline when we evaluate brand alignment.'
-        : 'This asset will be used as inspiration when we evaluate brand alignment.'
+    const promotionType = alsoAddToGuidelines ? 'guideline' : 'reference'
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -90,7 +84,7 @@ export default function PromoteBrandReferenceModal({
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify({
-                    type,
+                    type: promotionType,
                     category: category.trim() || null,
                     context_type: contextType.trim() || null,
                 }),
@@ -117,16 +111,18 @@ export default function PromoteBrandReferenceModal({
     }
 
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="promote-reference-title">
             <button
                 type="button"
                 className="absolute inset-0 bg-black/40"
                 aria-label="Close"
                 onClick={() => !loading && onClose()}
             />
-            <div className="relative w-full max-w-md rounded-xl bg-white shadow-xl ring-1 ring-black/5">
+            <div className="relative w-full max-w-lg rounded-xl bg-white shadow-xl ring-1 ring-black/5">
                 <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-                    <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+                    <h2 id="promote-reference-title" className="text-base font-semibold text-gray-900">
+                        Add as brand reference
+                    </h2>
                     <button
                         type="button"
                         className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
@@ -135,8 +131,42 @@ export default function PromoteBrandReferenceModal({
                         <XMarkIcon className="h-5 w-5" />
                     </button>
                 </div>
-                <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4">
-                    <p className="text-sm text-gray-600 leading-relaxed">{blurb}</p>
+                <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4 max-h-[min(85vh,32rem)] overflow-y-auto">
+                    <p className="text-sm text-gray-600 leading-relaxed">
+                        Add this asset to your brand’s reference library. Brand Intelligence uses these examples when scoring alignment
+                        and surfacing suggestions—especially when paired with the category and creative context you choose below.
+                    </p>
+
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">Promote as a style reference</h3>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                            This asset will be treated as a promoted reference when we evaluate on-brand fit. We prioritize examples in
+                            the same <span className="font-medium text-gray-800">category</span> (and optional creative context) so the
+                            model learns what “good” looks like for your team—not generic stock, but your brand’s own bar.
+                        </p>
+                    </div>
+
+                    <div className="rounded-lg border border-violet-100 bg-violet-50/40 p-3 space-y-3">
+                        <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={alsoAddToGuidelines}
+                                onChange={(e) => setAlsoAddToGuidelines(e.target.checked)}
+                                disabled={loading}
+                                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="min-w-0">
+                                <span className="text-sm font-medium text-gray-900">Also add to brand guidelines</span>
+                                <span className="block text-sm text-gray-600 leading-relaxed mt-1">
+                                    When checked, this asset is also presented as a formal <strong className="font-medium">creative reference</strong> in
+                                    your brand guidelines. That uses a <strong className="font-medium">stronger guideline weight</strong> in Brand
+                                    Intelligence than a standard reference—so it can influence alignment scores and AI suggestions more
+                                    noticeably. Use this when the creative should publicly represent the brand; leave unchecked for most
+                                    day-to-day reference adds.
+                                </span>
+                            </span>
+                        </label>
+                    </div>
 
                     <div>
                         <label htmlFor="promote-context-type" className="block text-sm font-medium text-gray-700 mb-1">
@@ -146,7 +176,7 @@ export default function PromoteBrandReferenceModal({
                             id="promote-context-type"
                             value={contextType}
                             onChange={(e) => setContextType(e.target.value)}
-                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mb-4"
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                             disabled={loading}
                         >
                             {contextTypeOptions.map((o) => (
@@ -184,7 +214,7 @@ export default function PromoteBrandReferenceModal({
                             {error}
                         </p>
                     )}
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
                         <button
                             type="button"
                             className="rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
@@ -197,7 +227,11 @@ export default function PromoteBrandReferenceModal({
                             disabled={loading}
                             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
                         >
-                            {loading ? 'Saving…' : 'Add'}
+                            {loading
+                                ? 'Saving…'
+                                : alsoAddToGuidelines
+                                  ? 'Add as guideline reference'
+                                  : 'Add style reference'}
                         </button>
                     </div>
                 </form>

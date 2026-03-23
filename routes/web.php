@@ -559,6 +559,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/brand-intelligence', [\App\Http\Controllers\AssetMetadataController::class, 'brandIntelligence'])->name('assets.brand-intelligence');
+            Route::post('/assets/{asset}/brand-intelligence/ensure', [\App\Http\Controllers\AssetMetadataController::class, 'ensureBrandIntelligence'])->name('assets.brand-intelligence.ensure');
             Route::post('/assets/{asset}/brand-intelligence/feedback', [\App\Http\Controllers\AssetMetadataController::class, 'storeBrandIntelligenceFeedback'])->name('assets.brand-intelligence.feedback');
             Route::post('/assets/{asset}/rescore', [\App\Http\Controllers\AssetMetadataController::class, 'rescore'])->name('assets.rescore');
             Route::post('/assets/{asset}/reanalyze', [\App\Http\Controllers\AssetMetadataController::class, 'reanalyze'])->name('assets.reanalyze');

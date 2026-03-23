@@ -6,6 +6,7 @@ use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\BrandVisualReference;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -63,6 +64,8 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             Log::info('[GenerateAssetEmbeddingJob] Embedding already exists, skipping', [
                 'asset_id' => $asset->id,
             ]);
+            // Still queue EBI if pipeline never scored (e.g. prior job failure, or race).
+            app(BrandIntelligenceScheduleService::class)->dispatchAfterPipelineComplete($asset->fresh());
 
             return;
         }
@@ -83,6 +86,7 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
         $vector = $existing?->embedding_vector ?? $embeddingService->embedAsset($asset);
         if (empty($vector)) {
             Log::warning('[GenerateAssetEmbeddingJob] Empty embedding returned', ['asset_id' => $asset->id]);
+            app(BrandIntelligenceScheduleService::class)->dispatchAfterPipelineComplete($asset->fresh());
 
             return;
         }

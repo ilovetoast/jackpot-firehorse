@@ -155,7 +155,6 @@ export default function AssetDrawer({
     const [finalizeCategoryId, setFinalizeCategoryId] = useState(null)
     const [finalizeLoading, setFinalizeLoading] = useState(false)
     const [promoteModalOpen, setPromoteModalOpen] = useState(false)
-    const [promoteModalInitialType, setPromoteModalInitialType] = useState('reference')
 
     // Unified Operations: Unresolved incidents for asset (processing issues)
     const [assetIncidents, setAssetIncidents] = useState([])
@@ -191,6 +190,9 @@ export default function AssetDrawer({
     
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
+    const [brandIntelActivityBanner, setBrandIntelActivityBanner] = useState(null)
+    /** Dev-only: pipeline debug snapshot lifted from AssetMetadataDisplay (single fetch). */
+    const [pipelineDevSnap, setPipelineDevSnap] = useState(null)
     const [toastType, setToastType] = useState('success')
     const [toastTicketUrl, setToastTicketUrl] = useState(null)
     
@@ -574,6 +576,14 @@ export default function AssetDrawer({
             })
             .catch(() => setAssetIncidents([]))
             .finally(() => setIncidentsLoading(false))
+    }, [displayAsset?.id])
+
+    useEffect(() => {
+        setBrandIntelActivityBanner(null)
+    }, [displayAsset?.id])
+
+    useEffect(() => {
+        setPipelineDevSnap(null)
     }, [displayAsset?.id])
 
     // Fetch Reliability Timeline when section expanded (lazy load)
@@ -2556,65 +2566,119 @@ export default function AssetDrawer({
                     <MetadataCandidateReview assetId={displayAsset.id} primaryColor={brandPrimary} />
                 )}
 
-                {/* Remove standalone Tag Management - will be moved into metadata section */}
-
-                {/* AI Tag Suggestions */}
-                {displayAsset?.id && (
-                    <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} primaryColor={brandPrimary} />
-                )}
-
-                {can('brand_settings.manage') && displayAsset?.id && (
-                    <div className="border-t border-gray-200 px-4 py-4 md:px-6">
-                        <h3 className="text-sm font-semibold text-gray-900 mb-2">Use as Reference</h3>
-                        {displayAsset.reference_promotion ? (
-                            <div className="flex items-center gap-2">
-                                <span
-                                    className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
-                                        displayAsset.reference_promotion.kind === 'guideline'
-                                            ? 'bg-violet-100 text-violet-800'
-                                            : 'bg-sky-100 text-sky-800'
-                                    }`}
+                {/* Brand insight stack: AI suggested tags + reference promotion + Brand Intelligence (aligned, shared panel) */}
+                {displayAsset?.id &&
+                    (can('brand_settings.manage') ||
+                        displayAsset.category?.ebi_enabled === true ||
+                        can('metadata.suggestions.view')) && (
+                    <div className="border-t border-gray-200 bg-gradient-to-b from-slate-50/80 to-white">
+                        <div className="px-4 md:px-6 py-3 space-y-3">
+                            {brandIntelActivityBanner && (
+                                <div
+                                    className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm"
+                                    role="status"
+                                    aria-live="polite"
                                 >
-                                    {displayAsset.reference_promotion.kind === 'guideline' ? 'Guideline' : 'Reference'}
-                                </span>
-                                {displayAsset.reference_promotion.category && (
-                                    <span className="text-xs text-gray-500">{displayAsset.reference_promotion.category}</span>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col sm:flex-row gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setPromoteModalInitialType('reference')
-                                        setPromoteModalOpen(true)
-                                    }}
-                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                                >
-                                    Promote as Reference
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setPromoteModalInitialType('guideline')
-                                        setPromoteModalOpen(true)
-                                    }}
-                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                                >
-                                    Add to Brand Guidelines
-                                </button>
-                            </div>
-                        )}
+                                    <ArrowPathIcon
+                                        className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-slate-600"
+                                        aria-hidden
+                                    />
+                                    <span>{brandIntelActivityBanner}</span>
+                                </div>
+                            )}
+                            <AiTagSuggestionsInline
+                                key={`ai-tags-${displayAsset.id}`}
+                                assetId={displayAsset.id}
+                                primaryColor={brandPrimary}
+                                drawerInsightGroup
+                            />
+                            {can('brand_settings.manage') && (
+                                <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
+                                    <div className="flex gap-2.5">
+                                        <RectangleStackIcon
+                                            className="h-4 w-4 text-slate-500 flex-shrink-0 mt-0.5"
+                                            aria-hidden
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="text-xs font-semibold text-gray-900">Use as a brand reference</h3>
+                                            <p className="text-xs text-gray-600 mt-1 leading-snug">
+                                                Promote this asset as a reference so Brand Intelligence learns what on-brand looks like
+                                                for your team—especially alongside other assets in the same category.
+                                            </p>
+                                            {displayAsset.reference_promotion ? (
+                                                <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                                                    <span
+                                                        className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
+                                                            displayAsset.reference_promotion.kind === 'guideline'
+                                                                ? 'bg-violet-100 text-violet-800'
+                                                                : 'bg-sky-100 text-sky-800'
+                                                        }`}
+                                                    >
+                                                        {displayAsset.reference_promotion.kind === 'guideline'
+                                                            ? 'Guideline'
+                                                            : 'Reference'}
+                                                    </span>
+                                                    {displayAsset.reference_promotion.category && (
+                                                        <span className="text-xs text-gray-500">
+                                                            {displayAsset.reference_promotion.category}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPromoteModalOpen(true)}
+                                                    className="mt-2.5 inline-flex justify-center rounded-md px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2"
+                                                    style={{
+                                                        backgroundColor: brandPrimary,
+                                                        ['--tw-ring-color']: brandPrimary,
+                                                    }}
+                                                >
+                                                    Add reference
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            <AssetBrandIntelligenceBlock
+                                asset={displayAsset}
+                                onAssetUpdate={onAssetUpdate}
+                                primaryColor={brandPrimary}
+                                drawerInsightGroup
+                                onActivityBannerChange={setBrandIntelActivityBanner}
+                            />
+                        </div>
                     </div>
-                )}
-
-                {displayAsset?.id && (
-                    <AssetBrandIntelligenceBlock asset={displayAsset} onAssetUpdate={onAssetUpdate} primaryColor={brandPrimary} />
                 )}
 
                 {/* Tags and Metadata */}
                 {displayAsset?.id && (
                     <div className="border-t border-gray-200">
+                        {!import.meta.env.PROD && (
+                            <CollapsibleSection
+                                title="Pipeline state (dev)"
+                                defaultExpanded={false}
+                                className="border-b border-amber-100/90 bg-amber-50/25"
+                            >
+                                {pipelineDevSnap ? (
+                                    <div className="rounded border border-amber-300 bg-amber-50/90 p-3 font-mono text-xs text-amber-950">
+                                        <pre className="whitespace-pre-wrap break-all">
+                                            analysis_status: {pipelineDevSnap.analysisStatus}
+                                            {'\n'}
+                                            thumbnail_status: {pipelineDevSnap.thumbnailStatus}
+                                            {'\n'}
+                                            metadata_health:{' '}
+                                            {pipelineDevSnap.metadataHealth
+                                                ? JSON.stringify(pipelineDevSnap.metadataHealth)
+                                                : 'null'}
+                                        </pre>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-amber-900/80">Loading pipeline state…</p>
+                                )}
+                            </CollapsibleSection>
+                        )}
                         <CollapsibleSection 
                             title="Metadata"
                             defaultExpanded={true}
@@ -2661,6 +2725,7 @@ export default function AssetDrawer({
                                 onPendingCountChange={setPendingMetadataCount}
                                 primaryColor={brandPrimary}
                                 suppressAnalysisRunningBanner={assetIncidents?.length > 0 || (displayAsset?.analysis_status ?? '') === 'promotion_failed'}
+                                onPipelineDebugStateChange={import.meta.env.PROD ? undefined : setPipelineDevSnap}
                                 collectionDisplay={{
                                     collections: assetCollections,
                                     loading: assetCollectionsLoading,
@@ -4234,14 +4299,18 @@ export default function AssetDrawer({
                     isOpen={promoteModalOpen}
                     onClose={() => setPromoteModalOpen(false)}
                     assetId={displayAsset.id}
-                    initialType={promoteModalInitialType === 'guideline' ? 'guideline' : 'reference'}
                     categories={categories}
                     defaultCategoryName={displayAsset?.category?.name ?? null}
                     onSuccess={(payload) => {
                         if (onAssetUpdate) {
                             onAssetUpdate({ ...displayAsset, ...payload })
                         }
-                        setToastMessage('Asset promoted to brand references')
+                        const kind = payload?.reference_promotion?.kind
+                        setToastMessage(
+                            kind === 'guideline'
+                                ? 'Added to brand guidelines as a creative reference'
+                                : 'Added as a brand style reference',
+                        )
                         setToastType('success')
                         setTimeout(() => setToastMessage(null), 4000)
                     }}

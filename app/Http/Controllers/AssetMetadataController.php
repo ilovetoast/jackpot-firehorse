@@ -1155,6 +1155,61 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Queue Brand Intelligence scoring if the category has EBI enabled, analysis is far enough along,
+     * and no score row exists yet. Idempotent: {@see ScoreAssetBrandIntelligenceJob} skips when already scored.
+     *
+     * POST /assets/{asset}/brand-intelligence/ensure
+     */
+    public function ensureBrandIntelligence(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $fresh = Asset::query()
+            ->whereKey($asset->id)
+            ->with(['category', 'latestBrandIntelligenceScore', 'brandReferenceAsset'])
+            ->firstOrFail();
+
+        $category = $fresh->category;
+        if (! $category || ! $category->isEbiEnabled()) {
+            return response()->json(['status' => 'ebi_disabled', 'brand_intelligence' => null], 422);
+        }
+
+        $status = $fresh->analysis_status ?? '';
+        if (! in_array($status, ['scoring', 'complete'], true)) {
+            return response()->json([
+                'status' => 'analysis_not_ready',
+                'analysis_status' => $status,
+                'brand_intelligence' => null,
+                'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+            ]);
+        }
+
+        $payload = $fresh->brandIntelligencePayloadForFrontend();
+        if ($payload !== null) {
+            return response()->json([
+                'status' => 'ready',
+                'brand_intelligence' => $payload,
+                'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+            ]);
+        }
+
+        ScoreAssetBrandIntelligenceJob::dispatch($fresh, false);
+
+        return response()->json([
+            'status' => 'queued',
+            'brand_intelligence' => null,
+            'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+        ]);
+    }
+
+    /**
      * Thumbs up / down on AI insight (telemetry only).
      * POST /assets/{asset}/brand-intelligence/feedback
      */

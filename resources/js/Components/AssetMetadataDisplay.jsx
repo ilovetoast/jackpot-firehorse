@@ -13,7 +13,15 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { resolve, isExcludedFromGenericLoop, isDominantColorsSwatches, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
-export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor, suppressAnalysisRunningBanner = false }) {
+export default function AssetMetadataDisplay({
+    assetId,
+    onPendingCountChange,
+    collectionDisplay = null,
+    primaryColor,
+    suppressAnalysisRunningBanner = false,
+    /** Dev only: parent (e.g. drawer) renders pipeline UI above Metadata; avoids duplicate fetch. */
+    onPipelineDebugStateChange = null,
+}) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const badgeBg = brandPrimary.startsWith('#') ? `${brandPrimary}18` : `#${brandPrimary}18`
@@ -66,6 +74,15 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     useEffect(() => {
         fetchMetadata()
     }, [assetId])
+
+    useEffect(() => {
+        if (!onPipelineDebugStateChange || loading) return
+        onPipelineDebugStateChange({
+            analysisStatus,
+            thumbnailStatus,
+            metadataHealth,
+        })
+    }, [onPipelineDebugStateChange, loading, analysisStatus, thumbnailStatus, metadataHealth])
 
     // Phase 8: Listen for metadata updates (from approval actions)
     useEffect(() => {
@@ -233,8 +250,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
-            {/* Local diagnostics only — never shipped in production builds (Vite sets import.meta.env.PROD). */}
-            {!import.meta.env.PROD && (
+            {/* Local diagnostics only when parent does not lift state (e.g. drawer uses onPipelineDebugStateChange). */}
+            {!import.meta.env.PROD && !onPipelineDebugStateChange && (
                 <div className="mb-3 rounded border border-amber-300 bg-amber-50/80 p-3 font-mono text-xs text-amber-900">
                     <div className="font-semibold mb-1">Pipeline state (dev)</div>
                     <pre className="whitespace-pre-wrap break-all">

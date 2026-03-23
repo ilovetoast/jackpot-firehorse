@@ -3,9 +3,9 @@
  * Human-readable labels only; no raw 0–100 score, weights, or compliance breakdown.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { SparklesIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import BrandSignalBreakdown from './BrandSignalBreakdown'
 
@@ -16,7 +16,7 @@ const POLL_MAX_ATTEMPTS = 45
  * Poll until Brand Intelligence row exists (queue may finish after POST).
  * @param {string} assetId
  * @param {{ signal: AbortSignal }} opts
- * @returns {Promise<object|null>} brand_intelligence payload or null
+ * @returns {Promise<{ brand_intelligence: object, reference_promotion?: object }|null>}
  */
 async function pollForBrandIntelligence(assetId, { signal } = {}) {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
@@ -37,7 +37,10 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
         }
         const data = await res.json()
         if (data.brand_intelligence != null) {
-            return data.brand_intelligence
+            return {
+                brand_intelligence: data.brand_intelligence,
+                reference_promotion: data.reference_promotion,
+            }
         }
         await new Promise((resolve) => {
             const t = setTimeout(resolve, POLL_INTERVAL_MS)
@@ -50,7 +53,14 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
     return null
 }
 
-export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = null, primaryColor }) {
+export default function AssetBrandIntelligenceBlock({
+    asset,
+    onAssetUpdate = null,
+    primaryColor,
+    drawerInsightGroup = false,
+    /** When set, called with a short status line while auto-ensure is running (drawer banner), or null when idle. */
+    onActivityBannerChange = null,
+}) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
@@ -60,12 +70,17 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
     const [pollTimedOut, setPollTimedOut] = useState(false)
     const [feedbackSent, setFeedbackSent] = useState(false)
     const [feedbackLoading, setFeedbackLoading] = useState(false)
+    const [autoEnsureLoading, setAutoEnsureLoading] = useState(false)
+    const [analysisGateNote, setAnalysisGateNote] = useState(null)
     const abortRef = useRef(null)
+    const ensureAbortRef = useRef(null)
 
     useEffect(() => {
         setLocalBi(null)
         setPollTimedOut(false)
         setFeedbackSent(false)
+        setAutoEnsureLoading(false)
+        setAnalysisGateNote(null)
     }, [asset?.id])
 
     useEffect(() => {
@@ -86,21 +101,124 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
     const analysisStatus = asset?.analysis_status ?? ''
     const canRequestEbi = ['complete', 'scoring'].includes(analysisStatus)
 
-    const applyBrandIntelligence = (payload) => {
-        if (onAssetUpdate && asset?.id) {
-            // Merge with current asset so parents never receive a sparse object (preserves thumbnail URLs, etc.).
-            onAssetUpdate({
-                ...asset,
-                id: asset.id,
-                brand_intelligence: payload,
-            })
-        } else {
-            setLocalBi(payload)
+    const applyBrandIntelligence = useCallback(
+        (payload, opts = {}) => {
+            if (onAssetUpdate && asset?.id) {
+                // Merge with current asset so parents never receive a sparse object (preserves thumbnail URLs, etc.).
+                onAssetUpdate({
+                    ...asset,
+                    id: asset.id,
+                    brand_intelligence: payload,
+                    ...(opts.reference_promotion !== undefined
+                        ? { reference_promotion: opts.reference_promotion }
+                        : {}),
+                })
+            } else {
+                setLocalBi(payload)
+            }
+        },
+        [onAssetUpdate, asset],
+    )
+
+    const applyBrandIntelligenceRef = useRef(applyBrandIntelligence)
+    applyBrandIntelligenceRef.current = applyBrandIntelligence
+
+    useEffect(() => {
+        if (typeof onActivityBannerChange !== 'function') return
+        onActivityBannerChange(autoEnsureLoading ? 'Running brand analysis…' : null)
+        return () => onActivityBannerChange(null)
+    }, [autoEnsureLoading, onActivityBannerChange])
+
+    /** When EBI is enabled and analysis is ready but no score exists yet, queue scoring and poll (or show a gate message). */
+    useEffect(() => {
+        if (!asset?.id) return
+        if (!asset?.category?.ebi_enabled) return
+        if (asset.brand_intelligence) return
+
+        const st = asset?.analysis_status ?? ''
+        if (!['complete', 'scoring'].includes(st)) {
+            setAnalysisGateNote('Brand analysis will start once processing finishes.')
+            setAutoEnsureLoading(false)
+            return
         }
-    }
+
+        setAnalysisGateNote(null)
+
+        let cancelled = false
+        const ac = new AbortController()
+        ensureAbortRef.current = ac
+
+        ;(async () => {
+            setAutoEnsureLoading(true)
+            try {
+                const res = await fetch(`/app/assets/${asset.id}/brand-intelligence/ensure`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                    signal: ac.signal,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (cancelled || ac.signal.aborted) return
+
+                if (!res.ok) {
+                    if (res.status === 422 && data.status === 'ebi_disabled') {
+                        setAutoEnsureLoading(false)
+                        return
+                    }
+                    setAutoEnsureLoading(false)
+                    return
+                }
+
+                if (data.status === 'ready' && data.brand_intelligence) {
+                    applyBrandIntelligenceRef.current(data.brand_intelligence, {
+                        reference_promotion: data.reference_promotion,
+                    })
+                    setAutoEnsureLoading(false)
+                    return
+                }
+                if (data.status === 'analysis_not_ready') {
+                    setAnalysisGateNote('Brand analysis will start once processing finishes.')
+                    setAutoEnsureLoading(false)
+                    return
+                }
+                if (data.status === 'queued') {
+                    const polled = await pollForBrandIntelligence(asset.id, { signal: ac.signal })
+                    if (cancelled || ac.signal.aborted) return
+                    if (polled != null) {
+                        applyBrandIntelligenceRef.current(polled.brand_intelligence, {
+                            reference_promotion: polled.reference_promotion ?? data.reference_promotion,
+                        })
+                    } else {
+                        setPollTimedOut(true)
+                    }
+                    setAutoEnsureLoading(false)
+                    return
+                }
+                setAutoEnsureLoading(false)
+            } catch {
+                if (!cancelled && !ac.signal.aborted) {
+                    setAutoEnsureLoading(false)
+                }
+            }
+        })()
+
+        return () => {
+            cancelled = true
+            ac.abort()
+            if (ensureAbortRef.current === ac) {
+                ensureAbortRef.current = null
+            }
+        }
+    }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status])
 
     const handleRescore = async () => {
         if (!asset?.id || rescoreLoading) return
+        ensureAbortRef.current?.abort()
         abortRef.current?.abort()
         const controller = new AbortController()
         abortRef.current = controller
@@ -129,7 +247,9 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                 return
             }
             if (payload != null) {
-                applyBrandIntelligence(payload)
+                applyBrandIntelligence(payload.brand_intelligence, {
+                    reference_promotion: payload.reference_promotion,
+                })
             } else {
                 setPollTimedOut(true)
             }
@@ -168,13 +288,19 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
         return null
     }
 
+    const wrapCard = (card) =>
+        drawerInsightGroup ? (
+            card
+        ) : (
+            <div className="px-4 py-3 border-t border-gray-200">{card}</div>
+        )
+
     if (!bi) {
-        return (
-            <div className="px-4 py-3 border-t border-gray-200">
-                <div
-                    className="rounded-md p-2.5 border"
-                    style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
-                >
+        return wrapCard(
+            <div
+                className={`rounded-md p-2.5 border ${drawerInsightGroup ? 'shadow-sm' : ''}`}
+                style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
+            >
                     <div className="flex items-center gap-1.5 mb-2">
                         <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
                         <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
@@ -183,6 +309,17 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                         <p className="text-sm text-slate-600" role="status" aria-live="polite">
                             Analyzing brand alignment…
                         </p>
+                    ) : autoEnsureLoading ? (
+                        <p
+                            className="text-sm text-slate-600 flex items-center gap-2"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <ArrowPathIcon className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
+                            Running brand analysis…
+                        </p>
+                    ) : analysisGateNote ? (
+                        <p className="text-sm text-amber-800">{analysisGateNote}</p>
                     ) : (
                         <>
                             <p className="text-sm text-slate-600">Not analyzed yet</p>
@@ -190,7 +327,7 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                                 <button
                                     type="button"
                                     onClick={handleRescore}
-                                    disabled={rescoreLoading}
+                                    disabled={rescoreLoading || autoEnsureLoading}
                                     className="mt-2 inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50"
                                     style={{ backgroundColor: brandColor, ['--tw-ring-color']: brandColor }}
                                 >
@@ -204,21 +341,19 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                             )}
                         </>
                     )}
-                </div>
-            </div>
+            </div>,
         )
     }
 
-    return (
-        <div className="px-4 py-3 border-t border-gray-200">
-            <div
-                className="rounded-md p-2.5 border"
-                style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
-            >
-                <div className="flex items-center gap-1.5 mb-2">
-                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
-                    <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
-                </div>
+    return wrapCard(
+        <div
+            className={`rounded-md p-2.5 border ${drawerInsightGroup ? 'shadow-sm' : ''}`}
+            style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
+        >
+            <div className="flex items-center gap-1.5 mb-2">
+                <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
+            </div>
             {rescoreLoading ? (
                 <p className="text-lg font-semibold text-slate-700" role="status" aria-live="polite">
                     Analyzing brand alignment…
@@ -281,7 +416,6 @@ export default function AssetBrandIntelligenceBlock({ asset, onAssetUpdate = nul
                     Re-score
                 </button>
             )}
-            </div>
-        </div>
+        </div>,
     )
 }

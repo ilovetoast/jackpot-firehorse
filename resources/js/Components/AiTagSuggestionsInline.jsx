@@ -19,7 +19,7 @@ import { usePage } from '@inertiajs/react'
 // Global cache to prevent fetching suggestions for the same asset multiple times
 const tagSuggestionsCache = new Map() // assetId -> { suggestions, timestamp }
 
-export default function AiTagSuggestionsInline({ assetId, primaryColor }) {
+export default function AiTagSuggestionsInline({ assetId, primaryColor, drawerInsightGroup = false }) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
@@ -159,20 +159,23 @@ export default function AiTagSuggestionsInline({ assetId, primaryColor }) {
         return null // Hide if user doesn't have permission
     }
 
-    if (loading) {
-        return (
-            <div className="px-4 py-4 border-t border-gray-200">
-                <div className="text-sm text-gray-500">Loading AI tag suggestions...</div>
-            </div>
+    const wrapOuter = (inner) =>
+        drawerInsightGroup ? (
+            <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">{inner}</div>
+        ) : (
+            <div className="px-4 py-3 border-t border-gray-200">{inner}</div>
         )
+
+    if (loading) {
+        return wrapOuter(<div className="text-sm text-gray-500">Loading AI tag suggestions...</div>)
     }
 
     if (suggestions.length === 0) {
         return null // Hide if no suggestions
     }
 
-    return (
-        <div className="px-4 py-3 border-t border-gray-200">
+    const body = (
+        <>
             <div className="flex items-center gap-1.5 mb-2">
                 <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
                 <h3 className="text-xs font-semibold text-gray-900">AI Suggested Tags</h3>
@@ -226,6 +229,8 @@ export default function AiTagSuggestionsInline({ assetId, primaryColor }) {
                     )
                 })}
             </div>
-        </div>
+        </>
     )
+
+    return wrapOuter(body)
 }

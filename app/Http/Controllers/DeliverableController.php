@@ -477,9 +477,37 @@ class DeliverableController extends Controller
                 ->keyBy('id');
         }
 
+        // Batch-load categories and uploaders for grid mapping (avoids N+1 Category/User queries per asset).
+        $metaCategoryIds = $assetModels
+            ->map(fn (Asset $asset) => $asset->metadata['category_id'] ?? null)
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $categoriesById = collect();
+        if ($metaCategoryIds !== []) {
+            $categoriesById = Category::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereIn('id', $metaCategoryIds)
+                ->get()
+                ->keyBy('id');
+        }
+
+        $uploaderIds = $assetModels->pluck('user_id')->filter()->unique()->values()->all();
+        $uploadedByUsersMap = collect();
+        if ($uploaderIds !== []) {
+            $uploadedByUsersMap = User::query()
+                ->whereIn('id', $uploaderIds)
+                ->get()
+                ->keyBy('id');
+        }
+
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $mappedAssets = $assetModels
-            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset, $publishedByUsers) {
+            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset, $publishedByUsers, $categoriesById, $uploadedByUsersMap) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -550,21 +578,17 @@ class DeliverableController extends Controller
                     $title = null;
                 }
 
-                // Get category if category_id exists in metadata
-                $categoryId = null;
+                // Category from preloaded map (metadata.category_id)
                 $category = null;
                 if ($asset->metadata && isset($asset->metadata['category_id'])) {
-                    $categoryId = $asset->metadata['category_id'];
-                    $category = \App\Models\Category::where('id', $categoryId)
-                        ->where('tenant_id', $tenant->id)
-                        ->where('brand_id', $brand->id)
-                        ->first();
+                    $cid = (int) $asset->metadata['category_id'];
+                    $category = $categoriesById->get($cid);
                 }
 
-                // Get user who uploaded the asset
+                // Uploader from preloaded map
                 $uploadedBy = null;
                 if ($asset->user_id) {
-                    $user = \App\Models\User::find($asset->user_id);
+                    $user = $uploadedByUsersMap->get($asset->user_id);
                     if ($user) {
                         $uploadedBy = [
                             'id' => $user->id,
