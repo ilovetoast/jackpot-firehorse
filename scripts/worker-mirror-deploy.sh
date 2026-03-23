@@ -155,7 +155,7 @@ echo "🔁 current → $RELEASE_DIR"
 # horizon:terminate gracefully stops Horizon (workers drain and restart).
 # Chain interruption: Jobs in Bus::chain() may be interrupted mid-chain.
 # Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
-# See docs/DEPLOY_INTERRUPTION_BEHAVIOR.md
+# See docs/UPLOAD_AND_QUEUE.md (Deploy interruption behavior)
 
 cd "$RELEASE_DIR"
 if command -v "$PHP" >/dev/null; then

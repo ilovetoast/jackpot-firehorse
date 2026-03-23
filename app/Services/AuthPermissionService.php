@@ -6,7 +6,6 @@ use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Roles\PermissionMap;
-use Spatie\Permission\Models\Role;
 
 /**
  * Auth Permission Service
@@ -63,7 +62,7 @@ class AuthPermissionService
         }
 
         if ($user->id === 1) {
-            $siteOwnerRole = Role::where('name', 'site_owner')->where('guard_name', 'web')->first();
+            $siteOwnerRole = app(SpatieRoleLookup::class)->roleByName('site_owner');
             if ($siteOwnerRole) {
                 foreach ($siteOwnerRole->permissions->pluck('name')->toArray() as $perm) {
                     if (!in_array($perm, $permissions, true)) {

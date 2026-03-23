@@ -19,6 +19,7 @@ use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\DocumentationService;
 use App\Services\TenantAgencyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -1421,14 +1422,30 @@ class SiteAdminController extends Controller
     }
 
     /**
-     * Display admin documentation page.
+     * Display admin documentation page (repository markdown under /docs).
      */
-    public function documentation(): Response
+    public function documentation(Request $request, DocumentationService $documentation): Response
     {
-        // Only user ID 1 (Site Owner) can access
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
-        return Inertia::render('Admin/Documentation');
+        $docQuery = $request->query('doc', 'README.md');
+        $absolute = $documentation->resolvePath(is_string($docQuery) ? $docQuery : 'README.md');
+        if ($absolute === null) {
+            abort(404, 'Documentation file not found.');
+        }
+
+        $relative = str_replace('\\', '/', $documentation->relativePathFromAbsolute($absolute));
+        $markdown = $documentation->readMarkdown($absolute);
+        $html = $documentation->markdownToHtml($markdown);
+        $docUrl = url('/app/admin/documentation');
+        $html = $documentation->rewriteMarkdownLinks($html, $relative, $docUrl);
+
+        return Inertia::render('Admin/Documentation', [
+            'docPath' => $relative,
+            'docTitle' => $documentation->titleFromPath($relative),
+            'bodyHtml' => $html,
+            'docIndex' => $documentation->listMarkdownFiles(),
+        ]);
     }
 
     /**

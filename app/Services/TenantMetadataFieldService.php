@@ -25,7 +25,7 @@ use Illuminate\Validation\ValidationException;
  * - Immutability: key and type cannot change after field has values
  * - Soft disable only (is_active flag)
  *
- * @see docs/PHASE_C_METADATA_GOVERNANCE.md
+ * @see docs/AUTOMATED_METADATA_AND_FILTERS.md (Phase C governance)
  */
 class TenantMetadataFieldService
 {

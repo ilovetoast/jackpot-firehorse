@@ -59,9 +59,9 @@ This doc tracks the **new** Brand Intelligence system (product language: *Execut
 | [BRAND_RESEARCH_FLOW.md](BRAND_RESEARCH_FLOW.md) | Brand DNA research, builder, **coherence** scoring (draft quality — not asset execution scoring) |
 | [BRAND_RESEARCH_ARCHITECTURE_AUDIT.md](BRAND_RESEARCH_ARCHITECTURE_AUDIT.md) | Gaps in coherence / snapshot / scoring_rules |
 | [BRAND_DNA_SETTINGS_REDESIGN_PLAN.md](BRAND_DNA_SETTINGS_REDESIGN_PLAN.md) | Brand DNA settings UI; mentions scoring rules in Standards |
-| [FEATURES_AND_VALUE_PROPOSITION.md](FEATURES_AND_VALUE_PROPOSITION.md) | Marketing copy on planned “on-brand” scoring |
+| [FEATURES.md](FEATURES.md) | Marketing copy on planned “on-brand” scoring |
 | [TODO.md](TODO.md) | Historical notes on compliance scoring / DNA integration |
-| [admin/ai/phase-7-5-tenant-ai-capabilities.md](admin/ai/phase-7-5-tenant-ai-capabilities.md) | Planned guideline compliance / consistency scoring |
+| [AI_USAGE_LIMITS_AND_SUGGESTIONS.md](AI_USAGE_LIMITS_AND_SUGGESTIONS.md) (merged tenant AI capabilities) | Planned guideline compliance / consistency scoring |
 
 ---
 

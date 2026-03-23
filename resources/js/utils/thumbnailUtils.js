@@ -225,7 +225,7 @@ export function getThumbnailState(asset, retryCount = 0) {
     
     // Priority 1: Final thumbnail (permanent, full-quality, versioned)
     // Backend sends final_thumbnail_url only when thumbnails exist (completed or metadata-resilient)
-    // Use it whenever provided - don't require status===completed (resilient to status sync - see THUMBNAIL_STATUS_SYNC_ISSUE.md)
+    // Use it whenever provided - don't require status===completed (resilient to thumbnail status timing; see docs/MEDIA_PIPELINE.md)
     if (asset?.final_thumbnail_url) {
         return {
             state: 'AVAILABLE',

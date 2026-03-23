@@ -80,7 +80,7 @@ class AITaggingJob implements ShouldQueue
         // PopulateAutomaticMetadataJob uses "retry until ready" model (release() + reschedule).
         // Both models are valid, but consider standardizing on Option A (retry until ready)
         // for consistency across all image-derived jobs long-term.
-        // See /docs/PIPELINE_SEQUENCING.md for architectural details.
+        // See /docs/UPLOAD_AND_QUEUE.md (Pipeline sequencing) for architectural details.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
             PipelineLogger::warning('AI TAGGING: SKIPPED', [
                 'asset_id' => $asset->id,

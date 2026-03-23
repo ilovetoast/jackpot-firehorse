@@ -57,6 +57,8 @@ class AppServiceProvider extends ServiceProvider
             return new ImageEmbeddingService;
         });
 
+        $this->app->singleton(\App\Services\SpatieRoleLookup::class);
+
         // Request-scoped URL metrics/state for AssetUrlService.
         $this->app->scoped(\App\Services\AssetUrlService::class, function ($app) {
             return new \App\Services\AssetUrlService(

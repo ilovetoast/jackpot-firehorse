@@ -17,7 +17,7 @@ use RuntimeException;
 /**
  * Assets Reset Staging
  *
- * STAGING-ONLY. Uses tenant staging buckets per docs/s3-bucket-strategy.md:
+ * STAGING-ONLY. Uses tenant staging buckets per docs/STORAGE.md:
  * - Expected bucket name from TenantBucketService (STORAGE_BUCKET_NAME_PATTERN, e.g. jackpot-staging-{company_slug})
  * - Empties and deletes that bucket in S3 (and any legacy tenant bucket rows)
  * - Deletes StorageBucket row(s) for the tenant so tenants:ensure-buckets can recreate them
@@ -96,7 +96,7 @@ class AssetsResetStaging extends Command
             'db_wipe' => 0,
         ];
 
-        // Use tenant staging bucket from config (docs/s3-bucket-strategy.md): STORAGE_BUCKET_NAME_PATTERN → e.g. jackpot-staging-{company_slug}
+        // Use tenant staging bucket from config (docs/STORAGE.md): STORAGE_BUCKET_NAME_PATTERN → e.g. jackpot-staging-{company_slug}
         $expectedBucketName = $bucketService->getBucketName($tenant);
         $dbBuckets = StorageBucket::where('tenant_id', $tenant->id)->get();
         $bucketNamesToProcess = collect([$expectedBucketName])

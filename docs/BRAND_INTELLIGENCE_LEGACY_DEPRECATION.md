@@ -87,9 +87,9 @@ These **mention** legacy/planned compliance scoring — refresh to describe EBI 
 
 | File | Action |
 |------|--------|
-| [FEATURES_AND_VALUE_PROPOSITION.md](FEATURES_AND_VALUE_PROPOSITION.md) | “On-Brand Scoring & Brand Ranking (Planned)” — align with EBI / Deliverables |
+| [FEATURES.md](FEATURES.md) | “On-Brand Scoring & Brand Ranking (Planned)” — align with EBI / Deliverables |
 | [TODO.md](TODO.md) | Lines on compliance scoring / DNA — close or retarget to EBI |
-| [admin/ai/phase-7-5-tenant-ai-capabilities.md](admin/ai/phase-7-5-tenant-ai-capabilities.md) | Guideline compliance / consistency scoring bullets |
+| [AI_USAGE_LIMITS_AND_SUGGESTIONS.md](AI_USAGE_LIMITS_AND_SUGGESTIONS.md) (merged tenant AI capabilities) | Guideline compliance / consistency scoring bullets |
 | [BRAND_DNA_SETTINGS_REDESIGN_PLAN.md](BRAND_DNA_SETTINGS_REDESIGN_PLAN.md) | “Scoring rules” in Standards — clarify DNA rules vs EBI execution scoring |
 | [BRAND_RESEARCH_FLOW.md](BRAND_RESEARCH_FLOW.md) / [BRAND_RESEARCH_ARCHITECTURE_AUDIT.md](BRAND_RESEARCH_ARCHITECTURE_AUDIT.md) | **Keep** coherence scoring docs; add one line that **asset compliance** moved to EBI |
 

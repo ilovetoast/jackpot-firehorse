@@ -494,7 +494,7 @@ class ThumbnailGenerationService
                         // LQIP: persist preview_thumbnails to DB immediately so the API can expose
                         // preview_thumbnail_url while final thumb/medium/large are still generating.
                         // Previously metadata was only written at job completion, so the grid saw no blur
-                        // for the entire PROCESSING window (see docs/THUMBNAIL_PIPELINE.md).
+                        // for the entire PROCESSING window (see docs/MEDIA_PIPELINE.md).
                         $this->persistEarlyLqipMetadata($asset, $previewThumbnails, $version);
                         
                         // Clean up local preview thumbnail

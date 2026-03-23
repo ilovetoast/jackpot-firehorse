@@ -497,7 +497,7 @@ class User extends Authenticatable
         }
 
         // Check if brand role has permission
-        $role = \Spatie\Permission\Models\Role::where('name', $brandRole)->first();
+        $role = app(\App\Services\SpatieRoleLookup::class)->roleByName($brandRole);
         if ($role) {
             try {
                 if ($role->hasPermissionTo($permission)) {
@@ -561,7 +561,7 @@ class User extends Authenticatable
         }
 
         // Get the role model and check if it has the permission
-        $role = \Spatie\Permission\Models\Role::where('name', $tenantRole)->first();
+        $role = app(\App\Services\SpatieRoleLookup::class)->roleByName($tenantRole);
         if ($role) {
             try {
                 if ($role->hasPermissionTo($permission)) {

@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\Log;
  * - Users must refresh to see final thumbnails
  * - This prevents UI flicker and re-render thrash
  * 
- * See THUMBNAIL_PIPELINE.md for full system documentation.
+ * See docs/MEDIA_PIPELINE.md for full system documentation.
  */
 class ThumbnailTimeoutGuard
 {

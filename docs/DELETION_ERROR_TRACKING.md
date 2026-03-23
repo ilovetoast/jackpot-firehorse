@@ -266,7 +266,7 @@ DeletionError::create([
 
 ## Related Documentation
 
-- `THUMBNAIL_STATUS_SYNC_ISSUE.md` - Similar error handling approach
+- `MEDIA_PIPELINE.md` - Thumbnail pipeline and status behavior
 - `app/Jobs/DeleteAssetJob.php` - Core deletion logic
 - `app/Models/DeletionError.php` - Error model definition
 - `app/Http/Controllers/DeletionErrorController.php` - Admin interface

@@ -1,6 +1,6 @@
 // Phase 2 verification UI — NOT final UX
 // Safe to refactor or remove in Phase 3
-// See docs/PHASE_2_UPLOAD_SYSTEM.md for Phase 2 status
+// See docs/UPLOAD_AND_QUEUE.md for upload pipeline status
 
 import { usePage } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'

@@ -63,7 +63,7 @@ use App\Support\Logging\PipelineLogger;
  * - ThumbnailTimeoutGuard enforces 5-minute timeout (prevents infinite PROCESSING)
  * - All execution paths explicitly set terminal state
  * 
- * Live updates are a DEFERRED FEATURE. See THUMBNAIL_PIPELINE.md for details.
+ * Live updates are a DEFERRED FEATURE. See docs/MEDIA_PIPELINE.md for details.
  * 
  * TODO (future): Allow manual thumbnail regeneration per asset.
  * TODO (future): Consider websocket-based thumbnail update broadcasting.

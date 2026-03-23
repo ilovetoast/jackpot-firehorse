@@ -8,7 +8,6 @@ use App\Models\SupportRoundRobinUser;
 use App\Models\Ticket;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
-use Spatie\Permission\Models\Role;
 
 /**
  * TicketAssignmentService
@@ -168,7 +167,7 @@ class TicketAssignmentService
      */
     protected function getUsersWithRole(string $roleName): \Illuminate\Database\Eloquent\Collection
     {
-        $role = Role::where('name', $roleName)->first();
+        $role = app(SpatieRoleLookup::class)->roleByName($roleName);
         if (!$role) {
             return new \Illuminate\Database\Eloquent\Collection([]);
         }

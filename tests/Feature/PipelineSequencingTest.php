@@ -45,7 +45,7 @@ use Tests\TestCase;
  * - Option B (Skip): AITaggingJob skips and marks as skipped
  * 
  * Both models are valid. Long-term, consider standardizing on Option A for consistency.
- * See /docs/PIPELINE_SEQUENCING.md for details.
+ * See /docs/UPLOAD_AND_QUEUE.md (Pipeline sequencing) for details.
  * 
  * Do NOT:
  * - Test AI output

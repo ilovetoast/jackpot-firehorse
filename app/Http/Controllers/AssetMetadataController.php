@@ -920,7 +920,7 @@ class AssetMetadataController extends Controller
             // This caused approved metadata (e.g., photo_type, scene_classification) to be invisible to contributors/viewers.
             // Fix: Check if field has approved metadata - if so, show it read-only even without edit permission.
             // Only skip fields if user cannot edit AND there's no approved value.
-            // See docs/PHASE_C_METADATA_GOVERNANCE.md for details.
+            // See docs/AUTOMATED_METADATA_AND_FILTERS.md (Phase C governance) for details.
             $hasApprovedValue = isset($fieldValues[$field['field_id']]) &&
                                 isset($fieldOverrideState[$field['field_id']]) &&
                                 ! ($fieldOverrideState[$field['field_id']]['is_pending'] ?? true);

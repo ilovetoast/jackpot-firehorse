@@ -15,7 +15,15 @@
 
 - ✅ Production-ready upload infrastructure (multipart, resume, cleanup)
 - ⚠️ **No new features or refactors should be added without starting Phase 3**
-- 📚 See [docs/PHASE_2_UPLOAD_SYSTEM.md](./docs/PHASE_2_UPLOAD_SYSTEM.md) for full documentation
+- 📚 See [docs/UPLOAD_AND_QUEUE.md](./docs/UPLOAD_AND_QUEUE.md) for upload pipeline documentation (includes former Phase 2 / 2.5 material)
+
+### Documentation
+
+- **[Documentation index](docs/README.md)** — table of contents for consolidated guides (use this for admin “Documents”)
+- [Features](docs/FEATURES.md) — value proposition and product-level behavior
+- [Technical overview](docs/TECHNICAL_OVERVIEW.md) — architecture and stack
+- [Server requirements](docs/environments/SERVER_REQUIREMENTS.md) — third-party binaries for web/worker hosts
+- [Phase index](docs/PHASE_INDEX.md) — where former phase docs were merged (canonical guide map)
 
 ---
 

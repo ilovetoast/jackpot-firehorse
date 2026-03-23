@@ -377,3 +377,15 @@ $stripe->subscriptionItems->delete($tenant->storage_addon_stripe_subscription_it
 - **Google**: Tiered (100 GB, 200 GB, 2 TB, etc.) — user picks tier
 - **Box**: Per-user storage add-ons
 - **Best practice**: Offer 2–4 fixed packages; avoid metered/usage-based for v1 (simpler)
+
+---
+
+## Appendix C: Stripe dashboard setup (quick checklist)
+
+Use this when wiring the storage add-on in Stripe; full architecture is in sections above.
+
+1. **Products** → create **Storage Add-on** (service), then create **4 monthly prices** (50 / 100 / 250 / 500 GB) and copy each **Price ID** into `.env` as `STRIPE_PRICE_STORAGE_*`.
+2. **Config & DB** — follow Sections 5–6 of this document for `config/storage_addons.php` and tenant columns.
+3. **Backend/UI** — follow Sections 7–10; routes and controller methods are listed in the implementation phases.
+
+Former standalone doc `STORAGE_ADDON_NEXT_STEPS.md` was merged here to avoid duplicate instructions.

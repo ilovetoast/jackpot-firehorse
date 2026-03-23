@@ -105,7 +105,7 @@ class MetadataFilterService
                 continue;
             }
 
-            // Tags filter: stored in asset_tags table, not asset_metadata (see TAGS_AS_METADATA_FIELD.md). Apply even if not in fieldMap.
+            // Tags filter: stored in asset_tags table, not asset_metadata (see docs/TAGS.md). Apply even if not in fieldMap.
             if ($fieldKey === 'tags') {
                 $this->applyTagsFilter($query, $value);
                 continue;
