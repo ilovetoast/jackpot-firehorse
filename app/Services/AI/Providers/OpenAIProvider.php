@@ -49,7 +49,10 @@ class OpenAIProvider implements AIProviderInterface
         'gpt-3.5-turbo',
         'gpt-4o',
         'gpt-4o-mini',
+        'gpt-image-1',
     ];
+
+    private const OPENAI_IMAGE_SIZES = ['1024x1024', '1024x1792', '1792x1024'];
 
     /**
      * Provider-specific pricing fallback for vision models.
@@ -177,6 +180,133 @@ class OpenAIProvider implements AIProviderInterface
                 'trace' => $e->getTraceAsString(),
             ]);
             throw $e;
+        }
+    }
+
+    /**
+     * Generate an image via OpenAI Images API (e.g. gpt-image-1).
+     *
+     * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array<string, mixed>}
+     */
+    public function generateImage(string $prompt, array $options = []): array
+    {
+        $model = $options['model'] ?? 'gpt-image-1';
+        $size = $this->normalizeOpenAiImageSize($options['image_size'] ?? $options['size'] ?? null);
+
+        if (! $this->isModelAvailable($model)) {
+            throw new \InvalidArgumentException("Model '{$model}' is not available for OpenAI image generation.");
+        }
+
+        try {
+            $response = Http::withToken($this->apiKey)
+                ->timeout(180)
+                ->acceptJson()
+                ->post("{$this->baseUrl}/images/generations", [
+                    'model' => $model,
+                    'prompt' => $prompt,
+                    'n' => 1,
+                    'size' => $size,
+                ]);
+
+            if ($response->failed()) {
+                $error = $response->json();
+                $errorMessage = is_array($error['error'] ?? null)
+                    ? ($error['error']['message'] ?? 'OpenAI image generation failed')
+                    : ($response->body() ?: 'OpenAI image generation failed');
+
+                if (stripos((string) $errorMessage, 'quota') !== false
+                    || stripos((string) $errorMessage, 'exceeded') !== false
+                    || $response->status() === 429) {
+                    throw new \App\Exceptions\AIQuotaExceededException(
+                        "OpenAI API quota exceeded: {$errorMessage}",
+                        'OpenAI'
+                    );
+                }
+
+                throw new \Exception('OpenAI image generation failed: '.(is_string($errorMessage) ? $errorMessage : json_encode($error)), $response->status());
+            }
+
+            $data = $response->json();
+            $actualModel = is_array($data) ? ($data['model'] ?? $model) : $model;
+
+            $imageRef = null;
+            if (is_array($data)) {
+                $url = $data['data'][0]['url'] ?? null;
+                if (is_string($url) && str_starts_with($url, 'http')) {
+                    $this->assertSafeRemoteImageUrl($url);
+                    $imageRef = $url;
+                }
+                $b64 = $data['data'][0]['b64_json'] ?? null;
+                if ($imageRef === null && is_string($b64) && $b64 !== '') {
+                    $imageRef = 'data:image/png;base64,'.$b64;
+                }
+            }
+
+            if ($imageRef === null || $imageRef === '') {
+                throw new \Exception('OpenAI returned no image URL or base64 data.');
+            }
+
+            $usage = is_array($data) ? ($data['usage'] ?? []) : [];
+            $tokensIn = 0;
+            $tokensOut = 0;
+            $estimated = false;
+            if (is_array($usage) && $usage !== []) {
+                $tokensIn = (int) ($usage['input_tokens'] ?? $usage['prompt_tokens'] ?? 0);
+                $tokensOut = (int) ($usage['output_tokens'] ?? $usage['completion_tokens'] ?? 0);
+            }
+            if ($tokensIn === 0 && $tokensOut === 0) {
+                $estimated = true;
+                $tokensIn = max(1, (int) ceil(strlen($prompt) / 4));
+                $tokensOut = max(1, 1024);
+            }
+
+            return [
+                'text' => '',
+                'tokens_in' => $tokensIn,
+                'tokens_out' => $tokensOut,
+                'model' => is_string($actualModel) ? $actualModel : $model,
+                'metadata' => [
+                    'image_ref' => $imageRef,
+                    'image_size' => $size,
+                    'estimated_tokens' => $estimated,
+                ],
+            ];
+        } catch (\App\Exceptions\AIQuotaExceededException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            Log::error('OpenAI image generation failed', [
+                'model' => $model,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    private function normalizeOpenAiImageSize(?string $size): string
+    {
+        $s = is_string($size) ? $size : '1024x1024';
+
+        return in_array($s, self::OPENAI_IMAGE_SIZES, true) ? $s : '1024x1024';
+    }
+
+    /**
+     * Only allow fetching images from known OpenAI / Azure blob hosts (mitigate SSRF on proxy).
+     */
+    private function assertSafeRemoteImageUrl(string $url): void
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! is_string($host) || $host === '') {
+            throw new \InvalidArgumentException('Invalid remote image URL.');
+        }
+
+        $host = strtolower($host);
+        $ok =
+            str_contains($host, 'blob.core.windows.net')
+            || str_contains($host, 'openai.com')
+            || str_contains($host, 'oaiusercontent.com');
+
+        if (! $ok) {
+            throw new \InvalidArgumentException('Remote image host is not allowed.');
         }
     }
 

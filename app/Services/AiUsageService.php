@@ -224,6 +224,16 @@ class AiUsageService
         $planService = app(PlanService::class);
         $limits = $planService->getPlanLimits($tenant);
 
+        if ($feature === 'generative_editor_images') {
+            $raw = $limits['max_editor_generative_images_per_month'] ?? 0;
+            // Plan uses -1 for unlimited (enterprise); AiUsageService uses 0 = unlimited.
+            if ((int) $raw === -1) {
+                return 0;
+            }
+
+            return (int) $raw;
+        }
+
         // Get feature-specific cap from plan limits
         $capKey = "max_ai_{$feature}_per_month";
         $cap = $limits[$capKey] ?? 0;
@@ -306,7 +316,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -371,7 +381,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images'];
         $status = [];
 
         foreach ($features as $feature) {

@@ -234,6 +234,10 @@ class EditorAssetBridgeController extends Controller
             return response()->json(['error' => 'Unauthorized', 'assets' => [], 'default_category_id' => null], 403);
         }
 
+        // AssetPolicy::view uses belongsToTenant + getRoleForTenant + activeBrandMembership per asset; all rows
+        // share this tenant/brand — eager-load tenants so pivot checks hit memory, and membership memoizes per brand.
+        $user->load('tenants');
+
         $limit = min(50, max(1, (int) $request->query('limit', 50)));
         $typeParam = strtolower((string) $request->query('asset_type', 'asset'));
         $assetType = $typeParam === 'deliverable' ? AssetType::DELIVERABLE : AssetType::ASSET;

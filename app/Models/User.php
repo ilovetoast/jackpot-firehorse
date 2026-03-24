@@ -173,6 +173,14 @@ class User extends Authenticatable
     protected ?array $assignedBrandIdsCache = null;
 
     /**
+     * Per-request memoization for {@see activeBrandMembership()} keyed by brand id.
+     * Avoids repeated tenant EXISTS + brand_user queries when policies run in loops (e.g. editor asset list).
+     *
+     * @var array<string, array{role: string|null, requires_approval: bool}|null>
+     */
+    protected array $activeBrandMembershipByBrandId = [];
+
+    /**
      * Whether this user has a brand_user row for the given brand.
      * Caches the full id list on first call to fix N+1 in CategoryPolicy::view and similar loops.
      */
@@ -359,9 +367,17 @@ class User extends Authenticatable
      */
     public function activeBrandMembership(Brand $brand): ?array
     {
+        $cacheKey = (string) $brand->id;
+        if (array_key_exists($cacheKey, $this->activeBrandMembershipByBrandId)) {
+            return $this->activeBrandMembershipByBrandId[$cacheKey];
+        }
+
         // Use tenant_id (always present) — do NOT access $brand->tenant; lazy loading is disabled.
         // See docs/EAGER_LOADING_RULES.md
-        if (! $this->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
+        // Prefer belongsToTenant() so a loaded tenants relation avoids repeated EXISTS queries.
+        if (! $this->belongsToTenant($brand->tenant_id)) {
+            $this->activeBrandMembershipByBrandId[$cacheKey] = null;
+
             return null;
         }
 
@@ -373,6 +389,8 @@ class User extends Authenticatable
             ->first();
 
         if (! $pivot) {
+            $this->activeBrandMembershipByBrandId[$cacheKey] = null;
+
             return null;
         }
 
@@ -387,13 +405,18 @@ class User extends Authenticatable
                 'invalid_role' => $role,
             ]);
 
+            $this->activeBrandMembershipByBrandId[$cacheKey] = null;
+
             return null; // Return null for invalid roles
         }
 
-        return [
+        $resolved = [
             'role' => $role,
             'requires_approval' => (bool) ($pivot->requires_approval ?? false),
         ];
+        $this->activeBrandMembershipByBrandId[$cacheKey] = $resolved;
+
+        return $resolved;
     }
 
     /**

@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers\Editor;
 
+use App\Enums\AITaskType;
+use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
-use App\Services\AI\Providers\GeminiProvider;
+use App\Services\AiUsageService;
+use App\Services\AIService;
 use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,10 +26,10 @@ class EditorGenerateImageController extends Controller
 {
     private const PROXY_CACHE_PREFIX = 'editor_gen_proxy:';
 
-    private const OPENAI_IMAGE_SIZES = ['1024x1024', '1024x1792', '1792x1024'];
-
     public function __construct(
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected AIService $aiService,
+        protected AiUsageService $aiUsageService
     ) {}
 
     public function usage(Request $request): JsonResponse
@@ -36,25 +39,43 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        [$limit, $planSlug, $planName] = $this->resolveLimitAndPlan();
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            return $this->usageFallbackNoTenant($request);
+        }
 
-        if ($limit < 0) {
+        $slug = $this->planService->getCurrentPlan($tenant);
+        $planName = (string) (config("plans.{$slug}.name") ?? $slug);
+        $limits = config("plans.{$slug}.limits", []);
+        $rawMax = $limits['max_editor_generative_images_per_month'] ?? null;
+
+        $used = $this->aiUsageService->getMonthlyUsage($tenant, 'generative_editor_images');
+
+        if ($rawMax === -1 || $slug === 'enterprise') {
             return response()->json([
                 'remaining' => -1,
                 'limit' => -1,
-                'plan' => $planSlug,
+                'plan' => $slug,
                 'plan_name' => $planName,
             ]);
         }
 
-        $tenant = app('tenant');
-        $used = (int) Cache::get($this->usageCacheKey($tenant, $user), 0);
-        $remaining = max(0, $limit - $used);
+        $cap = $this->aiUsageService->getMonthlyCap($tenant, 'generative_editor_images');
+        if ($cap === 0) {
+            return response()->json([
+                'remaining' => -1,
+                'limit' => -1,
+                'plan' => $slug,
+                'plan_name' => $planName,
+            ]);
+        }
+
+        $remaining = max(0, $cap - $used);
 
         return response()->json([
             'remaining' => $remaining,
-            'limit' => $limit,
-            'plan' => $planSlug,
+            'limit' => $cap,
+            'plan' => $slug,
             'plan_name' => $planName,
         ]);
     }
@@ -78,47 +99,80 @@ class EditorGenerateImageController extends Controller
             'model.provider' => 'required|string|max:64',
             'model.model' => 'required|string|max:128',
             'model_key' => 'nullable|string|max:32',
+            'model_override' => 'nullable|string|max:128',
             'size' => 'nullable|string|max:32',
             'brand_context' => 'nullable|array',
             'references' => 'sometimes|array',
             'references.*' => 'string|max:64',
+            'composition_id' => 'nullable|uuid',
+            'asset_id' => 'nullable|uuid',
+            'brand_id' => 'nullable|integer',
         ]);
 
-        $provider = strtolower((string) $validated['model']['provider']);
-        $model = (string) ($validated['model']['model'] ?? 'gpt-image-1');
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            return response()->json(['message' => 'Tenant context required.'], 422);
+        }
+
         $prompt = $this->resolvePromptString($validated);
 
         if ($prompt === '') {
             return response()->json(['message' => 'Prompt is required.'], 422);
         }
 
+        try {
+            $registryKey = $this->resolveRegistryModelKey($validated);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $provider = strtolower((string) $validated['model']['provider']);
+        $model = (string) ($validated['model']['model'] ?? 'gpt-image-1');
+
         Log::info('editor.generate_image', [
             'user_id' => $user->id,
             'provider' => $provider,
             'model' => $model,
+            'registry_key' => $registryKey,
             'model_key' => $validated['model_key'] ?? null,
+            'model_override' => $validated['model_override'] ?? null,
             'size' => $validated['size'] ?? null,
             'references_count' => isset($validated['references']) ? count($validated['references']) : 0,
             'has_brand_context' => ! empty($validated['brand_context']),
         ]);
 
-        [$limit] = $this->resolveLimitAndPlan();
-        $tenant = app('tenant');
-        $usageKey = $this->usageCacheKey($tenant, $user);
+        try {
+            $this->aiUsageService->checkUsage($tenant, 'generative_editor_images');
+        } catch (PlanLimitExceededException $e) {
+            return response()->json(['message' => 'Monthly limit reached'], 429);
+        }
 
-        if ($limit >= 0) {
-            $used = (int) Cache::get($usageKey, 0);
-            if ($used >= $limit) {
-                return response()->json(['message' => 'Monthly limit reached'], 429);
-            }
+        $options = [
+            'model' => $registryKey,
+            'image_size' => $validated['size'] ?? null,
+            'size' => $validated['size'] ?? null,
+            'tenant' => $tenant,
+            'user' => $user,
+            'triggering_context' => 'user',
+        ];
+
+        if (isset($validated['brand_id'])) {
+            $options['brand_id'] = (int) $validated['brand_id'];
+        }
+        if (! empty($validated['composition_id'])) {
+            $options['composition_id'] = $validated['composition_id'];
+        }
+        if (! empty($validated['asset_id'])) {
+            $options['asset_id'] = $validated['asset_id'];
         }
 
         try {
-            $rawImageRef = match ($provider) {
-                'openai' => $this->generateOpenAiImage($prompt, $model, $validated),
-                'gemini' => $this->generateGeminiImage($prompt, $model),
-                default => throw new \InvalidArgumentException("Unsupported image provider: {$provider}"),
-            };
+            $result = $this->aiService->executeGenerativeImageAgent(
+                'editor_generative_image',
+                AITaskType::EDITOR_GENERATIVE_IMAGE,
+                $prompt,
+                $options
+            );
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
@@ -132,14 +186,30 @@ class EditorGenerateImageController extends Controller
             ], 502);
         }
 
-        // Count usage only after a successful provider response (stub no longer consumes quota).
-        if ($limit >= 0) {
-            $used = (int) Cache::get($usageKey, 0);
-            Cache::put($usageKey, $used + 1, now()->endOfMonth());
+        try {
+            $this->aiUsageService->trackUsageWithCost(
+                $tenant,
+                'generative_editor_images',
+                1,
+                (float) ($result['cost'] ?? 0.0),
+                isset($result['tokens_in']) ? (int) $result['tokens_in'] : null,
+                isset($result['tokens_out']) ? (int) $result['tokens_out'] : null,
+                $result['resolved_model_key'] ?? $registryKey
+            );
+        } catch (PlanLimitExceededException $e) {
+            Log::warning('editor.generate_image_usage_track_failed', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Monthly limit reached'], 429);
         }
 
         return response()->json([
-            'image_url' => $this->registerProxyUrl($rawImageRef),
+            'image_url' => $this->registerProxyUrl((string) $result['image_ref']),
+            'resolved_model_key' => $result['resolved_model_key'] ?? $registryKey,
+            'model_display_name' => $result['model_display_name'] ?? $registryKey,
+            'agent_run_id' => $result['agent_run_id'],
         ]);
     }
 
@@ -227,6 +297,28 @@ SVG;
     /**
      * @param  array<string, mixed>  $validated
      */
+    private function resolveRegistryModelKey(array $validated): string
+    {
+        $override = $validated['model_override'] ?? null;
+        if (is_string($override) && trim($override) !== '') {
+            return trim($override);
+        }
+
+        $provider = strtolower((string) $validated['model']['provider']);
+        $apiModel = (string) ($validated['model']['model'] ?? '');
+
+        foreach (config('ai.models', []) as $key => $cfg) {
+            if (($cfg['provider'] ?? '') === $provider && ($cfg['model_name'] ?? '') === $apiModel) {
+                return $key;
+            }
+        }
+
+        throw new \InvalidArgumentException('Unknown model mapping for generative image.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
     private function resolvePromptString(array $validated): string
     {
         $p = trim((string) ($validated['prompt_string'] ?? ''));
@@ -245,74 +337,6 @@ SVG;
         $enc = json_encode($validated['prompt'] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 
         return $enc;
-    }
-
-    /**
-     * @param  array<string, mixed>  $validated
-     */
-    private function generateOpenAiImage(string $prompt, string $model, array $validated): string
-    {
-        $apiKey = config('ai.openai.api_key');
-        if (empty($apiKey)) {
-            throw new \RuntimeException('OpenAI API key is not configured (OPENAI_API_KEY).');
-        }
-
-        $size = $this->normalizeOpenAiSize($validated['size'] ?? null);
-        $baseUrl = rtrim((string) config('ai.openai.base_url', 'https://api.openai.com/v1'), '/');
-
-        // gpt-image-1 and newer image models reject legacy `response_format`; omit it and accept url or b64 in the response.
-        $response = Http::withToken($apiKey)
-            ->timeout(180)
-            ->acceptJson()
-            ->post("{$baseUrl}/images/generations", [
-                'model' => $model,
-                'prompt' => $prompt,
-                'n' => 1,
-                'size' => $size,
-            ]);
-
-        if ($response->failed()) {
-            $msg = $response->json('error.message') ?? $response->body() ?? 'OpenAI image generation failed';
-
-            throw new \RuntimeException(is_string($msg) ? $msg : 'OpenAI image generation failed');
-        }
-
-        $url = $response->json('data.0.url');
-        if (is_string($url) && str_starts_with($url, 'http')) {
-            $this->assertSafeRemoteImageUrl($url);
-
-            return $url;
-        }
-
-        $b64 = $response->json('data.0.b64_json');
-        if (is_string($b64) && $b64 !== '') {
-            return 'data:image/png;base64,'.$b64;
-        }
-
-        throw new \RuntimeException('OpenAI returned no image URL or base64 data.');
-    }
-
-    private function generateGeminiImage(string $prompt, string $model): string
-    {
-        if (empty(config('ai.gemini.api_key'))) {
-            throw new \RuntimeException('Gemini API key is not configured (GEMINI_API_KEY).');
-        }
-
-        $provider = new GeminiProvider;
-        $result = $provider->generateText($prompt, ['model' => $model]);
-        $inline = $result['metadata']['inline_images'][0] ?? null;
-        if (! is_string($inline) || $inline === '') {
-            throw new \RuntimeException('Gemini did not return an image for this model.');
-        }
-
-        return $inline;
-    }
-
-    private function normalizeOpenAiSize(?string $size): string
-    {
-        $s = is_string($size) ? $size : '1024x1024';
-
-        return in_array($s, self::OPENAI_IMAGE_SIZES, true) ? $s : '1024x1024';
     }
 
     /**
@@ -344,45 +368,7 @@ SVG;
         return route('api.editor.generate-image.proxy', ['token' => $token], absolute: true);
     }
 
-    /**
-     * @return array{0: int, 1: string, 2: string} limit (-1 = unlimited), plan slug, display name
-     */
-    private function resolveLimitAndPlan(): array
-    {
-        $tenant = app('tenant');
-        if (! $tenant instanceof Tenant) {
-            return $this->fallbackEnvLimitAndPlan();
-        }
-
-        $slug = $this->planService->getCurrentPlan($tenant);
-        $limits = config("plans.{$slug}.limits", []);
-        $max = $limits['max_editor_generative_images_per_month'] ?? null;
-
-        $planName = (string) (config("plans.{$slug}.name") ?? $slug);
-
-        if ($max === -1 || $slug === 'enterprise') {
-            return [-1, $slug, $planName];
-        }
-
-        if ($max !== null && is_numeric($max) && (int) $max >= 0) {
-            return [(int) $max, $slug, $planName];
-        }
-
-        $fallback = match ($slug) {
-            'free' => 3,
-            'starter' => 100,
-            'pro' => 300,
-            'premium' => 5000,
-            default => (int) env('EDITOR_GENERATIVE_LIMIT_PAID', 100),
-        };
-
-        return [$fallback, $slug, $planName];
-    }
-
-    /**
-     * @return array{0: int, 1: string, 2: string}
-     */
-    private function fallbackEnvLimitAndPlan(): array
+    private function usageFallbackNoTenant(Request $request): JsonResponse
     {
         $plan = (string) env('EDITOR_GENERATIVE_PLAN', 'free');
         $name = match ($plan) {
@@ -391,20 +377,24 @@ SVG;
             default => 'Free',
         };
 
-        return match ($plan) {
-            'enterprise' => [-1, 'enterprise', $name],
-            'paid' => [(int) env('EDITOR_GENERATIVE_LIMIT_PAID', 100), 'paid', $name],
-            default => [(int) env('EDITOR_GENERATIVE_LIMIT_FREE', 3), 'free', $name],
-        };
-    }
-
-    private function usageCacheKey(?Tenant $tenant, object $user): string
-    {
-        $month = now()->format('Y-m');
-        if ($tenant instanceof Tenant) {
-            return 'editor_gen_usage:tenant:'.$tenant->getKey().':'.$month;
+        if ($plan === 'enterprise') {
+            return response()->json([
+                'remaining' => -1,
+                'limit' => -1,
+                'plan' => 'enterprise',
+                'plan_name' => $name,
+            ]);
         }
 
-        return 'editor_gen_usage:user:'.$user->getAuthIdentifier().':'.$month;
+        $limit = $plan === 'paid'
+            ? (int) env('EDITOR_GENERATIVE_LIMIT_PAID', 100)
+            : (int) env('EDITOR_GENERATIVE_LIMIT_FREE', 3);
+
+        return response()->json([
+            'remaining' => $limit,
+            'limit' => $limit,
+            'plan' => $plan,
+            'plan_name' => $name,
+        ]);
     }
 }

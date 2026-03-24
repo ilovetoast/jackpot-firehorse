@@ -458,6 +458,33 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         />
                                     </div>
                                 </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Generative AI (images)</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(
+                                                current_usage?.ai_generative_editor_images || 0,
+                                                current_plan_limits?.max_editor_generative_images_per_month === -1
+                                                    ? 0
+                                                    : current_plan_limits?.max_editor_generative_images_per_month || 0
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(
+                                                    current_usage?.ai_generative_editor_images || 0,
+                                                    current_plan_limits?.max_editor_generative_images_per_month === -1
+                                                        ? 0
+                                                        : current_plan_limits?.max_editor_generative_images_per_month || 0
+                                                )}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -599,6 +626,16 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 <span>AI Suggestions:</span>
                                                 <span className="font-medium text-gray-900">
                                                     {formatLimit(plan.limits.max_ai_suggestions_per_month)}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Generative AI (images):</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {formatLimit(
+                                                        plan.limits.max_editor_generative_images_per_month === -1
+                                                            ? 0
+                                                            : plan.limits.max_editor_generative_images_per_month
+                                                    )}
                                                 </span>
                                             </div>
                                             {plan.limits.max_custom_metadata_fields !== undefined && (

@@ -83,6 +83,7 @@ class BillingController extends Controller
                 ->count(),
             'ai_tagging' => $aiUsageStatus['tagging']['usage'] ?? 0,
             'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
+            'ai_generative_editor_images' => $aiUsageStatus['generative_editor_images']['usage'] ?? 0,
         ];
 
         // Fetch Stripe price data for each plan

@@ -120,6 +120,7 @@ import {
     canGenerateFromUsage,
     fetchGenerateImageUsage,
     generateEditorImage,
+    GENERATIVE_ADVANCED_MODEL_OPTIONS,
     GENERATIVE_MODEL_OPTIONS,
     MODEL_MAP,
     resolveModelConfig,
@@ -560,11 +561,14 @@ function TextLayerEditable({
                 {innerRead}
                 {assistLoading && (
                     <div
-                        className="absolute inset-0 z-20 flex items-center justify-center bg-white/75 dark:bg-gray-950/75"
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/75 dark:bg-gray-950/75"
                         aria-busy
                         aria-label="Generating copy"
                     >
                         <ArrowPathIcon className="h-7 w-7 animate-spin text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-[10px] font-medium text-gray-700 dark:text-gray-200">
+                            Generating copy…
+                        </span>
                     </div>
                 )}
             </div>
@@ -601,11 +605,14 @@ function TextLayerEditable({
             </div>
             {assistLoading && (
                 <div
-                    className="absolute inset-0 z-20 flex items-center justify-center bg-white/75 dark:bg-gray-950/75"
+                    className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/75 dark:bg-gray-950/75"
                     aria-busy
                     aria-label="Generating copy"
                 >
                     <ArrowPathIcon className="h-7 w-7 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-[10px] font-medium text-gray-700 dark:text-gray-200">
+                        Generating copy…
+                    </span>
                 </div>
             )}
         </div>
@@ -2326,6 +2333,11 @@ export default function AssetEditor() {
                             size: generativeLayerToGenerationSize(layer),
                             brand_context: brandContext ?? undefined,
                             references: refs.length ? refs : undefined,
+                            ...(layer.advancedModel && layer.modelOverride?.trim()
+                                ? { model_override: layer.modelOverride.trim() }
+                                : {}),
+                            ...(compositionId ? { composition_id: compositionId } : {}),
+                            ...(activeBrandId != null ? { brand_id: activeBrandId } : {}),
                         },
                         { signal: ac.signal }
                     )
@@ -2335,6 +2347,7 @@ export default function AssetEditor() {
                     return
                 }
 
+                const resolvedLabel = res.model_display_name ?? res.resolved_model_key
                 setDocument((prev) => {
                     const current = prev.layers.find((l) => l.id === layerId)
                     if (!current || current.type !== 'generative_image') {
@@ -2358,6 +2371,9 @@ export default function AssetEditor() {
                                       variationResults: undefined,
                                       variationPending: false,
                                       variationBatchSize: undefined,
+                                      ...(resolvedLabel
+                                          ? { lastResolvedModelDisplay: resolvedLabel }
+                                          : {}),
                                   }
                                 : l
                         ),
@@ -2436,7 +2452,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId]
     )
 
     const runGenerativeVariations = useCallback(
@@ -2507,6 +2523,11 @@ export default function AssetEditor() {
                     size: generativeLayerToGenerationSize(layer),
                     brand_context: brandContext ?? undefined,
                     references: refs.length ? refs : undefined,
+                    ...(layer.advancedModel && layer.modelOverride?.trim()
+                        ? { model_override: layer.modelOverride.trim() }
+                        : {}),
+                    ...(compositionId ? { composition_id: compositionId } : {}),
+                    ...(activeBrandId != null ? { brand_id: activeBrandId } : {}),
                 }
                 const results = await Promise.all(
                     Array.from({ length: batchCount }, () =>
@@ -2517,6 +2538,8 @@ export default function AssetEditor() {
                     return
                 }
                 const urls = results.map((r) => r.image_url)
+                const varResolved =
+                    results[0]?.model_display_name ?? results[0]?.resolved_model_key
                 setDocument((prev) => ({
                     ...prev,
                     layers: prev.layers.map((l) => {
@@ -2543,6 +2566,7 @@ export default function AssetEditor() {
                             variationBatchSize: undefined,
                             variationResults: urls,
                             previousResults,
+                            ...(varResolved ? { lastResolvedModelDisplay: varResolved } : {}),
                         }
                     }),
                     updated_at: new Date().toISOString(),
@@ -2627,7 +2651,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext]
+        [genUsage, updateLayer, brandContext, compositionId, activeBrandId]
     )
 
     const applyVariationChoice = useCallback(
@@ -2986,10 +3010,12 @@ export default function AssetEditor() {
         <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
             {compositionBootstrapping && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/80 text-sm text-white"
+                    className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-gray-950/80 text-sm text-white"
                     role="status"
+                    aria-busy="true"
                 >
-                    Loading composition…
+                    <ArrowPathIcon className="h-10 w-10 animate-spin text-indigo-300" aria-hidden />
+                    <span>Loading composition…</span>
                 </div>
             )}
             <AppHead title="Generative editor" />
@@ -3661,7 +3687,20 @@ export default function AssetEditor() {
                                                     </div>
                                                 )}
                                                 {layer.status === 'generating' && (
-                                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/85 dark:bg-gray-950/85">
+                                                    <div
+                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/85 dark:bg-gray-950/85"
+                                                        role="status"
+                                                        aria-busy="true"
+                                                        aria-label={
+                                                            layer.variationPending
+                                                                ? 'Creating image variations'
+                                                                : 'Generating image'
+                                                        }
+                                                    >
+                                                        <ArrowPathIcon
+                                                            className="h-8 w-8 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400"
+                                                            aria-hidden
+                                                        />
                                                         {layer.variationPending ? (
                                                             <>
                                                                 <div className="grid w-[88px] grid-cols-2 gap-1">
@@ -3679,15 +3718,9 @@ export default function AssetEditor() {
                                                                 </span>
                                                             </>
                                                         ) : (
-                                                            <>
-                                                                <ArrowPathIcon
-                                                                    className="h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400"
-                                                                    aria-hidden
-                                                                />
-                                                                <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
-                                                                    Generating…
-                                                                </span>
-                                                            </>
+                                                            <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                                                                Generating…
+                                                            </span>
                                                         )}
                                                     </div>
                                                 )}
@@ -3845,7 +3878,11 @@ export default function AssetEditor() {
                     <div className="border-b border-gray-200 px-3 py-2 dark:border-gray-800">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Properties</h2>
                         {brandFontsLoading && (
-                            <p className="mt-1.5 text-[10px] text-violet-600 dark:text-violet-400" aria-live="polite">
+                            <p
+                                className="mt-1.5 flex items-center gap-1.5 text-[10px] text-violet-600 dark:text-violet-400"
+                                aria-live="polite"
+                            >
+                                <ArrowPathIcon className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
                                 Loading brand fonts…
                             </p>
                         )}
@@ -4177,6 +4214,18 @@ export default function AssetEditor() {
                                                 You&apos;ve reached your monthly limit.
                                             </p>
                                         )}
+                                        {selectedLayer.status === 'generating' && (
+                                            <div
+                                                className="flex items-center gap-2 rounded-md border border-violet-300 bg-violet-50 px-2.5 py-2 text-[10px] font-medium text-violet-950 dark:border-violet-600 dark:bg-violet-950/40 dark:text-violet-100"
+                                                role="status"
+                                                aria-live="polite"
+                                            >
+                                                <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                                                {selectedLayer.variationPending
+                                                    ? 'Creating variations…'
+                                                    : 'Generating image…'}
+                                            </div>
+                                        )}
                                         <div>
                                             <label className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
                                                 Prompt
@@ -4494,7 +4543,85 @@ export default function AssetEditor() {
                                                 ))}
                                             </select>
                                         </div>
+                                        <div className="space-y-1">
+                                            <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                                                <input
+                                                    type="checkbox"
+                                                    className="rounded border-gray-300"
+                                                    disabled={
+                                                        selectedLayer.locked ||
+                                                        selectedLayer.status === 'generating' ||
+                                                        selectedLayer.variationPending
+                                                    }
+                                                    checked={Boolean(selectedLayer.advancedModel)}
+                                                    onChange={(e) =>
+                                                        updateLayer(selectedLayer.id, (l) =>
+                                                            isGenerativeImageLayer(l)
+                                                                ? {
+                                                                      ...l,
+                                                                      advancedModel: e.target.checked,
+                                                                      modelOverride:
+                                                                          l.modelOverride ??
+                                                                          GENERATIVE_ADVANCED_MODEL_OPTIONS[0]
+                                                                              ?.value,
+                                                                  }
+                                                                : l
+                                                        )
+                                                    }
+                                                />
+                                                Advanced model (override)
+                                            </label>
+                                            {selectedLayer.advancedModel && (
+                                                <select
+                                                    disabled={
+                                                        selectedLayer.locked ||
+                                                        selectedLayer.status === 'generating' ||
+                                                        selectedLayer.variationPending
+                                                    }
+                                                    value={
+                                                        selectedLayer.modelOverride ??
+                                                        GENERATIVE_ADVANCED_MODEL_OPTIONS[0]?.value ??
+                                                        'gpt-image-1'
+                                                    }
+                                                    onChange={(e) =>
+                                                        updateLayer(selectedLayer.id, (l) =>
+                                                            isGenerativeImageLayer(l)
+                                                                ? { ...l, modelOverride: e.target.value }
+                                                                : l
+                                                        )
+                                                    }
+                                                    className="w-full rounded border border-gray-300 px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800"
+                                                >
+                                                    {GENERATIVE_ADVANCED_MODEL_OPTIONS.map((opt) => (
+                                                        <option key={opt.value} value={opt.value}>
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                            {selectedLayer.lastResolvedModelDisplay && (
+                                                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                                    Model: {selectedLayer.lastResolvedModelDisplay}
+                                                </p>
+                                            )}
+                                        </div>
                                         <div className="flex flex-col gap-2">
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending ||
+                                                    genUsage === null ||
+                                                    !canGenerateFromUsage(genUsage) ||
+                                                    !(selectedLayer.prompt.scene?.trim())
+                                                }
+                                                onClick={() => void runGenerativeGeneration(selectedLayer.id)}
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                <SparklesIcon className="h-4 w-4" aria-hidden />
+                                                Generate
+                                            </button>
                                             <button
                                                 type="button"
                                                 disabled={
@@ -4511,22 +4638,6 @@ export default function AssetEditor() {
                                             >
                                                 <Squares2X2Icon className="h-4 w-4" aria-hidden />
                                                 Generate variations
-                                            </button>
-                                            <button
-                                                type="button"
-                                                disabled={
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending ||
-                                                    genUsage === null ||
-                                                    !canGenerateFromUsage(genUsage) ||
-                                                    !(selectedLayer.prompt.scene?.trim())
-                                                }
-                                                onClick={() => void runGenerativeGeneration(selectedLayer.id)}
-                                                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                <SparklesIcon className="h-4 w-4" aria-hidden />
-                                                Generate
                                             </button>
                                             {selectedLayer.resultSrc && (
                                                 <>
@@ -4903,6 +5014,16 @@ export default function AssetEditor() {
                                             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
                                                 Copy Assist
                                             </p>
+                                            {copyAssistLoadingId === selectedLayer.id && (
+                                                <div
+                                                    className="mb-2 flex items-center gap-2 rounded border border-violet-300/80 bg-white/80 px-2 py-1.5 text-[10px] font-medium text-violet-900 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-100"
+                                                    role="status"
+                                                    aria-live="polite"
+                                                >
+                                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                                                    Working on copy…
+                                                </div>
+                                            )}
                                             <div className="flex flex-wrap gap-1">
                                                 {(
                                                     [
@@ -5353,7 +5474,14 @@ export default function AssetEditor() {
                         </div>
                         <div className="max-h-[60vh] overflow-y-auto p-3 text-xs">
                             {compositionListLoading && (
-                                <p className="text-gray-500 dark:text-gray-400">Loading…</p>
+                                <div
+                                    className="flex items-center gap-2 py-6 text-gray-600 dark:text-gray-300"
+                                    role="status"
+                                    aria-busy="true"
+                                >
+                                    <ArrowPathIcon className="h-5 w-5 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                                    Loading compositions…
+                                </div>
                             )}
                             {compositionListError && (
                                 <p className="text-red-600 dark:text-red-400">{compositionListError}</p>
@@ -5436,7 +5564,14 @@ export default function AssetEditor() {
                         </div>
                         <div className="max-h-[60vh] overflow-y-auto p-3 text-xs">
                             {versionsLoading && (
-                                <p className="text-gray-500 dark:text-gray-400">Loading versions…</p>
+                                <div
+                                    className="flex items-center gap-2 py-6 text-gray-600 dark:text-gray-300"
+                                    role="status"
+                                    aria-busy="true"
+                                >
+                                    <ArrowPathIcon className="h-5 w-5 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                                    Loading versions…
+                                </div>
                             )}
                             {!compositionId && (
                                 <p className="text-gray-500 dark:text-gray-400">
@@ -5684,7 +5819,12 @@ export default function AssetEditor() {
                                 as uploads.
                             </p>
                             {publishCategoriesLoading && (
-                                <p className="text-xs text-gray-500" role="status">
+                                <p
+                                    className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
+                                    role="status"
+                                    aria-busy="true"
+                                >
+                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
                                     Loading categories…
                                 </p>
                             )}
@@ -5766,7 +5906,12 @@ export default function AssetEditor() {
                                     Metadata <span className="font-normal text-gray-500">(from category)</span>
                                 </p>
                                 {publishMetadataLoading && (
-                                    <p className="text-xs text-gray-500" role="status">
+                                    <p
+                                        className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
+                                        role="status"
+                                        aria-busy="true"
+                                    >
+                                        <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
                                         Loading metadata fields…
                                     </p>
                                 )}
@@ -5923,24 +6068,77 @@ export default function AssetEditor() {
                                 in a new tab to upload or manage files, then return here and refresh the list.
                             </p>
                         </div>
+                        {pickerMode === 'references' && referenceSelectionIds.length > 0 && (
+                            <div className="shrink-0 border-b border-violet-200 bg-violet-50/70 px-4 py-2.5 dark:border-violet-800 dark:bg-violet-950/25">
+                                <p className="mb-1.5 text-[10px] font-medium text-violet-900 dark:text-violet-200">
+                                    Selected ({referenceSelectionIds.length} / {MAX_REFERENCE_ASSETS})
+                                </p>
+                                <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+                                    {referenceSelectionIds.map((rid) => {
+                                        const refAsset =
+                                            damAssets.find((x) => x.id === rid) ??
+                                            extraDamAssets.find((x) => x.id === rid)
+                                        return (
+                                            <div
+                                                key={rid}
+                                                className="flex max-w-[200px] items-center gap-1.5 rounded-md border border-violet-200 bg-white pr-1 shadow-sm dark:border-violet-700 dark:bg-gray-900"
+                                            >
+                                                <div className="h-11 w-11 shrink-0 overflow-hidden rounded-l bg-gray-100 dark:bg-gray-800">
+                                                    {refAsset ? (
+                                                        <img
+                                                            src={refAsset.thumbnail_url || refAsset.file_url}
+                                                            alt=""
+                                                            className="h-full w-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="flex h-full items-center justify-center text-[8px] text-gray-400">
+                                                            …
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <span className="min-w-0 flex-1 truncate text-[10px] text-gray-700 dark:text-gray-200">
+                                                    {refAsset?.name ?? 'Asset'}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    className="shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                                                    aria-label="Remove from selection"
+                                                    onClick={() => toggleReferenceAssetInPicker(rid)}
+                                                >
+                                                    <XMarkIcon className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
                         <div className="min-h-[200px] flex-1 overflow-y-auto p-4">
                             {pickerMode === 'references' && (
                                 <p className="mb-3 text-[10px] text-gray-500 dark:text-gray-400">
-                                    Tap to select or deselect. {referenceSelectionIds.length} /{' '}
-                                    {MAX_REFERENCE_ASSETS} selected.
+                                    Tap assets to add them to your selection (you can pick more than one). Use{' '}
+                                    <strong className="font-semibold text-gray-700 dark:text-gray-300">Done</strong>{' '}
+                                    when finished. {referenceSelectionIds.length} / {MAX_REFERENCE_ASSETS} selected.
                                 </p>
                             )}
                             {damLoading && (
-                                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4" aria-busy="true">
-                                    {Array.from({ length: 8 }).map((_, i) => (
-                                        <div
-                                            key={i}
-                                            className="flex flex-col overflow-hidden rounded border border-gray-200 dark:border-gray-600"
-                                        >
-                                            <div className="aspect-square w-full animate-pulse bg-gray-200 dark:bg-gray-700" />
-                                            <div className="mx-1 my-1 h-3 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
-                                        </div>
-                                    ))}
+                                <div
+                                    className="flex min-h-[180px] flex-col items-center justify-center gap-3 py-6"
+                                    aria-busy="true"
+                                    aria-label="Loading assets"
+                                >
+                                    <ArrowPathIcon className="h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+                                    <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                        Loading library…
+                                    </span>
+                                    <div className="grid w-full max-w-md grid-cols-4 gap-2 opacity-60">
+                                        {Array.from({ length: 4 }).map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className="aspect-square animate-pulse rounded bg-gray-200 dark:bg-gray-700"
+                                            />
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                             {!damLoading && damError && (
@@ -6002,7 +6200,7 @@ export default function AssetEditor() {
                                     className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-500"
                                     onClick={applyReferencePicker}
                                 >
-                                    Apply references
+                                    Done
                                 </button>
                             </div>
                         )}

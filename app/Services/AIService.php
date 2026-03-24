@@ -352,6 +352,276 @@ class AIService
     }
 
     /**
+     * Execute a generative image agent (editor image layers): agent runs, budgets, token/cost attribution.
+     *
+     * @param  array<string, mixed>  $options
+     *   - model: Registry key from config/ai.php models (required)
+     *   - image_size: OpenAI size e.g. 1024x1024
+     *   - tenant, user, brand_id, composition_id, asset_id: attribution
+     * @return array<string, mixed>
+     */
+    public function executeGenerativeImageAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
+    {
+        if ($taskType !== AITaskType::EDITOR_GENERATIVE_IMAGE) {
+            throw new \InvalidArgumentException("Task type must be ".AITaskType::EDITOR_GENERATIVE_IMAGE);
+        }
+
+        $triggeringContext = $options['triggering_context'] ?? $this->determineContext($options);
+        $environment = $options['environment'] ?? app()->environment();
+
+        $agentConfig = $this->getAgentConfig($agentId, $environment);
+        if (! $agentConfig) {
+            throw new \InvalidArgumentException("Agent '{$agentId}' not found in configuration.");
+        }
+
+        $tenant = $options['tenant'] ?? null;
+        if (! $tenant && isset($options['tenant_id']) && $options['tenant_id']) {
+            $tenant = Tenant::find($options['tenant_id']);
+        }
+
+        $user = $options['user'] ?? null;
+        if (! $user && isset($options['user_id']) && $options['user_id']) {
+            $user = User::find($options['user_id']);
+        }
+
+        $systemUser = null;
+        if ($triggeringContext === 'system') {
+            $systemUser = User::where('email', 'system@internal')->first();
+            if (! $systemUser) {
+                $systemUser = User::find(1);
+            }
+        }
+
+        $this->enforcePermissions($agentConfig, $triggeringContext, $tenant, $user ?? $systemUser);
+
+        if ($agentConfig['scope'] === 'tenant' && ! $tenant) {
+            throw new \InvalidArgumentException("Tenant-scoped agent '{$agentId}' requires a tenant.");
+        }
+
+        $modelKey = $options['model'] ?? $agentConfig['default_model'];
+        $this->assertGenerativeImageModelAllowed($modelKey, $environment);
+
+        $modelConfig = $this->getModelConfig($modelKey, $environment);
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+        }
+
+        $provider = $this->getProviderForModel($modelConfig);
+        $actualModelName = $modelConfig['model_name'] ?? $modelKey;
+        $providerName = $modelConfig['provider'] ?? config('ai.default_provider', 'openai');
+
+        $estimatedTokensIn = max(256, (int) (strlen($prompt) / 4));
+        $estimatedTokensOut = 2048;
+        $estimatedCost = $provider->calculateCost($estimatedTokensIn, $estimatedTokensOut, $actualModelName);
+
+        $systemBudget = $this->budgetService->getSystemBudget($environment);
+        $agentBudget = $this->budgetService->getAgentBudget($agentId, $environment);
+        $taskBudget = $this->budgetService->getTaskBudget($taskType, $environment);
+
+        try {
+            if ($systemBudget) {
+                $this->budgetService->checkBudget($systemBudget, $estimatedCost, $environment);
+            }
+            if ($agentBudget) {
+                $this->budgetService->checkBudget($agentBudget, $estimatedCost, $environment);
+            }
+            if ($taskBudget) {
+                $this->budgetService->checkBudget($taskBudget, $estimatedCost, $environment);
+            }
+        } catch (AIBudgetExceededException $e) {
+            $entity = $this->extractEntityFromOptions($options);
+            $agentRun = AIAgentRun::create([
+                'agent_id' => $agentId,
+                'agent_name' => $agentConfig['name'] ?? $agentId,
+                'triggering_context' => $triggeringContext,
+                'environment' => $environment,
+                'tenant_id' => $tenant?->id,
+                'user_id' => ($user ?? $systemUser)?->id,
+                'task_type' => $taskType,
+                'entity_type' => $entity['entity_type'],
+                'entity_id' => $entity['entity_id'],
+                'model_used' => $actualModelName,
+                'tokens_in' => 0,
+                'tokens_out' => 0,
+                'estimated_cost' => 0,
+                'status' => 'failed',
+                'severity' => 'warning',
+                'summary' => 'AI execution failed',
+                'blocked_reason' => $e->getMessage(),
+                'started_at' => now(),
+                'completed_at' => now(),
+                'metadata' => $this->buildMetadata($prompt, $options, $agentConfig, $triggeringContext),
+            ]);
+
+            Log::warning('AI generative image blocked by budget limit', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'estimated_cost' => $estimatedCost,
+                'budget_exception' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $entity = $this->extractEntityFromOptions($options);
+        $agentRun = AIAgentRun::create([
+            'agent_id' => $agentId,
+            'agent_name' => $agentConfig['name'] ?? $agentId,
+            'triggering_context' => $triggeringContext,
+            'environment' => $environment,
+            'tenant_id' => $tenant?->id,
+            'user_id' => ($user ?? $systemUser)?->id,
+            'task_type' => $taskType,
+            'entity_type' => $entity['entity_type'],
+            'entity_id' => $entity['entity_id'],
+            'model_used' => $actualModelName,
+            'tokens_in' => 0,
+            'tokens_out' => 0,
+            'estimated_cost' => 0,
+            'status' => 'failed',
+            'started_at' => now(),
+            'metadata' => $this->buildMetadata($prompt, $options, $agentConfig, $triggeringContext),
+        ]);
+
+        try {
+            $providerOptions = array_merge($options, [
+                'model' => $actualModelName,
+            ]);
+
+            if ($providerName === 'openai' && $provider instanceof OpenAIProvider) {
+                $response = $provider->generateImage($prompt, array_merge($providerOptions, [
+                    'image_size' => $options['image_size'] ?? $options['size'] ?? null,
+                ]));
+            } elseif ($providerName === 'gemini') {
+                $response = $provider->generateText($prompt, $providerOptions);
+            } else {
+                throw new \InvalidArgumentException("Provider '{$providerName}' does not support generative images.");
+            }
+
+            $imageRef = $this->extractImageRefFromGenerativeResponse($response, $providerName);
+            if ($imageRef === '' || $imageRef === null) {
+                throw new \Exception('Provider returned no image reference.');
+            }
+
+            $cost = $provider->calculateCost(
+                $response['tokens_in'],
+                $response['tokens_out'],
+                $actualModelName
+            );
+
+            $metadata = $agentRun->metadata ?? [];
+            if (config('ai.logging.store_prompts', false)) {
+                $metadata['prompt'] = $prompt;
+                $metadata['response_metadata'] = $response['metadata'] ?? [];
+            }
+            $metadata['resolved_model_key'] = $modelKey;
+            $metadata['image_ref'] = $imageRef;
+
+            $displayName = (string) ($modelConfig['display_name'] ?? $modelConfig['model_name'] ?? $modelKey);
+
+            $agentRun->markAsSuccessful(
+                $response['tokens_in'],
+                $response['tokens_out'],
+                $cost,
+                $metadata,
+                'info',
+                1.0,
+                'Generative image generated'
+            );
+
+            if ($systemBudget) {
+                $this->budgetService->recordUsage($systemBudget, $cost, $environment);
+            }
+            if ($agentBudget) {
+                $this->budgetService->recordUsage($agentBudget, $cost, $environment);
+            }
+            if ($taskBudget) {
+                $this->budgetService->recordUsage($taskBudget, $cost, $environment);
+            }
+
+            Log::info('AI generative image agent executed successfully', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'cost' => $cost,
+            ]);
+
+            return [
+                'text' => '',
+                'image_ref' => $imageRef,
+                'agent_run_id' => $agentRun->id,
+                'cost' => $cost,
+                'tokens_in' => $response['tokens_in'],
+                'tokens_out' => $response['tokens_out'],
+                'resolved_model_key' => $modelKey,
+                'model_display_name' => $displayName,
+                'metadata' => $response['metadata'] ?? [],
+            ];
+        } catch (\Exception $e) {
+            $agentRun->markAsFailed($e->getMessage());
+
+            Log::error('AI generative image agent execution failed', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     */
+    protected function extractImageRefFromGenerativeResponse(array $response, string $providerName): ?string
+    {
+        $meta = $response['metadata'] ?? [];
+        if ($providerName === 'openai') {
+            $ref = $meta['image_ref'] ?? null;
+
+            return is_string($ref) ? $ref : null;
+        }
+        if ($providerName === 'gemini') {
+            $inline = $meta['inline_images'] ?? [];
+            if (is_array($inline) && isset($inline[0]) && is_string($inline[0])) {
+                return $inline[0];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Allowed models for editor generative images: config allowlist or any active model with image_generation.
+     */
+    protected function assertGenerativeImageModelAllowed(string $modelKey, ?string $environment = null): void
+    {
+        $allowed = config('ai.generative_editor.allowed_model_keys', []);
+        $modelConfig = $this->getModelConfig($modelKey, $environment);
+
+        if ($allowed !== []) {
+            if (! in_array($modelKey, $allowed, true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not allowed for generative image generation.");
+            }
+            if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+            }
+
+            return;
+        }
+
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+        }
+        $caps = $modelConfig['capabilities'] ?? [];
+        if (! in_array('image_generation', $caps, true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' does not support image generation.");
+        }
+    }
+
+    /**
      * Get agent configuration from config with DB overrides.
      *
      * @param string $agentId Agent identifier
@@ -427,6 +697,9 @@ class AIService
         if (isset($options['asset_id'])) {
             return ['entity_type' => 'asset', 'entity_id' => (string) $options['asset_id']];
         }
+        if (isset($options['composition_id'])) {
+            return ['entity_type' => 'composition', 'entity_id' => (string) $options['composition_id']];
+        }
         if (isset($options['derivative_failure_id'])) {
             return ['entity_type' => 'asset', 'entity_id' => (string) ($options['asset_id'] ?? $options['derivative_failure_id'])];
         }
@@ -496,6 +769,7 @@ class AIService
         $metadata['options'] = array_diff_key($options, array_flip([
             'model', 'tenant', 'tenant_id', 'user', 'user_id', 'triggering_context',
             'max_tokens', 'temperature', // Provider-specific options
+            'image_size', 'size', 'model_override', 'composition_id', 'asset_id', 'brand_id',
         ]));
 
         return $metadata;

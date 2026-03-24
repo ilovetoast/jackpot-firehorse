@@ -145,6 +145,19 @@ return [
             'active' => true,
             'notes' => 'Cost-effective alternative for high-volume operations',
         ],
+        'gpt-image-1' => [
+            'provider' => 'openai',
+            'model_name' => 'gpt-image-1',
+            'capabilities' => ['image_generation'],
+            'recommended_use' => ['creative', 'image_generation'],
+            'display_name' => 'GPT Image 1',
+            'default_cost_per_token' => [
+                'input' => 0.00001,
+                'output' => 0.00004,
+            ],
+            'active' => true,
+            'notes' => 'OpenAI Images API — token usage when returned by API; otherwise estimated',
+        ],
         'claude-sonnet-4-20250514' => [
             'provider' => 'anthropic',
             'model_name' => 'claude-sonnet-4-20250514',
@@ -166,6 +179,7 @@ return [
             'model_name' => 'gemini-3-pro-image-preview',
             'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
             'recommended_use' => ['creative', 'image_generation'],
+            'display_name' => 'Gemini 3 Pro Image (preview)',
             'default_cost_per_token' => [
                 'input' => 0.000002,   // placeholder; align with current Gemini pricing
                 'output' => 0.000012,
@@ -178,6 +192,7 @@ return [
             'model_name' => 'gemini-3.1-flash-image-preview',
             'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
             'recommended_use' => ['creative', 'image_generation'],
+            'display_name' => 'Gemini 3.1 Flash Image (preview)',
             'default_cost_per_token' => [
                 'input' => 0.00000035,
                 'output' => 0.0000014,
@@ -190,12 +205,32 @@ return [
             'model_name' => 'gemini-2.5-flash-image',
             'capabilities' => ['text', 'image', 'multimodal', 'image_generation'],
             'recommended_use' => ['creative', 'image_generation'],
+            'display_name' => 'Gemini 2.5 Flash Image',
             'default_cost_per_token' => [
                 'input' => 0.0000003,
                 'output' => 0.0000012,
             ],
             'active' => true,
             'notes' => 'Nano Banana — speed/efficiency (gemini-2.5-flash-image)',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Generative asset editor (images)
+    |--------------------------------------------------------------------------
+    |
+    | Registry keys from ai.models that may be selected when using an optional
+    | advanced model override. Empty allowed_model_keys = allow any active model
+    | with image_generation capability (still merged with AIModelOverride).
+    |
+    */
+    'generative_editor' => [
+        'allowed_model_keys' => [
+            'gpt-image-1',
+            'gemini-3-pro-image-preview',
+            'gemini-3.1-flash-image-preview',
+            'gemini-2.5-flash-image',
         ],
     ],
 
@@ -475,6 +510,14 @@ PROMPT
             'permissions' => [
                 // User-triggered from editor; tenant + user attribution via AIService
             ],
+        ],
+        'editor_generative_image' => [
+            'name' => 'Editor Generative Image',
+            'description' => 'Generates images in the generative asset editor (image layers)',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-image-1',
+            'allowed_actions' => ['read', 'generate_image'],
+            'permissions' => [],
         ],
     ],
 

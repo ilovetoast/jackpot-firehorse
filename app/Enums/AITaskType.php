@@ -69,6 +69,9 @@ class AITaskType
     /** Asset editor — inline marketing copy assist (text layers) */
     public const EDITOR_COPY_ASSIST = 'editor_copy_assist';
 
+    /** Asset editor — generative image layers */
+    public const EDITOR_GENERATIVE_IMAGE = 'editor_generative_image';
+
     /**
      * Get all task types as an array.
      *
@@ -99,6 +102,7 @@ class AITaskType
             self::BRAND_PDF_EXTRACTION,
             self::BRAND_INSIGHTS,
             self::EDITOR_COPY_ASSIST,
+            self::EDITOR_GENERATIVE_IMAGE,
         ];
     }
     

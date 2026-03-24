@@ -246,6 +246,12 @@ export type GenerativeImageLayer = BaseLayer & {
     negativePrompt?: string[]
     /** UI preset key — maps to provider/model via MODEL_MAP on the client. */
     model?: string
+    /** Advanced: registry key from config/ai.php (server allowlisted). */
+    modelOverride?: string
+    /** When true, use {@link modelOverride} instead of the preset mapping. */
+    advancedModel?: boolean
+    /** Last resolved label from API (`model_display_name`). */
+    lastResolvedModelDisplay?: string
     /** When true (default), prompt_string is augmented with Brand DNA; when false, only buildPromptString. */
     applyBrandDna?: boolean
     /** DAM asset ids used as visual references (max 5 enforced in UI). */

@@ -44,16 +44,35 @@ export type GenerateImagePayload = {
     brand_context?: BrandContext | null
     /** DAM asset ids for reference-based generation (optional). */
     references?: string[]
+    /** Server registry key override (advanced); must match allowlist in config. */
+    model_override?: string
+    /** Saved composition UUID for attribution (optional). */
+    composition_id?: string
+    /** DAM asset UUID when editing in asset context (optional). */
+    asset_id?: string
+    /** Active brand id for attribution (optional). */
+    brand_id?: number
 }
 
 export type GenerateImageResponse = {
     image_url: string
+    resolved_model_key?: string
+    model_display_name?: string
+    agent_run_id?: number
 }
 
 export const GENERATIVE_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: GenerativeUiModelKey }> = [
     { label: 'Default', value: 'default' },
     { label: 'High Quality', value: 'high_quality' },
     { label: 'Fast', value: 'fast' },
+]
+
+/** Registry keys aligned with `config/ai.php` generative_editor.allowlist — advanced override only. */
+export const GENERATIVE_ADVANCED_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
+    { label: 'GPT Image 1', value: 'gpt-image-1' },
+    { label: 'Gemini 3 Pro Image (preview)', value: 'gemini-3-pro-image-preview' },
+    { label: 'Gemini 3.1 Flash Image (preview)', value: 'gemini-3.1-flash-image-preview' },
+    { label: 'Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
 ]
 
 export function canGenerateFromUsage(usage: GenerateImageUsage | null): boolean {
