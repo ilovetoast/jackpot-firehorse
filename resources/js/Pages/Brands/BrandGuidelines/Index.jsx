@@ -378,7 +378,23 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const [activeSection, setActiveSection] = useState('sec-hero')
     const [sectionTheme, setSectionTheme] = useState('dark')
     const [scrolledPastHero, setScrolledPastHero] = useState(false)
-    const darkSections = new Set(['sec-hero', 'sec-archetype', 'sec-logo-standards'])
+    /** Sections with dark BG: floating nav uses filter:invert(1) so labels stay readable. */
+    const darkSections = useMemo(() => {
+        const s = new Set(['sec-hero', 'sec-archetype', 'sec-logo-standards'])
+        if (isTextured) {
+            ;[
+                'sec-purpose',
+                'sec-values',
+                'sec-voice',
+                'sec-visual',
+                'sec-photography',
+                'sec-colors',
+                'sec-typography',
+                'sec-logo',
+            ].forEach((id) => s.add(id))
+        }
+        return s
+    }, [isTextured])
 
     useEffect(() => {
         if (showCallout) return
@@ -391,7 +407,8 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     }, [showCallout])
 
     useEffect(() => {
-        const sectionIds = NAV_SECTIONS.map(s => s.id)
+        if (showCallout) return
+        const sectionIds = NAV_SECTIONS.map((sec) => sec.id)
         const observer = new IntersectionObserver(
             (entries) => {
                 let topEntry = null
@@ -414,7 +431,8 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
             if (el) observer.observe(el)
         }
         return () => observer.disconnect()
-    }, [])
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- NAV_SECTIONS is rebuilt each render; ids follow brand data
+    }, [showCallout, darkSections])
 
     const scrollToSection = useCallback((id) => {
         const el = document.getElementById(id)

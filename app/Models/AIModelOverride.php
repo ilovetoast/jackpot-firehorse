@@ -78,6 +78,28 @@ class AIModelOverride extends Model
     }
 
     /**
+     * Effective override for a model: prefer environment-specific row over global (null environment).
+     * Avoids {@see scopeByEnvironment} + {@see first()} picking an arbitrary row when both exist.
+     */
+    public static function resolveForModelKey(string $modelKey, ?string $environment): ?self
+    {
+        if ($environment !== null && $environment !== '') {
+            $specific = static::query()
+                ->where('model_key', $modelKey)
+                ->where('environment', $environment)
+                ->first();
+            if ($specific !== null) {
+                return $specific;
+            }
+        }
+
+        return static::query()
+            ->where('model_key', $modelKey)
+            ->whereNull('environment')
+            ->first();
+    }
+
+    /**
      * Scope a query to only include overrides for a specific environment.
      */
     public function scopeByEnvironment(Builder $query, ?string $environment): Builder
@@ -103,7 +125,7 @@ class AIModelOverride extends Model
     /**
      * Merge this override with the base config.
      *
-     * @param array $config Base config from config/ai.php
+     * @param  array  $config  Base config from config/ai.php
      * @return array Merged configuration
      */
     public function mergeWithConfig(array $config): array
@@ -124,7 +146,7 @@ class AIModelOverride extends Model
     /**
      * Get the effective configuration after merging with base config.
      *
-     * @param array $baseConfig Base config from config/ai.php
+     * @param  array  $baseConfig  Base config from config/ai.php
      * @return array Effective configuration
      */
     public function getEffectiveConfig(array $baseConfig): array

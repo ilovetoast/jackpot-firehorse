@@ -78,6 +78,27 @@ class AIAutomationOverride extends Model
     }
 
     /**
+     * Prefer environment-specific override over global (null environment).
+     */
+    public static function resolveForTriggerKey(string $triggerKey, ?string $environment): ?self
+    {
+        if ($environment !== null && $environment !== '') {
+            $specific = static::query()
+                ->where('trigger_key', $triggerKey)
+                ->where('environment', $environment)
+                ->first();
+            if ($specific !== null) {
+                return $specific;
+            }
+        }
+
+        return static::query()
+            ->where('trigger_key', $triggerKey)
+            ->whereNull('environment')
+            ->first();
+    }
+
+    /**
      * Scope a query to only include overrides for a specific environment.
      */
     public function scopeByEnvironment(Builder $query, ?string $environment): Builder
@@ -103,7 +124,7 @@ class AIAutomationOverride extends Model
     /**
      * Merge this override with the base config.
      *
-     * @param array $config Base config from config/automation.php
+     * @param  array  $config  Base config from config/automation.php
      * @return array Merged configuration
      */
     public function mergeWithConfig(array $config): array
@@ -126,7 +147,7 @@ class AIAutomationOverride extends Model
     /**
      * Get the effective configuration after merging with base config.
      *
-     * @param array $baseConfig Base config from config/automation.php
+     * @param  array  $baseConfig  Base config from config/automation.php
      * @return array Effective configuration
      */
     public function getEffectiveConfig(array $baseConfig): array

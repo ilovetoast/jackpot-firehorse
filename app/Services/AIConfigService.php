@@ -27,25 +27,22 @@ class AIConfigService
     /**
      * Get merged model configuration (config + DB override).
      *
-     * @param string $modelKey Model key from config/ai.php
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $modelKey  Model key from config/ai.php
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Merged configuration or null if model not found
      */
     public function getModelConfig(string $modelKey, ?string $environment = null): ?array
     {
         $baseConfig = config("ai.models.{$modelKey}");
-        if (!$baseConfig) {
+        if (! $baseConfig) {
             return null;
         }
 
         $environment = $environment ?? app()->environment();
 
-        // Get override for this environment (or global if null)
-        $override = AIModelOverride::where('model_key', $modelKey)
-            ->byEnvironment($environment)
-            ->first();
+        $override = AIModelOverride::resolveForModelKey($modelKey, $environment);
 
-        if (!$override) {
+        if (! $override) {
             return $baseConfig;
         }
 
@@ -55,25 +52,22 @@ class AIConfigService
     /**
      * Get merged agent configuration (config + DB override).
      *
-     * @param string $agentId Agent ID from config/ai.php
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $agentId  Agent ID from config/ai.php
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Merged configuration or null if agent not found
      */
     public function getAgentConfig(string $agentId, ?string $environment = null): ?array
     {
         $baseConfig = config("ai.agents.{$agentId}");
-        if (!$baseConfig) {
+        if (! $baseConfig) {
             return null;
         }
 
         $environment = $environment ?? app()->environment();
 
-        // Get override for this environment (or global if null)
-        $override = AIAgentOverride::where('agent_id', $agentId)
-            ->byEnvironment($environment)
-            ->first();
+        $override = AIAgentOverride::resolveForAgentId($agentId, $environment);
 
-        if (!$override) {
+        if (! $override) {
             return $baseConfig;
         }
 
@@ -83,25 +77,22 @@ class AIConfigService
     /**
      * Get merged automation configuration (config + DB override).
      *
-     * @param string $triggerKey Trigger key from config/automation.php
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $triggerKey  Trigger key from config/automation.php
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Merged configuration or null if trigger not found
      */
     public function getAutomationConfig(string $triggerKey, ?string $environment = null): ?array
     {
         $baseConfig = config("automation.triggers.{$triggerKey}");
-        if (!$baseConfig) {
+        if (! $baseConfig) {
             return null;
         }
 
         $environment = $environment ?? app()->environment();
 
-        // Get override for this environment (or global if null)
-        $override = AIAutomationOverride::where('trigger_key', $triggerKey)
-            ->byEnvironment($environment)
-            ->first();
+        $override = AIAutomationOverride::resolveForTriggerKey($triggerKey, $environment);
 
-        if (!$override) {
+        if (! $override) {
             return $baseConfig;
         }
 
@@ -111,10 +102,9 @@ class AIConfigService
     /**
      * Update or create a model override.
      *
-     * @param string $modelKey Model key
-     * @param array $data Override data (active, default_for_tasks, environment)
-     * @param User $user User making the change
-     * @return AIModelOverride
+     * @param  string  $modelKey  Model key
+     * @param  array  $data  Override data (active, default_for_tasks, environment)
+     * @param  User  $user  User making the change
      */
     public function updateModelOverride(string $modelKey, array $data, User $user): AIModelOverride
     {
@@ -130,7 +120,7 @@ class AIConfigService
                 'environment' => $data['environment'] ?? null,
             ]);
 
-            if (!$override->exists) {
+            if (! $override->exists) {
                 $override->created_by_user_id = $user->id;
             }
             $override->updated_by_user_id = $user->id;
@@ -144,10 +134,9 @@ class AIConfigService
     /**
      * Update or create an agent override.
      *
-     * @param string $agentId Agent ID
-     * @param array $data Override data (active, default_model, environment)
-     * @param User $user User making the change
-     * @return AIAgentOverride
+     * @param  string  $agentId  Agent ID
+     * @param  array  $data  Override data (active, default_model, environment)
+     * @param  User  $user  User making the change
      */
     public function updateAgentOverride(string $agentId, array $data, User $user): AIAgentOverride
     {
@@ -163,7 +152,7 @@ class AIConfigService
                 'environment' => $data['environment'] ?? null,
             ]);
 
-            if (!$override->exists) {
+            if (! $override->exists) {
                 $override->created_by_user_id = $user->id;
             }
             $override->updated_by_user_id = $user->id;
@@ -177,10 +166,9 @@ class AIConfigService
     /**
      * Update or create an automation override.
      *
-     * @param string $triggerKey Trigger key
-     * @param array $data Override data (enabled, thresholds, environment)
-     * @param User $user User making the change
-     * @return AIAutomationOverride
+     * @param  string  $triggerKey  Trigger key
+     * @param  array  $data  Override data (enabled, thresholds, environment)
+     * @param  User  $user  User making the change
      */
     public function updateAutomationOverride(string $triggerKey, array $data, User $user): AIAutomationOverride
     {
@@ -196,7 +184,7 @@ class AIConfigService
                 'environment' => $data['environment'] ?? null,
             ]);
 
-            if (!$override->exists) {
+            if (! $override->exists) {
                 $override->created_by_user_id = $user->id;
             }
             $override->updated_by_user_id = $user->id;
@@ -210,7 +198,7 @@ class AIConfigService
     /**
      * Get all models with override status.
      *
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array Array of models with override information
      */
     public function getAllModelsWithOverrides(?string $environment = null): array
@@ -238,7 +226,7 @@ class AIConfigService
     /**
      * Get all agents with override status.
      *
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array Array of agents with override information
      */
     public function getAllAgentsWithOverrides(?string $environment = null): array
@@ -266,7 +254,7 @@ class AIConfigService
     /**
      * Get all automations with override status.
      *
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array Array of automations with override information
      */
     public function getAllAutomationsWithOverrides(?string $environment = null): array
@@ -312,9 +300,9 @@ class AIConfigService
     /**
      * Get budget configuration (config + DB override).
      *
-     * @param string $budgetType Budget type ('system', 'agent', 'task_type')
-     * @param string|null $scopeKey Scope key (agent_id or task_type, null for system)
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $budgetType  Budget type ('system', 'agent', 'task_type')
+     * @param  string|null  $scopeKey  Scope key (agent_id or task_type, null for system)
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Merged configuration or null if budget not found
      */
     public function getBudgetConfig(string $budgetType, ?string $scopeKey = null, ?string $environment = null): ?array
@@ -326,12 +314,12 @@ class AIConfigService
             default => null,
         };
 
-        if (!$configKey) {
+        if (! $configKey) {
             return null;
         }
 
         $baseConfig = config($configKey);
-        if (!$baseConfig) {
+        if (! $baseConfig) {
             return null;
         }
 
@@ -343,7 +331,7 @@ class AIConfigService
             ->byEnvironment($environment)
             ->first();
 
-        if (!$budget) {
+        if (! $budget) {
             return $baseConfig;
         }
 
@@ -352,7 +340,7 @@ class AIConfigService
             ->byEnvironment($environment)
             ->first();
 
-        if (!$override) {
+        if (! $override) {
             return $baseConfig;
         }
 
@@ -362,10 +350,9 @@ class AIConfigService
     /**
      * Update or create a budget override.
      *
-     * @param int $budgetId Budget ID
-     * @param array $data Override data (amount, warning_threshold_percent, hard_limit_enabled, environment)
-     * @param User $user User making the change
-     * @return AIBudgetOverride
+     * @param  int  $budgetId  Budget ID
+     * @param  array  $data  Override data (amount, warning_threshold_percent, hard_limit_enabled, environment)
+     * @param  User  $user  User making the change
      */
     public function updateBudgetOverride(int $budgetId, array $data, User $user): AIBudgetOverride
     {
@@ -382,7 +369,7 @@ class AIConfigService
                 'environment' => $data['environment'] ?? null,
             ]);
 
-            if (!$override->exists) {
+            if (! $override->exists) {
                 $override->created_by_user_id = $user->id;
             }
             $override->updated_by_user_id = $user->id;
@@ -396,7 +383,7 @@ class AIConfigService
     /**
      * Get all budgets with override status.
      *
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array Array of budgets with override information
      */
     public function getAllBudgetsWithOverrides(?string $environment = null): array

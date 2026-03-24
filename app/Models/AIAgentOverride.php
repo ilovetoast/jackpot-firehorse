@@ -77,6 +77,27 @@ class AIAgentOverride extends Model
     }
 
     /**
+     * Prefer environment-specific override over global (null environment).
+     */
+    public static function resolveForAgentId(string $agentId, ?string $environment): ?self
+    {
+        if ($environment !== null && $environment !== '') {
+            $specific = static::query()
+                ->where('agent_id', $agentId)
+                ->where('environment', $environment)
+                ->first();
+            if ($specific !== null) {
+                return $specific;
+            }
+        }
+
+        return static::query()
+            ->where('agent_id', $agentId)
+            ->whereNull('environment')
+            ->first();
+    }
+
+    /**
      * Scope a query to only include overrides for a specific environment.
      */
     public function scopeByEnvironment(Builder $query, ?string $environment): Builder
@@ -102,7 +123,7 @@ class AIAgentOverride extends Model
     /**
      * Merge this override with the base config.
      *
-     * @param array $config Base config from config/ai.php
+     * @param  array  $config  Base config from config/ai.php
      * @return array Merged configuration
      */
     public function mergeWithConfig(array $config): array
@@ -125,7 +146,7 @@ class AIAgentOverride extends Model
     /**
      * Get the effective configuration after merging with base config.
      *
-     * @param array $baseConfig Base config from config/ai.php
+     * @param  array  $baseConfig  Base config from config/ai.php
      * @return array Effective configuration
      */
     public function getEffectiveConfig(array $baseConfig): array
