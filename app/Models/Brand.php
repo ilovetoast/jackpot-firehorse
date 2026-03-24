@@ -84,13 +84,18 @@ class Brand extends Model
      * Thumbnail/original URL for a logo image asset (light or dark column).
      * Used by accessors (AUTHENTICATED) and {@see logoUrlForGuest} (GATEWAY signed URLs).
      */
-    protected function deliveryUrlForLogoAssetId(?int $assetId, DeliveryContext $context): ?string
+    protected function deliveryUrlForLogoAssetId(int|string|null $assetId, DeliveryContext $context): ?string
     {
-        if (! $assetId) {
+        if ($assetId === null || $assetId === '') {
             return null;
         }
 
-        $asset = Asset::find($assetId);
+        $id = (int) $assetId;
+        if ($id <= 0) {
+            return null;
+        }
+
+        $asset = Asset::find($id);
         if (! $asset) {
             return null;
         }
