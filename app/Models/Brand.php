@@ -90,12 +90,8 @@ class Brand extends Model
             return null;
         }
 
-        $id = (int) $assetId;
-        if ($id <= 0) {
-            return null;
-        }
-
-        $asset = Asset::find($id);
+        // logo_id is a UUID column — never cast to int (would break lookups and hide logos).
+        $asset = Asset::find($assetId);
         if (! $asset) {
             return null;
         }
