@@ -46,7 +46,7 @@ export type GenerateImagePayload = {
     references?: string[]
     /** Server registry key override (advanced); must match allowlist in config. */
     model_override?: string
-    /** Saved composition UUID for attribution (optional). */
+    /** Saved composition id (bigint from API, sent as string) for attribution (optional). */
     composition_id?: string
     /** DAM asset UUID when editing in asset context (optional). */
     asset_id?: string

@@ -28,17 +28,28 @@ abstract class TestCase extends BaseTestCase
     /**
      * RefreshDatabase runs migrate:fresh. If DB_DATABASE points at the dev database, data is destroyed.
      * phpunit.xml + tests/bootstrap.php should force DB_DATABASE=testing; this is a last-resort check.
+     *
+     * Never "fail open" when APP_ENV is not testing: the old behaviour returned early here, which skipped
+     * the database-name check entirely while RefreshDatabase still ran — migrate:fresh could wipe the
+     * dev database if .env pointed at it.
      */
     protected function assertTestDatabaseIsIsolated(): void
     {
         if (config('app.env') !== 'testing') {
-            return;
+            throw new RuntimeException(
+                'Refusing to run tests: APP_ENV must be "testing" when using RefreshDatabase. '.
+                'You are probably running PHPUnit without phpunit.xml (wrong working directory) or without '.
+                'tests/bootstrap.php. cd into the Laravel project root and use ./vendor/bin/phpunit, '.
+                'composer test, or ./vendor/bin/sail test. See docs/TESTING_DATABASE.md.'
+            );
         }
 
         $connectionName = (string) config('database.default');
         $config = config("database.connections.{$connectionName}");
         if (! is_array($config)) {
-            return;
+            throw new RuntimeException(
+                'Refusing to run tests: database connection ['.$connectionName.'] is not configured. See docs/TESTING_DATABASE.md.'
+            );
         }
 
         $driver = $config['driver'] ?? 'mysql';

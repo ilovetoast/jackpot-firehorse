@@ -5983,8 +5983,8 @@ export default function AssetEditor() {
                     aria-modal="true"
                     aria-label="Choose asset"
                 >
-                    <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
-                        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                    <div className="flex max-h-[85vh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+                        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                 {pickerMode === 'references'
                                     ? `Reference images (max ${MAX_REFERENCE_ASSETS})`
@@ -6001,7 +6001,7 @@ export default function AssetEditor() {
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
-                        <div className="border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+                        <div className="shrink-0 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
                             <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                     Source
@@ -6113,12 +6113,15 @@ export default function AssetEditor() {
                                 </div>
                             </div>
                         )}
-                        <div className="min-h-[200px] flex-1 overflow-y-auto p-4">
+                        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
                             {pickerMode === 'references' && (
                                 <p className="mb-3 text-[10px] text-gray-500 dark:text-gray-400">
-                                    Tap assets to add them to your selection (you can pick more than one). Use{' '}
-                                    <strong className="font-semibold text-gray-700 dark:text-gray-300">Done</strong>{' '}
-                                    when finished. {referenceSelectionIds.length} / {MAX_REFERENCE_ASSETS} selected.
+                                    Tap assets to add them to your selection (you can pick more than one). Choose{' '}
+                                    <strong className="font-semibold text-gray-700 dark:text-gray-300">
+                                        Use selection
+                                    </strong>{' '}
+                                    at the bottom when finished. {referenceSelectionIds.length} /{' '}
+                                    {MAX_REFERENCE_ASSETS} selected.
                                 </p>
                             )}
                             {damLoading && (
@@ -6187,7 +6190,7 @@ export default function AssetEditor() {
                             )}
                         </div>
                         {pickerMode === 'references' && (
-                            <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
                                 <button
                                     type="button"
                                     className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
@@ -6197,10 +6200,10 @@ export default function AssetEditor() {
                                 </button>
                                 <button
                                     type="button"
-                                    className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-500"
+                                    className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
                                     onClick={applyReferencePicker}
                                 >
-                                    Done
+                                    Use selection
                                 </button>
                             </div>
                         )}

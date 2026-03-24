@@ -5,9 +5,10 @@ namespace App\Http\Controllers\Editor;
 use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
+use App\Models\Composition;
 use App\Models\Tenant;
-use App\Services\AiUsageService;
 use App\Services\AIService;
+use App\Services\AiUsageService;
 use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -104,7 +105,8 @@ class EditorGenerateImageController extends Controller
             'brand_context' => 'nullable|array',
             'references' => 'sometimes|array',
             'references.*' => 'string|max:64',
-            'composition_id' => 'nullable|uuid',
+            // Compositions use bigint primary keys (not UUIDs); the editor sends stringified ids from the API.
+            'composition_id' => 'nullable|integer|min:1',
             'asset_id' => 'nullable|uuid',
             'brand_id' => 'nullable|integer',
         ]);
@@ -112,6 +114,20 @@ class EditorGenerateImageController extends Controller
         $tenant = app('tenant');
         if (! $tenant instanceof Tenant) {
             return response()->json(['message' => 'Tenant context required.'], 422);
+        }
+
+        if (! empty($validated['composition_id'])) {
+            $compositionId = (int) $validated['composition_id'];
+            $brand = app('brand');
+            $scoped = Composition::query()
+                ->where('id', $compositionId)
+                ->where('tenant_id', $tenant->id);
+            if ($brand && isset($brand->id)) {
+                $scoped->where('brand_id', $brand->id);
+            }
+            if (! $scoped->exists()) {
+                return response()->json(['message' => 'Invalid composition for this workspace.'], 422);
+            }
         }
 
         $prompt = $this->resolvePromptString($validated);
@@ -160,7 +176,7 @@ class EditorGenerateImageController extends Controller
             $options['brand_id'] = (int) $validated['brand_id'];
         }
         if (! empty($validated['composition_id'])) {
-            $options['composition_id'] = $validated['composition_id'];
+            $options['composition_id'] = (string) (int) $validated['composition_id'];
         }
         if (! empty($validated['asset_id'])) {
             $options['asset_id'] = $validated['asset_id'];
