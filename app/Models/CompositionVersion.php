@@ -13,7 +13,7 @@ class CompositionVersion extends Model
         'composition_id',
         'document_json',
         'label',
-        'thumbnail_path',
+        'thumbnail_asset_id',
         'created_at',
     ];
 
@@ -28,5 +28,10 @@ class CompositionVersion extends Model
     public function composition(): BelongsTo
     {
         return $this->belongsTo(Composition::class);
+    }
+
+    public function thumbnailAsset(): BelongsTo
+    {
+        return $this->belongsTo(Asset::class, 'thumbnail_asset_id');
     }
 }

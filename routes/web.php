@@ -555,6 +555,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
 
             // Generative editor — compositions + version history
+            // Same-origin preview (streams from S3). Static path before /api/compositions/{id}.
+            Route::get('/api/compositions/thumbnail/{asset}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'thumbnailAsset'])
+                ->name('api.editor.compositions.thumbnail-asset');
             Route::get('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'index'])->name('api.editor.compositions.index');
             Route::post('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'store'])->name('api.editor.compositions.store');
             Route::get('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'show'])->whereNumber('id')->name('api.editor.compositions.show');

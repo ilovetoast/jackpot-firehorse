@@ -47,6 +47,7 @@ import type {
     GenerativeImageLayer,
     ImageLayer,
     Layer,
+    LayerBlendMode,
     TextLayer,
 } from './documentModel'
 import {
@@ -64,6 +65,7 @@ import {
     createImageLayerFromDamAsset,
     createInitialDocument,
     isBlankUnsavedCanvas,
+    LAYER_BLEND_MODE_OPTIONS,
     DEFAULT_TEXT_FONT_FAMILY,
     effectivePrimaryFontFamily,
     defaultCompositionName,
@@ -3502,6 +3504,12 @@ export default function AssetEditor() {
                                                     : 'visible'
                                                 : 'hidden',
                                             transform: rot !== 0 ? `rotate(${rot}deg)` : undefined,
+                                            ...(layer.blendMode && layer.blendMode !== 'normal'
+                                                ? {
+                                                      mixBlendMode:
+                                                          layer.blendMode as CSSProperties['mixBlendMode'],
+                                                  }
+                                                : {}),
                                         }}
                                         onMouseDown={(e) => {
                                             e.stopPropagation()
@@ -4072,6 +4080,31 @@ export default function AssetEditor() {
                                         }}
                                         className="w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-800"
                                     />
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-gray-600 dark:text-gray-400">
+                                        Blend mode
+                                    </label>
+                                    <p className="mb-1.5 text-[9px] leading-snug text-gray-500 dark:text-gray-400">
+                                        How this layer composites over layers below (e.g. multiply, screen,
+                                        overlay).
+                                    </p>
+                                    <select
+                                        value={selectedLayer.blendMode ?? 'normal'}
+                                        onChange={(e) =>
+                                            updateLayer(selectedLayer.id, (l) => ({
+                                                ...l,
+                                                blendMode: e.target.value as LayerBlendMode,
+                                            }))
+                                        }
+                                        className="w-full rounded border border-gray-300 px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800"
+                                    >
+                                        {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div className="flex gap-3">
                                     <button

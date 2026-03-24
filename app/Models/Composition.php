@@ -14,7 +14,7 @@ class Composition extends Model
         'user_id',
         'name',
         'document_json',
-        'thumbnail_path',
+        'thumbnail_asset_id',
     ];
 
     protected function casts(): array
@@ -42,5 +42,10 @@ class Composition extends Model
     public function versions(): HasMany
     {
         return $this->hasMany(CompositionVersion::class)->orderByDesc('id');
+    }
+
+    public function thumbnailAsset(): BelongsTo
+    {
+        return $this->belongsTo(Asset::class, 'thumbnail_asset_id');
     }
 }

@@ -3,18 +3,30 @@
 namespace App\Http\Controllers\Editor;
 
 use App\Http\Controllers\Controller;
+use App\Models\Asset;
 use App\Models\Composition;
 use App\Models\CompositionVersion;
+use App\Models\User;
+use App\Services\CompositionThumbnailAssetService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Generative editor — composition persistence and version history.
+ *
+ * Preview thumbnails are stored as {@link Asset} rows on canonical tenant storage (S3 + same paths as DAM),
+ * not on the local public disk.
  */
 class EditorCompositionController extends Controller
 {
+    public function __construct(
+        protected CompositionThumbnailAssetService $thumbnailAssets
+    ) {}
+
     private function resolveComposition(Request $request, int $id): ?Composition
     {
         $tenant = app('tenant');
@@ -30,13 +42,70 @@ class EditorCompositionController extends Controller
             ->first();
     }
 
-    private function publicThumbnailUrl(?string $path): ?string
+    private function resolveThumbnailUrl(?string $assetId): ?string
     {
-        if ($path === null || $path === '') {
+        if ($assetId === null || $assetId === '') {
             return null;
         }
 
-        return Storage::disk('public')->url($path);
+        $asset = Asset::query()->find($assetId);
+        if (! $asset) {
+            return null;
+        }
+
+        // Same-origin URL (streams via thumbnailAsset). Avoids broken <img> from presigned S3 GETs
+        // (bucket policy / region / local dev) — same pattern as EditorAssetBridgeController::file.
+        return route('api.editor.compositions.thumbnail-asset', ['asset' => $asset->id], true);
+    }
+
+    /**
+     * GET /app/api/compositions/thumbnail/{asset}
+     *
+     * Stream composition preview PNG through the app (authenticated, brand-scoped).
+     */
+    public function thumbnailAsset(Request $request, Asset $asset): Response
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+        if (! $tenant || ! $brand || ! $user) {
+            abort(403);
+        }
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $meta = $asset->metadata ?? [];
+        $isCompositionPreview = ($meta['composition_preview'] ?? false) === true
+            || $asset->source === 'composition_editor';
+        if (! $isCompositionPreview) {
+            abort(404);
+        }
+
+        Gate::authorize('view', $asset);
+
+        $path = $asset->storage_root_path;
+        if ($path === null || $path === '') {
+            $asset->loadMissing('currentVersion');
+            $path = $asset->currentVersion?->file_path;
+        }
+        if ($path === null || $path === '') {
+            abort(404, 'Preview not available.');
+        }
+
+        if (! Storage::disk('s3')->exists($path)) {
+            abort(404, 'Preview file missing.');
+        }
+
+        return Storage::disk('s3')->response(
+            $path,
+            $asset->original_filename ?: 'composition-preview.png',
+            [
+                'Content-Type' => $asset->mime_type ?: 'image/png',
+                'Cache-Control' => 'private, max-age=120',
+            ]
+        );
     }
 
     private function compositionJson(Composition $c): array
@@ -45,7 +114,7 @@ class EditorCompositionController extends Controller
             'id' => (string) $c->id,
             'name' => $c->name,
             'document' => $c->document_json ?? [],
-            'thumbnail_url' => $this->publicThumbnailUrl($c->thumbnail_path),
+            'thumbnail_url' => $this->resolveThumbnailUrl($c->thumbnail_asset_id),
             'created_at' => $c->created_at?->toIso8601String() ?? '',
             'updated_at' => $c->updated_at?->toIso8601String() ?? '',
         ];
@@ -57,7 +126,7 @@ class EditorCompositionController extends Controller
             'id' => (string) $v->id,
             'composition_id' => (string) $v->composition_id,
             'label' => $v->label,
-            'thumbnail_url' => $this->publicThumbnailUrl($v->thumbnail_path),
+            'thumbnail_url' => $this->resolveThumbnailUrl($v->thumbnail_asset_id),
             'created_at' => $v->created_at?->toIso8601String() ?? '',
         ];
     }
@@ -69,7 +138,7 @@ class EditorCompositionController extends Controller
             'composition_id' => (string) $v->composition_id,
             'document' => $v->document_json ?? [],
             'label' => $v->label,
-            'thumbnail_url' => $this->publicThumbnailUrl($v->thumbnail_path),
+            'thumbnail_url' => $this->resolveThumbnailUrl($v->thumbnail_asset_id),
             'created_at' => $v->created_at?->toIso8601String() ?? '',
         ];
     }
@@ -90,29 +159,46 @@ class EditorCompositionController extends Controller
         return $binary;
     }
 
-    private function compositionThumbDir(Composition $c): string
+    private function persistCompositionThumbnail(Composition $c, string $binary, User $user): void
     {
-        return 'composition-thumbnails/'.$c->tenant_id.'/'.$c->brand_id.'/'.$c->id;
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand) {
+            return;
+        }
+
+        $id = $this->thumbnailAssets->createFromPngBinary(
+            $tenant,
+            $brand,
+            $user,
+            $binary,
+            $c->thumbnail_asset_id
+        );
+        $c->thumbnail_asset_id = $id;
     }
 
-    private function persistCompositionThumbnail(Composition $c, string $binary): void
+    private function persistVersionThumbnail(Composition $c, CompositionVersion $v, string $binary, User $user): void
     {
-        $path = $this->compositionThumbDir($c).'/thumb.png';
-        Storage::disk('public')->put($path, $binary);
-        $c->thumbnail_path = $path;
-    }
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand) {
+            return;
+        }
 
-    private function persistVersionThumbnail(Composition $c, CompositionVersion $v, string $binary): void
-    {
-        $path = $this->compositionThumbDir($c).'/v-'.$v->id.'.png';
-        Storage::disk('public')->put($path, $binary);
-        $v->thumbnail_path = $path;
+        $id = $this->thumbnailAssets->createFromPngBinary(
+            $tenant,
+            $brand,
+            $user,
+            $binary,
+            $v->thumbnail_asset_id
+        );
+        $v->thumbnail_asset_id = $id;
         $v->save();
     }
 
     /**
      * Keep only the newest N versions per composition to bound JSON + PNG storage.
-     * Deletes oldest rows first (by id) and removes version thumbnail files from disk.
+     * Deletes oldest rows first (by id) and soft-deletes version thumbnail assets.
      */
     private function pruneOldVersions(Composition $composition, int $maxVersions = 50): void
     {
@@ -130,8 +216,8 @@ class EditorCompositionController extends Controller
             ->get();
 
         foreach ($toDelete as $v) {
-            if ($v->thumbnail_path) {
-                Storage::disk('public')->delete($v->thumbnail_path);
+            if ($v->thumbnail_asset_id) {
+                Asset::query()->whereKey($v->thumbnail_asset_id)->delete();
             }
             $v->delete();
         }
@@ -154,13 +240,13 @@ class EditorCompositionController extends Controller
             ->where('brand_id', $brand->id)
             ->orderByDesc('updated_at')
             ->limit(100)
-            ->get(['id', 'name', 'thumbnail_path', 'updated_at']);
+            ->get(['id', 'name', 'thumbnail_asset_id', 'updated_at']);
 
         $items = $rows->map(function (Composition $c) {
             return [
                 'id' => (string) $c->id,
                 'name' => $c->name,
-                'thumbnail_url' => $this->publicThumbnailUrl($c->thumbnail_path),
+                'thumbnail_url' => $this->resolveThumbnailUrl($c->thumbnail_asset_id),
                 'updated_at' => $c->updated_at?->toIso8601String() ?? '',
             ];
         });
@@ -198,7 +284,7 @@ class EditorCompositionController extends Controller
             ]);
 
             if ($thumbBinary !== null) {
-                $this->persistCompositionThumbnail($c, $thumbBinary);
+                $this->persistCompositionThumbnail($c, $thumbBinary, $user);
                 $c->save();
             }
 
@@ -210,7 +296,7 @@ class EditorCompositionController extends Controller
             ]);
 
             if ($thumbBinary !== null) {
-                $this->persistVersionThumbnail($c->fresh(), $v, $thumbBinary);
+                $this->persistVersionThumbnail($c->fresh(), $v, $thumbBinary, $user);
             }
 
             $this->pruneOldVersions($c->fresh());
@@ -233,6 +319,11 @@ class EditorCompositionController extends Controller
             return response()->json(['error' => 'Not found'], 404);
         }
 
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'document' => 'required|array',
@@ -243,7 +334,7 @@ class EditorCompositionController extends Controller
         $createVersion = $request->boolean('create_version', true);
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
 
-        DB::transaction(function () use ($composition, $validated, $createVersion, $thumbBinary) {
+        DB::transaction(function () use ($composition, $validated, $createVersion, $thumbBinary, $user) {
             if (isset($validated['name'])) {
                 $composition->name = $validated['name'];
             }
@@ -251,7 +342,7 @@ class EditorCompositionController extends Controller
 
             // Thumbnails only when creating a new version row (manual save / checkpoint), not autosave.
             if ($thumbBinary !== null && $createVersion) {
-                $this->persistCompositionThumbnail($composition, $thumbBinary);
+                $this->persistCompositionThumbnail($composition, $thumbBinary, $user);
             }
 
             $composition->save();
@@ -265,7 +356,7 @@ class EditorCompositionController extends Controller
                 ]);
 
                 if ($thumbBinary !== null) {
-                    $this->persistVersionThumbnail($composition->fresh(), $v, $thumbBinary);
+                    $this->persistVersionThumbnail($composition->fresh(), $v, $thumbBinary, $user);
                 }
 
                 $this->pruneOldVersions($composition->fresh());
@@ -318,6 +409,11 @@ class EditorCompositionController extends Controller
             return response()->json(['error' => 'Not found'], 404);
         }
 
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
         $validated = $request->validate([
             'document' => 'required|array',
             'label' => 'nullable|string|max:255',
@@ -326,11 +422,11 @@ class EditorCompositionController extends Controller
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
 
-        DB::transaction(function () use ($composition, $validated, $thumbBinary) {
+        DB::transaction(function () use ($composition, $validated, $thumbBinary, $user) {
             $composition->document_json = $validated['document'];
 
             if ($thumbBinary !== null) {
-                $this->persistCompositionThumbnail($composition, $thumbBinary);
+                $this->persistCompositionThumbnail($composition, $thumbBinary, $user);
             }
 
             $composition->save();
@@ -343,7 +439,7 @@ class EditorCompositionController extends Controller
             ]);
 
             if ($thumbBinary !== null) {
-                $this->persistVersionThumbnail($composition->fresh(), $v, $thumbBinary);
+                $this->persistVersionThumbnail($composition->fresh(), $v, $thumbBinary, $user);
             }
 
             $this->pruneOldVersions($composition->fresh());
@@ -403,7 +499,7 @@ class EditorCompositionController extends Controller
         $doc = $source->document_json ?? [];
         $name = $validated['name'] ?? ($source->name.' (copy)');
 
-        $composition = DB::transaction(function () use ($tenant, $brand, $user, $name, $doc) {
+        $composition = DB::transaction(function () use ($tenant, $brand, $user, $name, $doc, $source) {
             $c = Composition::query()->create([
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
@@ -418,6 +514,14 @@ class EditorCompositionController extends Controller
                 'label' => 'Duplicated',
                 'created_at' => now(),
             ]);
+
+            $dupThumbId = $source->thumbnail_asset_id
+                ? $this->thumbnailAssets->duplicateAsset($source->thumbnail_asset_id, $tenant, $brand, $user)
+                : null;
+            if ($dupThumbId !== null && $dupThumbId !== '') {
+                $c->thumbnail_asset_id = $dupThumbId;
+                $c->save();
+            }
 
             $this->pruneOldVersions($c->fresh());
 

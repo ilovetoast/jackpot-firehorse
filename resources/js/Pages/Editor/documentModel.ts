@@ -4,6 +4,44 @@
 
 export type DocumentPreset = 'instagram_post' | 'web_banner' | 'custom'
 
+/** CSS `mix-blend-mode` values supported in the editor (layer vs content below). */
+export type LayerBlendMode =
+    | 'normal'
+    | 'multiply'
+    | 'screen'
+    | 'overlay'
+    | 'darken'
+    | 'lighten'
+    | 'color-dodge'
+    | 'color-burn'
+    | 'hard-light'
+    | 'soft-light'
+    | 'difference'
+    | 'exclusion'
+    | 'hue'
+    | 'saturation'
+    | 'color'
+    | 'luminosity'
+
+export const LAYER_BLEND_MODE_OPTIONS: { value: LayerBlendMode; label: string }[] = [
+    { value: 'normal', label: 'Normal' },
+    { value: 'multiply', label: 'Multiply' },
+    { value: 'screen', label: 'Screen' },
+    { value: 'overlay', label: 'Overlay' },
+    { value: 'darken', label: 'Darken' },
+    { value: 'lighten', label: 'Lighten' },
+    { value: 'color-dodge', label: 'Color dodge' },
+    { value: 'color-burn', label: 'Color burn' },
+    { value: 'hard-light', label: 'Hard light' },
+    { value: 'soft-light', label: 'Soft light' },
+    { value: 'difference', label: 'Difference' },
+    { value: 'exclusion', label: 'Exclusion' },
+    { value: 'hue', label: 'Hue' },
+    { value: 'saturation', label: 'Saturation' },
+    { value: 'color', label: 'Color' },
+    { value: 'luminosity', label: 'Luminosity' },
+]
+
 export type DocumentModel = {
     id: string
     width: number
@@ -21,6 +59,8 @@ export type BaseLayer = {
     visible: boolean
     locked: boolean
     z: number
+    /** How this layer composites over layers below (CSS mix-blend-mode). Default: normal. */
+    blendMode?: LayerBlendMode
     transform: {
         x: number
         y: number
@@ -869,6 +909,7 @@ export function convertGenerativeLayerToImage(
         visible: layer.visible,
         locked: layer.locked,
         z: layer.z,
+        blendMode: layer.blendMode,
         /* Preserve frame + rotation + scale from the generative layer verbatim. */
         transform: { ...layer.transform },
         src: layer.resultSrc,
