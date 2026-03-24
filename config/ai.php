@@ -572,9 +572,11 @@ PROMPT
     | Database overrides can modify these values without code changes.
     |
     | Budget types:
-    | - system: System-wide monthly budget
+    | - system: Global monthly cap (all tenants, all runs) — not a “non-tenant only” pool
     | - agents: Per-agent budgets (optional)
     | - tasks: Per-task type budgets (optional)
+    |
+    | Per-tenant monthly caps are not implemented here yet; use plan limits / AiUsageService for tenant quotas.
     |
     | Budget characteristics:
     | - Monthly period (resets on 1st of each month)

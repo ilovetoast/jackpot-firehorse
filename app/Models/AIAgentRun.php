@@ -167,6 +167,41 @@ class AIAgentRun extends Model
     }
 
     /**
+     * Admin activity list: omit large columns (especially JSON metadata) so ORDER BY started_at
+     * does not exhaust MySQL sort buffer on big tables.
+     */
+    public function scopeForAdminActivityList(Builder $query): Builder
+    {
+        $t = $query->getModel()->getTable();
+
+        return $query->select([
+            "{$t}.id",
+            "{$t}.agent_id",
+            "{$t}.agent_name",
+            "{$t}.triggering_context",
+            "{$t}.environment",
+            "{$t}.tenant_id",
+            "{$t}.user_id",
+            "{$t}.task_type",
+            "{$t}.entity_type",
+            "{$t}.entity_id",
+            "{$t}.model_used",
+            "{$t}.tokens_in",
+            "{$t}.tokens_out",
+            "{$t}.estimated_cost",
+            "{$t}.status",
+            "{$t}.severity",
+            "{$t}.confidence",
+            "{$t}.error_message",
+            "{$t}.blocked_reason",
+            "{$t}.started_at",
+            "{$t}.completed_at",
+            "{$t}.created_at",
+            "{$t}.updated_at",
+        ]);
+    }
+
+    /**
      * Scope a query to only include successful runs.
      */
     public function scopeSuccessful(Builder $query): Builder

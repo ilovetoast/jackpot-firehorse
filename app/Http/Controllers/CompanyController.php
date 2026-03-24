@@ -116,7 +116,7 @@ class CompanyController extends Controller
     }
 
     /**
-     * @return array<int, array{id: int, name: string, slug: string, brands: array<int, array{id: int, name: string, is_default: bool}>}>
+     * @return array<int, array{id: int, name: string, slug: string, brands: array<int, array{id: int, name: string, is_default: bool, logo_url: ?string, logo_dark_url: ?string, primary_color: ?string}>}>
      */
     public function managedAgencyClientsForUser(User $user, Tenant $agencyTenant): array
     {
@@ -156,23 +156,30 @@ class CompanyController extends Controller
     /**
      * Brands the user may open when switching into a client company (tenant admins see all brands).
      *
-     * @return array<int, array{id: int, name: string, is_default: bool}>
+     * @return array<int, array{id: int, name: string, is_default: bool, logo_url: ?string, logo_dark_url: ?string, primary_color: ?string}>
      */
     protected function brandsUserCanOpenInClientTenant(User $user, Tenant $clientTenant): array
     {
         $role = $user->getRoleForTenant($clientTenant);
         $tenantWide = in_array($role, ['admin', 'owner', 'agency_admin'], true);
 
+        $mapBrand = function (Brand $b): array {
+            return [
+                'id' => $b->id,
+                'name' => $b->name,
+                'is_default' => (bool) $b->is_default,
+                'logo_url' => $b->logo_path,
+                'logo_dark_url' => $b->logo_dark_path,
+                'primary_color' => $b->primary_color,
+            ];
+        };
+
         if ($tenantWide) {
             return Brand::query()
                 ->where('tenant_id', $clientTenant->id)
                 ->orderBy('name')
-                ->get(['id', 'name', 'is_default'])
-                ->map(fn (Brand $b) => [
-                    'id' => $b->id,
-                    'name' => $b->name,
-                    'is_default' => (bool) $b->is_default,
-                ])
+                ->get(['id', 'name', 'is_default', 'logo_id', 'logo_dark_id', 'primary_color'])
+                ->map($mapBrand)
                 ->values()
                 ->all();
         }
@@ -181,12 +188,8 @@ class CompanyController extends Controller
             ->where('brands.tenant_id', $clientTenant->id)
             ->wherePivotNull('removed_at')
             ->orderBy('brands.name')
-            ->get(['brands.id', 'brands.name', 'brands.is_default'])
-            ->map(fn (Brand $b) => [
-                'id' => $b->id,
-                'name' => $b->name,
-                'is_default' => (bool) $b->is_default,
-            ])
+            ->get(['brands.id', 'brands.name', 'brands.is_default', 'brands.logo_id', 'brands.logo_dark_id', 'brands.primary_color'])
+            ->map($mapBrand)
             ->values()
             ->all();
     }

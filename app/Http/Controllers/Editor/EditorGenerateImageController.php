@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Services\AIService;
 use App\Services\AiUsageService;
 use App\Services\PlanService;
+use App\Support\GenerativeEditorModelNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -317,15 +318,18 @@ SVG;
     {
         $override = $validated['model_override'] ?? null;
         if (is_string($override) && trim($override) !== '') {
-            return trim($override);
+            return GenerativeEditorModelNormalizer::normalizeRegistryKey(trim($override));
         }
 
         $provider = strtolower((string) $validated['model']['provider']);
-        $apiModel = (string) ($validated['model']['model'] ?? '');
+        $apiModel = GenerativeEditorModelNormalizer::normalizeApiModelId(
+            $provider,
+            (string) ($validated['model']['model'] ?? '')
+        );
 
         foreach (config('ai.models', []) as $key => $cfg) {
             if (($cfg['provider'] ?? '') === $provider && ($cfg['model_name'] ?? '') === $apiModel) {
-                return $key;
+                return GenerativeEditorModelNormalizer::normalizeRegistryKey($key);
             }
         }
 

@@ -67,12 +67,18 @@ export const GENERATIVE_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: Gen
     { label: 'Fast', value: 'fast' },
 ]
 
-/** Registry keys aligned with `config/ai.php` generative_editor.allowlist — advanced override only. */
+/**
+ * Registry keys aligned with `config/ai.php` generative_editor.allowlist — advanced override only.
+ *
+ * Google markets Gemini native image generation as “Nano Banana” (AI Studio / docs); API model ids are
+ * still `gemini-*-flash-image` / `gemini-*-pro-image-preview`. Labels show both so users recognize
+ * Google’s UI vs our registry keys.
+ */
 export const GENERATIVE_ADVANCED_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-    { label: 'GPT Image 1', value: 'gpt-image-1' },
-    { label: 'Gemini 3 Pro Image (preview)', value: 'gemini-3-pro-image-preview' },
-    { label: 'Gemini 3.1 Flash Image (preview)', value: 'gemini-3.1-flash-image-preview' },
-    { label: 'Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
+    { label: 'GPT Image 1 (OpenAI)', value: 'gpt-image-1' },
+    { label: 'Nano Banana Pro · Gemini 3 Pro (preview)', value: 'gemini-3-pro-image-preview' },
+    { label: 'Nano Banana 2 · Gemini 3.1 Flash (preview)', value: 'gemini-3.1-flash-image-preview' },
+    { label: 'Nano Banana · Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
 ]
 
 export function canGenerateFromUsage(usage: GenerateImageUsage | null): boolean {
@@ -83,6 +89,26 @@ export function canGenerateFromUsage(usage: GenerateImageUsage | null): boolean 
         return true
     }
     return usage.remaining > 0
+}
+
+/** Retired Nano Banana id — maps to {@link MODEL_MAP.fast} API id (see config/ai.php). */
+const LEGACY_GEMINI_FLASH_IMAGE = 'gemini-1.5-flash-image'
+const CURRENT_GEMINI_FLASH_IMAGE = 'gemini-2.5-flash-image'
+
+/** Align with server {@see GenerativeEditorModelNormalizer} so saved editor state still generates. */
+export function normalizeGenerativeModelPayload(payload: GenerateImagePayload): GenerateImagePayload {
+    let model = payload.model
+    if (model.provider === 'gemini' && model.model === LEGACY_GEMINI_FLASH_IMAGE) {
+        model = { ...model, model: CURRENT_GEMINI_FLASH_IMAGE }
+    }
+    let model_override = payload.model_override
+    if (model_override === LEGACY_GEMINI_FLASH_IMAGE) {
+        model_override = CURRENT_GEMINI_FLASH_IMAGE
+    }
+    if (model === payload.model && model_override === payload.model_override) {
+        return payload
+    }
+    return { ...payload, model, model_override }
 }
 
 export async function fetchGenerateImageUsage(): Promise<GenerateImageUsage> {
@@ -112,6 +138,7 @@ export async function generateEditorImage(
     }
     const timeout = window.setTimeout(() => ctrl.abort(), 120_000)
     try {
+        const body = normalizeGenerativeModelPayload(payload)
         const res = await fetch('/app/api/generate-image', {
             method: 'POST',
             headers: {
@@ -120,7 +147,7 @@ export async function generateEditorImage(
                 'X-CSRF-TOKEN': csrf ?? '',
             },
             credentials: 'same-origin',
-            body: JSON.stringify(payload),
+            body: JSON.stringify(body),
             signal: ctrl.signal,
         })
         const text = await res.text()

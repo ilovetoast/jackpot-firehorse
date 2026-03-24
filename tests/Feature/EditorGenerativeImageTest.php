@@ -123,4 +123,68 @@ class EditorGenerativeImageTest extends TestCase
         $response->assertStatus(429);
         $this->assertSame(0, AIAgentRun::where('agent_id', 'editor_generative_image')->count());
     }
+
+    /**
+     * Full stack: controller → AIService → GeminiProvider, with the HTTP client faked (no real Google call).
+     * Proves the editor agent can “call the library” and return a proxied image URL when the API succeeds.
+     */
+    public function test_generate_image_gemini_legacy_model_id_maps_and_pipeline_returns_success(): void
+    {
+        config([
+            'ai.openai.api_key' => 'sk-test',
+            'ai.gemini.api_key' => 'sk-test-gemini',
+        ]);
+        $this->app->forgetInstance(\App\Services\AIService::class);
+
+        $pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+        $geminiPayload = [
+            'candidates' => [
+                [
+                    'content' => [
+                        'parts' => [
+                            [
+                                'inlineData' => [
+                                    'mimeType' => 'image/png',
+                                    'data' => $pngB64,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'usageMetadata' => [
+                'promptTokenCount' => 12,
+                'candidatesTokenCount' => 34,
+            ],
+        ];
+
+        // Callback fake: pattern-based fakes can miss the exact URL and accidentally hit the real network.
+        Http::fake(function () use ($geminiPayload) {
+            return Http::response($geminiPayload, 200);
+        });
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id])
+            ->postJson('/app/api/generate-image', [
+                'prompt' => ['scene' => 'Test scene'],
+                'prompt_string' => 'Test scene',
+                'model' => [
+                    'provider' => 'gemini',
+                    'model' => 'gemini-1.5-flash-image',
+                ],
+                'model_key' => 'fast',
+                'size' => '1024x1024',
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('resolved_model_key', 'gemini-2.5-flash-image');
+        $response->assertJsonStructure(['image_url', 'agent_run_id']);
+        $this->assertStringContainsString('/app/api/generate-image/proxy/', $response->json('image_url'));
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), 'generativelanguage.googleapis.com')
+                && str_contains($request->url(), 'gemini-2.5-flash-image:generateContent');
+        });
+    }
 }

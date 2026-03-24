@@ -99,7 +99,9 @@ class AIDashboardController extends Controller
         
         if ($activeTab === 'activity') {
             // Load activity data (first page only for initial load)
-            $query = AIAgentRun::with(['tenant', 'user'])
+            $query = AIAgentRun::query()
+                ->forAdminActivityList()
+                ->with(['tenant', 'user'])
                 ->orderBy('started_at', 'desc');
 
             // Apply filters from request
@@ -457,7 +459,9 @@ class AIDashboardController extends Controller
             abort(403);
         }
 
-        $query = AIAgentRun::with(['tenant', 'user'])
+        $query = AIAgentRun::query()
+            ->forAdminActivityList()
+            ->with(['tenant', 'user'])
             ->orderBy('started_at', 'desc');
 
         // Apply filters
@@ -868,10 +872,15 @@ class AIDashboardController extends Controller
     /**
      * Update or create a budget override.
      */
-    public function updateBudgetOverride(Request $request, int $budgetId)
+    public function updateBudgetOverride(Request $request, string $budgetId): \Illuminate\Http\RedirectResponse
     {
         if (!Auth::user()->can('ai.budgets.manage')) {
             abort(403);
+        }
+
+        $budgetIdInt = filter_var($budgetId, FILTER_VALIDATE_INT);
+        if ($budgetIdInt === false || $budgetIdInt < 1) {
+            abort(404);
         }
 
         $validated = $request->validate([
@@ -882,7 +891,7 @@ class AIDashboardController extends Controller
         ]);
 
         $override = $this->configService->updateBudgetOverride(
-            $budgetId,
+            $budgetIdInt,
             $validated,
             Auth::user()
         );
@@ -911,14 +920,19 @@ class AIDashboardController extends Controller
     /**
      * Get detailed information about a specific AI agent run.
      */
-    public function showRun(int $id): \Illuminate\Http\JsonResponse
+    public function showRun(string $id): \Illuminate\Http\JsonResponse
     {
         if (!Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
+        $idInt = filter_var($id, FILTER_VALIDATE_INT);
+        if ($idInt === false || $idInt < 1) {
+            abort(404);
+        }
+
         $run = AIAgentRun::with(['tenant', 'user'])
-            ->findOrFail($id);
+            ->findOrFail($idInt);
 
         // Get related tickets
         $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)

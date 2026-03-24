@@ -130,20 +130,33 @@ class AIBudget extends Model
     }
 
     /**
-     * Get current usage for the current period.
+     * Current-period spend derived from {@see AIAgentRun} (authoritative), not {@see AIBudgetUsage}.
+     *
+     * The usage table was updated incrementally via {@see AIBudgetService::recordUsage}; if no
+     * {@see AIBudget} row existed, recording never ran and the dashboard showed $0 while runs had cost.
+     * Summing runs matches the AI Dashboard “Total cost” and enforces limits against real spend.
+     *
+     * System budget = all runs in the month (global, all tenants). Agent/task budgets = filtered runs.
      */
     public function getCurrentUsage(?string $environment = null): float
     {
-        $now = Carbon::now();
-        $periodStart = $now->copy()->startOfMonth();
-        $periodEnd = $now->copy()->endOfMonth();
+        $environment = $environment ?? app()->environment();
+        $periodStart = Carbon::now()->startOfMonth();
+        $periodEnd = Carbon::now()->endOfMonth();
 
-        $usage = $this->usageRecords()
-            ->where('period_start', $periodStart->format('Y-m-d'))
-            ->where('period_end', $periodEnd->format('Y-m-d'))
-            ->first();
+        $query = AIAgentRun::query()
+            ->whereBetween('started_at', [$periodStart, $periodEnd])
+            ->where(function ($q) use ($environment) {
+                $q->where('environment', $environment)->orWhereNull('environment');
+            });
 
-        return $usage ? (float) $usage->amount_used : 0.0;
+        if ($this->budget_type === 'agent' && $this->scope_key !== null && $this->scope_key !== '') {
+            $query->where('agent_id', $this->scope_key);
+        } elseif ($this->budget_type === 'task_type' && $this->scope_key !== null && $this->scope_key !== '') {
+            $query->where('task_type', $this->scope_key);
+        }
+
+        return (float) $query->sum('estimated_cost');
     }
 
     /**

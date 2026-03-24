@@ -33,7 +33,9 @@ class AIConfigService
      */
     public function getModelConfig(string $modelKey, ?string $environment = null): ?array
     {
-        $baseConfig = config("ai.models.{$modelKey}");
+        // Keys like gemini-2.5-flash-image contain dots; config("ai.models.{$modelKey}") wrongly nests (Laravel splits on every .).
+        $models = config('ai.models', []);
+        $baseConfig = is_array($models) ? ($models[$modelKey] ?? null) : null;
         if (! $baseConfig) {
             return null;
         }

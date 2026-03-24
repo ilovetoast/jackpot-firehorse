@@ -25,6 +25,7 @@ class ResolveTenant
             if ($tenantId) {
                 $tenant = Tenant::find($tenantId);
                 if ($tenant) {
+                    $tenant->loadMissing(['defaultBrand', 'brands']);
                     app()->instance('tenant', $tenant);
                 }
             }
@@ -55,6 +56,9 @@ class ResolveTenant
         if (! $tenant) {
             abort(404, 'Tenant not found');
         }
+
+        // Lazy loading is disabled app-wide; this middleware reads brands + defaultBrand below.
+        $tenant->loadMissing(['defaultBrand', 'brands']);
 
         // Verify authenticated user belongs to tenant (load tenants once to avoid N+1 in policies)
         $user = $request->user();

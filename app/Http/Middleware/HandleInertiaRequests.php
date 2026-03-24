@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
 use App\Models\User;
@@ -46,9 +47,19 @@ class HandleInertiaRequests extends Middleware
         $user = $request->user();
         $currentTenantId = session('tenant_id');
 
-        // Eager load tenants once when we have a user (avoids N+1 in policy checks and membership checks)
-        if ($user && $currentTenantId) {
+        // Membership list for nav — load tenants only; default brand colors come from a batch query (no Tenant->defaultBrand access).
+        if ($user) {
             $user->loadMissing('tenants');
+        }
+
+        /** @var array<int|string, string|null> primary_color keyed by tenant id for auth.companies / activeCompany */
+        $defaultBrandPrimaryByTenantId = [];
+        if ($user && $user->tenants->isNotEmpty()) {
+            $defaultBrandPrimaryByTenantId = Brand::query()
+                ->whereIn('tenant_id', $user->tenants->pluck('id')->all())
+                ->where('is_default', true)
+                ->pluck('primary_color', 'tenant_id')
+                ->all();
         }
 
         // Resolve tenant if not already bound (HandleInertiaRequests runs before ResolveTenant middleware)
@@ -68,6 +79,12 @@ class HandleInertiaRequests extends Middleware
         }
         if ($tenant && ! app()->bound('tenant')) {
             app()->instance('tenant', $tenant);
+        }
+
+        // Session / container tenant is not the same instance as $user->tenants; eager-load relations
+        // used below (defaultBrand, brands loop, agencyTier) — lazy loading may be disabled app-wide.
+        if ($tenant) {
+            $tenant->loadMissing(['defaultBrand', 'brands', 'agencyTier']);
         }
 
         // Resolve active brand if not already bound
@@ -409,6 +426,7 @@ class HandleInertiaRequests extends Middleware
                     'is_active' => $tenant->id == $currentTenantId,
                     'is_agency' => (bool) $tenant->is_agency,
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
+                    'primary_color' => $defaultBrandPrimaryByTenantId[$tenant->id] ?? null,
                 ]) : [],
                 'activeCompany' => $tenant ? [
                     'id' => $tenant->id,
@@ -417,6 +435,7 @@ class HandleInertiaRequests extends Middleware
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
                     'is_agency' => (bool) $tenant->is_agency,
                     'agency_tier' => $tenant->agencyTier?->name, // Phase AG-7.1: Agency nav link
+                    'primary_color' => $defaultBrandPrimaryByTenantId[$tenant->id] ?? null,
                 ] : null,
                 /** Client companies linked to this agency (tenant_agencies) that the user may open */
                 'managed_agency_clients' => $this->managedAgencyClientsForUser($user, $tenant),

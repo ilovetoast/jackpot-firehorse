@@ -10,14 +10,13 @@ import {
     SparklesIcon,
     LinkIcon,
     Squares2X2Icon,
-    ClipboardDocumentCheckIcon,
     ArrowTrendingUpIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import ManagedCompaniesClientList from '../../Components/dashboard/ManagedCompaniesClientList'
-import AgencyReadinessTabGrid from '../../Components/agency/AgencyReadinessTabGrid'
+import AgencyBrandQuickJump from '../../Components/agency/AgencyBrandQuickJump'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 /**
@@ -25,7 +24,6 @@ import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverla
  */
 const DASH_TABS = [
     { id: 'overview', label: 'Overview', icon: Squares2X2Icon },
-    { id: 'readiness', label: 'Readiness', icon: ClipboardDocumentCheckIcon },
     { id: 'clients', label: 'Clients', icon: BuildingOfficeIcon },
     { id: 'progress', label: 'Progress', icon: ArrowTrendingUpIcon },
 ]
@@ -138,7 +136,7 @@ export default function AgencyDashboard({
     }, [readinessToast])
 
     useEffect(() => {
-        if (dashTab !== 'readiness') {
+        if (dashTab !== 'clients') {
             return
         }
         const onVis = () => {
@@ -367,28 +365,9 @@ export default function AgencyDashboard({
                                 </div>
                             ))}
                         </div>
-                            </>
-                        )}
 
-                        {dashTab === 'readiness' && (
-                            <section>
-                                <div className="mb-3 flex items-center gap-2">
-                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
-                                        Brand readiness
-                                    </span>
-                                </div>
-                                <div className={`${glassPanel} p-6 sm:p-8`}>
-                                    <p className="mb-4 text-sm text-white/60">
-                                        Task-first: open a client workspace from the checklist or quick links. Lowest scores are listed first.
-                                    </p>
-                                    <AgencyReadinessTabGrid
-                                        brandsReadiness={brands_readiness}
-                                        brandColor={brandColor}
-                                        readinessSummary={readiness_summary}
-                                        readinessAnimateKey={readinessAnimateKey}
-                                    />
-                                </div>
-                            </section>
+                        <AgencyBrandQuickJump clients={managed_clients} brandColor={brandColor} />
+                            </>
                         )}
 
                         {dashTab === 'clients' && (
@@ -402,7 +381,8 @@ export default function AgencyDashboard({
                                     <p className="text-sm text-white/60">
                                         Client workspaces linked to{' '}
                                         <span className="font-medium text-white/55">{managed_agency?.name ?? 'your agency'}</span>.
-                                        Expand a brand for readiness checklist; the row opens that workspace.
+                                        Expand a brand for the full readiness summary, tasks, and checklist — use Open workspace to switch
+                                        into that client.
                                     </p>
                                     {managed_agency?.name && (
                                         <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-4">
@@ -431,6 +411,9 @@ export default function AgencyDashboard({
                                                 theme="dark"
                                                 brandColor={brandColor}
                                                 showReadiness
+                                                readinessSummary={readiness_summary}
+                                                brandsReadiness={brands_readiness}
+                                                readinessAnimateKey={readinessAnimateKey}
                                             />
                                         </div>
                                     ) : (

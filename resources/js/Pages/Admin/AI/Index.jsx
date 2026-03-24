@@ -143,7 +143,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                 <div>
                                     <p className="text-sm font-medium text-gray-500">Current Month Cost</p>
                                     <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                        ${(currentMonthCost || 0).toFixed(4)}
+                                        ${Number(currentMonthCost ?? 0).toFixed(4)}
                                     </p>
                                 </div>
                                 <div>
@@ -154,8 +154,8 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                 </div>
                                 <div>
                                     <p className="text-sm font-medium text-gray-500">Budget Remaining</p>
-                                    <p className={`mt-1 text-2xl font-semibold ${(budgetRemaining || 0) < 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                                        ${(budgetRemaining || 0).toFixed(2)}
+                                    <p className={`mt-1 text-2xl font-semibold ${Number(budgetRemaining ?? 0) < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                        ${Number(budgetRemaining ?? 0).toFixed(2)}
                                     </p>
                                 </div>
                                 {costTrends && costTrends.length >= 2 && (
@@ -181,7 +181,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                         <div className="ml-3">
                                             <h3 className="text-sm font-medium text-yellow-800">Cost Spike Detected</h3>
                                             <p className="mt-1 text-sm text-yellow-700">
-                                                Unusual cost increase detected: {costSpikes[0].percent_increase.toFixed(1)}% increase in {costSpikes[0].period}
+                                                Unusual cost increase detected: {Number(costSpikes[0].percent_increase ?? 0).toFixed(1)}% increase in {costSpikes[0].period}
                                             </p>
                                         </div>
                                     </div>
