@@ -56,6 +56,8 @@ export type GenerateImagePayload = {
 
 export type GenerateImageResponse = {
     image_url: string
+    /** Present when server persisted to DAM (stable /app/api/assets/{id}/file URL). */
+    asset_id?: string
     resolved_model_key?: string
     model_display_name?: string
     agent_run_id?: number

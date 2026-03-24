@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Editor;
 use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Editor\Concerns\ResolvesGenerativeImageOutput;
 use App\Models\Composition;
 use App\Models\Tenant;
 use App\Services\AIService;
 use App\Services\AiUsageService;
+use App\Services\EditorGenerativeImagePersistService;
 use App\Services\PlanService;
 use App\Support\GenerativeEditorModelNormalizer;
 use Illuminate\Http\JsonResponse;
@@ -26,12 +28,15 @@ use Illuminate\Support\Facades\Log;
  */
 class EditorGenerateImageController extends Controller
 {
+    use ResolvesGenerativeImageOutput;
+
     private const PROXY_CACHE_PREFIX = 'editor_gen_proxy:';
 
     public function __construct(
         protected PlanService $planService,
         protected AIService $aiService,
-        protected AiUsageService $aiUsageService
+        protected AiUsageService $aiUsageService,
+        protected EditorGenerativeImagePersistService $generativeImagePersistService
     ) {}
 
     public function usage(Request $request): JsonResponse
@@ -222,12 +227,24 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Monthly limit reached'], 429);
         }
 
-        return response()->json([
-            'image_url' => $this->registerProxyUrl((string) $result['image_ref']),
+        $final = $this->finalizeGenerativeImageOutput(
+            (string) $result['image_ref'],
+            $tenant,
+            $user,
+            $this->generativeImagePersistService
+        );
+
+        $payload = [
+            'image_url' => $final['image_url'],
             'resolved_model_key' => $result['resolved_model_key'] ?? $registryKey,
             'model_display_name' => $result['model_display_name'] ?? $registryKey,
             'agent_run_id' => $result['agent_run_id'],
-        ]);
+        ];
+        if ($final['asset_id'] !== null) {
+            $payload['asset_id'] = $final['asset_id'];
+        }
+
+        return response()->json($payload);
     }
 
     /**
@@ -380,7 +397,7 @@ SVG;
         }
     }
 
-    private function registerProxyUrl(string $urlOrDataUrl): string
+    protected function registerProxyUrl(string $urlOrDataUrl): string
     {
         $token = bin2hex(random_bytes(16));
         Cache::put(self::PROXY_CACHE_PREFIX.$token, $urlOrDataUrl, now()->addMinutes(45));

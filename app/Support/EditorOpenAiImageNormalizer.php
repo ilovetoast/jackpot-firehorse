@@ -14,7 +14,7 @@ final class EditorOpenAiImageNormalizer
     private const MAX_BYTES = 4 * 1024 * 1024;
 
     /**
-     * Decode arbitrary raster bytes (JPEG/PNG/GIF/WebP when GD supports them) and return PNG bytes.
+     * Decode arbitrary raster bytes and return PNG bytes (Imagick robust path, else GD).
      *
      * @throws \InvalidArgumentException
      */
@@ -28,31 +28,75 @@ final class EditorOpenAiImageNormalizer
             throw new \InvalidArgumentException(self::unsupportedFormatUserMessage());
         }
 
+        if (extension_loaded('imagick')) {
+            try {
+                $magick = EditorRobustImageDecoder::decodeToImagick($binary, $sourceMime);
+
+                try {
+                    $w = $magick->getImageWidth();
+                    $h = $magick->getImageHeight();
+                    if ($w > self::MAX_EDGE_PX || $h > self::MAX_EDGE_PX) {
+                        $scale = min(self::MAX_EDGE_PX / $w, self::MAX_EDGE_PX / $h);
+                        $nw = max(2, (int) round($w * $scale));
+                        $nh = max(2, (int) round($h * $scale));
+                        $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
+                    }
+
+                    $magick->setImageFormat('png');
+                    $png = $magick->getImageBlob();
+
+                    $guard = 0;
+                    while (is_string($png) && strlen($png) > self::MAX_BYTES && $guard < 10) {
+                        $guard++;
+                        $nw = max(2, (int) ($magick->getImageWidth() * 0.82));
+                        $nh = max(2, (int) ($magick->getImageHeight() * 0.82));
+                        $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
+                        $magick->setImageFormat('png');
+                        $png = $magick->getImageBlob();
+                    }
+
+                    if (! is_string($png) || $png === '') {
+                        throw new \RuntimeException('Failed to encode PNG.');
+                    }
+
+                    if (strlen($png) > self::MAX_BYTES) {
+                        throw new \InvalidArgumentException('Image is too large after processing. Try a smaller source image.');
+                    }
+
+                    return $png;
+                } finally {
+                    $magick->clear();
+                    $magick->destroy();
+                }
+            } catch (\InvalidArgumentException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                Log::warning('OpenAI normalize: Imagick pipeline failed, trying GD', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         if (! function_exists('imagecreatefromstring')) {
-            return $binary;
+            throw new \InvalidArgumentException(self::unsupportedFormatUserMessage());
         }
 
         $im = @imagecreatefromstring($binary);
         if ($im === false) {
-            $fromImagick = self::tryImagickBlobToPng($binary, $sourceMime);
-            if ($fromImagick !== null) {
-                return self::toPngForOpenAiEdits($fromImagick, $depth + 1, 'image/png');
-            }
-
             throw new \InvalidArgumentException(self::unsupportedFormatUserMessage());
         }
 
         try {
             $w = imagesx($im);
             $h = imagesy($im);
-            if ($w < 10 || $h < 10) {
+            if ($w < 2 || $h < 2) {
                 throw new \InvalidArgumentException('Invalid image dimensions.');
             }
 
             if ($w > self::MAX_EDGE_PX || $h > self::MAX_EDGE_PX) {
                 $scale = min(self::MAX_EDGE_PX / $w, self::MAX_EDGE_PX / $h);
-                $nw = max(1, (int) round($w * $scale));
-                $nh = max(1, (int) round($h * $scale));
+                $nw = max(2, (int) round($w * $scale));
+                $nh = max(2, (int) round($h * $scale));
                 $scaled = imagescale($im, $nw, $nh);
                 if ($scaled !== false) {
                     imagedestroy($im);
@@ -70,8 +114,8 @@ final class EditorOpenAiImageNormalizer
             $guard = 0;
             while (strlen($png) > self::MAX_BYTES && $guard < 10) {
                 $guard++;
-                $nw = max(256, (int) (imagesx($im) * 0.82));
-                $nh = max(256, (int) (imagesy($im) * 0.82));
+                $nw = max(2, (int) (imagesx($im) * 0.82));
+                $nh = max(2, (int) (imagesy($im) * 0.82));
                 $scaled = imagescale($im, $nw, $nh);
                 if ($scaled === false) {
                     break;
@@ -115,49 +159,5 @@ final class EditorOpenAiImageNormalizer
         }
 
         return $out;
-    }
-
-    /**
-     * AVIF, HEIC, some TIFF/CMYK JPEG, etc. fail GD's imagecreatefromstring; Imagick often reads them when installed.
-     *
-     * @return non-empty-string|null PNG bytes, or null if Imagick is unavailable or cannot decode
-     */
-    private static function tryImagickBlobToPng(string $binary, ?string $sourceMime = null): ?string
-    {
-        if (! extension_loaded('imagick')) {
-            return null;
-        }
-
-        try {
-            $magick = new \Imagick();
-            $magick->readImageBlob($binary);
-        } catch (\Throwable $e) {
-            Log::error('Imagick decode failed', ['error' => $e->getMessage()]);
-
-            return null;
-        }
-
-        try {
-            $magick->setIteratorIndex(0);
-            $magick->setImageFormat('png');
-            $w = $magick->getImageWidth();
-            $h = $magick->getImageHeight();
-            if ($w < 10 || $h < 10) {
-                $magick->clear();
-                $magick->destroy();
-                throw new \InvalidArgumentException('Invalid image dimensions.');
-            }
-            $out = $magick->getImageBlob();
-            $magick->clear();
-            $magick->destroy();
-
-            return is_string($out) && $out !== '' ? $out : null;
-        } catch (\InvalidArgumentException $e) {
-            throw $e;
-        } catch (\Throwable $e) {
-            Log::error('Imagick PNG encode failed', ['error' => $e->getMessage()]);
-
-            return null;
-        }
     }
 }

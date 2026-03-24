@@ -10,12 +10,12 @@ export type EditImagePayload = {
     modelKey?: string
     brandContext?: BrandContext | null
     compositionId?: string
-    assetId?: string
     brandId?: number
 }
 
 export type EditImageResponse = {
     image_url: string
+    asset_id?: string
     message?: string
 }
 

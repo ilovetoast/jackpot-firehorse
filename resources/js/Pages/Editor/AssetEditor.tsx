@@ -2384,6 +2384,7 @@ export default function AssetEditor() {
                                       ...l,
                                       status: 'done' as const,
                                       resultSrc: res.image_url,
+                                      ...(res.asset_id ? { resultAssetId: res.asset_id } : {}),
                                       previousResults,
                                       variationResults: undefined,
                                       variationPending: false,
@@ -2561,6 +2562,7 @@ export default function AssetEditor() {
                                 ? {
                                       ...l,
                                       src: res.image_url,
+                                      ...(res.asset_id ? { assetId: res.asset_id } : {}),
                                       aiEdit: {
                                           ...l.aiEdit,
                                           prompt: instruction,

@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Prepares raster data for Gemini generateContent inlineData: JPEG, bounded dimensions and payload size.
- * Avoids "Unable to process input image" from oversized, mis-typed, or exotic raw bytes.
  */
 final class EditorGeminiInlineImagePreparer
 {
@@ -27,9 +26,23 @@ final class EditorGeminiInlineImagePreparer
         }
 
         if (extension_loaded('imagick')) {
-            $jpeg = self::tryImagickToJpeg($binary, $sourceMime);
-            if ($jpeg !== null) {
-                return ['binary' => $jpeg, 'mime_type' => 'image/jpeg'];
+            try {
+                $magick = EditorRobustImageDecoder::decodeToImagick($binary, $sourceMime);
+
+                try {
+                    $jpeg = self::encodeGeminiJpegFromDecodedImagick($magick);
+
+                    return ['binary' => $jpeg, 'mime_type' => 'image/jpeg'];
+                } finally {
+                    $magick->clear();
+                    $magick->destroy();
+                }
+            } catch (\InvalidArgumentException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                Log::warning('Gemini preparer: Imagick pipeline failed, trying GD fallback', [
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
@@ -38,87 +51,47 @@ final class EditorGeminiInlineImagePreparer
         return ['binary' => self::pngBytesToJpegViaGd($png), 'mime_type' => 'image/jpeg'];
     }
 
-    private static function tryImagickToJpeg(string $binary, ?string $sourceMime = null): ?string
+    /**
+     * Input: Imagick already flattened/stripped and normalized to JPEG @ 90 by {@see EditorRobustImageDecoder}.
+     */
+    private static function encodeGeminiJpegFromDecodedImagick(\Imagick $magick): string
     {
-        try {
-            $magick = new \Imagick();
-            $magick->readImageBlob($binary);
-        } catch (\Throwable $e) {
-            Log::error('Imagick decode failed', ['error' => $e->getMessage()]);
-
-            return null;
+        $w = $magick->getImageWidth();
+        $h = $magick->getImageHeight();
+        $max = max($w, $h);
+        if ($max > self::MAX_EDGE_PX) {
+            $scale = self::MAX_EDGE_PX / $max;
+            $nw = max(2, (int) round($w * $scale));
+            $nh = max(2, (int) round($h * $scale));
+            $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
         }
 
-        try {
-            if ($magick->getNumberImages() > 1) {
-                $magick = $magick->coalesceImages();
-                $magick = $magick->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
-            }
-            $magick->setIteratorIndex(0);
-            $magick->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
-            if ($magick->getImageAlphaChannel()) {
-                $magick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
-            }
-            $magick->stripImage();
-
-            if ($sourceMime === 'image/webp') {
-                $magick->setImageFormat('jpeg');
-            }
-
-            $w = $magick->getImageWidth();
-            $h = $magick->getImageHeight();
-            if ($w < 10 || $h < 10) {
-                $magick->clear();
-                $magick->destroy();
-
-                throw new \InvalidArgumentException('Invalid image dimensions.');
-            }
-            $max = max($w, $h);
-            if ($max > self::MAX_EDGE_PX) {
-                $scale = self::MAX_EDGE_PX / $max;
-                $nw = max(1, (int) round($w * $scale));
-                $nh = max(1, (int) round($h * $scale));
-                $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
-            }
-
-            $magick->setImageFormat('jpeg');
-            $quality = 88;
-            for ($guard = 0; $guard < 18; $guard++) {
-                $magick->setImageCompressionQuality($quality);
-                $blob = $magick->getImageBlob();
-                if (is_string($blob) && $blob !== '' && strlen($blob) <= self::TARGET_MAX_BYTES) {
-                    $magick->clear();
-                    $magick->destroy();
-
-                    return $blob;
-                }
-                if ($quality > 38) {
-                    $quality -= 6;
-                } else {
-                    $nw = max(256, (int) ($magick->getImageWidth() * 0.88));
-                    $nh = max(256, (int) ($magick->getImageHeight() * 0.88));
-                    $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
-                    $quality = 82;
-                }
-            }
-
-            $magick->setImageCompressionQuality(35);
+        $magick->setImageFormat('jpeg');
+        $quality = 88;
+        for ($guard = 0; $guard < 18; $guard++) {
+            $magick->setImageCompressionQuality($quality);
             $blob = $magick->getImageBlob();
-            $magick->clear();
-            $magick->destroy();
-
-            return is_string($blob) && $blob !== '' ? $blob : null;
-        } catch (\InvalidArgumentException $e) {
-            throw $e;
-        } catch (\Throwable $e) {
-            Log::error('Imagick JPEG pipeline failed', ['error' => $e->getMessage()]);
-            if (isset($magick)) {
-                $magick->clear();
-                $magick->destroy();
+            if (is_string($blob) && $blob !== '' && strlen($blob) <= self::TARGET_MAX_BYTES) {
+                return $blob;
             }
-
-            return null;
+            if ($quality > 38) {
+                $quality -= 6;
+            } else {
+                $nw = max(2, (int) ($magick->getImageWidth() * 0.88));
+                $nh = max(2, (int) ($magick->getImageHeight() * 0.88));
+                $magick->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
+                $quality = 82;
+            }
         }
+
+        $magick->setImageCompressionQuality(35);
+        $blob = $magick->getImageBlob();
+
+        if (! is_string($blob) || $blob === '') {
+            throw new \InvalidArgumentException('Could not encode image for Gemini.');
+        }
+
+        return $blob;
     }
 
     /**
@@ -133,7 +106,7 @@ final class EditorGeminiInlineImagePreparer
 
         $w = imagesx($im);
         $h = imagesy($im);
-        if ($w < 10 || $h < 10) {
+        if ($w < 2 || $h < 2) {
             imagedestroy($im);
             throw new \InvalidArgumentException('Invalid image dimensions.');
         }
@@ -141,8 +114,8 @@ final class EditorGeminiInlineImagePreparer
         $max = max($w, $h);
         if ($max > self::MAX_EDGE_PX) {
             $scale = self::MAX_EDGE_PX / $max;
-            $nw = max(1, (int) round($w * $scale));
-            $nh = max(1, (int) round($h * $scale));
+            $nw = max(2, (int) round($w * $scale));
+            $nh = max(2, (int) round($h * $scale));
             $scaled = imagescale($im, $nw, $nh);
             if ($scaled !== false) {
                 imagedestroy($im);
@@ -171,8 +144,8 @@ final class EditorGeminiInlineImagePreparer
             if ($quality > 38) {
                 $quality -= 6;
             } else {
-                $nw = max(256, (int) ($w * 0.88));
-                $nh = max(256, (int) ($h * 0.88));
+                $nw = max(2, (int) ($w * 0.88));
+                $nh = max(2, (int) ($h * 0.88));
                 $sm2 = imagescale($canvas, $nw, $nh);
                 if ($sm2 !== false) {
                     imagedestroy($canvas);
