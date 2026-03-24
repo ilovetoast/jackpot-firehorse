@@ -72,6 +72,9 @@ class AITaskType
     /** Asset editor — generative image layers */
     public const EDITOR_GENERATIVE_IMAGE = 'editor_generative_image';
 
+    /** Asset editor — AI edit of an existing image layer (counts toward same plan quota as generative) */
+    public const EDITOR_EDIT_IMAGE = 'editor_edit_image';
+
     /**
      * Get all task types as an array.
      *
@@ -103,6 +106,7 @@ class AITaskType
             self::BRAND_INSIGHTS,
             self::EDITOR_COPY_ASSIST,
             self::EDITOR_GENERATIVE_IMAGE,
+            self::EDITOR_EDIT_IMAGE,
         ];
     }
     

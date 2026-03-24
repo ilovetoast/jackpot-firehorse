@@ -77,7 +77,13 @@ class AIService
     {
         $defaultProviderName = config('ai.default_provider', 'openai');
 
-        $this->providers['openai'] = new OpenAIProvider();
+        if (trim((string) config('ai.openai.api_key', '')) !== '') {
+            try {
+                $this->providers['openai'] = new OpenAIProvider();
+            } catch (\Throwable $e) {
+                Log::warning('[AIService] OpenAIProvider failed to initialize', ['error' => $e->getMessage()]);
+            }
+        }
 
         if (config('ai.anthropic.api_key')) {
             try {
@@ -573,6 +579,230 @@ class AIService
     }
 
     /**
+     * Editor: edit an existing image with a text instruction.
+     * OpenAI: images/edits. Gemini: generateContent with image + prompt (Nano Banana).
+     *
+     * @param  array<string, mixed>  $options
+     *   - model: Registry key (e.g. gpt-image-1, gemini-2.5-flash-image)
+     *   - image_binary: raw bytes (required)
+     *   - mime_type: optional hint for Gemini (from original bytes)
+     *   - tenant, user, brand_id, composition_id, asset_id: attribution
+     * @return array<string, mixed>
+     */
+    public function executeEditorImageEditAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
+    {
+        if ($taskType !== AITaskType::EDITOR_EDIT_IMAGE) {
+            throw new \InvalidArgumentException('Task type must be '.AITaskType::EDITOR_EDIT_IMAGE);
+        }
+
+        $imageBinary = $options['image_binary'] ?? null;
+        if (! is_string($imageBinary) || $imageBinary === '') {
+            throw new \InvalidArgumentException('image_binary is required for editor image edit.');
+        }
+
+        $triggeringContext = $options['triggering_context'] ?? $this->determineContext($options);
+        $environment = $options['environment'] ?? app()->environment();
+
+        $agentConfig = $this->getAgentConfig($agentId, $environment);
+        if (! $agentConfig) {
+            throw new \InvalidArgumentException("Agent '{$agentId}' not found in configuration.");
+        }
+
+        $tenant = $options['tenant'] ?? null;
+        if (! $tenant && isset($options['tenant_id']) && $options['tenant_id']) {
+            $tenant = Tenant::find($options['tenant_id']);
+        }
+
+        $user = $options['user'] ?? null;
+        if (! $user && isset($options['user_id']) && $options['user_id']) {
+            $user = User::find($options['user_id']);
+        }
+
+        $this->enforcePermissions($agentConfig, $triggeringContext, $tenant, $user);
+
+        if ($agentConfig['scope'] === 'tenant' && ! $tenant) {
+            throw new \InvalidArgumentException("Tenant-scoped agent '{$agentId}' requires a tenant.");
+        }
+
+        $modelKey = $options['model'] ?? $agentConfig['default_model'];
+        $this->assertGenerativeImageModelAllowed($modelKey, $environment);
+
+        $modelConfig = $this->getModelConfig($modelKey, $environment);
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+        }
+
+        $provider = $this->getProviderForModel($modelConfig);
+        $actualModelName = $modelConfig['model_name'] ?? $modelKey;
+        $providerName = $modelConfig['provider'] ?? config('ai.default_provider', 'openai');
+
+        if (! ($provider instanceof OpenAIProvider) && ! ($provider instanceof GeminiProvider)) {
+            throw new \InvalidArgumentException(
+                'Editor image edit requires OpenAI (gpt-image-1) or a Gemini Nano Banana image model.'
+            );
+        }
+
+        $estimatedTokensIn = max(256, (int) (strlen($prompt) / 4));
+        $estimatedTokensOut = 2048;
+        $estimatedCost = $provider->calculateCost($estimatedTokensIn, $estimatedTokensOut, $actualModelName);
+
+        $systemBudget = $this->budgetService->getSystemBudget($environment);
+        $agentBudget = $this->budgetService->getAgentBudget($agentId, $environment);
+        $taskBudget = $this->budgetService->getTaskBudget($taskType, $environment);
+
+        try {
+            if ($systemBudget) {
+                $this->budgetService->checkBudget($systemBudget, $estimatedCost, $environment);
+            }
+            if ($agentBudget) {
+                $this->budgetService->checkBudget($agentBudget, $estimatedCost, $environment);
+            }
+            if ($taskBudget) {
+                $this->budgetService->checkBudget($taskBudget, $estimatedCost, $environment);
+            }
+        } catch (AIBudgetExceededException $e) {
+            $entity = $this->extractEntityFromOptions($options);
+            $agentRun = AIAgentRun::create([
+                'agent_id' => $agentId,
+                'agent_name' => $agentConfig['name'] ?? $agentId,
+                'triggering_context' => $triggeringContext,
+                'environment' => $environment,
+                'tenant_id' => $tenant?->id,
+                'user_id' => $user?->id,
+                'task_type' => $taskType,
+                'entity_type' => $entity['entity_type'],
+                'entity_id' => $entity['entity_id'],
+                'model_used' => $actualModelName,
+                'tokens_in' => 0,
+                'tokens_out' => 0,
+                'estimated_cost' => 0,
+                'status' => 'failed',
+                'severity' => 'warning',
+                'summary' => 'AI execution failed',
+                'blocked_reason' => $e->getMessage(),
+                'started_at' => now(),
+                'completed_at' => now(),
+                'metadata' => $this->buildMetadata($prompt, $options, $agentConfig, $triggeringContext),
+            ]);
+
+            Log::warning('AI editor image edit blocked by budget limit', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+            ]);
+
+            throw $e;
+        }
+
+        $entity = $this->extractEntityFromOptions($options);
+        $agentRun = AIAgentRun::create([
+            'agent_id' => $agentId,
+            'agent_name' => $agentConfig['name'] ?? $agentId,
+            'triggering_context' => $triggeringContext,
+            'environment' => $environment,
+            'tenant_id' => $tenant?->id,
+            'user_id' => $user?->id,
+            'task_type' => $taskType,
+            'entity_type' => $entity['entity_type'],
+            'entity_id' => $entity['entity_id'],
+            'model_used' => $actualModelName,
+            'tokens_in' => 0,
+            'tokens_out' => 0,
+            'estimated_cost' => 0,
+            'status' => 'failed',
+            'started_at' => now(),
+            'metadata' => $this->buildMetadata($prompt, $options, $agentConfig, $triggeringContext),
+        ]);
+
+        try {
+            $providerOptions = array_merge($options, [
+                'model' => $actualModelName,
+                'image_binary' => $imageBinary,
+                'filename' => $options['filename'] ?? 'source.png',
+            ]);
+
+            if ($provider instanceof OpenAIProvider) {
+                $response = $provider->editImage($prompt, $providerOptions);
+            } elseif ($provider instanceof GeminiProvider) {
+                $response = $provider->editImage($prompt, $providerOptions);
+            } else {
+                throw new \InvalidArgumentException('Unsupported provider for editor image edit.');
+            }
+
+            $imageRef = $this->extractImageRefFromGenerativeResponse($response, (string) $providerName);
+            if ($imageRef === '' || $imageRef === null) {
+                throw new \Exception('Provider returned no image reference.');
+            }
+
+            $cost = $provider->calculateCost(
+                $response['tokens_in'],
+                $response['tokens_out'],
+                $actualModelName
+            );
+
+            $metadata = $agentRun->metadata ?? [];
+            if (config('ai.logging.store_prompts', false)) {
+                $metadata['prompt'] = $prompt;
+                $metadata['response_metadata'] = $response['metadata'] ?? [];
+            }
+            $metadata['resolved_model_key'] = $modelKey;
+            $metadata['image_ref'] = $imageRef;
+
+            $displayName = (string) ($modelConfig['display_name'] ?? $modelConfig['model_name'] ?? $modelKey);
+
+            $agentRun->markAsSuccessful(
+                $response['tokens_in'],
+                $response['tokens_out'],
+                $cost,
+                $metadata,
+                'info',
+                1.0,
+                'Editor image edited'
+            );
+
+            if ($systemBudget) {
+                $this->budgetService->recordUsage($systemBudget, $cost, $environment);
+            }
+            if ($agentBudget) {
+                $this->budgetService->recordUsage($agentBudget, $cost, $environment);
+            }
+            if ($taskBudget) {
+                $this->budgetService->recordUsage($taskBudget, $cost, $environment);
+            }
+
+            Log::info('AI editor image edit agent executed successfully', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'cost' => $cost,
+            ]);
+
+            return [
+                'text' => '',
+                'image_ref' => $imageRef,
+                'agent_run_id' => $agentRun->id,
+                'cost' => $cost,
+                'tokens_in' => $response['tokens_in'],
+                'tokens_out' => $response['tokens_out'],
+                'resolved_model_key' => $modelKey,
+                'model_display_name' => $displayName,
+                'metadata' => $response['metadata'] ?? [],
+            ];
+        } catch (\Exception $e) {
+            $agentRun->markAsFailed($e->getMessage());
+
+            Log::error('AI editor image edit agent execution failed', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $response
      */
     protected function extractImageRefFromGenerativeResponse(array $response, string $providerName): ?string
@@ -770,6 +1000,7 @@ class AIService
             'model', 'tenant', 'tenant_id', 'user', 'user_id', 'triggering_context',
             'max_tokens', 'temperature', // Provider-specific options
             'image_size', 'size', 'model_override', 'composition_id', 'asset_id', 'brand_id',
+            'image_binary', 'mime_type', // Raw bytes are not JSON-safe / must not be logged to DB
         ]));
 
         return $metadata;

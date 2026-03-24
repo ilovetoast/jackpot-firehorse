@@ -82,6 +82,15 @@ export type ImageLayer = BaseLayer & {
     naturalWidth?: number
     naturalHeight?: number
     fit?: 'cover' | 'contain' | 'fill'
+    /** AI image edit (instructional edits — does not mutate DAM asset; new URLs only). */
+    aiEdit?: {
+        prompt?: string
+        /** Registry key for POST /app/api/edit-image (e.g. gpt-image-1, gemini-2.5-flash-image). */
+        editModelKey?: string
+        status?: 'idle' | 'editing' | 'error' | 'done'
+        resultSrc?: string
+        previousResults?: string[]
+    }
 }
 
 /** API row from GET /app/api/assets */

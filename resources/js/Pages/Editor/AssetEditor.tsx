@@ -127,6 +127,7 @@ import {
     type GenerateImageUsage,
     type GenerativeUiModelKey,
 } from './editorGenerateImageBridge'
+import { editImage } from './editorEditImageBridge'
 import {
     handleAIError,
     MAX_CONCURRENT_AI_REQUESTS,
@@ -962,6 +963,9 @@ export default function AssetEditor() {
     const lastGenerateAtByLayerRef = useRef<Record<string, number>>({})
     const genSeqRef = useRef<Record<string, number>>({})
     const genAbortByLayerRef = useRef<Record<string, AbortController>>({})
+    const imageEditSeqRef = useRef<Record<string, number>>({})
+    const imageEditAbortByLayerRef = useRef<Record<string, AbortController>>({})
+    const [imageEditActionError, setImageEditActionError] = useState<string | null>(null)
     const [viewportScale, setViewportScale] = useState(1)
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
@@ -1002,6 +1006,14 @@ export default function AssetEditor() {
         selectedLayer && isGenerativeImageLayer(selectedLayer) && selectedLayer.variationResults
             ? selectedLayer.variationResults.join('|')
             : ''
+
+    /** Block AI actions only when usage is known and exhausted, or usage fetch failed — not while still loading (null). */
+    const imageEditUsageBlocked = useMemo(
+        () =>
+            genUsageError !== null ||
+            (genUsage !== null && !canGenerateFromUsage(genUsage)),
+        [genUsage, genUsageError]
+    )
 
     const damAssetById = useMemo(() => {
         const m = new Map<string, DamPickerAsset>()
@@ -1155,10 +1167,15 @@ export default function AssetEditor() {
                     setSaveError(null)
                     const doc = documentRef.current
                     const name = compositionName.trim() || defaultCompositionName(doc)
+                    let thumb: string | null = null
+                    if (stageRef.current) {
+                        thumb = await captureCompositionThumbnailBase64(stageRef.current, doc)
+                    }
                     await putComposition(compositionId, doc, {
                         name,
                         versionLabel: null,
                         createVersion: false,
+                        thumbnailPngBase64: thumb,
                     })
                     setLastSavedSerialized(JSON.stringify(documentRef.current))
                     setSaveState('saved')
@@ -2446,6 +2463,180 @@ export default function AssetEditor() {
                             status: 'idle' as const,
                             variationPending: false,
                             variationBatchSize: undefined,
+                        }
+                    }),
+                    updated_at: new Date().toISOString(),
+                }))
+            }
+        },
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId]
+    )
+
+    const runImageLayerEdit = useCallback(
+        async (layerId: string) => {
+            const layer = documentRef.current.layers.find((l) => l.id === layerId)
+            if (!layer || !isImageLayer(layer) || layer.locked) {
+                return
+            }
+            const instruction = (layer.aiEdit?.prompt ?? '').trim()
+            if (!instruction) {
+                setImageEditActionError('Describe what to change first.')
+                return
+            }
+            let usage = genUsage
+            if (usage === null) {
+                try {
+                    usage = await fetchGenerateImageUsage()
+                    setGenUsage(usage)
+                    setGenUsageError(null)
+                } catch {
+                    setImageEditActionError('Could not verify your plan. Check your connection and try again.')
+                    return
+                }
+            }
+            if (!canGenerateFromUsage(usage)) {
+                setImageEditActionError("You've reached your monthly limit.")
+                return
+            }
+            if (!layer.src || layer.src === PLACEHOLDER_IMAGE_SRC) {
+                setImageEditActionError('No image to edit.')
+                return
+            }
+
+            setImageEditActionError(null)
+            imageEditAbortByLayerRef.current[layerId]?.abort()
+            const ac = new AbortController()
+            imageEditAbortByLayerRef.current[layerId] = ac
+            const seq = (imageEditSeqRef.current[layerId] = (imageEditSeqRef.current[layerId] ?? 0) + 1)
+
+            updateLayer(layerId, (l) => {
+                if (!isImageLayer(l)) {
+                    return l
+                }
+                return {
+                    ...l,
+                    aiEdit: {
+                        ...l.aiEdit,
+                        prompt: instruction,
+                        status: 'editing',
+                    },
+                }
+            })
+
+            let finishedOk = false
+            try {
+                const res = await withAIConcurrency(() =>
+                    editImage(
+                        {
+                            ...(layer.assetId
+                                ? { assetId: layer.assetId }
+                                : { imageUrl: layer.src }),
+                            instruction,
+                            modelKey: layer.aiEdit?.editModelKey ?? 'gpt-image-1',
+                            brandContext: brandContext ?? undefined,
+                            ...(compositionId ? { compositionId } : {}),
+                            ...(activeBrandId != null ? { brandId: activeBrandId } : {}),
+                        },
+                        { signal: ac.signal }
+                    )
+                )
+                if (imageEditSeqRef.current[layerId] !== seq) {
+                    return
+                }
+                setDocument((prev) => {
+                    const cur = prev.layers.find((l) => l.id === layerId)
+                    if (!cur || cur.type !== 'image') {
+                        return prev
+                    }
+                    const prevSrc = cur.src
+                    const hist = [...(cur.aiEdit?.previousResults ?? [])]
+                    if (prevSrc && prevSrc !== PLACEHOLDER_IMAGE_SRC) {
+                        hist.push(prevSrc)
+                    }
+                    const previousResults = hist.slice(-GENERATIVE_PREVIOUS_RESULTS_MAX)
+                    const next: DocumentModel = {
+                        ...prev,
+                        layers: prev.layers.map((l) =>
+                            l.id === layerId && l.type === 'image'
+                                ? {
+                                      ...l,
+                                      src: res.image_url,
+                                      aiEdit: {
+                                          ...l.aiEdit,
+                                          prompt: instruction,
+                                          status: 'done',
+                                          resultSrc: res.image_url,
+                                          previousResults,
+                                      },
+                                  }
+                                : l
+                        ),
+                        updated_at: new Date().toISOString(),
+                    }
+                    queueMicrotask(() => {
+                        void snapshotCheckpoint('AI image edit', next)
+                    })
+                    return next
+                })
+                finishedOk = true
+                setActivityToast('Image updated')
+                try {
+                    const fresh = await fetchGenerateImageUsage()
+                    setGenUsage(fresh)
+                } catch {
+                    /* ignore */
+                }
+            } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') {
+                    if (imageEditSeqRef.current[layerId] === seq) {
+                        updateLayer(layerId, (l) => {
+                            if (!isImageLayer(l)) {
+                                return l
+                            }
+                            return {
+                                ...l,
+                                aiEdit: { ...l.aiEdit, status: 'idle' },
+                            }
+                        })
+                    }
+                    return
+                }
+                if (imageEditSeqRef.current[layerId] !== seq) {
+                    return
+                }
+                updateLayer(layerId, (l) => {
+                    if (!isImageLayer(l)) {
+                        return l
+                    }
+                    return {
+                        ...l,
+                        aiEdit: { ...l.aiEdit, status: 'error' },
+                    }
+                })
+                setImageEditActionError(handleAIError(e))
+                try {
+                    const u = await fetchGenerateImageUsage()
+                    setGenUsage(u)
+                } catch {
+                    /* ignore */
+                }
+            } finally {
+                delete imageEditAbortByLayerRef.current[layerId]
+                if (finishedOk || imageEditSeqRef.current[layerId] !== seq) {
+                    return
+                }
+                setDocument((prev) => ({
+                    ...prev,
+                    layers: prev.layers.map((l) => {
+                        if (l.id !== layerId || l.type !== 'image') {
+                            return l
+                        }
+                        if (l.aiEdit?.status !== 'editing') {
+                            return l
+                        }
+                        return {
+                            ...l,
+                            aiEdit: { ...l.aiEdit, status: 'idle' },
                         }
                     }),
                     updated_at: new Date().toISOString(),
@@ -3785,6 +3976,43 @@ export default function AssetEditor() {
                                                         </span>
                                                     </div>
                                                 )}
+                                                {layer.aiEdit?.status === 'editing' && (
+                                                    <div
+                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/85 dark:bg-gray-950/85"
+                                                        role="status"
+                                                        aria-busy="true"
+                                                        aria-label="Editing image"
+                                                    >
+                                                        <ArrowPathIcon
+                                                            className="h-8 w-8 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400"
+                                                            aria-hidden
+                                                        />
+                                                        <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                                                            Editing…
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {layer.aiEdit?.status === 'error' && (
+                                                    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-red-950/25 px-2 text-center dark:bg-red-950/50">
+                                                        <ExclamationTriangleIcon
+                                                            className="h-6 w-6 text-red-600 dark:text-red-400"
+                                                            aria-hidden
+                                                        />
+                                                        <span className="text-[10px] font-medium text-red-900 dark:text-red-100">
+                                                            Edit failed
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            className="pointer-events-auto rounded-md border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-900 shadow-sm hover:bg-red-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-100 dark:hover:bg-red-950/50"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                void runImageLayerEdit(layer.id)
+                                                            }}
+                                                        >
+                                                            Retry
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         {isTextLayer(layer) && (
@@ -4730,6 +4958,167 @@ export default function AssetEditor() {
                                             <option value="fill">fill</option>
                                         </select>
                                         </div>
+
+                                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2 text-gray-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-gray-100">
+                                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
+                                                Modify image (AI)
+                                            </p>
+                                            <p className="mb-2 text-[10px] leading-snug text-gray-600 dark:text-gray-400">
+                                                Uses the same monthly AI image budget as Generate. Apply runs on the
+                                                current layer. After a successful edit,{' '}
+                                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                                    Regenerate
+                                                </span>{' '}
+                                                re-runs your prompt on the latest result. Choose{' '}
+                                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                                    Nano Banana
+                                                </span>{' '}
+                                                (Gemini) if OpenAI cannot decode your file (e.g. AVIF/HEIC).
+                                            </p>
+                                            <div className="mb-2">
+                                                <label className="mb-0.5 block text-[10px] font-medium text-gray-700 dark:text-gray-300">
+                                                    Edit model
+                                                </label>
+                                                <select
+                                                    value={
+                                                        selectedLayer.aiEdit?.editModelKey ?? 'gpt-image-1'
+                                                    }
+                                                    disabled={
+                                                        selectedLayer.locked ||
+                                                        selectedLayer.aiEdit?.status === 'editing'
+                                                    }
+                                                    onChange={(e) => {
+                                                        const v = e.target.value
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isImageLayer(l)) {
+                                                                return l
+                                                            }
+                                                            return {
+                                                                ...l,
+                                                                aiEdit: {
+                                                                    ...l.aiEdit,
+                                                                    editModelKey: v,
+                                                                },
+                                                            }
+                                                        })
+                                                    }}
+                                                    className="w-full rounded border border-violet-200 bg-white px-2 py-1.5 text-[11px] text-gray-900 dark:border-violet-700 dark:bg-gray-900 dark:text-gray-100"
+                                                >
+                                                    {GENERATIVE_ADVANCED_MODEL_OPTIONS.map((opt) => (
+                                                        <option key={opt.value} value={opt.value}>
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            {genUsageError && (
+                                                <p className="mb-2 text-[10px] text-amber-800 dark:text-amber-200">
+                                                    {genUsageError} — AI actions stay off until usage loads.
+                                                </p>
+                                            )}
+                                            <textarea
+                                                value={selectedLayer.aiEdit?.prompt ?? ''}
+                                                onChange={(e) => {
+                                                    const v = e.target.value
+                                                    updateLayer(selectedLayer.id, (l) => {
+                                                        if (!isImageLayer(l)) {
+                                                            return l
+                                                        }
+                                                        return {
+                                                            ...l,
+                                                            aiEdit: { ...l.aiEdit, prompt: v },
+                                                        }
+                                                    })
+                                                }}
+                                                rows={3}
+                                                placeholder="Describe what to change (e.g. change background to desert, make pants blue)"
+                                                disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
+                                                className="w-full rounded border border-violet-200 bg-white px-2 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 dark:border-violet-700 dark:bg-gray-900 dark:text-gray-100"
+                                            />
+                                            {imageEditActionError && (
+                                                <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">{imageEditActionError}</p>
+                                            )}
+                                            {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
+                                                <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">
+                                                    Edit failed. Try again or adjust the instruction.
+                                                </p>
+                                            )}
+                                            <div className="mt-2 flex flex-col gap-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.aiEdit?.status === 'editing' ||
+                                                            imageEditUsageBlocked
+                                                        }
+                                                        title={
+                                                            genUsageError
+                                                                ? genUsageError
+                                                                : imageEditUsageBlocked
+                                                                  ? "You've used all AI image generations for this month"
+                                                                  : 'Send this layer and prompt to the AI editor'
+                                                        }
+                                                        onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                        className="group inline-flex min-h-[2.25rem] min-w-[8.5rem] flex-1 items-center justify-center rounded-md border-2 border-violet-800 bg-violet-600 px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:border-violet-400 disabled:bg-violet-300 dark:border-violet-400 dark:bg-violet-700 dark:hover:bg-violet-600 dark:disabled:border-violet-800 dark:disabled:bg-violet-900"
+                                                    >
+                                                        <span className="text-black group-disabled:text-violet-950 dark:group-disabled:text-violet-100">
+                                                            Apply changes
+                                                        </span>
+                                                    </button>
+                                                    {selectedLayer.aiEdit?.resultSrc ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={
+                                                                selectedLayer.locked ||
+                                                                selectedLayer.aiEdit?.status === 'editing' ||
+                                                                imageEditUsageBlocked ||
+                                                                !(selectedLayer.aiEdit?.prompt ?? '').trim()
+                                                            }
+                                                            title="Run the same prompt again on the last AI result"
+                                                            onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                            className="inline-flex min-h-[2.25rem] min-w-[8rem] flex-1 items-center justify-center rounded-md border-2 border-gray-800 bg-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-950 shadow-sm hover:bg-gray-400 disabled:cursor-not-allowed disabled:border-gray-500 disabled:bg-gray-200 disabled:text-gray-600 dark:border-gray-400 dark:bg-neutral-600 dark:text-white dark:hover:bg-neutral-500 dark:disabled:border-neutral-700 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-300"
+                                                        >
+                                                            Regenerate
+                                                        </button>
+                                                    ) : null}
+                                                </div>
+                                                {(selectedLayer.aiEdit?.previousResults?.length ?? 0) > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.aiEdit?.status === 'editing'
+                                                        }
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isImageLayer(l)) {
+                                                                    return l
+                                                                }
+                                                                const stack = [...(l.aiEdit?.previousResults ?? [])]
+                                                                if (stack.length === 0) {
+                                                                    return l
+                                                                }
+                                                                const nextSrc = stack[stack.length - 1]
+                                                                return {
+                                                                    ...l,
+                                                                    src: nextSrc,
+                                                                    aiEdit: {
+                                                                        ...l.aiEdit,
+                                                                        previousResults: stack.slice(0, -1),
+                                                                        resultSrc: nextSrc,
+                                                                        status: 'idle',
+                                                                    },
+                                                                }
+                                                            })
+                                                        }
+                                                        className="inline-flex w-full min-h-[2.25rem] items-center justify-center rounded-md border-2 border-gray-800 bg-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-950 shadow-sm hover:bg-gray-400 disabled:cursor-not-allowed disabled:border-gray-500 disabled:bg-gray-200 disabled:text-gray-600 dark:border-gray-400 dark:bg-neutral-600 dark:text-white dark:hover:bg-neutral-500 dark:disabled:border-neutral-700 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-300 sm:w-auto"
+                                                    >
+                                                        Revert to previous image
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 
@@ -5502,7 +5891,8 @@ export default function AssetEditor() {
                                     <div className="flex min-w-0 flex-1 items-start gap-3">
                                         {c.thumbnail_url ? (
                                             <img
-                                                src={c.thumbnail_url}
+                                                key={`open-comp-${c.id}-${c.updated_at}`}
+                                                src={`${c.thumbnail_url}${c.thumbnail_url.includes('?') ? '&' : '?'}rid=${encodeURIComponent(c.id)}`}
                                                 alt=""
                                                 className="h-14 w-14 shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-gray-200 dark:ring-gray-600"
                                             />

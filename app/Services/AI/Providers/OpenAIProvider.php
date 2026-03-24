@@ -282,6 +282,131 @@ class OpenAIProvider implements AIProviderInterface
         }
     }
 
+    /**
+     * Edit an image via OpenAI Images API (multipart /v1/images/edits).
+     *
+     * @param  array<string, mixed>  $options
+     *   - image_binary: string (raw image bytes, required)
+     *   - filename: optional filename hint for multipart (e.g. source.png)
+     *   - model: e.g. gpt-image-1
+     * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array<string, mixed>}
+     */
+    public function editImage(string $prompt, array $options = []): array
+    {
+        $binary = $options['image_binary'] ?? null;
+        if (! is_string($binary) || $binary === '') {
+            throw new \InvalidArgumentException('image_binary is required for image edit.');
+        }
+
+        $model = $options['model'] ?? 'gpt-image-1';
+        if (! $this->isModelAvailable($model)) {
+            throw new \InvalidArgumentException("Model '{$model}' is not available for OpenAI image edit.");
+        }
+
+        $filename = $options['filename'] ?? $this->guessImageFilename($binary);
+
+        try {
+            $response = Http::withToken($this->apiKey)
+                ->timeout(180)
+                ->attach('image', $binary, $filename)
+                ->post("{$this->baseUrl}/images/edits", [
+                    'model' => $model,
+                    'prompt' => $prompt,
+                    'n' => 1,
+                ]);
+
+            if ($response->failed()) {
+                $error = $response->json();
+                $errorMessage = is_array($error['error'] ?? null)
+                    ? ($error['error']['message'] ?? 'OpenAI image edit failed')
+                    : ($response->body() ?: 'OpenAI image edit failed');
+
+                if (stripos((string) $errorMessage, 'quota') !== false
+                    || stripos((string) $errorMessage, 'exceeded') !== false
+                    || $response->status() === 429) {
+                    throw new \App\Exceptions\AIQuotaExceededException(
+                        "OpenAI API quota exceeded: {$errorMessage}",
+                        'OpenAI'
+                    );
+                }
+
+                throw new \Exception('OpenAI image edit failed: '.(is_string($errorMessage) ? $errorMessage : json_encode($error)), $response->status());
+            }
+
+            $data = $response->json();
+            $actualModel = is_array($data) ? ($data['model'] ?? $model) : $model;
+
+            $imageRef = null;
+            if (is_array($data)) {
+                $url = $data['data'][0]['url'] ?? null;
+                if (is_string($url) && str_starts_with($url, 'http')) {
+                    $this->assertSafeRemoteImageUrl($url);
+                    $imageRef = $url;
+                }
+                $b64 = $data['data'][0]['b64_json'] ?? null;
+                if ($imageRef === null && is_string($b64) && $b64 !== '') {
+                    $imageRef = 'data:image/png;base64,'.$b64;
+                }
+            }
+
+            if ($imageRef === null || $imageRef === '') {
+                throw new \Exception('OpenAI returned no edited image URL or base64 data.');
+            }
+
+            $usage = is_array($data) ? ($data['usage'] ?? []) : [];
+            $tokensIn = 0;
+            $tokensOut = 0;
+            $estimated = false;
+            if (is_array($usage) && $usage !== []) {
+                $tokensIn = (int) ($usage['input_tokens'] ?? $usage['prompt_tokens'] ?? 0);
+                $tokensOut = (int) ($usage['output_tokens'] ?? $usage['completion_tokens'] ?? 0);
+            }
+            if ($tokensIn === 0 && $tokensOut === 0) {
+                $estimated = true;
+                $tokensIn = max(1, (int) ceil(strlen($prompt) / 4));
+                $tokensOut = max(1, 1024);
+            }
+
+            return [
+                'text' => '',
+                'tokens_in' => $tokensIn,
+                'tokens_out' => $tokensOut,
+                'model' => is_string($actualModel) ? $actualModel : $model,
+                'metadata' => [
+                    'image_ref' => $imageRef,
+                    'estimated_tokens' => $estimated,
+                ],
+            ];
+        } catch (\App\Exceptions\AIQuotaExceededException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            Log::error('OpenAI image edit failed', [
+                'model' => $model,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    private function guessImageFilename(string $binary): string
+    {
+        if (strlen($binary) >= 3 && $binary[0] === "\xff" && $binary[1] === "\xd8") {
+            return 'source.jpg';
+        }
+        if (strlen($binary) >= 8 && substr($binary, 0, 8) === "\x89PNG\r\n\x1a\n") {
+            return 'source.png';
+        }
+        if (strlen($binary) >= 6 && strtoupper(substr($binary, 0, 6)) === 'GIF87a'
+            || strtoupper(substr($binary, 0, 6)) === 'GIF89a') {
+            return 'source.gif';
+        }
+        if (strlen($binary) >= 12 && substr($binary, 0, 4) === 'RIFF' && substr($binary, 8, 4) === 'WEBP') {
+            return 'source.webp';
+        }
+
+        return 'source.png';
+    }
+
     private function normalizeOpenAiImageSize(?string $size): string
     {
         $s = is_string($size) ? $size : '1024x1024';

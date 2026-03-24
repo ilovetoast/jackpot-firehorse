@@ -310,7 +310,8 @@ class EditorCompositionController extends Controller
     /**
      * PUT /app/api/compositions/{id}
      *
-     * create_version: false = autosave (document + optional thumbnail only, no new version row).
+     * create_version: false = autosave (document + optional thumbnail PNG, no new version row).
+     * When thumbnail_png_base64 is sent, the composition list preview is updated even for autosave.
      */
     public function update(Request $request, int $id): JsonResponse
     {
@@ -340,8 +341,9 @@ class EditorCompositionController extends Controller
             }
             $composition->document_json = $validated['document'];
 
-            // Thumbnails only when creating a new version row (manual save / checkpoint), not autosave.
-            if ($thumbBinary !== null && $createVersion) {
+            // Composition list preview: update whenever PNG bytes are sent (manual save or autosave).
+            // Version-row thumbnails only when we create a new history snapshot (create_version true).
+            if ($thumbBinary !== null) {
                 $this->persistCompositionThumbnail($composition, $thumbBinary, $user);
             }
 

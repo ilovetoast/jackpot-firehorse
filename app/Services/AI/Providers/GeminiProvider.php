@@ -89,12 +89,67 @@ class GeminiProvider implements AIProviderInterface
     }
 
     /**
+     * Edit / transform an image from raw bytes + instruction (Nano Banana image models).
+     * Skips PHP GD — sends bytes as inlineData with detected MIME type (handles AVIF, etc. when API accepts).
+     *
+     * @param  array<string, mixed>  $options
+     *   - image_binary: string (required)
+     *   - model: API model id (e.g. gemini-2.5-flash-image)
+     *   - mime_type: optional hint (e.g. image/jpeg)
+     * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array<string, mixed>}
+     */
+    public function editImage(string $prompt, array $options = []): array
+    {
+        $binary = $options['image_binary'] ?? null;
+        if (! is_string($binary) || $binary === '') {
+            throw new \InvalidArgumentException('image_binary is required for Gemini image edit.');
+        }
+
+        $model = $options['model'] ?? 'gemini-2.5-flash-image';
+        if (! $this->isModelAvailable($model)) {
+            throw new \InvalidArgumentException("Model '{$model}' is not available for Gemini image edit.");
+        }
+
+        $mime = $options['mime_type'] ?? null;
+        if (! is_string($mime) || $mime === '') {
+            $mime = $this->guessMimeFromBinary($binary);
+        }
+        if ($mime === 'image/jpg') {
+            $mime = 'image/jpeg';
+        }
+
+        $b64 = base64_encode($binary);
+        $contents = [
+            [
+                'parts' => [
+                    [
+                        'inlineData' => [
+                            'mimeType' => $mime,
+                            'data' => $b64,
+                        ],
+                    ],
+                    ['text' => $prompt],
+                ],
+            ],
+        ];
+
+        return $this->generateContent($contents, $model, [
+            'generationConfig' => [
+                'responseModalities' => ['TEXT', 'IMAGE'],
+            ],
+        ]);
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $contents
+     * @param  array<string, mixed>  $extraRootKeys Merged into POST JSON (e.g. generationConfig for image models)
      * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array}
      */
-    protected function generateContent(array $contents, string $model): array
+    protected function generateContent(array $contents, string $model, array $extraRootKeys = []): array
     {
         $url = "{$this->baseUrl}/models/{$model}:generateContent";
+
+        $body = array_merge(['contents' => $contents], $extraRootKeys);
 
         try {
             $response = Http::timeout(180)
@@ -102,9 +157,7 @@ class GeminiProvider implements AIProviderInterface
                     'x-goog-api-key' => $this->apiKey,
                     'Content-Type' => 'application/json',
                 ])
-                ->post($url, [
-                    'contents' => $contents,
-                ]);
+                ->post($url, $body);
 
             if ($response->failed()) {
                 $error = $response->json();
@@ -217,6 +270,22 @@ class GeminiProvider implements AIProviderInterface
     public function getProviderName(): string
     {
         return 'gemini';
+    }
+
+    private function guessMimeFromBinary(string $binary): string
+    {
+        if (function_exists('finfo_open')) {
+            $f = finfo_open(FILEINFO_MIME_TYPE);
+            if ($f !== false) {
+                $mime = finfo_buffer($f, $binary);
+                finfo_close($f);
+                if (is_string($mime) && str_starts_with($mime, 'image/')) {
+                    return $mime === 'image/jpg' ? 'image/jpeg' : $mime;
+                }
+            }
+        }
+
+        return 'image/png';
     }
 
     public function isModelAvailable(string $model): bool

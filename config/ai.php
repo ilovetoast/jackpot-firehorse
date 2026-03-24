@@ -519,6 +519,14 @@ PROMPT
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],
         ],
+        'editor_edit_image' => [
+            'name' => 'Editor Image Edit',
+            'description' => 'Edits existing images in the asset editor via AI instructions',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-image-1',
+            'allowed_actions' => ['read', 'generate_image'],
+            'permissions' => [],
+        ],
     ],
 
     /*

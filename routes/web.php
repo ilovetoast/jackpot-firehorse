@@ -551,6 +551,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/generate-image/stub', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'stub'])->name('api.editor.generate-image.stub');
             Route::get('/api/generate-image/proxy/{token}', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'proxyImage'])->where('token', '[a-f0-9]{32}')->name('api.editor.generate-image.proxy');
             Route::post('/api/generate-image', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'generate'])->name('api.editor.generate-image');
+            Route::post('/api/edit-image', [\App\Http\Controllers\Editor\EditorEditImageController::class, 'edit'])->name('api.editor.edit-image');
             Route::get('/api/editor/brand-context', [\App\Http\Controllers\Editor\EditorBrandContextController::class, 'show'])->name('api.editor.brand-context');
             Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
 
