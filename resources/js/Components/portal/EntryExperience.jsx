@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+import { route } from 'ziggy-js'
 import { EntryPreview } from './GatewayPreview'
 import PortalGate from './PortalGate'
 
@@ -34,7 +36,12 @@ export default function EntryExperience({ data, setData, portalFeatures, brand, 
         onSave?.({ portal_settings: data.portal_settings })
     }
 
-    const primary = brand?.primary_color || '#6366f1'
+    const gatewayLoginUrl = useMemo(() => {
+        if (!brand?.slug) return ''
+        const base = route('gateway')
+        const qs = new URLSearchParams({ mode: 'login', brand: brand.slug })
+        return `${base}?${qs.toString()}`
+    }, [brand?.slug])
 
     return (
         <div className="space-y-8">
@@ -44,6 +51,35 @@ export default function EntryExperience({ data, setData, portalFeatures, brand, 
                     Control how users enter your brand when they arrive at the gateway.
                 </p>
             </div>
+
+            {gatewayLoginUrl && (
+                <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Brand login link</p>
+                    <p className="text-xs text-gray-600 mb-3">
+                        Share this URL to open the login screen with this brand&apos;s gateway (theme and entry experience below).
+                    </p>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <a
+                            href={gatewayLoginUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm font-mono text-indigo-600 hover:text-indigo-700 underline decoration-indigo-300 underline-offset-2 truncate"
+                        >
+                            {gatewayLoginUrl}
+                        </a>
+                        <button
+                            type="button"
+                            onClick={() => navigator.clipboard?.writeText(gatewayLoginUrl)}
+                            className="flex-shrink-0 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                            title="Copy URL"
+                        >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <PortalGate allowed={canCustomize} planName="Pro" feature="Entry Customization">
                 <div className="space-y-6">

@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\EventType;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -79,6 +81,52 @@ class Brand extends Model
     }
 
     /**
+     * Thumbnail/original URL for a logo image asset (light or dark column).
+     * Used by accessors (AUTHENTICATED) and {@see logoUrlForGuest} (GATEWAY signed URLs).
+     */
+    protected function deliveryUrlForLogoAssetId(?int $assetId, DeliveryContext $context): ?string
+    {
+        if (! $assetId) {
+            return null;
+        }
+
+        $asset = Asset::find($assetId);
+        if (! $asset) {
+            return null;
+        }
+
+        $isSvg = $asset->mime_type === 'image/svg+xml'
+            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status
+            : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
+
+        if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+            return $asset->deliveryUrl(AssetVariant::ORIGINAL, $context) ?: null;
+        }
+
+        return $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, $context) ?: null;
+    }
+
+    /**
+     * Logo URL for unauthenticated pages (gateway, forgot password, public portal).
+     * Uses time-limited signed CloudFront URLs — guests do not receive tenant CDN cookies.
+     * Manual logo_path / logo_dark_path overrides are returned as-is (may still require cookies).
+     */
+    public function logoUrlForGuest(bool $dark = false): ?string
+    {
+        $manual = $dark ? ($this->attributes['logo_dark_path'] ?? null) : ($this->attributes['logo_path'] ?? null);
+        if ($manual !== null && $manual !== '') {
+            return $manual;
+        }
+
+        $logoId = $dark ? ($this->attributes['logo_dark_id'] ?? null) : ($this->attributes['logo_id'] ?? null);
+
+        return $this->deliveryUrlForLogoAssetId($logoId, DeliveryContext::GATEWAY);
+    }
+
+    /**
      * Resolve logo_path from logo_id when logo_path is null.
      * When logo references an asset (logo_id), returns the thumbnail URL so the logo displays
      * in nav, brand selector, etc. For SVG assets without thumbnails, serves the original
@@ -89,27 +137,8 @@ class Brand extends Model
         if ($value !== null && $value !== '') {
             return $value;
         }
-        $logoId = $this->attributes['logo_id'] ?? null;
-        if ($logoId) {
-            $asset = Asset::find($logoId);
-            if (!$asset) {
-                return null;
-            }
 
-            $isSvg = $asset->mime_type === 'image/svg+xml'
-                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
-
-            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                ? $asset->thumbnail_status
-                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
-
-            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
-                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-            }
-
-            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-        }
-        return null;
+        return $this->deliveryUrlForLogoAssetId($this->attributes['logo_id'] ?? null, DeliveryContext::AUTHENTICATED);
     }
 
     /**
@@ -121,27 +150,8 @@ class Brand extends Model
         if ($value !== null && $value !== '') {
             return $value;
         }
-        $logoDarkId = $this->attributes['logo_dark_id'] ?? null;
-        if ($logoDarkId) {
-            $asset = Asset::find($logoDarkId);
-            if (!$asset) {
-                return null;
-            }
 
-            $isSvg = $asset->mime_type === 'image/svg+xml'
-                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
-
-            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                ? $asset->thumbnail_status
-                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
-
-            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
-                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-            }
-
-            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-        }
-        return null;
+        return $this->deliveryUrlForLogoAssetId($this->attributes['logo_dark_id'] ?? null, DeliveryContext::AUTHENTICATED);
     }
 
     /**

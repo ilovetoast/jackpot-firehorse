@@ -34,7 +34,7 @@ class PublicBrandPortalController extends Controller
         $this->enforcePublicAccess($request, $brand);
 
         $portal = $brand->portal_settings ?? [];
-        $theme = $this->themeBuilder->build($brand->tenant, $brand);
+        $theme = $this->themeBuilder->build($brand->tenant, $brand, true);
 
         $collections = $this->loadPublicCollections($brand);
         $recentAssets = $this->loadPublicAssets($brand, 12);
@@ -73,7 +73,7 @@ class PublicBrandPortalController extends Controller
             abort(404);
         }
 
-        $theme = $this->themeBuilder->build($brand->tenant, $brand);
+        $theme = $this->themeBuilder->build($brand->tenant, $brand, true);
         $portal = $brand->portal_settings ?? [];
 
         $assets = $collection->assets()

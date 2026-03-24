@@ -16,6 +16,7 @@ use RuntimeException;
  * - AUTHENTICATED: Plain CDN URL (signed cookies apply)
  * - PUBLIC_COLLECTION: CloudFront signed URL with public_collection_ttl
  * - PUBLIC_DOWNLOAD: CloudFront signed URL with DownloadExpirationPolicy
+ * - GATEWAY: Same signing as public collection (guests have no tenant CDN cookies)
  *
  * Never exposes raw S3 URLs. Never bypasses CDN.
  */
@@ -67,6 +68,7 @@ class AssetDeliveryService
             DeliveryContext::AUTHENTICATED => $this->urlForAuthenticatedContext($cdnUrl, $variant, $options),
             DeliveryContext::PUBLIC_COLLECTION => $this->signForPublicCollection($cdnUrl, $asset, $variant),
             DeliveryContext::PUBLIC_DOWNLOAD => $this->signForPublicDownload($cdnUrl, $asset, array_merge($options, ['variant' => $variant])),
+            DeliveryContext::GATEWAY => $this->signForGateway($cdnUrl, $asset, $variant),
         };
     }
 
@@ -122,6 +124,22 @@ class AssetDeliveryService
      */
     protected function signForPublicCollection(string $cdnUrl, Asset $asset, string $variant): string
     {
+        return $this->signWithPublicCollectionTtl($cdnUrl, $asset, $variant, 'public_collection');
+    }
+
+    /**
+     * Sign URL for gateway / unauthenticated branding (no CloudFront tenant cookies).
+     */
+    protected function signForGateway(string $cdnUrl, Asset $asset, string $variant): string
+    {
+        return $this->signWithPublicCollectionTtl($cdnUrl, $asset, $variant, 'gateway');
+    }
+
+    /**
+     * Shared TTL and signing for contexts that must work without signed cookies.
+     */
+    protected function signWithPublicCollectionTtl(string $cdnUrl, Asset $asset, string $variant, string $logLabel): string
+    {
         $variantEnum = AssetVariant::tryFrom($variant);
         $ttl = $variantEnum === AssetVariant::PDF_PAGE
             ? $this->signedUrlService->getPdfPagePublicTtl()
@@ -129,7 +147,7 @@ class AssetDeliveryService
         $expiresAt = time() + $ttl;
         $signed = $this->signedUrlService->sign($cdnUrl, $expiresAt);
 
-        \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Signed URL generated (public_collection)', [
+        \Illuminate\Support\Facades\Log::channel('single')->info('[CDN] Signed URL generated ('.$logLabel.')', [
             'asset_id' => $asset->id,
             'tenant_id' => $asset->tenant_id,
             'variant' => $variant,

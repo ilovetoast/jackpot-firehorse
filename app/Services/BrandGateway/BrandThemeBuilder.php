@@ -21,14 +21,17 @@ class BrandThemeBuilder
      * When only a tenant is available, we pull from its default brand.
      * When nothing is available, we return Jackpot defaults.
      */
-    public function build(?Tenant $tenant, ?Brand $brand): array
+    /**
+     * @param  bool  $guestSignedLogos  Use signed CDN URLs for logos (gateway, public portal, forgot password). Guests have no tenant CloudFront cookies.
+     */
+    public function build(?Tenant $tenant, ?Brand $brand, bool $guestSignedLogos = false): array
     {
         $effectiveBrand = $brand ?? $this->resolveEffectiveBrand($tenant);
 
         $mode = $this->resolveMode($tenant, $brand);
         $colors = $this->resolveColors($effectiveBrand);
-        $logo = $this->resolveLogo($effectiveBrand);
-        $logoDark = $this->resolveLogoDark($effectiveBrand);
+        $logo = $this->resolveLogo($effectiveBrand, $guestSignedLogos);
+        $logoDark = $this->resolveLogoDark($effectiveBrand, $guestSignedLogos);
         $name = $this->resolveName($tenant, $brand);
         $tagline = $this->resolveTagline($effectiveBrand);
 
@@ -58,7 +61,7 @@ class BrandThemeBuilder
             ? Brand::find($context['brand']['id'])
             : null;
 
-        return $this->build($tenant, $brand);
+        return $this->build($tenant, $brand, true);
     }
 
     private function resolveMode(?Tenant $tenant, ?Brand $brand): string
@@ -96,13 +99,17 @@ class BrandThemeBuilder
         return 'Jackpot';
     }
 
-    private function resolveLogo(?Brand $brand): ?string
+    private function resolveLogo(?Brand $brand, bool $guestSignedLogos = false): ?string
     {
         if (! $brand) {
             return null;
         }
 
         try {
+            if ($guestSignedLogos) {
+                return $brand->logoUrlForGuest(false);
+            }
+
             $logo = $brand->logo_path;
 
             return ($logo !== null && $logo !== '') ? $logo : null;
@@ -111,13 +118,17 @@ class BrandThemeBuilder
         }
     }
 
-    private function resolveLogoDark(?Brand $brand): ?string
+    private function resolveLogoDark(?Brand $brand, bool $guestSignedLogos = false): ?string
     {
         if (! $brand) {
             return null;
         }
 
         try {
+            if ($guestSignedLogos) {
+                return $brand->logoUrlForGuest(true);
+            }
+
             $logoDark = $brand->logo_dark_path;
 
             return ($logoDark !== null && $logoDark !== '') ? $logoDark : null;
