@@ -126,10 +126,12 @@ class EditorAssetBridgeController extends Controller
     /**
      * Brand Guidelines font uploads are often type REFERENCE (builder-staged typography).
      * Allow streaming those bytes for FontFace; normal library assets stay ASSET/DELIVERABLE.
+     * AI_GENERATED includes persisted editor generative output ({@see EditorGenerativeImagePersistService})
+     * — same-origin /file URLs must stream or the canvas shows 404.
      */
     private function editorMayStreamOriginalFile(Asset $asset): bool
     {
-        if (in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)) {
+        if (in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED], true)) {
             return true;
         }
 

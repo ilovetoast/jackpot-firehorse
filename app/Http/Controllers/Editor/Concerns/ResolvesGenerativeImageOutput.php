@@ -22,6 +22,13 @@ trait ResolvesGenerativeImageOutput
         EditorGenerativeImagePersistService $persistService
     ): array {
         if (! config('editor.generative.persist', true)) {
+            Log::info('editor.generative.output', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'delivery' => 'proxy',
+                'reason' => 'persist_disabled',
+            ]);
+
             return [
                 'image_url' => $this->registerProxyUrl($imageRef),
                 'asset_id' => null,
@@ -32,6 +39,13 @@ trait ResolvesGenerativeImageOutput
         if (! $brand instanceof Brand || ! isset($brand->id)) {
             Log::info('editor.generative.persist_skipped_no_brand', [
                 'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+            ]);
+            Log::info('editor.generative.output', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'delivery' => 'proxy',
+                'reason' => 'no_brand_context',
             ]);
 
             return [
@@ -43,6 +57,14 @@ trait ResolvesGenerativeImageOutput
         try {
             $out = $persistService->persistFromProviderReference($imageRef, $tenant, $user, $brand);
 
+            Log::info('editor.generative.output', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'brand_id' => $brand->id,
+                'delivery' => 'asset',
+                'asset_id' => $out['asset_id'],
+            ]);
+
             return [
                 'image_url' => $out['url'],
                 'asset_id' => $out['asset_id'],
@@ -51,7 +73,16 @@ trait ResolvesGenerativeImageOutput
             Log::warning('editor.generative.persist_failed', [
                 'tenant_id' => $tenant->id,
                 'user_id' => $user->id,
+                'brand_id' => $brand->id,
+                'exception' => $e::class,
                 'error' => $e->getMessage(),
+            ]);
+            Log::info('editor.generative.output', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'brand_id' => $brand->id,
+                'delivery' => 'proxy',
+                'reason' => 'persist_exception',
             ]);
 
             return [
