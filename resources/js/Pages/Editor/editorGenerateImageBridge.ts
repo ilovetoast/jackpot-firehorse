@@ -88,15 +88,15 @@ export const GENERATIVE_ADVANCED_MODEL_OPTIONS: ReadonlyArray<{ label: string; v
     { label: 'Nano Banana · Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
 ]
 
-/** Modify image (AI) only — GPT Image 1 + Nano Banana 2.5 + FLUX; Gemini 3.x disabled for edits. */
+/** Modify image (AI) — GPT Image 1 + Nano Banana 2.5 + Pro (3). FLUX temporarily disabled. */
 export const GENERATIVE_EDIT_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
     { label: 'GPT Image 1 (OpenAI)', value: 'gpt-image-1' },
     { label: 'Nano Banana · Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
-    { label: 'FLUX.2 [flex] (Black Forest Labs)', value: 'flux-2-flex' },
+    { label: 'Nano Banana Pro · Gemini 3 Pro (preview)', value: 'gemini-3-pro-image-preview' },
+    // { label: 'FLUX.2 [flex] (Black Forest Labs)', value: 'flux-2-flex' },
 ]
 
 const EDIT_MODEL_DISABLED_IDS = new Set([
-    'gemini-3-pro-image-preview',
     'gemini-3.1-flash-image-preview',
 ])
 

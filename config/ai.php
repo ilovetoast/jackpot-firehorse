@@ -263,7 +263,8 @@ return [
         'edit_allowed_model_keys' => [
             'gpt-image-1',
             'gemini-2.5-flash-image',
-            'flux-2-flex',
+            'gemini-3-pro-image-preview',
+            // 'flux-2-flex', // temporarily disabled for edit
         ],
     ],
 
@@ -568,7 +569,8 @@ PROMPT
             'allowed_models' => [
                 'gpt-image-1',
                 'gemini-2.5-flash-image',
-                'flux-2-flex',
+                'gemini-3-pro-image-preview',
+                // 'flux-2-flex', // temporarily disabled for edit
             ],
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],

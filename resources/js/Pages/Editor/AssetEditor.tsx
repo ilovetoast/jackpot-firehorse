@@ -5106,16 +5106,17 @@ export default function AssetEditor() {
                                                 <span className="font-medium text-gray-800 dark:text-gray-300">
                                                     Regenerate
                                                 </span>{' '}
-                                                re-runs your prompt on the latest result.                                                 Choose{' '}
+                                                re-runs your prompt on the latest result. Choose{' '}
                                                 <span className="font-medium text-gray-800 dark:text-gray-300">
                                                     Nano Banana (2.5)
                                                 </span>{' '}
                                                 or{' '}
                                                 <span className="font-medium text-gray-800 dark:text-gray-300">
-                                                    FLUX
+                                                    Nano Banana Pro (3)
                                                 </span>{' '}
-                                                if OpenAI cannot decode your file (e.g. AVIF/HEIC); FLUX requires{' '}
-                                                <span className="font-mono text-[10px]">FLUX_API_KEY</span>.
+                                                if OpenAI cannot decode your file (e.g. AVIF/HEIC); Gemini models
+                                                require{' '}
+                                                <span className="font-mono text-[10px]">GEMINI_API_KEY</span>.
                                             </p>
                                             <div className="mb-2">
                                                 <label className="mb-0.5 block text-[10px] font-medium text-gray-700 dark:text-gray-300">

@@ -119,7 +119,7 @@ class EditorEditImageTest extends TestCase
         $response->assertJsonFragment(['message' => 'Provide either asset_id or image_url.']);
     }
 
-    public function test_edit_image_rejects_gemini_3_models_for_modification(): void
+    public function test_edit_image_rejects_models_not_in_edit_allowlist(): void
     {
         config(['ai.openai.api_key' => 'sk-test', 'ai.gemini.api_key' => 'fake']);
 
@@ -130,10 +130,10 @@ class EditorEditImageTest extends TestCase
             ->postJson('/app/api/edit-image', [
                 'image_url' => $dataUrl,
                 'instruction' => 'Make it warmer',
-                'model_key' => 'gemini-3-pro-image-preview',
+                'model_key' => 'gemini-3.1-flash-image-preview',
             ]);
 
         $response->assertStatus(422);
-        $response->assertJsonFragment(['message' => "Model 'gemini-3-pro-image-preview' is not allowed for image modification."]);
+        $response->assertJsonFragment(['message' => "Model 'gemini-3.1-flash-image-preview' is not allowed for image modification."]);
     }
 }
