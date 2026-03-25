@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\AIAgentRun;
 use App\Models\Ticket;
-use App\Models\TicketLink;
 use App\Models\AlertCandidate;
 use App\Models\AlertSummary;
 use App\Models\SupportTicket;
@@ -43,6 +42,32 @@ class AIDashboardController extends Controller
         protected AICostReportingService $reportingService,
         protected AIBudgetService $budgetService
     ) {
+    }
+
+    /**
+     * Eager loads for paginated admin AI run lists (avoids N+1 on ticket_links per run).
+     *
+     * @return array<string, mixed>
+     */
+    protected function eagerLoadsForAdminAiRunList(): array
+    {
+        return [
+            'tenant',
+            'user',
+            'tickets' => function ($q) {
+                $q->with('ticket:id,ticket_number,subject');
+            },
+        ];
+    }
+
+    /**
+     * Tickets linked to a run (Ticket models), using preloaded {@see AIAgentRun::tickets} when present.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\Ticket>
+     */
+    protected function relatedTicketsForAiAgentRun(AIAgentRun $run): \Illuminate\Support\Collection
+    {
+        return $run->tickets->pluck('ticket')->filter();
     }
 
     /**
@@ -101,7 +126,7 @@ class AIDashboardController extends Controller
             // Load activity data (first page only for initial load)
             $query = AIAgentRun::query()
                 ->forAdminActivityList()
-                ->with(['tenant', 'user'])
+                ->with($this->eagerLoadsForAdminAiRunList())
                 ->orderBy('started_at', 'desc');
 
             // Apply filters from request
@@ -129,12 +154,7 @@ class AIDashboardController extends Controller
             }
             
             $runs = $query->paginate(50)->through(function ($run) {
-                $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
-                    ->where('linkable_id', $run->id)
-                    ->with('ticket:id,ticket_number,subject')
-                    ->get()
-                    ->pluck('ticket')
-                    ->filter();
+                $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
                 return [
                     'id' => $run->id,
@@ -211,7 +231,8 @@ class AIDashboardController extends Controller
                         'job_name' => $displayName,
                         'failed_at' => \Carbon\Carbon::parse($job->failed_at)->format('Y-m-d H:i:s'),
                         'error_message' => $errorMessage,
-                        'full_exception' => $exception,
+                        // Cap size — exception blobs can be huge and inflate Inertia payload / memory.
+                        'full_exception' => mb_substr($exception, 0, 12000),
                         'ticket_id' => $ticketId,
                     ];
                 })
@@ -461,7 +482,7 @@ class AIDashboardController extends Controller
 
         $query = AIAgentRun::query()
             ->forAdminActivityList()
-            ->with(['tenant', 'user'])
+            ->with($this->eagerLoadsForAdminAiRunList())
             ->orderBy('started_at', 'desc');
 
         // Apply filters
@@ -494,13 +515,7 @@ class AIDashboardController extends Controller
         }
 
         $runs = $query->paginate(50)->through(function ($run) {
-            // Get related entities (tickets linked to this agent run)
-            $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
-                ->where('linkable_id', $run->id)
-                ->with('ticket:id,ticket_number,subject')
-                ->get()
-                ->pluck('ticket')
-                ->filter();
+            $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
             return [
                 'id' => $run->id,
@@ -565,7 +580,7 @@ class AIDashboardController extends Controller
         $query = AIAgentRun::query()
             ->forAdminActivityList()
             ->whereIn('task_type', $editorTaskTypes)
-            ->with(['tenant', 'user'])
+            ->with($this->eagerLoadsForAdminAiRunList())
             ->orderBy('started_at', 'desc');
 
         if ($request->filled('agent_id')) {
@@ -607,12 +622,7 @@ class AIDashboardController extends Controller
         }
 
         $runs = $query->paginate(50)->through(function ($run) {
-            $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
-                ->where('linkable_id', $run->id)
-                ->with('ticket:id,ticket_number,subject')
-                ->get()
-                ->pluck('ticket')
-                ->filter();
+            $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
             $ga = is_array($run->metadata) ? ($run->metadata['generative_audit'] ?? null) : null;
             $auditSummary = null;
@@ -1072,16 +1082,10 @@ class AIDashboardController extends Controller
             abort(404);
         }
 
-        $run = AIAgentRun::with(['tenant', 'user'])
+        $run = AIAgentRun::with($this->eagerLoadsForAdminAiRunList())
             ->findOrFail($idInt);
 
-        // Get related tickets
-        $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
-            ->where('linkable_id', $run->id)
-            ->with('ticket:id,ticket_number,subject')
-            ->get()
-            ->pluck('ticket')
-            ->filter();
+        $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
         return response()->json([
             'id' => $run->id,

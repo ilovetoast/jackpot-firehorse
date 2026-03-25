@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AIAgentRun;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * AI Cost Reporting Service
@@ -202,10 +203,62 @@ class AICostReportingService
             default => $endDate->copy()->subDays($limit),
         };
 
-        $runs = AIAgentRun::whereBetween('started_at', [$startDate, $endDate])
+        // Admin dashboard uses day/7 — never hydrate every row (metadata JSON can exhaust 128MB+).
+        if ($period === 'day') {
+            return $this->getCostTrendsByDayAggregated($startDate, $endDate);
+        }
+
+        $runs = AIAgentRun::query()
+            ->whereBetween('started_at', [$startDate, $endDate])
+            ->select(['id', 'started_at', 'estimated_cost', 'tokens_in', 'tokens_out'])
             ->get();
 
         return $this->aggregateByTimeRange($runs, $period);
+    }
+
+    /**
+     * SQL aggregation by calendar day — avoids loading full ai_agent_runs rows into memory.
+     *
+     * @return array<int, array{period: string, total_runs: int, total_cost: float, total_tokens: int}>
+     */
+    protected function getCostTrendsByDayAggregated(Carbon $startDate, Carbon $endDate): array
+    {
+        $driver = AIAgentRun::query()->getConnection()->getDriverName();
+
+        $dayExpr = match ($driver) {
+            'mysql', 'mariadb' => 'DATE(started_at)',
+            'sqlite' => 'date(started_at)',
+            'pgsql' => 'CAST(started_at AS date)',
+            default => null,
+        };
+
+        if ($dayExpr === null) {
+            $runs = AIAgentRun::query()
+                ->whereBetween('started_at', [$startDate, $endDate])
+                ->select(['id', 'started_at', 'estimated_cost', 'tokens_in', 'tokens_out'])
+                ->get();
+
+            return $this->aggregateByTimeRange($runs, 'day');
+        }
+
+        $rows = AIAgentRun::query()
+            ->whereBetween('started_at', [$startDate, $endDate])
+            ->selectRaw("{$dayExpr} as trend_period")
+            ->selectRaw('COUNT(*) as trend_total_runs')
+            ->selectRaw('COALESCE(SUM(estimated_cost), 0) as trend_total_cost')
+            ->selectRaw('COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0) as trend_total_tokens')
+            ->groupBy(DB::raw($dayExpr))
+            ->orderBy('trend_period')
+            ->get();
+
+        return $rows->map(function ($row) {
+            return [
+                'period' => (string) $row->trend_period,
+                'total_runs' => (int) $row->trend_total_runs,
+                'total_cost' => round((float) $row->trend_total_cost, 4),
+                'total_tokens' => (int) $row->trend_total_tokens,
+            ];
+        })->values()->all();
     }
 
     /**
@@ -219,18 +272,15 @@ class AICostReportingService
         $currentMonth = Carbon::now()->startOfMonth();
         $previousMonth = $currentMonth->copy()->subMonth();
 
-        $currentRuns = AIAgentRun::whereBetween('started_at', [
+        $currentCost = (float) AIAgentRun::query()->whereBetween('started_at', [
             $currentMonth,
             $currentMonth->copy()->endOfMonth(),
-        ])->get();
+        ])->sum('estimated_cost');
 
-        $previousRuns = AIAgentRun::whereBetween('started_at', [
+        $previousCost = (float) AIAgentRun::query()->whereBetween('started_at', [
             $previousMonth,
             $previousMonth->copy()->endOfMonth(),
-        ])->get();
-
-        $currentCost = $currentRuns->sum('estimated_cost');
-        $previousCost = $previousRuns->sum('estimated_cost');
+        ])->sum('estimated_cost');
 
         if ($previousCost == 0) {
             return []; // No previous data to compare

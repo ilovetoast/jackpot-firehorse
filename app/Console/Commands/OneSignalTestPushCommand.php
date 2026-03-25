@@ -76,7 +76,7 @@ class OneSignalTestPushCommand extends Command
         try {
             $response = Http::timeout(15)
                 ->withHeaders([
-                    'Authorization' => 'Key '.$apiKey,
+                    'Authorization' => 'key '.$apiKey,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
                 ])

@@ -13,6 +13,16 @@ function log(...args) {
     }
 }
 
+function logError(context, err) {
+    const msg =
+        err instanceof Error
+            ? err.message
+            : typeof err === 'string'
+              ? err
+              : (err && (err.message || err.reason)) || null
+    log(context, msg || String(err), err instanceof Error ? err.stack : err)
+}
+
 let initPushInFlight = null
 
 function csrfToken() {
@@ -149,7 +159,7 @@ function runOnOneSignal(callback) {
                 log('runOnOneSignal:done')
                 resolve()
             } catch (e) {
-                log('runOnOneSignal:error', e)
+                logError('runOnOneSignal:error', e)
                 reject(e)
             }
         })
@@ -177,6 +187,9 @@ async function safeOneSignalInit(OneSignal) {
             appId: id,
             allowLocalhostAsSecureOrigin: allowHttp,
             autoPrompt: false,
+            // Pin v16 worker at site root — stale SW from older SDK causes "Unrecognized operation: login-user".
+            serviceWorkerPath: '/OneSignalSDKWorker.js',
+            serviceWorkerParam: { scope: '/' },
         })
     } catch (e) {
         const msg = e?.message || String(e)
@@ -204,6 +217,38 @@ export function formatPushUserError(err) {
         return null
     }
     return msg
+}
+
+/**
+ * Associate Jackpot user with OneSignal (external_id = user_{id} for REST targeting).
+ * Prefer {@link OneSignal.login} after init; fall back to User.addAlias if login op fails (SW/version edge cases).
+ */
+async function linkOneSignalExternalUser(OneSignal, userId) {
+    const externalId = `user_${userId}`
+    try {
+        if (typeof OneSignal.login === 'function') {
+            await OneSignal.login(externalId)
+            log('linkOneSignalExternalUser: login OK', { externalId })
+            return
+        }
+    } catch (e) {
+        logError('linkOneSignalExternalUser: login failed', e)
+    }
+    try {
+        if (OneSignal.User?.addAlias) {
+            OneSignal.User.addAlias('external_id', externalId)
+            log('linkOneSignalExternalUser: addAlias OK', { externalId })
+            return
+        }
+    } catch (e2) {
+        logError('linkOneSignalExternalUser: addAlias failed', e2)
+        throw e2
+    }
+    throw new Error('OneSignal: login/addAlias unavailable')
+}
+
+function browserNotificationGranted() {
+    return typeof Notification !== 'undefined' && Notification.permission === 'granted'
 }
 
 /**
@@ -280,11 +325,18 @@ export async function initPush(user) {
             await safeOneSignalInit(OneSignal)
             log('initPush:OneSignal init path complete')
 
-            if (user.push_enabled) {
-                await OneSignal.login(`user_${user.id}`)
-                log('initPush:OneSignal.login (push_enabled)', { externalId: `user_${user.id}` })
+            // Login before permission/subscription often yields POST /users 400 and "login-user" op errors in SW.
+            if (user.push_enabled && browserNotificationGranted()) {
+                try {
+                    await linkOneSignalExternalUser(OneSignal, user.id)
+                } catch (e) {
+                    logError('initPush: link external user failed (non-fatal)', e)
+                }
             } else {
-                log('initPush:skip login until user enables (push_enabled false)')
+                log('initPush:skip login', {
+                    push_enabled: user.push_enabled,
+                    browser_granted: browserNotificationGranted(),
+                })
             }
         })
 
@@ -331,8 +383,11 @@ export async function requestPushPermission(user) {
         await postPushStatus(granted)
 
         if (granted) {
-            await OneSignal.login(`user_${user.id}`)
-            log('requestPushPermission:OneSignal.login', { externalId: `user_${user.id}` })
+            try {
+                await linkOneSignalExternalUser(OneSignal, user.id)
+            } catch (e) {
+                logError('requestPushPermission: link user failed (prefs saved)', e)
+            }
         }
     })
 
@@ -390,7 +445,11 @@ export async function togglePush(user, enabled) {
             }
 
             if (result === 'granted') {
-                await OneSignal.login(`user_${user.id}`)
+                try {
+                    await linkOneSignalExternalUser(OneSignal, user.id)
+                } catch (e) {
+                    logError('togglePush: link user failed', e)
+                }
                 await postPushStatus(true)
             }
         } else {
