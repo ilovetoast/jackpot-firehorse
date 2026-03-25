@@ -76,7 +76,7 @@ class OneSignalTestPushCommand extends Command
         try {
             $response = Http::timeout(15)
                 ->withHeaders([
-                    'Authorization' => 'key '.$apiKey,
+                    'Authorization' => 'Key '.$apiKey,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
                 ])
@@ -96,6 +96,11 @@ class OneSignalTestPushCommand extends Command
         }
 
         if (! $response->successful()) {
+            if ($response->status() === 403) {
+                $this->newLine();
+                $this->warn('403: OneSignal rejected the API key. Use an App API key from the same app as ONESIGNAL_APP_ID (Settings → Keys & IDs), check IP allowlisting on that key, and run php artisan config:clear after changing .env.');
+            }
+
             return self::FAILURE;
         }
 

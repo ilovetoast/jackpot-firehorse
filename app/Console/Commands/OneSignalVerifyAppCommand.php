@@ -41,7 +41,7 @@ class OneSignalVerifyAppCommand extends Command
             $tried[] = $label;
             $response = Http::timeout(20)
                 ->withHeaders([
-                    'Authorization' => 'key '.$key,
+                    'Authorization' => 'Key '.$key,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
                 ])

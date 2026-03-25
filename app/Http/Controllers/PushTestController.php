@@ -35,7 +35,7 @@ class PushTestController extends Controller
         try {
             $response = Http::timeout(15)
                 ->withHeaders([
-                    'Authorization' => 'key '.$apiKey,
+                    'Authorization' => 'Key '.$apiKey,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
                 ])
