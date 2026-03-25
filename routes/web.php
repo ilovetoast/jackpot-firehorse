@@ -289,6 +289,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::put('/profile/password', [\App\Http\Controllers\ProfileController::class, 'updatePassword'])->name('profile.password.update');
     Route::delete('/profile', [\App\Http\Controllers\ProfileController::class, 'destroy'])->name('profile.destroy');
 
+    Route::post('/api/user/push-preference', [\App\Http\Controllers\UserPushPreferenceController::class, 'store'])
+        ->name('api.user.push-preference');
+
     // Site Admin routes - Command Center
     Route::get('/admin', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'index'])->name('admin.index');
     Route::get('/admin/api/overview', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'metrics'])->name('admin.api.overview');

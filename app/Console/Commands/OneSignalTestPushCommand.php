@@ -99,8 +99,33 @@ class OneSignalTestPushCommand extends Command
             return self::FAILURE;
         }
 
+        $messageId = is_array($decoded) ? ($decoded['id'] ?? null) : null;
+        $apiErrors = is_array($decoded) ? ($decoded['errors'] ?? []) : [];
+        $hasMessageId = is_string($messageId) && $messageId !== '';
+        $hasApiErrors = is_array($apiErrors) && $apiErrors !== [];
+
+        // OneSignal often returns HTTP 200 with empty id + errors when the request is valid but nobody is subscribed.
+        if ($hasApiErrors || ! $hasMessageId) {
+            $this->newLine();
+            $this->warn('No message was queued for delivery (no matching subscribed devices for this external_id).');
+            if ($hasApiErrors) {
+                foreach ($apiErrors as $err) {
+                    $this->line('  • '.(is_string($err) ? $err : json_encode($err)));
+                }
+            }
+            $this->newLine();
+            $this->line('Typical fixes for “not subscribed”:');
+            $this->line('  1. User opens the app on the SAME OneSignal app (correct ONESIGNAL_APP_ID + Site URL in the OneSignal dashboard).');
+            $this->line('  2. PUSH_NOTIFICATIONS_ENABLED=true so the SDK loads; user is logged in so OneSignal.login("user_'.$userId.'") runs.');
+            $this->line('  3. User allows browser notifications (or uses “Enable notifications” if you add that control).');
+            $this->line('  4. Service workers load from /OneSignalSDKWorker.js — hard-refresh or revisit after deploy.');
+            $this->newLine();
+
+            return self::FAILURE;
+        }
+
         $this->newLine();
-        $this->comment('If HTTP 200 but no device receives it: user must have opened the app after OneSignal was enabled, run OneSignal.login (user_*), and granted notification permission. PWA reinstall is usually not required—opening the updated site is enough for the service worker to update.');
+        $this->info('Message accepted; check a subscribed device for the push.');
 
         return self::SUCCESS;
     }

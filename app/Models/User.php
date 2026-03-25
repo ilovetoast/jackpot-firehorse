@@ -47,6 +47,8 @@ class User extends Authenticatable
         'zip',
         'suspended_at',
         'last_login_at',
+        'push_prompted_at',
+        'push_enabled',
     ];
 
     /**
@@ -79,6 +81,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'suspended_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'push_prompted_at' => 'datetime',
+            'push_enabled' => 'boolean',
             'password' => 'hashed',
         ];
     }
