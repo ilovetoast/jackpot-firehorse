@@ -5,11 +5,11 @@ import {
     requestPushPermission,
 } from '../services/pushService'
 
-/**
- * Shown before the browser permission prompt: explains that accepting registers this device for push.
- */
 const NS = '[JackpotPush]'
 
+/**
+ * First visit: friendly prompt before the browser’s own allow/block dialog.
+ */
 export default function PushPermissionDialog({ user }) {
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState(null)
@@ -24,29 +24,29 @@ export default function PushPermissionDialog({ user }) {
         router.reload({ only: ['auth'] })
     }, [])
 
-    const onEnable = useCallback(async () => {
+    const onAllow = useCallback(async () => {
         setError(null)
         setBusy(true)
         try {
             await requestPushPermission(user)
             reloadAuth()
         } catch (e) {
-            console.error('[JackpotPush] PushPermissionDialog enable failed', e)
-            setError(e?.message || 'Something went wrong')
+            console.error(NS, 'Allow notifications failed', e)
+            setError(e?.message || 'Something went wrong. Try again.')
         } finally {
             setBusy(false)
         }
     }, [user, reloadAuth])
 
-    const onNotNow = useCallback(async () => {
+    const onMaybeLater = useCallback(async () => {
         setError(null)
         setBusy(true)
         try {
             await dismissPushPermissionPrompt()
             reloadAuth()
         } catch (e) {
-            console.error('[JackpotPush] PushPermissionDialog dismiss failed', e)
-            setError(e?.message || 'Something went wrong')
+            console.error(NS, 'Dismiss failed', e)
+            setError(e?.message || 'Something went wrong. Try again.')
         } finally {
             setBusy(false)
         }
@@ -62,37 +62,37 @@ export default function PushPermissionDialog({ user }) {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="jackpot-push-dialog-title"
-                className="relative z-10 w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+                aria-describedby="jackpot-push-dialog-desc"
+                className="relative z-10 w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl"
             >
-                <h2 id="jackpot-push-dialog-title" className="text-lg font-semibold text-gray-900">
-                    Turn on notifications
+                <h2 id="jackpot-push-dialog-title" className="text-xl font-semibold tracking-tight text-gray-900">
+                    Stay in the loop
                 </h2>
-                <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                    Allow notifications so we can register this browser for push alerts. Until you accept, your account
-                    is not linked for delivery on this device — you will see a second prompt from the browser to allow
-                    or block.
+                <p id="jackpot-push-dialog-desc" className="mt-3 text-sm leading-relaxed text-gray-600">
+                    Get timely updates on this device. When you continue, your browser will ask whether to allow
+                    notifications — that’s normal, and you can change it anytime in settings.
                 </p>
                 {error && (
                     <p className="mt-3 text-sm text-red-600" role="alert">
                         {error}
                     </p>
                 )}
-                <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse sm:justify-end sm:gap-3">
                     <button
                         type="button"
                         disabled={busy}
-                        onClick={onNotNow}
-                        className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        onClick={onAllow}
+                        className="inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
                     >
-                        Not now
+                        {busy ? 'Working…' : 'Allow notifications'}
                     </button>
                     <button
                         type="button"
                         disabled={busy}
-                        onClick={onEnable}
-                        className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                        onClick={onMaybeLater}
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 sm:w-auto"
                     >
-                        {busy ? 'Please wait…' : 'Continue — enable notifications'}
+                        Maybe later
                     </button>
                 </div>
             </div>

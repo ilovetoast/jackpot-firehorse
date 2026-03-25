@@ -36,7 +36,7 @@ function mergePrefs(base, patch) {
 }
 
 /**
- * Per-group push toggles + master device push (OneSignal).
+ * Per-group push toggles + master device registration for browser alerts.
  *
  * Future: email + push unified prefs; per-category quiet hours; multi-device list.
  */
@@ -168,22 +168,28 @@ export default function NotificationPreferences() {
                 </p>
             )}
             <p className="text-xs text-gray-500">
-                Email and other channels can be added here later. Category toggles choose which <em>types</em> of updates
-                may be sent; the master toggle below registers this browser with OneSignal and triggers the browser’s
-                permission prompt when you turn it on.
+                Choose which kinds of updates you care about below. Turning on <strong>Push notifications</strong> lets us
+                send alerts to this browser after you allow them in the prompt.
             </p>
 
             {browserPermission === 'default' && !masterOn && (
                 <div
-                    className="rounded-lg border border-indigo-200 bg-indigo-50/90 px-4 py-3 text-sm text-indigo-950"
+                    className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-4 py-4 text-indigo-950 shadow-sm"
                     role="status"
                 >
-                    <p className="font-medium">Allow notifications in this browser</p>
-                    <p className="mt-1 text-xs leading-relaxed text-indigo-900/90">
-                        Opening this page does not show the system prompt by itself. Turn <strong>Push notifications</strong>{' '}
-                        on — your browser will then ask whether to allow notifications for this site. Until you allow,
-                        this device is not registered for push.
+                    <p className="text-sm font-semibold">Get alerts on this device</p>
+                    <p className="mt-1 text-xs leading-relaxed text-indigo-900/85">
+                        You haven’t allowed notifications in this browser yet. Tap the button and confirm in your
+                        browser’s prompt to finish setup.
                     </p>
+                    <button
+                        type="button"
+                        disabled={pushBusy || saving}
+                        onClick={() => onMasterPushToggle(true)}
+                        className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
+                    >
+                        Allow notifications
+                    </button>
                 </div>
             )}
 
@@ -191,7 +197,7 @@ export default function NotificationPreferences() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900">Push notifications</p>
-                        <p className="text-xs text-gray-500">Enable or disable web push for this browser (OneSignal).</p>
+                        <p className="text-xs text-gray-500">Browser alerts on this device — on or off.</p>
                         {browserPermission === 'denied' && (
                             <p className="mt-2 text-xs text-amber-700">
                                 Notifications are blocked in your browser settings.
