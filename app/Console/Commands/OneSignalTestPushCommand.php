@@ -24,7 +24,7 @@ class OneSignalTestPushCommand extends Command
 
     public function handle(): int
     {
-        $pushEnabled = filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        $pushEnabled = (bool) config('services.onesignal.push_enabled');
         if (! $pushEnabled && ! $this->option('force')) {
             $this->error('PUSH_NOTIFICATIONS_ENABLED is false. Set it true or pass --force to send a test anyway.');
 

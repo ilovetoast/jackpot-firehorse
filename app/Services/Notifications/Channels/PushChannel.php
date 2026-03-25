@@ -19,8 +19,8 @@ final class PushChannel implements NotificationChannel
             return;
         }
 
-        if (! filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN)) {
-            Log::info('Push skipped (PUSH_NOTIFICATIONS_ENABLED disabled)');
+        if (! config('services.onesignal.push_enabled')) {
+            Log::info('Push skipped (PUSH_NOTIFICATIONS disabled in config)');
 
             return;
         }

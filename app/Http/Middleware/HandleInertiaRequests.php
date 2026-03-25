@@ -511,7 +511,7 @@ class HandleInertiaRequests extends Middleware
             'headlineAppearanceCatalog' => HeadlineAppearanceCatalog::forFrontend(),
             'oneSignal' => [
                 'app_id' => config('services.onesignal.app_id'),
-                'client_enabled' => filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN)
+                'client_enabled' => config('services.onesignal.push_enabled')
                     && ! empty(config('services.onesignal.app_id')),
             ],
         ];

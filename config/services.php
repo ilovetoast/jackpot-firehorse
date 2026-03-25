@@ -69,6 +69,8 @@ return [
     | OneSignal (web push — external user id matches numeric User id after OneSignal.login).
     */
     'onesignal' => [
+        /** Must use config(), not env(), in app code — env() is empty when config is cached. */
+        'push_enabled' => filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
         'app_id' => env('ONESIGNAL_APP_ID'),
         'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
         /** When true, Blade emits meta so the web SDK may use HTTP (see pushService.js + OneSignal v16). */
