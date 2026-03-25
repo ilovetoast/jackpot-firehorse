@@ -19,12 +19,21 @@ function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
 }
 
+/**
+ * Prefer Blade `onesignal-app-id` (from ONESIGNAL_APP_ID on the server) over Vite env.
+ * `VITE_ONESIGNAL_APP_ID` is baked in at `npm run build`; if it pointed at an older OneSignal app
+ * (e.g. Site URL still .co), the SDK would keep enforcing that origin even after dashboard + .env were fixed.
+ */
 function appId() {
-    return (
-        import.meta.env.VITE_ONESIGNAL_APP_ID ||
-        document.querySelector('meta[name="onesignal-app-id"]')?.getAttribute('content') ||
-        ''
-    )
+    const fromMeta = document.querySelector('meta[name="onesignal-app-id"]')?.getAttribute('content')?.trim()
+    if (fromMeta) {
+        return fromMeta
+    }
+    const fromVite = import.meta.env.VITE_ONESIGNAL_APP_ID
+    if (fromVite) {
+        log('appId: using VITE_ONESIGNAL_APP_ID (no onesignal-app-id meta on this page)')
+    }
+    return fromVite || ''
 }
 
 function isPrivateLanIpv4(hostname) {
