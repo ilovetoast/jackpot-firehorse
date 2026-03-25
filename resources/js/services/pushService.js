@@ -148,6 +148,55 @@ function runOnOneSignal(callback) {
 }
 
 /**
+ * OneSignal.init must only succeed once per page. {@link initPush} runs on load; {@link requestPushPermission}
+ * and {@link togglePush} run later — calling init again throws "SDK already initialized".
+ */
+async function safeOneSignalInit(OneSignal) {
+    const id = appId()
+    if (!id) {
+        log('safeOneSignalInit:skip — no app id')
+        return
+    }
+    const allowHttp = allowLocalhostAsSecureOriginOption()
+    log('OneSignal.init calling', {
+        appId: id,
+        allowLocalhostAsSecureOrigin: allowHttp,
+        href: typeof window !== 'undefined' ? window.location.href : '',
+    })
+    try {
+        await OneSignal.init({
+            appId: id,
+            allowLocalhostAsSecureOrigin: allowHttp,
+            autoPrompt: false,
+        })
+    } catch (e) {
+        const msg = e?.message || String(e)
+        if (/already initialized|SDK already initialized/i.test(msg)) {
+            log('safeOneSignalInit: OK — already initialized (second init skipped)')
+            return
+        }
+        throw e
+    }
+}
+
+/**
+ * Maps OneSignal / browser errors to short copy for modals and settings.
+ */
+export function formatPushUserError(err) {
+    const msg = err?.message || String(err || '')
+    if (/Can only be used on:/i.test(msg)) {
+        return (
+            'This page’s address doesn’t match the site URL allowed in your OneSignal web app. ' +
+            'In OneSignal → Settings → Web, add this exact origin (check .com vs .co and https), save, then reload.'
+        )
+    }
+    if (/already initialized|SDK already initialized/i.test(msg)) {
+        return null
+    }
+    return msg
+}
+
+/**
  * Why the in-app consent modal may be hidden (browser prompt comes only after you tap Allow there).
  *
  * @returns {{ eligible: boolean, blockers: string[] }}
@@ -218,18 +267,8 @@ export async function initPush(user) {
 
     initPushInFlight = (async () => {
         await runOnOneSignal(async (OneSignal) => {
-            const allowHttp = allowLocalhostAsSecureOriginOption()
-            log('OneSignal.init calling', {
-                appId: id,
-                allowLocalhostAsSecureOrigin: allowHttp,
-                href: typeof window !== 'undefined' ? window.location.href : '',
-            })
-            await OneSignal.init({
-                appId: id,
-                allowLocalhostAsSecureOrigin: allowHttp,
-                autoPrompt: false,
-            })
-            log('initPush:OneSignal.init complete')
+            await safeOneSignalInit(OneSignal)
+            log('initPush:OneSignal init path complete')
 
             if (user.push_enabled) {
                 await OneSignal.login(`user_${user.id}`)
@@ -270,12 +309,7 @@ export async function requestPushPermission(user) {
     let granted = false
 
     await runOnOneSignal(async (OneSignal) => {
-        const allowHttp = allowLocalhostAsSecureOriginOption()
-        await OneSignal.init({
-            appId: id,
-            allowLocalhostAsSecureOrigin: allowHttp,
-            autoPrompt: false,
-        })
+        await safeOneSignalInit(OneSignal)
 
         const before = typeof Notification !== 'undefined' ? Notification.permission : 'denied'
         log('requestPushPermission:before requestPermission', { permission: before })
@@ -331,15 +365,7 @@ export async function togglePush(user, enabled) {
     }
 
     await runOnOneSignal(async (OneSignal) => {
-        const id = appId()
-        if (id) {
-            const allowHttp = allowLocalhostAsSecureOriginOption()
-            await OneSignal.init({
-                appId: id,
-                allowLocalhostAsSecureOrigin: allowHttp,
-                autoPrompt: false,
-            })
-        }
+        await safeOneSignalInit(OneSignal)
 
         if (enabled) {
             const permission = typeof Notification !== 'undefined' ? Notification.permission : 'denied'

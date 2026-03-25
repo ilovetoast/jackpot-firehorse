@@ -1,6 +1,6 @@
 import { usePage } from '@inertiajs/react'
 import { useCallback, useEffect, useState } from 'react'
-import { togglePush } from '../services/pushService'
+import { formatPushUserError, togglePush } from '../services/pushService'
 
 const GROUPS = [
     {
@@ -161,7 +161,8 @@ export default function NotificationPreferences() {
                 setBrowserPermission(Notification.permission)
             }
         } catch (e) {
-            setError(e.message || 'Could not update push')
+            const mapped = formatPushUserError(e)
+            setError(mapped != null ? mapped : (e?.message || 'Could not update push'))
             await load()
         } finally {
             setPushBusy(false)

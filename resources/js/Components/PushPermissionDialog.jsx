@@ -2,6 +2,7 @@ import { router } from '@inertiajs/react'
 import { useCallback, useEffect, useState } from 'react'
 import {
     dismissPushPermissionPrompt,
+    formatPushUserError,
     requestPushPermission,
 } from '../services/pushService'
 
@@ -32,7 +33,12 @@ export default function PushPermissionDialog({ user }) {
             reloadAuth()
         } catch (e) {
             console.error(NS, 'Allow notifications failed', e)
-            setError(e?.message || 'Something went wrong. Try again.')
+            const mapped = formatPushUserError(e)
+            if (mapped != null) {
+                setError(mapped)
+            } else {
+                setError('Could not finish setup. Reload the page and try again.')
+            }
         } finally {
             setBusy(false)
         }
