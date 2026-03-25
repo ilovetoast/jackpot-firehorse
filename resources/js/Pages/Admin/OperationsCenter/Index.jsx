@@ -137,6 +137,7 @@ export default function OperationsCenterIndex({
 }) {
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
+    const [flushFailedLoading, setFlushFailedLoading] = useState(false)
     const [quickViewData, setQuickViewData] = useState(null)
     const [quickViewLoading, setQuickViewLoading] = useState(false)
     const selectAllRef = useRef(null)
@@ -184,6 +185,27 @@ export default function OperationsCenterIndex({
     }, [someSelected, allSelected])
 
     const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
+
+    const flushFailedJobRecords = async () => {
+        if (
+            !window.confirm(
+                'Remove all rows from the failed_jobs table? This only clears history — it does not retry jobs. Equivalent to: php artisan queue:flush'
+            )
+        ) {
+            return
+        }
+        setFlushFailedLoading(true)
+        try {
+            const res = await axios.post(route('admin.operations-center.failed-jobs.flush'))
+            const msg = res?.data?.message ?? 'Done.'
+            window.alert(msg)
+            router.reload({ only: ['failedJobs', 'queueHealth'] })
+        } catch (e) {
+            window.alert(e?.response?.data?.message || e?.message || 'Failed to clear failed job records.')
+        } finally {
+            setFlushFailedLoading(false)
+        }
+    }
 
     const toggleSelect = (id, checked) => {
         setSelectedIds((prev) => {
@@ -531,9 +553,22 @@ export default function OperationsCenterIndex({
 
                         {tab === 'failed-jobs' && (
                             <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                <div className="px-4 py-4 sm:px-6">
-                                    <h2 className="text-lg font-semibold text-gray-900">Failed Jobs (Horizon / DB)</h2>
-                                    <p className="mt-1 text-sm text-gray-500">Recent failed jobs from failed_jobs table</p>
+                                <div className="px-4 py-4 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">Failed Jobs (Horizon / DB)</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Recent failed jobs from failed_jobs table. Clearing removes stored failure records only;
+                                            use Horizon to retry work if needed.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={flushFailedLoading || (queueHealth?.failed_count ?? 0) === 0}
+                                        onClick={() => void flushFailedJobRecords()}
+                                        className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-900 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {flushFailedLoading ? 'Clearing…' : 'Clear all failed job records'}
+                                    </button>
                                 </div>
                                 <div className="border-t border-gray-200 overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-300">

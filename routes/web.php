@@ -339,6 +339,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/{asset}/clear-promotion-failed', [\App\Http\Controllers\Admin\AdminAssetController::class, 'clearPromotionFailed'])->name('admin.assets.clear-promotion-failed');
     Route::post('/admin/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restoreVersion'])->name('admin.assets.versions.restore');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
+    Route::post('/admin/operations-center/failed-jobs/flush', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'flushFailedJobs'])->name('admin.operations-center.failed-jobs.flush');
     Route::post('/admin/incidents/bulk-actions', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'bulkActions'])->name('admin.incidents.bulk-actions');
     Route::post('/admin/incidents/{incident}/attempt-repair', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'attemptRepair'])->name('admin.incidents.attempt-repair');
     Route::post('/admin/incidents/{incident}/create-ticket', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'createTicket'])->name('admin.incidents.create-ticket');

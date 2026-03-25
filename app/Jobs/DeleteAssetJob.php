@@ -45,8 +45,15 @@ class DeleteAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        // Find asset including soft-deleted
-        $asset = Asset::withTrashed()->findOrFail($this->assetId);
+        // Find asset including soft-deleted (no findOrFail — row may already be gone)
+        $asset = Asset::withTrashed()->find($this->assetId);
+        if ($asset === null) {
+            Log::info('Asset hard deletion skipped — no row (already removed)', [
+                'asset_id' => $this->assetId,
+            ]);
+
+            return;
+        }
 
         // Idempotency: Check if asset was already permanently deleted
         if (!$asset->trashed()) {
@@ -344,6 +351,14 @@ class DeleteAssetJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
+        if ($exception instanceof \Illuminate\Database\Eloquent\ModelNotFoundException) {
+            Log::info('DeleteAssetJob failed callback skipped — model not found (already deleted)', [
+                'asset_id' => $this->assetId,
+            ]);
+
+            return;
+        }
+
         $asset = Asset::withTrashed()->find($this->assetId);
 
         if ($asset) {

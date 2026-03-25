@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\SystemIncident;
 use App\Services\Reliability\ReliabilityMetricsService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -90,6 +92,25 @@ class OperationsCenterController extends Controller
             'reliabilityMetrics' => $reliabilityMetrics,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
+        ]);
+    }
+
+    /**
+     * Remove all rows from the failed_jobs table (same as `php artisan queue:flush`).
+     * Does not re-run jobs; use Horizon retry if you need to replay work.
+     */
+    public function flushFailedJobs(): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $before = (int) DB::table('failed_jobs')->count();
+        Artisan::call('queue:flush');
+
+        return response()->json([
+            'cleared' => $before,
+            'message' => $before === 0
+                ? 'No failed job records to remove.'
+                : "Removed {$before} failed job record(s).",
         ]);
     }
 

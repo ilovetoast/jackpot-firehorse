@@ -135,6 +135,19 @@ export default function NotificationPreferences() {
         void persist(next)
     }
 
+    const onMasterPushToggleClick = () => {
+        if (!authUser?.id || pushBusy || saving) {
+            return
+        }
+        if (!pushClientEnabled) {
+            setError(
+                'Browser push isn’t enabled for this site yet. Your team can turn it on in the server environment (PUSH_NOTIFICATIONS_ENABLED and ONESIGNAL_APP_ID), then reload this page.'
+            )
+            return
+        }
+        void onMasterPushToggle(pushEnabled !== true)
+    }
+
     const onMasterPushToggle = async (nextOn) => {
         if (!authUser?.id || pushBusy || !pushClientEnabled) {
             return
@@ -214,7 +227,7 @@ export default function NotificationPreferences() {
                     </p>
                     <button
                         type="button"
-                        disabled={pushBusy || saving || !pushClientEnabled}
+                        disabled={pushBusy || saving}
                         onClick={() => onMasterPushToggle(true)}
                         className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
                     >
@@ -255,11 +268,17 @@ export default function NotificationPreferences() {
                             type="button"
                             role="switch"
                             aria-checked={masterOn}
-                            disabled={pushBusy || saving || !pushClientEnabled}
-                            onClick={() => onMasterPushToggle(!masterOn)}
-                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${
-                                masterOn ? 'bg-indigo-600' : 'bg-gray-200'
-                            }`}
+                            aria-disabled={!pushClientEnabled}
+                            title={
+                                !pushClientEnabled
+                                    ? 'Push is not enabled for this app yet — click for details'
+                                    : undefined
+                            }
+                            disabled={pushBusy || saving}
+                            onClick={onMasterPushToggleClick}
+                            className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${
+                                !pushClientEnabled ? 'cursor-pointer opacity-60' : 'cursor-pointer'
+                            } ${masterOn ? 'bg-indigo-600' : 'bg-gray-200'}`}
                         >
                             <span
                                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
