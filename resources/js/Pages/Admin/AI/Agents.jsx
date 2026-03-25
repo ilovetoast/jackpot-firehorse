@@ -130,26 +130,30 @@ export default function AIAgents({ agents, environment, availableModels = [], ca
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {isEditing ? (
-                                                    <select
-                                                        value={data.default_model || ''}
-                                                        onChange={(e) =>
-                                                            setData('default_model', e.target.value || null)
-                                                        }
-                                                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                                    >
-                                                        <option value="">Use Config</option>
-                                                        {(agent.config.allowed_models?.length
-                                                            ? agent.config.allowed_models
-                                                            : availableModels
-                                                        ).map((model) => (
-                                                            <option key={model} value={model}>
-                                                                {model}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    {pageErrors?.default_model && (
-                                                        <p className="mt-1 text-xs text-red-600">{pageErrors.default_model}</p>
-                                                    )}
+                                                    <>
+                                                        <select
+                                                            value={data.default_model || ''}
+                                                            onChange={(e) =>
+                                                                setData('default_model', e.target.value || null)
+                                                            }
+                                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                        >
+                                                            <option value="">Use Config</option>
+                                                            {(agent.config.allowed_models?.length
+                                                                ? agent.config.allowed_models
+                                                                : availableModels
+                                                            ).map((model) => (
+                                                                <option key={model} value={model}>
+                                                                    {model}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {pageErrors?.default_model && (
+                                                            <p className="mt-1 text-xs text-red-600">
+                                                                {pageErrors.default_model}
+                                                            </p>
+                                                        )}
+                                                    </>
                                                 ) : (
                                                     <div className="text-sm text-gray-500">
                                                         {effective.default_model}
