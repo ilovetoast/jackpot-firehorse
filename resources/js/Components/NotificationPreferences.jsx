@@ -43,6 +43,7 @@ function mergePrefs(base, patch) {
 export default function NotificationPreferences() {
     const page = usePage()
     const authUser = page.props.auth?.user
+    const pushClientEnabled = Boolean(page.props.oneSignal?.client_enabled)
 
     const [prefs, setPrefs] = useState(defaultPreferences)
     const [pushEnabled, setPushEnabled] = useState(false)
@@ -135,7 +136,7 @@ export default function NotificationPreferences() {
     }
 
     const onMasterPushToggle = async (nextOn) => {
-        if (!authUser?.id || pushBusy) {
+        if (!authUser?.id || pushBusy || !pushClientEnabled) {
             return
         }
         setPushBusy(true)
@@ -159,7 +160,7 @@ export default function NotificationPreferences() {
     }
 
     const masterOn = pushEnabled === true
-    const showAllowCallout = browserPermission === 'default' && !masterOn
+    const showAllowCallout = pushClientEnabled && browserPermission === 'default' && !masterOn
 
     const savingSpinner = (
         <span
@@ -176,9 +177,30 @@ export default function NotificationPreferences() {
                 </p>
             )}
             <p className="text-xs text-gray-500">
-                Choose which kinds of updates you care about below. Turning on <strong>Push notifications</strong> lets us
-                send alerts to this browser after you allow them in the prompt.
+                Choose which kinds of updates you care about below.
+                {pushClientEnabled ? (
+                    <>
+                        {' '}
+                        Turning on <strong>Push notifications</strong> lets us send alerts to this browser after you allow
+                        them in the prompt.
+                    </>
+                ) : (
+                    <> Category choices apply when browser push is available for this site.</>
+                )}
             </p>
+
+            {!pushClientEnabled && (
+                <div
+                    className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800"
+                    role="status"
+                >
+                    <p className="font-medium text-gray-900">Browser push isn’t turned on for this site yet</p>
+                    <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                        You can still choose which kinds of updates you’d want. When your team enables notifications for
+                        this app, reload the page and you’ll be able to allow alerts here.
+                    </p>
+                </div>
+            )}
 
             {showAllowCallout && (
                 <div
@@ -192,7 +214,7 @@ export default function NotificationPreferences() {
                     </p>
                     <button
                         type="button"
-                        disabled={pushBusy || saving}
+                        disabled={pushBusy || saving || !pushClientEnabled}
                         onClick={() => onMasterPushToggle(true)}
                         className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
                     >
@@ -216,6 +238,11 @@ export default function NotificationPreferences() {
                     <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900">Push notifications</p>
                         <p className="text-xs text-gray-500">Browser alerts on this device — on or off.</p>
+                        {!pushClientEnabled && (
+                            <p className="mt-2 text-xs text-gray-500">
+                                Unavailable until push is enabled for this app (reload after your team turns it on).
+                            </p>
+                        )}
                         {browserPermission === 'denied' && (
                             <p className="mt-2 text-xs text-amber-700">
                                 Notifications are blocked in your browser settings.
@@ -228,7 +255,7 @@ export default function NotificationPreferences() {
                             type="button"
                             role="switch"
                             aria-checked={masterOn}
-                            disabled={pushBusy || saving}
+                            disabled={pushBusy || saving || !pushClientEnabled}
                             onClick={() => onMasterPushToggle(!masterOn)}
                             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${
                                 masterOn ? 'bg-indigo-600' : 'bg-gray-200'
