@@ -73,6 +73,8 @@ return [
         'push_enabled' => filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
         'app_id' => env('ONESIGNAL_APP_ID'),
         'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+        /** Optional: Organization API key — required for GET /apps/{id} (see onesignal:verify-app). REST key alone may be 403. */
+        'organization_api_key' => env('ONESIGNAL_ORGANIZATION_API_KEY'),
         /** When true, Blade emits meta so the web SDK may use HTTP (see pushService.js + OneSignal v16). */
         'allow_http_local' => filter_var(env('ONESIGNAL_ALLOW_HTTP_LOCAL', false), FILTER_VALIDATE_BOOLEAN),
     ],

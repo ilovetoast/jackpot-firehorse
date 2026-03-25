@@ -195,8 +195,9 @@ export function formatPushUserError(err) {
     const msg = err?.message || String(err || '')
     if (/Can only be used on:/i.test(msg)) {
         return (
-            'This page’s address doesn’t match the site URL allowed in your OneSignal web app. ' +
-            'In OneSignal → Settings → Web, add this exact origin (check .com vs .co and https), save, then reload.'
+            'The browser URL doesn’t match the Web origin OneSignal has for this App ID (SDK reads it from their servers — changing the REST API key does not change that origin). ' +
+            'In OneSignal, open Keys & IDs and confirm ONESIGNAL_APP_ID matches that app; set Site URL to this exact origin (https + host, e.g. .com not .co), save, wait a minute, hard-refresh. ' +
+            'On the server run: php artisan onesignal:verify-app (set ONESIGNAL_ORGANIZATION_API_KEY if the command says 403).'
         )
     }
     if (/already initialized|SDK already initialized/i.test(msg)) {
