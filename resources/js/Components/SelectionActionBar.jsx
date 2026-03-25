@@ -75,7 +75,7 @@ export default function SelectionActionBar({
 
     const handleCreateDownload = useCallback(async () => {
         if (!bucket) return
-        const ids = getSelectedIds()
+        const ids = getSelectedIds().map((id) => String(id))
         await bucket.bucketClear()
         if (ids.length > 0) {
             await bucket.bucketAddBatch(ids)

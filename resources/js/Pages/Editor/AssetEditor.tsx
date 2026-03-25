@@ -132,6 +132,7 @@ import {
     handleAIError,
     MAX_CONCURRENT_AI_REQUESTS,
     trackEvent,
+    editorHtmlToImageFetchRequestInit,
     waitForImagesToLoad,
     withAIConcurrency,
 } from './editorHardening'
@@ -1658,6 +1659,7 @@ export default function AssetEditor() {
                     backgroundColor: '#ffffff',
                     width: doc.width,
                     height: doc.height,
+                    fetchRequestInit: editorHtmlToImageFetchRequestInit,
                     style: {
                         transform: 'none',
                         width: `${doc.width}px`,
@@ -1713,6 +1715,7 @@ export default function AssetEditor() {
                 backgroundColor: '#ffffff',
                 width: document.width,
                 height: document.height,
+                fetchRequestInit: editorHtmlToImageFetchRequestInit,
                 style: {
                     transform: 'none',
                     width: `${document.width}px`,
@@ -2206,6 +2209,7 @@ export default function AssetEditor() {
                     backgroundColor: '#ffffff',
                     width: doc.width,
                     height: doc.height,
+                    fetchRequestInit: editorHtmlToImageFetchRequestInit,
                     style: {
                         transform: 'none',
                         width: `${doc.width}px`,

@@ -72,7 +72,13 @@ class DownloadBucketService
         $added = 0;
 
         foreach ($assetIds as $assetId) {
-            if (! is_string($assetId) || in_array($assetId, $ids, true)) {
+            if (is_int($assetId) || is_float($assetId)) {
+                $assetId = (string) (int) $assetId;
+            } elseif (! is_string($assetId)) {
+                continue;
+            }
+            $assetId = trim($assetId);
+            if ($assetId === '' || in_array($assetId, $ids, true)) {
                 continue;
             }
 

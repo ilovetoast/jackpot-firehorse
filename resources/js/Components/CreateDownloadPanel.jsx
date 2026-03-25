@@ -249,6 +249,17 @@ export default function CreateDownloadPanel({
               <p className="text-sm text-gray-600">
                 {bucketCount} asset{bucketCount !== 1 ? 's' : ''} selected
               </p>
+              {!loadingPreview &&
+                previewItems.length > 0 &&
+                previewItems.some((i) => i.eligible_for_download === false) && (
+                  <p
+                    className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/50 dark:text-amber-100"
+                    role="status"
+                  >
+                    Some selected assets are drafts or archived and won&apos;t be included in the download. Publish
+                    them first, then create the download.
+                  </p>
+                )}
               {(loadingPreview || previewItems.length > 0) && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {loadingPreview ? (

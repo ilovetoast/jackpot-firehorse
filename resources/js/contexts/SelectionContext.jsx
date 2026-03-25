@@ -119,11 +119,6 @@ export function SelectionProvider({ children }) {
         return breakdown
     }, [selectedItems])
 
-    // Dev logging (temporary for verification)
-    useEffect(() => {
-        console.log('[Selection] count:', selectedCount)
-    }, [selectedCount])
-
     const value = {
         selectedItems,
         selectedCount,

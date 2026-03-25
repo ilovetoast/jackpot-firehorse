@@ -740,6 +740,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
             Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
+            Route::post('/brands/{brand}/logo-variants/generate', [\App\Http\Controllers\BrandController::class, 'generateLogoVariants'])->name('brands.logo-variants.generate');
 
             // Brand DNA (internal settings)
             Route::get('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'index'])->name('brands.dna.index');

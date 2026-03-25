@@ -40,6 +40,19 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Library vs Executions (deliverables) — aligns with {@see AssetType} / `asset_type` from download thumbnails. */
+function previewHrefForDownloadItem(thumbnail) {
+  const id = thumbnail?.id
+  if (!id) return '/app/assets'
+  const q = encodeURIComponent(id)
+  const raw = thumbnail?.asset_type ?? thumbnail?.type ?? 'asset'
+  const t = typeof raw === 'string' ? raw.toLowerCase() : 'asset'
+  if (t === 'deliverable') {
+    return `/app/executions?asset=${q}`
+  }
+  return `/app/assets?asset=${q}`
+}
+
 // Phase D4: Badge label and tooltip from backend state (processing|ready|expired|revoked|failed)
 function stateBadge(state, isPossiblyStuck = false) {
   const map = {
@@ -1078,13 +1091,13 @@ export default function DownloadsIndex({
                         </div>
                         {d.thumbnails && d.thumbnails.length > 0 && (
                           <>
-                            <p className="text-xs font-medium text-slate-500 mb-2">Assets in this download (click to preview):</p>
+                            <p className="text-xs font-medium text-slate-500 mb-2">Items in this download (click to open):</p>
                             <div className="flex flex-wrap gap-2">
                               {d.thumbnails.map((t) => (
                                 <button
                                   key={t.id}
                                   type="button"
-                                  onClick={() => router.visit('/app/assets?asset=' + encodeURIComponent(t.id))}
+                                  onClick={() => router.visit(previewHrefForDownloadItem(t))}
                                   className="w-16 h-16 rounded-lg border border-slate-200 bg-white overflow-hidden flex items-center justify-center shadow-sm hover:ring-2 hover:ring-slate-300 hover:ring-offset-1 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
                                 >
                                   {t.thumbnail_url ? (

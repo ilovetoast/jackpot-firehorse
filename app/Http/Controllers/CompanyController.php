@@ -168,8 +168,9 @@ class CompanyController extends Controller
                 'id' => $b->id,
                 'name' => $b->name,
                 'is_default' => (bool) $b->is_default,
-                'logo_url' => $b->logo_path,
-                'logo_dark_url' => $b->logo_dark_path,
+                // Gateway signed URLs: agency session has CDN cookies for the agency tenant, not the client.
+                'logo_url' => $b->logoUrlForGuest(false),
+                'logo_dark_url' => $b->logoUrlForGuest(true),
                 'primary_color' => $b->primary_color,
             ];
         };
@@ -178,7 +179,7 @@ class CompanyController extends Controller
             return Brand::query()
                 ->where('tenant_id', $clientTenant->id)
                 ->orderBy('name')
-                ->get(['id', 'name', 'is_default', 'logo_id', 'logo_dark_id', 'primary_color'])
+                ->get(['id', 'name', 'is_default', 'logo_id', 'logo_dark_id', 'logo_path', 'logo_dark_path', 'primary_color'])
                 ->map($mapBrand)
                 ->values()
                 ->all();
@@ -188,7 +189,7 @@ class CompanyController extends Controller
             ->where('brands.tenant_id', $clientTenant->id)
             ->wherePivotNull('removed_at')
             ->orderBy('brands.name')
-            ->get(['brands.id', 'brands.name', 'brands.is_default', 'brands.logo_id', 'brands.logo_dark_id', 'brands.primary_color'])
+            ->get(['brands.id', 'brands.name', 'brands.is_default', 'brands.logo_id', 'brands.logo_dark_id', 'brands.logo_path', 'brands.logo_dark_path', 'brands.primary_color'])
             ->map($mapBrand)
             ->values()
             ->all();

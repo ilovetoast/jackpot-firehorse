@@ -131,6 +131,106 @@ final class BrandLogoVariantAutomationService
         }
     }
 
+    /**
+     * Manual generation from Identity tab (or API): same raster pipeline as DNA "automated logo variants",
+     * without requiring Brand DNA → Standards toggles. Replaces existing logo_on_dark / logo_on_light DNA slots.
+     *
+     * @return array{ok: bool, on_dark_asset_id: ?string, on_light_asset_id: ?string, errors: list<string>}
+     */
+    public function generateExplicit(Brand $brand, BrandModelVersion $version, bool $onDark, bool $onLight): array
+    {
+        $brand->loadMissing('tenant');
+        $out = [
+            'ok' => false,
+            'on_dark_asset_id' => null,
+            'on_light_asset_id' => null,
+            'errors' => [],
+        ];
+
+        if (! $onDark && ! $onLight) {
+            $out['errors'][] = 'Choose at least one variant to generate.';
+
+            return $out;
+        }
+
+        $logoAsset = $this->resolvePrimaryLogoAsset($brand, $version);
+        if (! $logoAsset) {
+            $out['errors'][] = 'Add a primary logo in Brand Images first.';
+
+            return $out;
+        }
+
+        $logoAsset->loadMissing('currentVersion');
+        $bytes = $this->downloadOriginalBytes($logoAsset);
+        if ($bytes === null || $bytes === '') {
+            $out['errors'][] = 'Could not load the primary logo file. Try re-uploading the logo.';
+
+            return $out;
+        }
+
+        $mime = strtolower((string) ($logoAsset->mime_type ?? ''));
+        if (str_contains($mime, 'svg') || ! $this->isRasterMime($mime)) {
+            $out['errors'][] = 'Auto-generation works with raster logos (PNG, JPEG, WebP). SVG logos must be exported or added manually.';
+
+            return $out;
+        }
+
+        $payload = $version->model_payload ?? [];
+        $primaryHex = $this->resolvePrimaryHex($brand, $payload);
+        $rgb = $primaryHex ? LogoVariantRasterProcessor::parseHexRgb($primaryHex) : null;
+
+        if ($onDark) {
+            $png = LogoVariantRasterProcessor::whiteSilhouettePng($bytes);
+            if (! $png) {
+                $out['errors'][] = 'Could not generate the on-dark logo.';
+            } else {
+                $asset = $this->createVariantAsset(
+                    $brand,
+                    $version,
+                    $png,
+                    $this->variantFilename($logoAsset, 'on-dark-white'),
+                    'logo_on_dark',
+                    'image/png'
+                );
+                if ($asset) {
+                    $out['on_dark_asset_id'] = (string) $asset->id;
+                    $brand->refresh();
+                } else {
+                    $out['errors'][] = 'Could not save the on-dark logo.';
+                }
+            }
+        }
+
+        if ($onLight) {
+            if (! $rgb) {
+                $out['errors'][] = 'Set a primary brand color (Brand Images → Brand Colors) to generate the primary-color logo variant.';
+            } else {
+                $png = LogoVariantRasterProcessor::primaryColorWashPng($bytes, $rgb);
+                if (! $png) {
+                    $out['errors'][] = 'Could not generate the primary-color logo variant.';
+                } else {
+                    $asset = $this->createVariantAsset(
+                        $brand,
+                        $version,
+                        $png,
+                        $this->variantFilename($logoAsset, 'on-light-primary'),
+                        'logo_on_light',
+                        'image/png'
+                    );
+                    if ($asset) {
+                        $out['on_light_asset_id'] = (string) $asset->id;
+                    } else {
+                        $out['errors'][] = 'Could not save the primary-color logo variant.';
+                    }
+                }
+            }
+        }
+
+        $out['ok'] = $out['on_dark_asset_id'] !== null || $out['on_light_asset_id'] !== null;
+
+        return $out;
+    }
+
     private function truthy(mixed $v): bool
     {
         if ($v === true || $v === 1 || $v === '1') {
@@ -240,14 +340,14 @@ final class BrandLogoVariantAutomationService
         string $filename,
         string $context,
         string $mimeType
-    ): void {
+    ): ?Asset {
         $tenant = $brand->tenant;
         if (! $tenant?->uuid) {
             Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] Tenant UUID missing', [
                 'brand_id' => $brand->id,
             ]);
 
-            return;
+            return null;
         }
 
         $size = strlen($pngBinary);
@@ -284,7 +384,7 @@ final class BrandLogoVariantAutomationService
             ]);
             $asset->delete();
 
-            return;
+            return null;
         }
 
         AssetVersion::create([
@@ -315,6 +415,8 @@ final class BrandLogoVariantAutomationService
 
         $this->finalizeStagedVariant($asset, $brand, $context);
         $this->dispatchProcessing($asset);
+
+        return $asset->fresh();
     }
 
     private function finalizeStagedVariant(Asset $asset, Brand $brand, string $context): void

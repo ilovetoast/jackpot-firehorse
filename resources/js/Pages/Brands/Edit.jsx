@@ -1,5 +1,5 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
@@ -1461,6 +1461,44 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         portal_settings: portal_settings || {},
     })
 
+    const [logoVariantGenerating, setLogoVariantGenerating] = useState(false)
+    const [logoVariantError, setLogoVariantError] = useState(null)
+
+    /** Deliverables grid as JSON for AssetImagePicker — same session brand as this edit page. */
+    const fetchDeliverablesForPicker = useCallback((opts) => {
+        const params = new URLSearchParams({ format: 'json' })
+        if (opts?.category) params.set('category', opts.category)
+        return fetch(`/app/executions?${params}`, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        }).then((r) => r.json())
+    }, [])
+
+    const runLogoVariantGeneration = async (onDark, onLight) => {
+        setLogoVariantGenerating(true)
+        setLogoVariantError(null)
+        try {
+            const { data } = await axios.post(`/app/brands/${brand.id}/logo-variants/generate`, {
+                on_dark: onDark,
+                on_light: onLight,
+            })
+            if (data.logo_dark_preview_url && data.on_dark_asset_id) {
+                setData('logo_dark_id', data.on_dark_asset_id)
+                setData('logo_dark_preview', data.logo_dark_preview_url)
+                setData('clear_logo_dark', false)
+            }
+            if (Array.isArray(data.errors) && data.errors.length > 0 && !data.ok) {
+                setLogoVariantError(data.errors.join(' '))
+            }
+        } catch (e) {
+            const d = e.response?.data
+            const errList = Array.isArray(d?.errors) ? d.errors : []
+            setLogoVariantError(errList.join(' ') || d?.message || e.message || 'Generation failed.')
+        } finally {
+            setLogoVariantGenerating(false)
+        }
+    }
+
     // Brand DNA: model_payload from active version (Strategy, Positioning, Expression, Standards tabs)
     const [modelPayload, setModelPayload] = useState(() => modelPayloadToForm(model_payload))
     const [dnaSaving, setDnaSaving] = useState(false)
@@ -2352,7 +2390,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Logo Variants</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Logo versions for different contexts. Managed in{' '}
+                                        Logo versions for different contexts. Upload, pick from library or executions, or generate raster variants in{' '}
                                         <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Identity &rarr; Brand Images</button>.
                                     </p>
                                 </div>
@@ -2944,8 +2982,35 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Brand Images</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Upload your logo and icon. These are used across the app, brand guidelines, and creative exports.
+                                        Upload your logo and icon, pick from the asset library or {DELIVERABLES_PAGE_LABEL_SINGULAR.toLowerCase()}s, or generate raster variants from your primary logo (same options as Brand DNA → Standards).
                                     </p>
+                                </div>
+                                <div className="mt-6 rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-4">
+                                    <h3 className="text-sm font-semibold text-gray-900">Generate raster variants</h3>
+                                    <p className="mt-1 text-xs text-gray-600">
+                                        Creates PNGs from your <strong>primary</strong> logo (PNG / JPEG / WebP only — not SVG). On-dark updates <strong>Logo (dark background)</strong> below. Primary-color variant is stored for Brand DNA guidelines.
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={logoVariantGenerating || processing}
+                                            onClick={() => runLogoVariantGeneration(true, false)}
+                                            className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
+                                        >
+                                            {logoVariantGenerating ? 'Working…' : 'Generate on-dark logo'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={logoVariantGenerating || processing}
+                                            onClick={() => runLogoVariantGeneration(false, true)}
+                                            className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
+                                        >
+                                            {logoVariantGenerating ? 'Working…' : 'Generate primary-color variant'}
+                                        </button>
+                                    </div>
+                                    {logoVariantError && (
+                                        <p className="mt-2 text-xs text-amber-800" role="alert">{logoVariantError}</p>
+                                    )}
                                 </div>
                                 <div className="mt-6 space-y-6">
                                             {/* Logo (Light) */}
@@ -2980,6 +3045,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                                                             }).then((r) => r.json())
                                                         }}
+                                                        fetchDeliverables={fetchDeliverablesForPicker}
                                                         getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
                                                         title="Select logo"
                                                         defaultCategoryLabel="Logos"
@@ -3025,6 +3091,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                                                             }).then((r) => r.json())
                                                         }}
+                                                        fetchDeliverables={fetchDeliverablesForPicker}
                                                         getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
                                                         title="Select dark logo"
                                                         defaultCategoryLabel="Logos"
@@ -3070,6 +3137,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                                                             }).then((r) => r.json())
                                                         }}
+                                                        fetchDeliverables={fetchDeliverablesForPicker}
                                                         getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
                                                         title="Select horizontal logo"
                                                         defaultCategoryLabel="Logos"
@@ -3115,6 +3183,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                                                             }).then((r) => r.json())
                                                         }}
+                                                        fetchDeliverables={fetchDeliverablesForPicker}
                                                         getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
                                                         title="Select icon"
                                                         defaultCategoryLabel="Logos"

@@ -13,9 +13,12 @@ use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Services\BrandDNA\BrandLogoVariantAutomationService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\SystemCategoryService;
 use App\Support\Roles\PermissionMap;
 use App\Support\Roles\RoleRegistry;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -186,6 +189,50 @@ class BrandController extends Controller
         // For Inertia requests, return back to allow client-side navigation without full page reload
         // The frontend will reload only the auth props to update activeBrand
         return back();
+    }
+
+    /**
+     * POST /app/brands/{brand}/logo-variants/generate
+     * Raster logo variants (on-dark white mark, on-light primary wash) — same engine as Brand DNA → Standards.
+     */
+    public function generateLogoVariants(Request $request, Brand $brand): JsonResponse
+    {
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        $this->authorize('update', $brand);
+
+        $validated = $request->validate([
+            'on_dark' => 'boolean',
+            'on_light' => 'boolean',
+        ]);
+        $onDark = (bool) ($validated['on_dark'] ?? false);
+        $onLight = (bool) ($validated['on_light'] ?? false);
+        if (! $onDark && ! $onLight) {
+            return response()->json([
+                'ok' => false,
+                'errors' => ['Choose at least one variant to generate.'],
+            ], 422);
+        }
+
+        $version = app(BrandVersionService::class)->getWorkingVersion($brand);
+        $result = app(BrandLogoVariantAutomationService::class)->generateExplicit($brand, $version, $onDark, $onLight);
+
+        $brand->refresh();
+
+        $result['logo_dark_preview_url'] = $brand->logo_dark_id
+            ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
+            : null;
+
+        if (! empty($result['on_light_asset_id'])) {
+            $result['on_light_preview_url'] = \App\Models\Asset::find($result['on_light_asset_id'])
+                ?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED);
+        }
+
+        $status = ($result['ok'] ?? false) ? 200 : 422;
+
+        return response()->json($result, $status);
     }
 
     /**

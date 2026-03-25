@@ -76,6 +76,15 @@ export function trackEvent(
 }
 
 /**
+ * Pass to html-to-image `toPng` / `toJpeg` so inlined fetches to same-origin asset URLs
+ * (e.g. `/app/api/assets/{id}/file`) send session cookies. Without this, raster export can
+ * fail with an image `error` event / SecurityError while the on-screen img still loads.
+ */
+export const editorHtmlToImageFetchRequestInit: RequestInit = {
+    credentials: 'include',
+}
+
+/**
  * Wait for images inside a root (e.g. stage) to load or fail before raster export.
  * Reduces blank or partial PNGs when assets are still loading.
  */

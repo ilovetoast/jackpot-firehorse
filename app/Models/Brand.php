@@ -112,7 +112,8 @@ class Brand extends Model
 
     /**
      * Logo URL for unauthenticated pages (gateway, forgot password, public portal).
-     * Uses time-limited signed CloudFront URLs — guests do not receive tenant CDN cookies.
+     * Also used when the viewer's session tenant does not own the brand (e.g. agency listing a client's brands):
+     * authenticated CDN URLs rely on cookies scoped to /tenants/{uuid}/* for the active tenant only.
      * Manual logo_path / logo_dark_path overrides are returned as-is (may still require cookies).
      */
     public function logoUrlForGuest(bool $dark = false): ?string
@@ -125,6 +126,39 @@ class Brand extends Model
         $logoId = $dark ? ($this->attributes['logo_dark_id'] ?? null) : ($this->attributes['logo_id'] ?? null);
 
         return $this->deliveryUrlForLogoAssetId($logoId, DeliveryContext::GATEWAY);
+    }
+
+    /**
+     * Uploaded icon image URL for gateway / cross-tenant contexts (signed URLs; no tenant CDN cookies).
+     * Mirrors {@see getIconPathAttribute} but uses GATEWAY delivery for asset-backed icons.
+     */
+    public function iconUrlForGuest(): ?string
+    {
+        $manual = $this->attributes['icon_path'] ?? null;
+        if ($manual !== null && $manual !== '') {
+            return $manual;
+        }
+        $iconId = $this->attributes['icon_id'] ?? null;
+        if (! $iconId) {
+            return null;
+        }
+        $asset = Asset::find($iconId);
+        if (! $asset) {
+            return null;
+        }
+
+        $isSvg = $asset->mime_type === 'image/svg+xml'
+            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status
+            : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
+
+        if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+            return $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::GATEWAY) ?: null;
+        }
+
+        return $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::GATEWAY) ?: null;
     }
 
     /**

@@ -294,6 +294,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    size={size}
                 />
             </div>
         )
@@ -313,6 +314,7 @@ export default function ThumbnailPreview({
                     <AssetPlaceholder
                         asset={asset}
                         primaryColor={brandPrimaryColor}
+                        size={size}
                     />
                 </div>
             )
@@ -549,6 +551,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    size={size}
                 />
             </div>
         )
@@ -582,7 +585,8 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
-                    />
+                    size={size}
+                />
             </div>
         )
     }
@@ -593,8 +597,9 @@ export default function ThumbnailPreview({
         return (
             <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
                 <AssetPlaceholder
-                asset={asset}
+                    asset={asset}
                     primaryColor={brandPrimaryColor}
+                    size={size}
                 />
             </div>
         )
@@ -605,8 +610,9 @@ export default function ThumbnailPreview({
         <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
             <AssetPlaceholder
                 asset={asset}
-                    primaryColor={brandPrimaryColor}
-                />
+                primaryColor={brandPrimaryColor}
+                size={size}
+            />
         </div>
     )
 }

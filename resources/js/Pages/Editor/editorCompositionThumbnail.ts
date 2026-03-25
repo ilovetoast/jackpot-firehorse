@@ -1,4 +1,5 @@
 import { toPng } from 'html-to-image'
+import { editorHtmlToImageFetchRequestInit } from './editorHardening'
 import type { DocumentModel } from './documentModel'
 
 /** PNG base64 (no data URL prefix) for API `thumbnail_png_base64`. */
@@ -16,6 +17,7 @@ export async function captureCompositionThumbnailBase64(
             width: doc.width,
             height: doc.height,
             backgroundColor: '#ffffff',
+            fetchRequestInit: editorHtmlToImageFetchRequestInit,
             style: {
                 transform: 'none',
                 width: `${doc.width}px`,

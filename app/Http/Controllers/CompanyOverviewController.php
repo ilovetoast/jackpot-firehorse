@@ -244,8 +244,8 @@ class CompanyOverviewController extends Controller
                         'brand' => [
                             'id' => $brand->id,
                             'name' => $brand->name,
-                            'logo_path' => $brand->logo_path,
-                            'icon_path' => $brand->icon_path,
+                            'logo_path' => $brand->logoUrlForGuest(false),
+                            'icon_path' => $brand->iconUrlForGuest(),
                             'icon' => $brand->icon,
                             'icon_bg_color' => $brand->icon_bg_color,
                             'icon_style' => $brand->icon_style ?? 'subtle',

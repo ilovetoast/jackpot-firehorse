@@ -73,6 +73,7 @@ export default function AssetImagePickerField({
   disabled = false,
   className = '',
   getAssetDownloadUrl = null,
+  fetchDeliverables = null,
   theme = 'light',
   allowCrop = true,
   brandId = null,
@@ -222,6 +223,7 @@ export default function AssetImagePickerField({
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         fetchAssets={fetchAssets}
+        fetchDeliverables={fetchDeliverables}
         onSelect={handleSelect}
         title={title}
         defaultCategoryLabel={defaultCategoryLabel}

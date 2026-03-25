@@ -141,7 +141,7 @@ class DownloadController extends Controller
             $perPage = 15;
             $paginator = $query->withCount('landingPageViewEvents')
                 ->with(['assets' => function ($q) {
-                    $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
+                    $q->select('assets.id', 'assets.type', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
                         ->orderBy('download_asset.is_primary', 'desc');
                 }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_path,icon'])
                 ->paginate($perPage, ['*'], 'page', $page);
@@ -248,8 +248,12 @@ class DownloadController extends Controller
             } else {
                 $thumbUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
             }
+            $typeVal = $asset->type instanceof \App\Enums\AssetType
+                ? $asset->type->value
+                : (string) ($asset->type ?? 'asset');
             $thumbnails[] = [
                 'id' => $asset->id,
+                'asset_type' => $typeVal,
                 'original_filename' => $asset->original_filename,
                 'thumbnail_url' => $thumbUrl,
             ];
@@ -519,7 +523,11 @@ class DownloadController extends Controller
         $bucketService = app(DownloadBucketService::class);
         $visibleIds = $bucketService->visibleItems();
         if (empty($visibleIds)) {
-            throw ValidationException::withMessages(['message' => 'Add at least one asset to the download bucket.']);
+            $rawBucket = $bucketService->items();
+            $message = empty($rawBucket)
+                ? 'Add at least one asset to the download bucket.'
+                : 'None of the selected assets can be included in a download. Downloads only include published, non-archived assets. Publish any drafts first, then try again.';
+            throw ValidationException::withMessages(['message' => $message]);
         }
 
         $accessModeInput = $request->input('access_mode', 'public');

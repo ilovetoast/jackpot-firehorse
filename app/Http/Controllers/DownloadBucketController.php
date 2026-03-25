@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Asset;
 use App\Services\AssetDeliveryService;
+use App\Services\AssetEligibilityService;
 use App\Services\DownloadBucketService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Phase D1 — Download bucket (session-backed selection of assets for creating a download).
@@ -26,27 +28,38 @@ class DownloadBucketController extends Controller
         $service = app(DownloadBucketService::class);
 
         if ($request->boolean('details')) {
-            $visibleIds = $service->visibleItems();
-            if (empty($visibleIds)) {
+            $user = $request->user();
+            if (! $user) {
                 return response()->json(['items' => []]);
             }
+
+            // Use full session bucket order (not only published). Include eligible_for_download so the UI can
+            // explain when drafts are selected — collections grid was confusing when preview looked empty.
+            $allIds = $service->items();
+            if (empty($allIds)) {
+                return response()->json(['items' => []]);
+            }
+
             $assets = Asset::query()
-                ->whereIn('id', $visibleIds)
-                ->get(['id', 'brand_id', 'original_filename', 'metadata', 'thumbnail_status'])
+                ->whereIn('id', $allIds)
+                ->get(['id', 'brand_id', 'original_filename', 'metadata', 'thumbnail_status', 'published_at', 'archived_at'])
                 ->keyBy('id');
-            // Preserve order of visibleIds (visibleItems() order); include thumbnail URLs for bucket bar and create-download panel.
+
+            $eligibility = app(AssetEligibilityService::class);
+            $assetDelivery = app(AssetDeliveryService::class);
             $items = [];
-            foreach ($visibleIds as $id) {
+
+            foreach ($allIds as $id) {
                 $asset = $assets->get($id);
-                if (! $asset) {
+                if (! $asset || ! Gate::forUser($user)->allows('view', $asset)) {
                     continue;
                 }
+
                 $metadata = $asset->metadata ?? [];
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
                     ? $asset->thumbnail_status->value
                     : ($asset->thumbnail_status ?? 'pending');
 
-                $assetDelivery = app(AssetDeliveryService::class);
                 $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
                 $finalThumbnailUrl = null;
@@ -67,6 +80,7 @@ class DownloadBucketController extends Controller
                     'preview_thumbnail_url' => $previewThumbnailUrl,
                     'final_thumbnail_url' => $finalThumbnailUrl,
                     'thumbnail_url' => $finalThumbnailUrl ?? $previewThumbnailUrl,
+                    'eligible_for_download' => $eligibility->isEligibleForDownloads($asset),
                 ];
             }
 
