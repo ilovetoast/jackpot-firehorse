@@ -93,6 +93,8 @@ class UploadCompletionService
      * @param int|null $categoryId Optional category ID to store in metadata
      * @param array|null $metadata Optional metadata fields to store (will be merged with category_id)
      * @param int|null $userId Optional user ID who uploaded the asset
+     * @param bool $skipAiTagging When true, persist `_skip_ai_tagging` on asset metadata before the pipeline runs.
+     * @param bool $skipAiMetadata When true, persist `_skip_ai_metadata` before the pipeline runs.
      * @return Asset
      * @throws \Exception
      */
@@ -104,7 +106,9 @@ class UploadCompletionService
         ?string $s3Key = null,
         ?int $categoryId = null,
         ?array $metadata = null,
-        ?int $userId = null
+        ?int $userId = null,
+        bool $skipAiTagging = false,
+        bool $skipAiMetadata = false
     ): Asset {
         // NOTE:
         // Metadata persistence is intentionally NOT handled here.
@@ -363,7 +367,7 @@ class UploadCompletionService
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
-        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId, $isBuilderStaged, $uploadOptions) {
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId, $isBuilderStaged, $uploadOptions, $skipAiTagging, $skipAiMetadata) {
             $skipPublishForBuilderStaged = $isBuilderStaged;
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
@@ -929,6 +933,29 @@ class UploadCompletionService
                         'has_fields_key' => isset($metadataArray['fields']),
                     ]);
                 }
+            }
+
+            // C9.2: Upload-time AI skip flags MUST be on the asset row before AssetUploaded / ProcessAssetJob.
+            // UploadController used to merge these after complete() returned — too late: afterCommit already fired
+            // and ProcessAssetJob loaded the asset without _skip_ai_tagging / _skip_ai_metadata.
+            if ($skipAiTagging || $skipAiMetadata) {
+                $meta = $asset->metadata ?? [];
+                if (! is_array($meta)) {
+                    $meta = [];
+                }
+                if ($skipAiTagging) {
+                    $meta['_skip_ai_tagging'] = true;
+                }
+                if ($skipAiMetadata) {
+                    $meta['_skip_ai_metadata'] = true;
+                }
+                $asset->update(['metadata' => $meta]);
+                $asset->refresh();
+                Log::info('[UploadCompletionService] AI skip flags merged before pipeline (same transaction as AssetUploaded)', [
+                    'asset_id' => $asset->id,
+                    'skip_ai_tagging' => $skipAiTagging,
+                    'skip_ai_metadata' => $skipAiMetadata,
+                ]);
             }
 
             // Emit AssetUploaded event after transaction commits so queued listener (ProcessAssetOnUpload)

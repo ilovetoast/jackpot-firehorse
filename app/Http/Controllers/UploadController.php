@@ -2028,7 +2028,9 @@ class UploadController extends Controller
                         $uploadKey, // s3Key
                         null, // categoryId not needed for replace (keep existing)
                         $comment ? ['comment' => $comment] : null, // Pass comment via metadata array
-                        $user->id
+                        $user->id,
+                        $skipAiTagging,
+                        $skipAiMetadata
                     );
                 } else {
                     // Create mode: Normal asset creation flow
@@ -2128,26 +2130,10 @@ class UploadController extends Controller
                         $uploadKey, // s3Key
                         $categoryId,
                         null, // Do NOT pass metadata here - persist separately below with approval check
-                        $user->id
+                        $user->id,
+                        $skipAiTagging,
+                        $skipAiMetadata
                     );
-
-                    // C9.2: Store upload-time AI skip flags in asset metadata (if provided)
-                    if ($skipAiTagging || $skipAiMetadata) {
-                        $currentMetadata = $asset->metadata ?? [];
-                        if ($skipAiTagging) {
-                            $currentMetadata['_skip_ai_tagging'] = true;
-                        }
-                        if ($skipAiMetadata) {
-                            $currentMetadata['_skip_ai_metadata'] = true;
-                        }
-                        $asset->update(['metadata' => $currentMetadata]);
-                        
-                        Log::info('[UploadController::finalize] AI skip flags stored in asset metadata', [
-                            'asset_id' => $asset->id,
-                            'skip_ai_tagging' => $skipAiTagging,
-                            'skip_ai_metadata' => $skipAiMetadata,
-                        ]);
-                    }
 
                     // Generative editor publish modal: description is not a schema field; store on asset JSON metadata.
                     if ($editorPublishDescription !== null && $editorPublishDescription !== '' && $asset && $asset->id) {
@@ -2166,10 +2152,11 @@ class UploadController extends Controller
                     }
 
                     // IMPORTANT:
-                    // Metadata MUST be persisted exactly once during upload.
+                    // Field metadata MUST be persisted exactly once during upload (below).
                     // UploadController::finalize() is the single source of truth for
-                    // metadata persistence so that approval logic is always enforced.
-                    // Do NOT persist metadata inside UploadCompletionService.
+                    // schema metadata so that approval logic is always enforced.
+                    // AI skip flags (_skip_ai_*) are merged inside UploadCompletionService::complete()
+                    // before AssetUploaded so ProcessAssetJob sees them.
                     // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
                     // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
                     // This ensures approval logic runs only after asset exists, not during upload
