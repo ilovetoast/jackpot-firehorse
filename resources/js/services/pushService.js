@@ -1,9 +1,17 @@
 /**
- * OneSignal Web SDK (v16) — init, one-time browser permission after login, and settings toggle.
+ * OneSignal Web SDK (v16) — init, optional pre-dialog, then permission + server sync.
  * Requires {@see app.blade.php} to load OneSignalSDK.page.js and `window.OneSignalDeferred`.
  *
  * Future: email + push unified preferences; per-category device routing; multi-device subscription UI.
  */
+
+const NS = '[JackpotPush]'
+
+function log(...args) {
+    if (typeof console !== 'undefined' && console.log) {
+        console.log(NS, ...args)
+    }
+}
 
 let initPushInFlight = null
 
@@ -20,6 +28,7 @@ function appId() {
 }
 
 async function postPushStatus(enabled) {
+    log('postPushStatus', { enabled })
     const res = await fetch('/app/api/user/push-status', {
         method: 'POST',
         credentials: 'same-origin',
@@ -40,14 +49,18 @@ async function postPushStatus(enabled) {
 
 function runOnOneSignal(callback) {
     if (typeof window === 'undefined' || !window.OneSignalDeferred) {
+        log('runOnOneSignal:skipped', { reason: !window?.OneSignalDeferred ? 'no OneSignalDeferred' : 'no window' })
         return Promise.resolve()
     }
+    log('runOnOneSignal:queued')
     return new Promise((resolve, reject) => {
         window.OneSignalDeferred.push(async function (OneSignal) {
             try {
                 await callback(OneSignal)
+                log('runOnOneSignal:done')
                 resolve()
             } catch (e) {
+                log('runOnOneSignal:error', e)
                 reject(e)
             }
         })
@@ -55,59 +68,64 @@ function runOnOneSignal(callback) {
 }
 
 /**
- * Call once when a user session is active and push is enabled server-side.
- * One-time browser permission if never prompted; sync login when push_enabled.
+ * True when the server has never recorded a consent outcome and the browser has not decided yet.
+ * Use with PushPermissionDialog (show explanation before requestPermission).
+ */
+export function shouldShowPushPermissionDialog(user) {
+    if (!user?.id || user.push_prompted_at) {
+        return false
+    }
+    if (typeof Notification === 'undefined') {
+        return false
+    }
+    return Notification.permission === 'default'
+}
+
+/**
+ * OneSignal init + login for existing subscribers. Does not call requestPermission (dialog handles that).
  *
- * @returns {Promise<{ didPrompt: boolean }>}
+ * @returns {Promise<{ ready: boolean }>}
  */
 export async function initPush(user) {
     if (!user?.id || typeof window === 'undefined') {
-        return { didPrompt: false }
+        log('initPush:skip', { reason: 'no user or window' })
+        return { ready: false }
     }
     if (!window.OneSignalDeferred) {
-        return { didPrompt: false }
+        log('initPush:skip', { reason: 'OneSignal SDK not loaded (PUSH_NOTIFICATIONS_ENABLED / app id?)' })
+        return { ready: false }
     }
     const id = appId()
     if (!id) {
-        console.warn('[pushService] No OneSignal app id (VITE_ONESIGNAL_APP_ID or meta onesignal-app-id)')
-        return { didPrompt: false }
+        log('initPush:skip', { reason: 'no app id — set VITE_ONESIGNAL_APP_ID or Blade meta onesignal-app-id' })
+        return { ready: false }
     }
 
     if (initPushInFlight) {
+        log('initPush:dedupe', { waiting: true })
         return initPushInFlight
     }
 
-    initPushInFlight = (async () => {
-        let didPrompt = false
+    log('initPush:start', { userId: user.id, push_enabled: user.push_enabled, push_prompted_at: user.push_prompted_at })
 
+    initPushInFlight = (async () => {
         await runOnOneSignal(async (OneSignal) => {
             await OneSignal.init({
                 appId: id,
                 allowLocalhostAsSecureOrigin: import.meta.env.DEV,
                 autoPrompt: false,
             })
+            log('initPush:OneSignal.init complete')
 
             if (user.push_enabled) {
                 await OneSignal.login(`user_${user.id}`)
-            }
-
-            const permission = typeof Notification !== 'undefined' ? Notification.permission : 'denied'
-
-            if (!user.push_prompted_at && permission === 'default') {
-                didPrompt = true
-                const req = await OneSignal.Notifications.requestPermission()
-                const granted =
-                    req === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted')
-
-                await postPushStatus(granted)
-
-                if (granted) {
-                    await OneSignal.login(`user_${user.id}`)
-                }
+                log('initPush:OneSignal.login (push_enabled)', { externalId: `user_${user.id}` })
+            } else {
+                log('initPush:skip login until user enables (push_enabled false)')
             }
         })
 
-        return { didPrompt }
+        return { ready: true }
     })()
 
     try {
@@ -118,9 +136,63 @@ export async function initPush(user) {
 }
 
 /**
+ * After the user accepts the in-app explanation — native permission + server + OneSignal.login when granted.
+ */
+export async function requestPushPermission(user) {
+    log('requestPushPermission:start', { userId: user?.id })
+    if (!user?.id || typeof window === 'undefined') {
+        return { granted: false }
+    }
+    if (!window.OneSignalDeferred) {
+        log('requestPushPermission:abort', { reason: 'no SDK' })
+        return { granted: false }
+    }
+
+    const id = appId()
+    if (!id) {
+        return { granted: false }
+    }
+
+    let granted = false
+
+    await runOnOneSignal(async (OneSignal) => {
+        await OneSignal.init({
+            appId: id,
+            allowLocalhostAsSecureOrigin: import.meta.env.DEV,
+            autoPrompt: false,
+        })
+
+        const before = typeof Notification !== 'undefined' ? Notification.permission : 'denied'
+        log('requestPushPermission:before requestPermission', { permission: before })
+
+        const req = await OneSignal.Notifications.requestPermission()
+        granted = req === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted')
+        log('requestPushPermission:after', { requestResult: req, notificationPermission: Notification?.permission, granted })
+
+        await postPushStatus(granted)
+
+        if (granted) {
+            await OneSignal.login(`user_${user.id}`)
+            log('requestPushPermission:OneSignal.login', { externalId: `user_${user.id}` })
+        }
+    })
+
+    return { granted }
+}
+
+/**
+ * User chose "Not now" — record consent outcome so we do not show the dialog every load.
+ */
+export async function dismissPushPermissionPrompt() {
+    log('dismissPushPermissionPrompt')
+    await postPushStatus(false)
+}
+
+/**
  * Settings: enable or disable push (opt-out on disable when SDK is available).
  */
 export async function togglePush(user, enabled) {
+    log('togglePush', { enabled, userId: user?.id })
     if (!user?.id || typeof window === 'undefined') {
         return
     }
@@ -164,7 +236,7 @@ export async function togglePush(user, enabled) {
                     await OneSignal.User.PushSubscription.optOut()
                 }
             } catch (e) {
-                console.warn('[pushService] optOut', e)
+                log('togglePush:optOut warning', e)
             }
             await postPushStatus(false)
         }
