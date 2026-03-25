@@ -1,4 +1,4 @@
-import { usePage } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
 import PushPermissionDialog from './PushPermissionDialog'
 import { initPush, shouldShowPushPermissionDialog } from '../services/pushService'
@@ -80,16 +80,25 @@ export default function PushServiceInit() {
                 >
                     <p className="font-medium text-gray-900">Browser alerts aren’t on for this site yet</p>
                     <p className="mt-1 text-xs leading-relaxed text-gray-600">
-                        You’re signed in, but this app hasn’t switched on push notifications, so we can’t ask your browser
-                        yet. After they’re enabled on the server, reload the page and you’ll see the prompt here.
+                        You’re signed in, but this app hasn’t switched on browser push yet, so we can’t show the allow
+                        prompt here. When push is enabled for this site, reload and you’ll see it — or open your account
+                        settings to manage notification preferences.
                     </p>
-                    <button
-                        type="button"
-                        onClick={dismissUnavailable}
-                        className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-500"
-                    >
-                        Got it
-                    </button>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                        <Link
+                            href="/app/profile#notifications"
+                            className="inline-flex w-full items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 sm:w-auto"
+                        >
+                            Open notification settings
+                        </Link>
+                        <button
+                            type="button"
+                            onClick={dismissUnavailable}
+                            className="text-xs font-medium text-gray-600 hover:text-gray-800"
+                        >
+                            Got it
+                        </button>
+                    </div>
                 </div>
             ) : null}
         </>
