@@ -47,6 +47,25 @@ async function postPushStatus(enabled) {
     return res.json()
 }
 
+/**
+ * Blade loads OneSignal with `defer`; React often runs before `window.OneSignalDeferred` exists.
+ */
+async function waitForOneSignalDeferred(maxMs = 15000) {
+    if (typeof window === 'undefined') {
+        return false
+    }
+    const start = Date.now()
+    while (!window.OneSignalDeferred) {
+        if (Date.now() - start > maxMs) {
+            log('waitForOneSignalDeferred:timeout', { maxMs })
+            return false
+        }
+        await new Promise((r) => setTimeout(r, 50))
+    }
+    log('waitForOneSignalDeferred:ready')
+    return true
+}
+
 function runOnOneSignal(callback) {
     if (typeof window === 'undefined' || !window.OneSignalDeferred) {
         log('runOnOneSignal:skipped', { reason: !window?.OneSignalDeferred ? 'no OneSignalDeferred' : 'no window' })
@@ -68,11 +87,14 @@ function runOnOneSignal(callback) {
 }
 
 /**
- * True when the server has never recorded a consent outcome and the browser has not decided yet.
- * Use with PushPermissionDialog (show explanation before requestPermission).
+ * True when `users.push_prompted_at` is null (no consent recorded in DB) and the browser has not
+ * chosen allow/deny yet. Drives the first-load site dialog — not the master toggle on settings.
  */
 export function shouldShowPushPermissionDialog(user) {
-    if (!user?.id || user.push_prompted_at) {
+    if (!user?.id) {
+        return false
+    }
+    if (user.push_prompted_at != null && user.push_prompted_at !== '') {
         return false
     }
     if (typeof Notification === 'undefined') {
@@ -91,7 +113,7 @@ export async function initPush(user) {
         log('initPush:skip', { reason: 'no user or window' })
         return { ready: false }
     }
-    if (!window.OneSignalDeferred) {
+    if (!(await waitForOneSignalDeferred())) {
         log('initPush:skip', { reason: 'OneSignal SDK not loaded (PUSH_NOTIFICATIONS_ENABLED / app id?)' })
         return { ready: false }
     }
@@ -143,8 +165,8 @@ export async function requestPushPermission(user) {
     if (!user?.id || typeof window === 'undefined') {
         return { granted: false }
     }
-    if (!window.OneSignalDeferred) {
-        log('requestPushPermission:abort', { reason: 'no SDK' })
+    if (!(await waitForOneSignalDeferred())) {
+        log('requestPushPermission:abort', { reason: 'no SDK (timeout waiting for script)' })
         return { granted: false }
     }
 
@@ -194,6 +216,11 @@ export async function dismissPushPermissionPrompt() {
 export async function togglePush(user, enabled) {
     log('togglePush', { enabled, userId: user?.id })
     if (!user?.id || typeof window === 'undefined') {
+        return
+    }
+
+    if (enabled && !(await waitForOneSignalDeferred())) {
+        log('togglePush:abort', { reason: 'no SDK (timeout)' })
         return
     }
 

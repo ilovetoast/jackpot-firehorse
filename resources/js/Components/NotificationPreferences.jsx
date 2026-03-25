@@ -168,9 +168,24 @@ export default function NotificationPreferences() {
                 </p>
             )}
             <p className="text-xs text-gray-500">
-                Email and other channels can be added here later. Push requires browser permission and the master toggle
-                below; category toggles choose which types of updates may be sent.
+                Email and other channels can be added here later. Category toggles choose which <em>types</em> of updates
+                may be sent; the master toggle below registers this browser with OneSignal and triggers the browser’s
+                permission prompt when you turn it on.
             </p>
+
+            {browserPermission === 'default' && !masterOn && (
+                <div
+                    className="rounded-lg border border-indigo-200 bg-indigo-50/90 px-4 py-3 text-sm text-indigo-950"
+                    role="status"
+                >
+                    <p className="font-medium">Allow notifications in this browser</p>
+                    <p className="mt-1 text-xs leading-relaxed text-indigo-900/90">
+                        Opening this page does not show the system prompt by itself. Turn <strong>Push notifications</strong>{' '}
+                        on — your browser will then ask whether to allow notifications for this site. Until you allow,
+                        this device is not registered for push.
+                    </p>
+                </div>
+            )}
 
             <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

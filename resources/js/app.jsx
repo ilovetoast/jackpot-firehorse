@@ -113,7 +113,8 @@ createInertiaApp({
             <>
                 <PageComponent {...props} />
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
-                {props.auth?.user && props.oneSignal?.client_enabled && <PushServiceInit />}
+                {/* Mounts on any logged-in app page (not Experience/Gateway). Push SDK runs only when oneSignal.client_enabled. */}
+                {props.auth?.user && <PushServiceInit />}
                 <FlashMessage />
                 <AssetProcessingTray />
                 {false && <DownloadBucketBarGlobal />}
