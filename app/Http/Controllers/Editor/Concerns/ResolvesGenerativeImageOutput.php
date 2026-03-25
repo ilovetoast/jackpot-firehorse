@@ -13,13 +13,16 @@ trait ResolvesGenerativeImageOutput
     abstract protected function registerProxyUrl(string $urlOrDataUrl): string;
 
     /**
+     * @param  array<string, mixed>  $persistContext
+     *   Optional keys: composition_id, generative_layer_uuid (for versioned generative layer assets).
      * @return array{image_url: string, asset_id: string|null}
      */
     protected function finalizeGenerativeImageOutput(
         string $imageRef,
         Tenant $tenant,
         User $user,
-        EditorGenerativeImagePersistService $persistService
+        EditorGenerativeImagePersistService $persistService,
+        array $persistContext = []
     ): array {
         if (! config('editor.generative.persist', true)) {
             Log::info('editor.generative.output', [
@@ -55,7 +58,7 @@ trait ResolvesGenerativeImageOutput
         }
 
         try {
-            $out = $persistService->persistFromProviderReference($imageRef, $tenant, $user, $brand);
+            $out = $persistService->persistFromProviderReference($imageRef, $tenant, $user, $brand, $persistContext);
 
             Log::info('editor.generative.output', [
                 'tenant_id' => $tenant->id,

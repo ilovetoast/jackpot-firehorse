@@ -56,6 +56,7 @@ class EditorEditImageController extends Controller
             'brand_id' => 'nullable|integer',
             /** Registry key from config ai.models (e.g. gpt-image-1, gemini-2.5-flash-image). */
             'model_key' => 'nullable|string|max:64',
+            'generative_layer_uuid' => 'nullable|string|max:128',
         ]);
 
         $hasAssetId = ! empty($validated['asset_id']);
@@ -100,9 +101,12 @@ class EditorEditImageController extends Controller
             return response()->json(['message' => "Unknown or inactive model '{$modelKey}'."], 422);
         }
 
-        $allowed = config('ai.generative_editor.allowed_model_keys', []);
+        $allowed = config('ai.generative_editor.edit_allowed_model_keys', []);
+        if ($allowed === []) {
+            $allowed = config('ai.generative_editor.allowed_model_keys', []);
+        }
         if ($allowed !== [] && ! in_array($modelKey, $allowed, true)) {
-            return response()->json(['message' => "Model '{$modelKey}' is not allowed for the editor."], 422);
+            return response()->json(['message' => "Model '{$modelKey}' is not allowed for image modification."], 422);
         }
 
         $caps = $modelConfig['capabilities'] ?? [];
@@ -113,21 +117,27 @@ class EditorEditImageController extends Controller
         $providerName = (string) ($modelConfig['provider'] ?? 'openai');
         $hasOpenAi = trim((string) config('ai.openai.api_key', '')) !== '';
         $hasGemini = trim((string) config('ai.gemini.api_key', '')) !== '';
+        $hasFlux = trim((string) config('ai.flux.api_key', '')) !== '';
 
         $canRunSelected = ($providerName === 'openai' && $hasOpenAi)
-            || ($providerName === 'gemini' && $hasGemini);
+            || ($providerName === 'gemini' && $hasGemini)
+            || ($providerName === 'flux' && $hasFlux);
 
         if (! $canRunSelected) {
-            if (! $hasOpenAi && ! $hasGemini) {
+            if (! $hasOpenAi && ! $hasGemini && ! $hasFlux) {
                 return response()->json([
                     'image_url' => $this->stubProxyUrl($instruction),
                 ]);
             }
 
+            $missingKey = match ($providerName) {
+                'gemini' => 'GEMINI_API_KEY is not configured. Set it in .env or choose another edit model.',
+                'flux' => 'FLUX_API_KEY is not configured. Set it in .env or choose another edit model.',
+                default => 'OPENAI_API_KEY is not configured. Set it in .env or choose another edit model.',
+            };
+
             return response()->json([
-                'message' => $providerName === 'gemini'
-                    ? 'GEMINI_API_KEY is not configured. Set it in .env or choose GPT Image 1 (OpenAI).'
-                    : 'OPENAI_API_KEY is not configured. Set it in .env or choose a Gemini (Nano Banana) model.',
+                'message' => $missingKey,
             ], 422);
         }
 
@@ -169,7 +179,7 @@ class EditorEditImageController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
             $mimeForPayload = 'image/png';
-        } elseif ($providerName === 'gemini') {
+        } elseif ($providerName === 'gemini' || $providerName === 'flux') {
             try {
                 $prepared = EditorGeminiInlineImagePreparer::prepare($binary, $detectedMime);
                 $binary = $prepared['binary'];
@@ -208,6 +218,12 @@ class EditorEditImageController extends Controller
         if (! empty($validated['asset_id'])) {
             $options['asset_id'] = $validated['asset_id'];
         }
+        if (! empty($validated['brand_context'])) {
+            $options['brand_context'] = $validated['brand_context'];
+        }
+        if (! empty($validated['generative_layer_uuid'])) {
+            $options['generative_layer_uuid'] = $validated['generative_layer_uuid'];
+        }
 
         try {
             $result = $this->aiService->executeEditorImageEditAgent(
@@ -241,11 +257,17 @@ class EditorEditImageController extends Controller
             return response()->json(['message' => 'Monthly limit reached'], 429);
         }
 
+        $persistContext = array_filter([
+            'composition_id' => ! empty($validated['composition_id']) ? (string) (int) $validated['composition_id'] : null,
+            'generative_layer_uuid' => isset($validated['generative_layer_uuid']) ? (string) $validated['generative_layer_uuid'] : null,
+        ], static fn ($v) => $v !== null && $v !== '');
+
         $final = $this->finalizeGenerativeImageOutput(
             (string) $result['image_ref'],
             $tenant,
             $user,
-            $this->generativeImagePersistService
+            $this->generativeImagePersistService,
+            $persistContext
         );
 
         $payload = ['image_url' => $final['image_url']];

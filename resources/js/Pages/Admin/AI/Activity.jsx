@@ -90,8 +90,18 @@ export default function AIActivity({ runs, filters, filterOptions }) {
                         >
                             ← Back to AI Dashboard
                         </Link>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Activity</h1>
-                        <p className="mt-2 text-sm text-gray-700">View all AI agent executions across the system</p>
+                        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+                            <div>
+                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Activity</h1>
+                                <p className="mt-2 text-sm text-gray-700">View all AI agent executions across the system</p>
+                            </div>
+                            <Link
+                                href="/app/admin/ai/editor-image-audit"
+                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 shrink-0"
+                            >
+                                Editor image audit →
+                            </Link>
+                        </div>
                     </div>
 
                     {/* Filters */}

@@ -8,6 +8,7 @@ use App\Models\Composition;
 use App\Models\CompositionVersion;
 use App\Models\User;
 use App\Services\CompositionThumbnailAssetService;
+use App\Services\GenerativeCompositionAssetCleanup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
 class EditorCompositionController extends Controller
 {
     public function __construct(
-        protected CompositionThumbnailAssetService $thumbnailAssets
+        protected CompositionThumbnailAssetService $thumbnailAssets,
+        protected GenerativeCompositionAssetCleanup $generativeCompositionAssetCleanup
     ) {}
 
     private function resolveComposition(Request $request, int $id): ?Composition
@@ -335,6 +337,8 @@ class EditorCompositionController extends Controller
         $createVersion = $request->boolean('create_version', true);
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
 
+        $oldDocument = is_array($composition->document_json) ? $composition->document_json : [];
+
         DB::transaction(function () use ($composition, $validated, $createVersion, $thumbBinary, $user) {
             if (isset($validated['name'])) {
                 $composition->name = $validated['name'];
@@ -364,6 +368,16 @@ class EditorCompositionController extends Controller
                 $this->pruneOldVersions($composition->fresh());
             }
         });
+
+        $fresh = $composition->fresh();
+        if ($fresh !== null) {
+            $this->generativeCompositionAssetCleanup->afterDocumentReplaced(
+                (int) $fresh->tenant_id,
+                (int) $fresh->brand_id,
+                $oldDocument,
+                is_array($validated['document']) ? $validated['document'] : []
+            );
+        }
 
         return response()->json(['composition' => $this->compositionJson($composition->fresh())]);
     }
@@ -424,6 +438,8 @@ class EditorCompositionController extends Controller
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
 
+        $oldDocument = is_array($composition->document_json) ? $composition->document_json : [];
+
         DB::transaction(function () use ($composition, $validated, $thumbBinary, $user) {
             $composition->document_json = $validated['document'];
 
@@ -446,6 +462,16 @@ class EditorCompositionController extends Controller
 
             $this->pruneOldVersions($composition->fresh());
         });
+
+        $fresh = $composition->fresh();
+        if ($fresh !== null) {
+            $this->generativeCompositionAssetCleanup->afterDocumentReplaced(
+                (int) $fresh->tenant_id,
+                (int) $fresh->brand_id,
+                $oldDocument,
+                is_array($validated['document']) ? $validated['document'] : []
+            );
+        }
 
         $latest = $composition->versions()->orderByDesc('id')->first();
 
@@ -531,5 +557,57 @@ class EditorCompositionController extends Controller
         });
 
         return response()->json(['composition' => $this->compositionJson($composition)]);
+    }
+
+    /**
+     * DELETE /app/api/compositions/{id}
+     *
+     * Drops the composition row (composition_versions cascade). Soft-deletes preview thumbnail
+     * {@link Asset} rows used for list/history tiles only — not DAM / library assets referenced in layer JSON.
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+        if (! $tenant || ! $brand || ! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $composition = Composition::query()
+            ->with('versions')
+            ->where('id', $id)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+
+        if (! $composition) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        $documentBeforeDelete = is_array($composition->document_json) ? $composition->document_json : [];
+
+        /** @var array<int, string> $thumbnailAssetIds */
+        $thumbnailAssetIds = collect([$composition->thumbnail_asset_id])
+            ->merge($composition->versions->pluck('thumbnail_asset_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        DB::transaction(function () use ($composition, $thumbnailAssetIds): void {
+            $composition->delete();
+            foreach ($thumbnailAssetIds as $assetId) {
+                Asset::query()->whereKey($assetId)->delete();
+            }
+        });
+
+        $this->generativeCompositionAssetCleanup->afterCompositionRemoved(
+            (int) $tenant->id,
+            (int) $brand->id,
+            $documentBeforeDelete
+        );
+
+        return response()->json(['ok' => true]);
     }
 }

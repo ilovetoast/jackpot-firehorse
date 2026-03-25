@@ -12,31 +12,31 @@ use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
- * Persists in-progress composition preview PNGs as {@link Asset} rows on canonical tenant storage
- * (same key layout as uploads: tenants/{tenant_uuid}/assets/{asset_uuid}/v1/original.png).
+ * Persists in-progress composition preview PNGs as {@link Asset} rows on canonical tenant storage.
  *
- * Type {@see AssetType::AI_GENERATED}. These are WIP previews only: we do not run
- * {@see \App\Jobs\ProcessAssetJob}
- * (no thumbnail jobs, embedding, or grid lifecycle). They stay unpublished ({@see Asset::$published_at} null)
- * and off the default grid until a future “export / publish as asset” flow promotes them.
- * In-app URLs use {@see \App\Http\Controllers\Editor\EditorCompositionController::thumbnailAsset} (same-origin stream).
+ * **One {@link Asset} per composition thumbnail** (referenced by `compositions.thumbnail_asset_id`).
+ * Each save appends a new {@link AssetVersion} and writes a new `v{n}/original.png` key — no new asset UUID
+ * per autosave (avoids admin list spam from soft-deleted preview rows).
  *
- * Not stored on the public local disk — staging/production use S3 + CloudFront like other assets.
+ * Type {@see AssetType::AI_GENERATED}. WIP only: no {@see \App\Jobs\ProcessAssetJob}.
+ * In-app URLs use {@see \App\Http\Controllers\Editor\EditorCompositionController::thumbnailAsset}.
  */
 class CompositionThumbnailAssetService
 {
+    private const MAX_VERSIONS_TO_RETAIN = 20;
+
     public function __construct(
         protected AssetPathGenerator $pathGenerator
     ) {}
 
     /**
-     * Create a generative preview asset from PNG bytes (flat image, same canonical key as uploaded originals).
-     * Optionally soft-delete a previous asset id.
+     * Store PNG bytes for a composition thumbnail: reuse existing asset id when $replaceAssetId is set.
      *
      * @return non-empty-string Asset UUID
      */
@@ -52,17 +52,128 @@ class CompositionThumbnailAssetService
         }
 
         if ($replaceAssetId !== null && $replaceAssetId !== '') {
-            Asset::query()->whereKey($replaceAssetId)->delete();
+            $existing = Asset::withTrashed()->find($replaceAssetId);
+            if ($existing !== null) {
+                if ($existing->trashed()) {
+                    $existing->restore();
+                }
+
+                return $this->appendVersionToExistingAsset($tenant, $brand, $user, $existing, $pngBinary);
+            }
         }
 
-        return DB::transaction(function () use ($tenant, $brand, $user, $pngBinary) {
-            $size = strlen($pngBinary);
+        return $this->createNewThumbnailAsset($tenant, $brand, $user, $pngBinary);
+    }
 
+    /**
+     * @return non-empty-string
+     */
+    private function appendVersionToExistingAsset(
+        Tenant $tenant,
+        Brand $brand,
+        User $user,
+        Asset $asset,
+        string $pngBinary
+    ): string {
+        return DB::transaction(function () use ($tenant, $brand, $user, $asset, $pngBinary) {
+            $size = strlen($pngBinary);
             $dims = @getimagesizefromstring($pngBinary);
             $width = isset($dims[0]) ? (int) $dims[0] : null;
             $height = isset($dims[1]) ? (int) $dims[1] : null;
 
-            // Pre-assign UUID so we can set storage_root_path on insert (MySQL: column has no default).
+            $maxVersion = (int) (AssetVersion::query()
+                ->where('asset_id', $asset->id)
+                ->max('version_number') ?? 0);
+
+            $nextVersion = $maxVersion + 1;
+
+            $path = $this->pathGenerator->generateOriginalPathForAssetId(
+                $tenant,
+                $asset->id,
+                $nextVersion,
+                'png'
+            );
+
+            $previousPath = $asset->storage_root_path;
+
+            Storage::disk('s3')->put($path, $pngBinary, 'private');
+
+            AssetVersion::query()
+                ->where('asset_id', $asset->id)
+                ->update(['is_current' => false]);
+
+            AssetVersion::create([
+                'id' => (string) Str::uuid(),
+                'asset_id' => $asset->id,
+                'version_number' => $nextVersion,
+                'file_path' => $path,
+                'file_size' => $size,
+                'mime_type' => 'image/png',
+                'width' => $width,
+                'height' => $height,
+                'checksum' => hash('sha256', $pngBinary),
+                'is_current' => true,
+                'pipeline_status' => 'complete',
+                'uploaded_by' => $user->id,
+            ]);
+
+            $meta = $asset->metadata ?? [];
+            if (! is_array($meta)) {
+                $meta = [];
+            }
+            $meta['composition_preview'] = true;
+            $meta['composition_wip'] = true;
+            $meta['asset_role'] = 'composition_thumbnail';
+            $meta['last_preview_at'] = now()->toIso8601String();
+
+            $asset->update([
+                'storage_root_path' => $path,
+                'size_bytes' => $size,
+                'width' => $width,
+                'height' => $height,
+                'mime_type' => 'image/png',
+                'metadata' => $meta,
+            ]);
+
+            if (is_string($previousPath) && $previousPath !== '' && $previousPath !== $path) {
+                try {
+                    Storage::disk('s3')->delete($previousPath);
+                } catch (\Throwable $e) {
+                    Log::warning('[CompositionThumbnailAssetService] Could not delete previous preview object', [
+                        'asset_id' => $asset->id,
+                        'path' => $previousPath,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            $this->pruneOldVersions($asset->id, self::MAX_VERSIONS_TO_RETAIN);
+
+            Log::info('Composition preview version appended', [
+                'asset_id' => $asset->id,
+                'version' => $nextVersion,
+                'bytes' => $size,
+            ]);
+
+            return $asset->id;
+        });
+    }
+
+    /**
+     * @return non-empty-string
+     */
+    private function createNewThumbnailAsset(
+        Tenant $tenant,
+        Brand $brand,
+        User $user,
+        string $pngBinary
+    ): string {
+        return DB::transaction(function () use ($tenant, $brand, $user, $pngBinary) {
+            $size = strlen($pngBinary);
+            $dims = @getimagesizefromstring($pngBinary);
+            $width = isset($dims[0]) ? (int) $dims[0] : null;
+            $height = isset($dims[1]) ? (int) $dims[1] : null;
+
             $assetId = (string) Str::uuid();
             $path = $this->pathGenerator->generateOriginalPathForAssetId(
                 $tenant,
@@ -85,7 +196,6 @@ class CompositionThumbnailAssetService
                 'width' => $width,
                 'height' => $height,
                 'storage_root_path' => $path,
-                // Flat PNG is the preview; no derivative thumbnail pipeline for WIP compositions.
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'analysis_status' => 'complete',
                 'approval_status' => ApprovalStatus::NOT_REQUIRED,
@@ -96,6 +206,7 @@ class CompositionThumbnailAssetService
                 'metadata' => [
                     'composition_preview' => true,
                     'composition_wip' => true,
+                    'asset_role' => 'composition_thumbnail',
                 ],
             ]);
 
@@ -118,6 +229,35 @@ class CompositionThumbnailAssetService
 
             return $asset->id;
         });
+    }
+
+    /**
+     * Remove oldest version rows and S3 objects beyond the cap (keeps current + N-1).
+     */
+    private function pruneOldVersions(string $assetId, int $maxRetain): void
+    {
+        $versions = AssetVersion::query()
+            ->where('asset_id', $assetId)
+            ->whereNull('deleted_at')
+            ->orderByDesc('version_number')
+            ->get(['id', 'version_number', 'file_path']);
+
+        if ($versions->count() <= $maxRetain) {
+            return;
+        }
+
+        $toRemove = $versions->slice($maxRetain);
+        foreach ($toRemove as $row) {
+            $path = $row->file_path;
+            try {
+                if (is_string($path) && $path !== '') {
+                    Storage::disk('s3')->delete($path);
+                }
+            } catch (\Throwable) {
+                // best-effort
+            }
+            AssetVersion::query()->whereKey($row->id)->delete();
+        }
     }
 
     /**

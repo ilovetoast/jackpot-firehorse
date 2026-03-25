@@ -5,7 +5,7 @@ import AppFooter from '../../../Components/AppFooter'
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 
 export default function AIAgents({ agents, environment, availableModels = [], canManage }) {
-    const { auth } = usePage().props
+    const { auth, errors: pageErrors } = usePage().props
     const [editingAgent, setEditingAgent] = useState(null)
     const { data, setData, post, processing, errors } = useForm({
         active: null,
@@ -138,12 +138,18 @@ export default function AIAgents({ agents, environment, availableModels = [], ca
                                                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                                     >
                                                         <option value="">Use Config</option>
-                                                        {availableModels.map((model) => (
+                                                        {(agent.config.allowed_models?.length
+                                                            ? agent.config.allowed_models
+                                                            : availableModels
+                                                        ).map((model) => (
                                                             <option key={model} value={model}>
                                                                 {model}
                                                             </option>
                                                         ))}
                                                     </select>
+                                                    {pageErrors?.default_model && (
+                                                        <p className="mt-1 text-xs text-red-600">{pageErrors.default_model}</p>
+                                                    )}
                                                 ) : (
                                                     <div className="text-sm text-gray-500">
                                                         {effective.default_model}

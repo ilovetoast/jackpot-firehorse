@@ -78,6 +78,8 @@ export type ImageLayer = BaseLayer & {
     type: 'image'
     /** DAM asset id when sourced from the library */
     assetId?: string
+    /** Selected {@link AssetVersion} id when user picks a historical version (UUID). */
+    assetVersionId?: string
     src: string
     naturalWidth?: number
     naturalHeight?: number

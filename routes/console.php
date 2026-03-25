@@ -115,6 +115,13 @@ if ($schedulerEnabled) {
         ->name('cleanup-expired-downloads')
         ->description('Delete expired download ZIPs from storage and verify cleanup');
 
+    // Generative editor: purge orphaned AI layer assets (lifecycle=orphaned) after grace period
+    Schedule::job(new \App\Jobs\CleanupOrphanedGenerativeAssetsJob)
+        ->daily()
+        ->withoutOverlapping()
+        ->name('cleanup-orphaned-generative-assets')
+        ->description('Hard-delete orphaned generative_layer AI assets after configured days');
+
     // Asset deletion: backup for delayed DeleteAssetJob (catches jobs lost on Redis flush, worker restarts, or deploy)
     // Primary path: soft delete dispatches DeleteAssetJob with 30-day delay. This job runs daily and processes
     // any soft-deleted assets past grace period that weren't handled by delayed jobs (e.g. queue store lost).

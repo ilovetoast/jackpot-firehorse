@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\AnthropicProvider;
+use App\Services\AI\Providers\FluxProvider;
 use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use Illuminate\Support\Facades\Log;
@@ -98,6 +99,14 @@ class AIService
                 $this->providers['gemini'] = new GeminiProvider();
             } catch (\Throwable $e) {
                 Log::warning('[AIService] GeminiProvider failed to initialize', ['error' => $e->getMessage()]);
+            }
+        }
+
+        if (trim((string) config('ai.flux.api_key', '')) !== '') {
+            try {
+                $this->providers['flux'] = new FluxProvider();
+            } catch (\Throwable $e) {
+                Log::warning('[AIService] FluxProvider failed to initialize', ['error' => $e->getMessage()]);
             }
         }
 
@@ -516,13 +525,30 @@ class AIService
                 $actualModelName
             );
 
-            $metadata = $agentRun->metadata ?? [];
+            $metadata = array_merge(
+                $agentRun->metadata ?? [],
+                $this->buildGenerativeAuditForRun(
+                    $prompt,
+                    $options,
+                    $modelKey,
+                    $actualModelName,
+                    (string) $providerName,
+                    $imageRef
+                )
+            );
             if (config('ai.logging.store_prompts', false)) {
                 $metadata['prompt'] = $prompt;
                 $metadata['response_metadata'] = $response['metadata'] ?? [];
             }
             $metadata['resolved_model_key'] = $modelKey;
             $metadata['image_ref'] = $imageRef;
+            $metadata['editor_admin_request'] = $this->buildEditorAdminRequestSnapshot(
+                $prompt,
+                $options,
+                $modelKey,
+                $actualModelName,
+                (string) $providerName
+            );
 
             $displayName = (string) ($modelConfig['display_name'] ?? $modelConfig['model_name'] ?? $modelKey);
 
@@ -625,7 +651,7 @@ class AIService
         }
 
         $modelKey = $options['model'] ?? $agentConfig['default_model'];
-        $this->assertGenerativeImageModelAllowed($modelKey, $environment);
+        $this->assertEditorEditImageModelAllowed($modelKey, $environment);
 
         $modelConfig = $this->getModelConfig($modelKey, $environment);
         if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
@@ -636,9 +662,11 @@ class AIService
         $actualModelName = $modelConfig['model_name'] ?? $modelKey;
         $providerName = $modelConfig['provider'] ?? config('ai.default_provider', 'openai');
 
-        if (! ($provider instanceof OpenAIProvider) && ! ($provider instanceof GeminiProvider)) {
+        if (! ($provider instanceof OpenAIProvider)
+            && ! ($provider instanceof GeminiProvider)
+            && ! ($provider instanceof FluxProvider)) {
             throw new \InvalidArgumentException(
-                'Editor image edit requires OpenAI (gpt-image-1) or a Gemini Nano Banana image model.'
+                'Editor image edit requires OpenAI (gpt-image-1), Gemini (Nano Banana), or FLUX.'
             );
         }
 
@@ -725,6 +753,8 @@ class AIService
                 $response = $provider->editImage($prompt, $providerOptions);
             } elseif ($provider instanceof GeminiProvider) {
                 $response = $provider->editImage($prompt, $providerOptions);
+            } elseif ($provider instanceof FluxProvider) {
+                $response = $provider->editImage($prompt, $providerOptions);
             } else {
                 throw new \InvalidArgumentException('Unsupported provider for editor image edit.');
             }
@@ -740,13 +770,30 @@ class AIService
                 $actualModelName
             );
 
-            $metadata = $agentRun->metadata ?? [];
+            $metadata = array_merge(
+                $agentRun->metadata ?? [],
+                $this->buildGenerativeAuditForRun(
+                    $prompt,
+                    $options,
+                    $modelKey,
+                    $actualModelName,
+                    (string) $providerName,
+                    $imageRef
+                )
+            );
             if (config('ai.logging.store_prompts', false)) {
                 $metadata['prompt'] = $prompt;
                 $metadata['response_metadata'] = $response['metadata'] ?? [];
             }
             $metadata['resolved_model_key'] = $modelKey;
             $metadata['image_ref'] = $imageRef;
+            $metadata['editor_admin_request'] = $this->buildEditorAdminRequestSnapshot(
+                $prompt,
+                $options,
+                $modelKey,
+                $actualModelName,
+                (string) $providerName
+            );
 
             $displayName = (string) ($modelConfig['display_name'] ?? $modelConfig['model_name'] ?? $modelKey);
 
@@ -808,7 +855,7 @@ class AIService
     protected function extractImageRefFromGenerativeResponse(array $response, string $providerName): ?string
     {
         $meta = $response['metadata'] ?? [];
-        if ($providerName === 'openai') {
+        if ($providerName === 'openai' || $providerName === 'flux') {
             $ref = $meta['image_ref'] ?? null;
 
             return is_string($ref) ? $ref : null;
@@ -834,6 +881,37 @@ class AIService
         if ($allowed !== []) {
             if (! in_array($modelKey, $allowed, true)) {
                 throw new \InvalidArgumentException("Model '{$modelKey}' is not allowed for generative image generation.");
+            }
+            if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+            }
+
+            return;
+        }
+
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+        }
+        $caps = $modelConfig['capabilities'] ?? [];
+        if (! in_array('image_generation', $caps, true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' does not support image generation.");
+        }
+    }
+
+    /**
+     * Allowed models for POST /app/api/edit-image only (uses edit_allowed_model_keys, then allowed_model_keys).
+     */
+    protected function assertEditorEditImageModelAllowed(string $modelKey, ?string $environment = null): void
+    {
+        $allowed = config('ai.generative_editor.edit_allowed_model_keys', []);
+        if ($allowed === []) {
+            $allowed = config('ai.generative_editor.allowed_model_keys', []);
+        }
+        $modelConfig = $this->getModelConfig($modelKey, $environment);
+
+        if ($allowed !== []) {
+            if (! in_array($modelKey, $allowed, true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not allowed for editor image edit.");
             }
             if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
                 throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
@@ -1001,9 +1079,100 @@ class AIService
             'max_tokens', 'temperature', // Provider-specific options
             'image_size', 'size', 'model_override', 'composition_id', 'asset_id', 'brand_id',
             'image_binary', 'mime_type', // Raw bytes are not JSON-safe / must not be logged to DB
+            'brand_context', 'generative_layer_uuid', // Summarized in generative_audit on success
         ]));
 
         return $metadata;
+    }
+
+    /**
+     * Structured audit for editor generative image / edit (stored in ai_agent_runs.metadata).
+     * Does not include image bytes; optional full prompt via ai.logging.log_generative_prompts.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    protected function buildGenerativeAuditForRun(
+        string $prompt,
+        array $options,
+        string $modelKey,
+        string $actualModelName,
+        string $providerName,
+        ?string $imageRef
+    ): array {
+        $brandContext = $options['brand_context'] ?? null;
+        $hasBrand = is_array($brandContext) && $brandContext !== [];
+        $digest = null;
+        if ($hasBrand) {
+            $json = json_encode($brandContext, JSON_UNESCAPED_UNICODE);
+            $json = is_string($json) ? $json : '{}';
+            $digest = [
+                'sha256' => hash('sha256', $json),
+                'preview' => mb_substr($json, 0, 400),
+            ];
+        }
+
+        $refKind = 'unknown';
+        if (is_string($imageRef)) {
+            if (str_starts_with($imageRef, 'data:')) {
+                $refKind = 'data_url';
+            } elseif (str_starts_with($imageRef, 'http://') || str_starts_with($imageRef, 'https://')) {
+                $refKind = 'https_url';
+            }
+        }
+
+        $audit = [
+            'registry_model_key' => $modelKey,
+            'resolved_api_model' => $actualModelName,
+            'provider' => $providerName,
+            'brand_context_included' => $hasBrand,
+            'brand_context_digest' => $digest,
+            'composition_id' => isset($options['composition_id']) ? (string) $options['composition_id'] : null,
+            'generative_layer_uuid' => isset($options['generative_layer_uuid']) ? (string) $options['generative_layer_uuid'] : null,
+            'source_asset_id' => isset($options['asset_id']) ? (string) $options['asset_id'] : null,
+            'prompt_sha256' => hash('sha256', $prompt),
+            'prompt_length' => strlen($prompt),
+            'prompt_preview' => mb_substr($prompt, 0, 500),
+            'output_image_ref_kind' => $refKind,
+            'output_image_ref_length' => is_string($imageRef) ? strlen($imageRef) : 0,
+        ];
+
+        if (config('ai.logging.log_generative_prompts', true)) {
+            $audit['prompt'] = $prompt;
+        }
+
+        return ['generative_audit' => $audit];
+    }
+
+    /**
+     * Admin-friendly JSON snapshot of what was sent to the provider (no image bytes).
+     * Stored on successful editor generative / editor edit runs only.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    protected function buildEditorAdminRequestSnapshot(
+        string $prompt,
+        array $options,
+        string $modelKey,
+        string $actualModelName,
+        string $providerName
+    ): array {
+        $refs = $options['references'] ?? null;
+
+        return [
+            'prompt' => $prompt,
+            'model_registry_key' => $modelKey,
+            'resolved_api_model' => $actualModelName,
+            'provider' => $providerName,
+            'composition_id' => $options['composition_id'] ?? null,
+            'generative_layer_uuid' => $options['generative_layer_uuid'] ?? null,
+            'asset_id' => $options['asset_id'] ?? null,
+            'mime_type' => $options['mime_type'] ?? null,
+            'size' => $options['size'] ?? $options['image_size'] ?? null,
+            'brand_id' => $options['brand_id'] ?? null,
+            'reference_asset_count' => is_array($refs) ? count($refs) : null,
+        ];
     }
 
     /**

@@ -11,6 +11,8 @@ export type EditImagePayload = {
     brandContext?: BrandContext | null
     compositionId?: string
     brandId?: number
+    /** Same layer id as in the document — versions persisted edit output per layer (optional). */
+    generativeLayerUuid?: string
 }
 
 export type EditImageResponse = {
@@ -57,6 +59,9 @@ export async function editImage(
         }
         if (payload.modelKey != null && payload.modelKey !== '') {
             body.model_key = payload.modelKey
+        }
+        if (payload.generativeLayerUuid != null && String(payload.generativeLayerUuid).trim() !== '') {
+            body.generative_layer_uuid = String(payload.generativeLayerUuid).trim()
         }
 
         const res = await fetch('/app/api/edit-image', {

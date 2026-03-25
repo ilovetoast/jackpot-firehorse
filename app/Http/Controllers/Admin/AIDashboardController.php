@@ -552,6 +552,143 @@ class AIDashboardController extends Controller
     }
 
     /**
+     * Editor canvas: generative image + AI image edit runs with structured {@see AIService::buildGenerativeAuditForRun} metadata.
+     */
+    public function editorImageAudit(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $editorTaskTypes = ['editor_generative_image', 'editor_edit_image'];
+
+        $query = AIAgentRun::query()
+            ->forAdminActivityList()
+            ->whereIn('task_type', $editorTaskTypes)
+            ->with(['tenant', 'user'])
+            ->orderBy('started_at', 'desc');
+
+        if ($request->filled('agent_id')) {
+            $aid = (string) $request->agent_id;
+            if (in_array($aid, ['editor_generative_image', 'editor_edit_image'], true)) {
+                $query->where('agent_id', $aid);
+            }
+        }
+
+        if ($request->filled('model_used')) {
+            $query->where('model_used', 'like', '%'.$request->model_used.'%');
+        }
+
+        if ($request->filled('task_type')) {
+            $tt = (string) $request->task_type;
+            if (in_array($tt, $editorTaskTypes, true)) {
+                $query->where('task_type', $tt);
+            }
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('environment')) {
+            $query->where('environment', $request->environment);
+        }
+
+        if ($request->filled('tenant_id')) {
+            $query->where('tenant_id', (int) $request->tenant_id);
+        }
+
+        if ($request->filled('date_from')) {
+            $query->where('started_at', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->where('started_at', '<=', $request->date_to.' 23:59:59');
+        }
+
+        $runs = $query->paginate(50)->through(function ($run) {
+            $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
+                ->where('linkable_id', $run->id)
+                ->with('ticket:id,ticket_number,subject')
+                ->get()
+                ->pluck('ticket')
+                ->filter();
+
+            $ga = is_array($run->metadata) ? ($run->metadata['generative_audit'] ?? null) : null;
+            $auditSummary = null;
+            if (is_array($ga)) {
+                $auditSummary = [
+                    'registry_model_key' => $ga['registry_model_key'] ?? null,
+                    'provider' => $ga['provider'] ?? null,
+                    'prompt_preview' => isset($ga['prompt_preview']) ? mb_substr((string) $ga['prompt_preview'], 0, 160) : null,
+                    'generative_layer_uuid' => $ga['generative_layer_uuid'] ?? null,
+                    'composition_id' => $ga['composition_id'] ?? null,
+                    'source_asset_id' => $ga['source_asset_id'] ?? null,
+                    'has_audit' => true,
+                ];
+            } else {
+                $auditSummary = ['has_audit' => false];
+            }
+
+            return [
+                'id' => $run->id,
+                'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
+                'agent_id' => $run->agent_id,
+                'agent_name' => $this->getAgentName($run->agent_id),
+                'task_type' => $run->task_type,
+                'triggering_context' => $run->triggering_context,
+                'model_used' => $run->model_used,
+                'tokens_in' => $run->tokens_in,
+                'tokens_out' => $run->tokens_out,
+                'estimated_cost' => $run->estimated_cost,
+                'status' => $run->status,
+                'error_message' => $run->error_message,
+                'duration' => $run->formatted_duration,
+                'tenant' => $run->tenant ? [
+                    'id' => $run->tenant->id,
+                    'name' => $run->tenant->name,
+                ] : null,
+                'user' => $run->user ? [
+                    'id' => $run->user->id,
+                    'name' => $run->user->name,
+                    'email' => $run->user->email,
+                ] : null,
+                'environment' => $run->environment,
+                'audit_summary' => $auditSummary,
+                'related_tickets' => $relatedTickets->map(function ($ticket) {
+                    return [
+                        'id' => $ticket->id,
+                        'ticket_number' => $ticket->ticket_number,
+                        'subject' => $ticket->subject,
+                    ];
+                })->values(),
+            ];
+        });
+
+        $filterOptions = [
+            'agents' => [
+                ['value' => 'editor_generative_image', 'label' => $this->getAgentName('editor_generative_image')],
+                ['value' => 'editor_edit_image', 'label' => $this->getAgentName('editor_edit_image')],
+            ],
+            'models' => $this->getModelOptions(),
+            'task_types' => [
+                ['value' => 'editor_generative_image', 'label' => 'editor_generative_image'],
+                ['value' => 'editor_edit_image', 'label' => 'editor_edit_image'],
+            ],
+            'environments' => $this->getEnvironmentOptions(),
+        ];
+
+        return Inertia::render('Admin/AI/EditorImageAudit', [
+            'runs' => $runs,
+            'filters' => $request->only([
+                'agent_id', 'model_used', 'task_type', 'status', 'environment',
+                'date_from', 'date_to', 'tenant_id',
+            ]),
+            'filterOptions' => $filterOptions,
+        ]);
+    }
+
+    /**
      * Display AI Models management view.
      */
     public function models(Request $request): Response
@@ -665,11 +802,15 @@ class AIDashboardController extends Controller
             'environment' => 'nullable|string',
         ]);
 
-        $override = $this->configService->updateAgentOverride(
-            $agentId,
-            $validated,
-            Auth::user()
-        );
+        try {
+            $this->configService->updateAgentOverride(
+                $agentId,
+                $validated,
+                Auth::user()
+            );
+        } catch (\InvalidArgumentException $e) {
+            return redirect()->back()->withErrors(['default_model' => $e->getMessage()]);
+        }
 
         return redirect()->back()->with('success', 'Agent override updated successfully.');
     }

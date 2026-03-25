@@ -18,7 +18,10 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * Persists AI provider output (HTTPS URL or data URL) to tenant S3 and creates an {@link Asset}.
+ * Persists AI provider output (HTTPS URL or data URL) to tenant S3 and creates or versions an {@link Asset}.
+ *
+ * When `generative_layer_uuid` is present in `$context`, reuses the same asset id for that layer and appends
+ * {@link AssetVersion} rows (cap: config editor.generative.max_versions_per_layer).
  */
 final class EditorGenerativeImagePersistService
 {
@@ -28,6 +31,8 @@ final class EditorGenerativeImagePersistService
     ) {}
 
     /**
+     * @param  array<string, mixed>  $context
+     *   Optional: generative_layer_uuid, composition_id
      * @return array{url: string, asset_id: string}
      *
      * @throws \InvalidArgumentException
@@ -36,7 +41,8 @@ final class EditorGenerativeImagePersistService
         string $urlOrDataUrl,
         Tenant $tenant,
         User $user,
-        Brand $brand
+        Brand $brand,
+        array $context = []
     ): array {
         if ($tenant->uuid === null || $tenant->uuid === '') {
             throw new \InvalidArgumentException('Tenant UUID is required for asset storage.');
@@ -56,6 +62,27 @@ final class EditorGenerativeImagePersistService
 
         $bucket = $this->tenantBucketService->resolveActiveBucketOrFail($tenant);
 
+        $layerUuid = isset($context['generative_layer_uuid']) ? trim((string) $context['generative_layer_uuid']) : '';
+        if ($layerUuid !== '') {
+            $existing = $this->findGenerativeLayerAsset($tenant, $brand, $layerUuid);
+            if ($existing !== null) {
+                return $this->appendVersionToGenerativeLayerAsset(
+                    $tenant,
+                    $brand,
+                    $user,
+                    $existing,
+                    $binary,
+                    $extension,
+                    $mimeType,
+                    $size,
+                    $width,
+                    $height,
+                    $layerUuid,
+                    $context
+                );
+            }
+        }
+
         return DB::transaction(function () use (
             $tenant,
             $brand,
@@ -66,7 +93,9 @@ final class EditorGenerativeImagePersistService
             $mimeType,
             $size,
             $width,
-            $height
+            $height,
+            $layerUuid,
+            $context
         ) {
             $assetId = (string) Str::uuid();
             $path = $this->pathGenerator->generateOriginalPathForAssetId(
@@ -77,6 +106,18 @@ final class EditorGenerativeImagePersistService
             );
 
             $title = 'AI Generated '.now()->format('M j, Y g:i a');
+
+            $meta = [
+                'generated_at' => now()->toIso8601String(),
+                'ai_generated' => true,
+                'asset_role' => 'generative_layer',
+            ];
+            if ($layerUuid !== '') {
+                $meta['generative_layer_uuid'] = $layerUuid;
+            }
+            if (! empty($context['composition_id'])) {
+                $meta['composition_id'] = (string) $context['composition_id'];
+            }
 
             $asset = Asset::forceCreate([
                 'id' => $assetId,
@@ -100,10 +141,7 @@ final class EditorGenerativeImagePersistService
                 'source' => 'generative_editor',
                 'builder_staged' => false,
                 'intake_state' => 'normal',
-                'metadata' => [
-                    'generated_at' => now()->toIso8601String(),
-                    'ai_generated' => true,
-                ],
+                'metadata' => $meta,
             ]);
 
             Storage::disk('s3')->put($path, $binary, 'private');
@@ -133,6 +171,168 @@ final class EditorGenerativeImagePersistService
 
             return ['url' => $url, 'asset_id' => $asset->id];
         });
+    }
+
+    private function findGenerativeLayerAsset(Tenant $tenant, Brand $brand, string $layerUuid): ?Asset
+    {
+        return Asset::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('source', 'generative_editor')
+            ->where('metadata->generative_layer_uuid', $layerUuid)
+            ->first();
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array{url: string, asset_id: string}
+     */
+    private function appendVersionToGenerativeLayerAsset(
+        Tenant $tenant,
+        Brand $brand,
+        User $user,
+        Asset $asset,
+        string $binary,
+        string $extension,
+        string $mimeType,
+        int $size,
+        ?int $width,
+        ?int $height,
+        string $layerUuid,
+        array $context
+    ): array {
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            throw new \InvalidArgumentException('Generative layer asset does not belong to this workspace.');
+        }
+
+        $maxRetain = max(1, (int) config('editor.generative.max_versions_per_layer', 20));
+
+        return DB::transaction(function () use (
+            $tenant,
+            $user,
+            $asset,
+            $binary,
+            $extension,
+            $mimeType,
+            $size,
+            $width,
+            $height,
+            $layerUuid,
+            $context,
+            $maxRetain
+        ) {
+            $asset->refresh();
+
+            $maxVersion = (int) (AssetVersion::query()
+                ->where('asset_id', $asset->id)
+                ->max('version_number') ?? 0);
+
+            $nextVersion = $maxVersion + 1;
+
+            $path = $this->pathGenerator->generateOriginalPathForAssetId(
+                $tenant,
+                $asset->id,
+                $nextVersion,
+                $extension
+            );
+
+            $previousPath = $asset->storage_root_path;
+
+            Storage::disk('s3')->put($path, $binary, 'private');
+
+            AssetVersion::query()
+                ->where('asset_id', $asset->id)
+                ->update(['is_current' => false]);
+
+            AssetVersion::create([
+                'id' => (string) Str::uuid(),
+                'asset_id' => $asset->id,
+                'version_number' => $nextVersion,
+                'file_path' => $path,
+                'file_size' => $size,
+                'mime_type' => $mimeType,
+                'width' => $width,
+                'height' => $height,
+                'checksum' => hash('sha256', $binary),
+                'is_current' => true,
+                'pipeline_status' => 'complete',
+                'uploaded_by' => $user->id,
+            ]);
+
+            $meta = $asset->metadata ?? [];
+            if (! is_array($meta)) {
+                $meta = [];
+            }
+            $meta['generated_at'] = now()->toIso8601String();
+            $meta['ai_generated'] = true;
+            $meta['asset_role'] = 'generative_layer';
+            $meta['generative_layer_uuid'] = $layerUuid;
+            if (! empty($context['composition_id'])) {
+                $meta['composition_id'] = (string) $context['composition_id'];
+            }
+
+            $asset->update([
+                'storage_root_path' => $path,
+                'size_bytes' => $size,
+                'width' => $width,
+                'height' => $height,
+                'mime_type' => $mimeType,
+                'metadata' => $meta,
+            ]);
+
+            if (is_string($previousPath) && $previousPath !== '' && $previousPath !== $path) {
+                try {
+                    Storage::disk('s3')->delete($previousPath);
+                } catch (\Throwable $e) {
+                    Log::warning('[EditorGenerativeImagePersistService] Could not delete previous generative object', [
+                        'asset_id' => $asset->id,
+                        'path' => $previousPath,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            $this->pruneOldGenerativeVersions($asset->id, $maxRetain);
+
+            Log::info('Generative layer version appended', [
+                'asset_id' => $asset->id,
+                'version' => $nextVersion,
+                'bytes' => $size,
+            ]);
+
+            $url = route('api.editor.assets.file', ['asset' => $asset->id], absolute: true);
+
+            return ['url' => $url, 'asset_id' => $asset->id];
+        });
+    }
+
+    /**
+     * Remove oldest version rows and S3 objects beyond the cap (keeps newest N).
+     */
+    private function pruneOldGenerativeVersions(string $assetId, int $maxRetain): void
+    {
+        $versions = AssetVersion::query()
+            ->where('asset_id', $assetId)
+            ->whereNull('deleted_at')
+            ->orderByDesc('version_number')
+            ->get(['id', 'version_number', 'file_path']);
+
+        if ($versions->count() <= $maxRetain) {
+            return;
+        }
+
+        $toRemove = $versions->slice($maxRetain);
+        foreach ($toRemove as $row) {
+            $path = $row->file_path;
+            try {
+                if (is_string($path) && $path !== '') {
+                    Storage::disk('s3')->delete($path);
+                }
+            } catch (\Throwable) {
+                // best-effort
+            }
+            AssetVersion::query()->whereKey($row->id)->delete();
+        }
     }
 
     /**
@@ -272,7 +472,8 @@ final class EditorGenerativeImagePersistService
             || str_contains($host, 'googleusercontent.com')
             || str_contains($host, 'googleapis.com')
             || str_contains($host, 'storage.googleapis.com')
-            || str_contains($host, 'gstatic.com');
+            || str_contains($host, 'gstatic.com')
+            || str_contains($host, 'bfl.ai');
 
         $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
         if (is_string($appHost) && $appHost !== '' && $host === strtolower($appHost)) {

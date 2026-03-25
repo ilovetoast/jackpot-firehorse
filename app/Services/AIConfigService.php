@@ -143,6 +143,17 @@ class AIConfigService
     public function updateAgentOverride(string $agentId, array $data, User $user): AIAgentOverride
     {
         return DB::transaction(function () use ($agentId, $data, $user) {
+            $baseAgent = config("ai.agents.{$agentId}");
+            $allowed = is_array($baseAgent) ? ($baseAgent['allowed_models'] ?? null) : null;
+            if (is_array($allowed) && $allowed !== [] && isset($data['default_model']) && $data['default_model'] !== null && $data['default_model'] !== '') {
+                $dm = (string) $data['default_model'];
+                if (! in_array($dm, $allowed, true)) {
+                    throw new \InvalidArgumentException(
+                        "Model '{$dm}' is not allowed for agent '{$agentId}'. Allowed: ".implode(', ', $allowed)
+                    );
+                }
+            }
+
             $override = AIAgentOverride::firstOrNew([
                 'agent_id' => $agentId,
                 'environment' => $data['environment'] ?? null,

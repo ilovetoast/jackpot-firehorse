@@ -667,6 +667,9 @@ class AdminAssetController extends Controller
             'intake_state' => $request->filled('intake_state') ? trim($request->intake_state) : null,
             'date_from' => $request->filled('date_from') ? trim($request->date_from) : null,
             'date_to' => $request->filled('date_to') ? trim($request->date_to) : null,
+            'include_trashed' => $this->parseBoolParam($request, 'include_trashed'),
+            'asset_role' => $request->filled('asset_role') ? trim($request->asset_role) : null,
+            'editor_wip_only' => $this->parseBoolParam($request, 'editor_wip_only'),
         ];
 
         if ($search !== '') {
@@ -763,7 +766,11 @@ class AdminAssetController extends Controller
 
     protected function buildQuery(array $filters): \Illuminate\Database\Eloquent\Builder
     {
-        $query = Asset::query()->withTrashed();
+        $includeTrashed = ($filters['include_trashed'] ?? null) === true;
+        $deletedOnly = ($filters['deleted'] ?? null) === true || ($filters['deleted'] ?? null) === '1';
+        $query = ($includeTrashed || $deletedOnly)
+            ? Asset::query()->withTrashed()
+            : Asset::query();
 
         if (! empty($filters['asset_id'])) {
             $query->where('assets.id', $filters['asset_id']);
@@ -863,6 +870,15 @@ class AdminAssetController extends Controller
             $query->stagedOnly();
         } elseif (($filters['intake_state'] ?? null) === 'normal') {
             $query->normalIntakeOnly();
+        }
+        if (! empty($filters['asset_role'])) {
+            $query->where('metadata->asset_role', $filters['asset_role']);
+        }
+        if (($filters['editor_wip_only'] ?? null) === true) {
+            $query->where(function ($q) {
+                $q->where('metadata->composition_wip', true)
+                    ->orWhere('metadata->composition_preview', true);
+            });
         }
 
         return $query;

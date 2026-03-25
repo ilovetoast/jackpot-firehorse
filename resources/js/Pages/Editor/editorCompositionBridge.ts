@@ -226,6 +226,25 @@ export async function postCompositionVersion(
     return { composition: data.composition, version: data.version ?? null }
 }
 
+/** DELETE /app/api/compositions/{id} — removes composition + version rows; preview assets only; not library assets. */
+export async function deleteCompositionApi(compositionId: string): Promise<void> {
+    const res = await fetch(`/app/api/compositions/${encodeURIComponent(compositionId)}`, {
+        method: 'DELETE',
+        headers: csrfHeaders(),
+        credentials: 'same-origin',
+    })
+    const text = await res.text()
+    let data: { ok?: boolean; error?: string }
+    try {
+        data = JSON.parse(text) as { ok?: boolean; error?: string }
+    } catch {
+        throw new Error(text || 'Delete failed')
+    }
+    if (!res.ok) {
+        throw new Error(data.error || text || 'Delete failed')
+    }
+}
+
 export async function duplicateCompositionApi(
     compositionId: string,
     name?: string

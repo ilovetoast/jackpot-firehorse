@@ -89,6 +89,7 @@ import {
     type EditorPublishCategory,
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
+import { fetchAssetVersions, type EditorAssetVersionRow } from './editorAssetVersionBridge'
 import { captureCompositionThumbnailBase64 } from './editorCompositionThumbnail'
 import {
     ensureCanvasFontLoaded,
@@ -96,6 +97,7 @@ import {
     resolveCanvasFontFamily,
 } from './editorBrandFonts'
 import {
+    deleteCompositionApi,
     duplicateCompositionApi,
     fetchCompositionSummaries,
     fetchCompositionVersions,
@@ -121,8 +123,10 @@ import {
     fetchGenerateImageUsage,
     generateEditorImage,
     GENERATIVE_ADVANCED_MODEL_OPTIONS,
+    GENERATIVE_EDIT_MODEL_OPTIONS,
     GENERATIVE_MODEL_OPTIONS,
     MODEL_MAP,
+    normalizeEditModelKey,
     resolveModelConfig,
     type GenerateImageUsage,
     type GenerativeUiModelKey,
@@ -930,10 +934,13 @@ export default function AssetEditor() {
     const [compositionSummaries, setCompositionSummaries] = useState<CompositionSummaryDto[]>([])
     const [compositionListLoading, setCompositionListLoading] = useState(false)
     const [compositionListError, setCompositionListError] = useState<string | null>(null)
+    const [compositionDeleteBusy, setCompositionDeleteBusy] = useState(false)
     const [versions, setVersions] = useState<
         import('./editorCompositionBridge').CompositionVersionMeta[]
     >([])
     const [versionsLoading, setVersionsLoading] = useState(false)
+    /** Per image-layer id: DAM asset version rows for the version strip (no new versions on switch). */
+    const [layerVersions, setLayerVersions] = useState<Record<string, EditorAssetVersionRow[]>>({})
     const [compareOpen, setCompareOpen] = useState(false)
     const [compareLeftId, setCompareLeftId] = useState<string | null>(null)
     const [compareRightId, setCompareRightId] = useState<string | null>(null)
@@ -988,6 +995,51 @@ export default function AssetEditor() {
         () => document.layers.find((l) => l.id === selectedLayerId) ?? null,
         [document.layers, selectedLayerId]
     )
+
+    const selectedImageLayerWithAsset = useMemo(() => {
+        if (!selectedLayerId) {
+            return null
+        }
+        const l = document.layers.find((x) => x.id === selectedLayerId)
+        return l && isImageLayer(l) && l.assetId ? l : null
+    }, [document.layers, selectedLayerId])
+
+    useEffect(() => {
+        if (!selectedImageLayerWithAsset?.assetId) {
+            return
+        }
+        const layerId = selectedImageLayerWithAsset.id
+        const assetId = selectedImageLayerWithAsset.assetId
+        let cancelled = false
+        fetchAssetVersions(assetId)
+            .then((res) => {
+                if (!cancelled) {
+                    setLayerVersions((prev) => ({ ...prev, [layerId]: res.versions }))
+                }
+            })
+            .catch((err) => {
+                console.error(err)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [selectedImageLayerWithAsset?.id, selectedImageLayerWithAsset?.assetId])
+
+    const handleSwitchAssetVersion = useCallback((layerId: string, version: EditorAssetVersionRow) => {
+        setDocument((prev) => ({
+            ...prev,
+            layers: prev.layers.map((layer) => {
+                if (layer.id !== layerId || !isImageLayer(layer)) {
+                    return layer
+                }
+                return {
+                    ...layer,
+                    src: version.url,
+                    assetVersionId: version.id,
+                }
+            }),
+        }))
+    }, [])
 
     const generativeBrandScore = useMemo(() => {
         if (!selectedLayer || !isGenerativeImageLayer(selectedLayer)) {
@@ -1735,8 +1787,12 @@ export default function AssetEditor() {
         [document, compositionName]
     )
 
-    const startNewComposition = useCallback(() => {
-        if (discardRequiresConfirmation && !window.confirm('Discard unsaved changes and start a new composition?')) {
+    const startNewComposition = useCallback((opts?: { skipDiscardConfirm?: boolean }) => {
+        if (
+            !opts?.skipDiscardConfirm &&
+            discardRequiresConfirmation &&
+            !window.confirm('Discard unsaved changes and start a new composition?')
+        ) {
             return
         }
         const fresh = createInitialDocument()
@@ -1762,6 +1818,38 @@ export default function AssetEditor() {
         })
         replaceUrlCompositionParam(null)
     }, [discardRequiresConfirmation])
+
+    const deleteCompositionById = useCallback(
+        async (targetId: string) => {
+            if (
+                !window.confirm(
+                    'Delete this composition for everyone in this brand? The saved canvas and its version history will be removed. Images in your library are not deleted.'
+                )
+            ) {
+                return
+            }
+            setCompositionDeleteBusy(true)
+            try {
+                await deleteCompositionApi(targetId)
+                setActivityToast('Composition deleted')
+                if (compositionId === targetId) {
+                    startNewComposition({ skipDiscardConfirm: true })
+                }
+                void fetchCompositionSummaries()
+                    .then((rows) => {
+                        setCompositionSummaries(rows)
+                    })
+                    .catch(() => {
+                        /* list refresh best-effort */
+                    })
+            } catch (e: unknown) {
+                setActivityToast(handleAIError(e))
+            } finally {
+                setCompositionDeleteBusy(false)
+            }
+        },
+        [compositionId, startNewComposition]
+    )
 
     const openCompositionPickerAndLoad = useCallback(() => {
         setOpenCompositionPicker(true)
@@ -2359,6 +2447,7 @@ export default function AssetEditor() {
                                 : {}),
                             ...(compositionId ? { composition_id: compositionId } : {}),
                             ...(activeBrandId != null ? { brand_id: activeBrandId } : {}),
+                            generative_layer_uuid: layerId,
                         },
                         { signal: ac.signal }
                     )
@@ -2537,10 +2626,11 @@ export default function AssetEditor() {
                                 ? { assetId: layer.assetId }
                                 : { imageUrl: layer.src }),
                             instruction,
-                            modelKey: layer.aiEdit?.editModelKey ?? 'gpt-image-1',
+                            modelKey: normalizeEditModelKey(layer.aiEdit?.editModelKey),
                             brandContext: brandContext ?? undefined,
                             ...(compositionId ? { compositionId } : {}),
                             ...(activeBrandId != null ? { brandId: activeBrandId } : {}),
+                            generativeLayerUuid: layerId,
                         },
                         { signal: ac.signal }
                     )
@@ -2711,6 +2801,7 @@ export default function AssetEditor() {
                 const promptString = buildBrandAugmentedPrompt(structuredPrompt, applyBrand && brandContext ? brandContext : null, {
                     referenceCount: refs.length,
                 })
+                // Omit generative_layer_uuid: parallel variation requests would contend for the same versioned asset.
                 const payload = {
                     prompt: structuredPrompt,
                     prompt_string: promptString,
@@ -3397,6 +3488,16 @@ export default function AssetEditor() {
                             >
                                 <DocumentDuplicateIcon className="h-4 w-4" aria-hidden />
                                 Duplicate
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!compositionId || compositionDeleteBusy}
+                                onClick={() => compositionId && void deleteCompositionById(compositionId)}
+                                title="Delete this saved composition for everyone in this brand. Library assets are not removed."
+                                className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2.5 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+                            >
+                                <TrashIcon className="h-4 w-4" aria-hidden />
+                                Delete
                             </button>
                             <button
                                 type="button"
@@ -4965,6 +5066,36 @@ export default function AssetEditor() {
                                         </select>
                                         </div>
 
+                                        {selectedLayer.assetId && (
+                                            <div className="mt-4">
+                                                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                                                    Versions
+                                                </div>
+                                                <div className="flex gap-2 overflow-x-auto pb-1">
+                                                    {(layerVersions[selectedLayer.id] ?? []).map((v) => (
+                                                        <button
+                                                            key={v.id}
+                                                            type="button"
+                                                            disabled={selectedLayer.locked}
+                                                            onClick={() => handleSwitchAssetVersion(selectedLayer.id, v)}
+                                                            className={`border rounded overflow-hidden w-16 h-16 flex-shrink-0 hover:ring-2 hover:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 ${
+                                                                selectedLayer.assetVersionId === v.id
+                                                                    ? 'ring-2 ring-indigo-500'
+                                                                    : ''
+                                                            }`}
+                                                            title={v.created_at ?? undefined}
+                                                        >
+                                                            <img
+                                                                src={v.url}
+                                                                alt=""
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2 text-gray-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-gray-100">
                                             <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
                                                 Modify image (AI)
@@ -4975,20 +5106,25 @@ export default function AssetEditor() {
                                                 <span className="font-medium text-gray-800 dark:text-gray-300">
                                                     Regenerate
                                                 </span>{' '}
-                                                re-runs your prompt on the latest result. Choose{' '}
+                                                re-runs your prompt on the latest result.                                                 Choose{' '}
                                                 <span className="font-medium text-gray-800 dark:text-gray-300">
-                                                    Nano Banana
+                                                    Nano Banana (2.5)
                                                 </span>{' '}
-                                                (Gemini) if OpenAI cannot decode your file (e.g. AVIF/HEIC).
+                                                or{' '}
+                                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                                    FLUX
+                                                </span>{' '}
+                                                if OpenAI cannot decode your file (e.g. AVIF/HEIC); FLUX requires{' '}
+                                                <span className="font-mono text-[10px]">FLUX_API_KEY</span>.
                                             </p>
                                             <div className="mb-2">
                                                 <label className="mb-0.5 block text-[10px] font-medium text-gray-700 dark:text-gray-300">
                                                     Edit model
                                                 </label>
                                                 <select
-                                                    value={
-                                                        selectedLayer.aiEdit?.editModelKey ?? 'gpt-image-1'
-                                                    }
+                                                    value={normalizeEditModelKey(
+                                                        selectedLayer.aiEdit?.editModelKey
+                                                    )}
                                                     disabled={
                                                         selectedLayer.locked ||
                                                         selectedLayer.aiEdit?.status === 'editing'
@@ -5010,7 +5146,7 @@ export default function AssetEditor() {
                                                     }}
                                                     className="w-full rounded border border-violet-200 bg-white px-2 py-1.5 text-[11px] text-gray-900 dark:border-violet-700 dark:bg-gray-900 dark:text-gray-100"
                                                 >
-                                                    {GENERATIVE_ADVANCED_MODEL_OPTIONS.map((opt) => (
+                                                    {GENERATIVE_EDIT_MODEL_OPTIONS.map((opt) => (
                                                         <option key={opt.value} value={opt.value}>
                                                             {opt.label}
                                                         </option>
@@ -5920,13 +6056,25 @@ export default function AssetEditor() {
                                             </div>
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        className="shrink-0 rounded border border-indigo-600 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 dark:border-indigo-500 dark:bg-indigo-950/50 dark:text-indigo-100 dark:hover:bg-indigo-900/40"
-                                        onClick={() => navigateToComposition(c.id)}
-                                    >
-                                        Open
-                                    </button>
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            disabled={compositionDeleteBusy}
+                                            className="rounded border border-gray-300 bg-white p-1.5 text-gray-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-red-950/50 dark:hover:text-red-300"
+                                            title="Delete composition"
+                                            aria-label={`Delete ${c.name || 'composition'}`}
+                                            onClick={() => void deleteCompositionById(c.id)}
+                                        >
+                                            <TrashIcon className="h-4 w-4" aria-hidden />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="shrink-0 rounded border border-indigo-600 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 dark:border-indigo-500 dark:bg-indigo-950/50 dark:text-indigo-100 dark:hover:bg-indigo-900/40"
+                                            onClick={() => navigateToComposition(c.id)}
+                                        >
+                                            Open
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>

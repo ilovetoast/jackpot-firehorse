@@ -423,6 +423,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // AI Dashboard routes (no tenant middleware - system-level only)
     Route::get('/admin/ai', [\App\Http\Controllers\Admin\AIDashboardController::class, 'index'])->name('admin.ai.index');
     Route::get('/admin/ai/activity', [\App\Http\Controllers\Admin\AIDashboardController::class, 'activity'])->name('admin.ai.activity');
+    Route::get('/admin/ai/editor-image-audit', [\App\Http\Controllers\Admin\AIDashboardController::class, 'editorImageAudit'])->name('admin.ai.editor-image-audit');
     Route::get('/admin/ai/models', [\App\Http\Controllers\Admin\AIDashboardController::class, 'models'])->name('admin.ai.models');
     Route::get('/admin/ai/agents', [\App\Http\Controllers\Admin\AIDashboardController::class, 'agents'])->name('admin.ai.agents');
     Route::get('/admin/ai/automations', [\App\Http\Controllers\Admin\AIDashboardController::class, 'automations'])->name('admin.ai.automations');
@@ -542,6 +543,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/assets/categories', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'categories'])->name('api.editor.assets.categories');
             Route::get('/api/assets/{asset}/file', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'file'])->name('api.editor.assets.file');
             Route::get('/api/assets/{asset}/thumbnail', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'thumbnail'])->name('api.editor.assets.thumbnail');
+            Route::get('/api/assets/{asset}/versions', [\App\Http\Controllers\Editor\EditorAssetVersionController::class, 'index'])->name('api.editor.assets.versions.index');
+            Route::get('/api/assets/{asset}/versions/{assetVersion}/file', [\App\Http\Controllers\Editor\EditorAssetVersionController::class, 'file'])->name('api.editor.assets.versions.file');
             Route::get('/api/assets', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'index'])->name('api.editor.assets.index');
             Route::post('/api/assets', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'store'])->name('api.editor.assets.store');
             Route::get('/api/assets/{asset}', [\App\Http\Controllers\Editor\EditorAssetBridgeController::class, 'show'])->name('api.editor.assets.show');
@@ -563,6 +566,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'store'])->name('api.editor.compositions.store');
             Route::get('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'show'])->whereNumber('id')->name('api.editor.compositions.show');
             Route::put('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'update'])->whereNumber('id')->name('api.editor.compositions.update');
+            Route::delete('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'destroy'])->whereNumber('id')->name('api.editor.compositions.destroy');
             Route::post('/api/compositions/{id}/duplicate', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'duplicate'])->whereNumber('id')->name('api.editor.compositions.duplicate');
             Route::get('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsIndex'])->whereNumber('id')->name('api.editor.compositions.versions.index');
             Route::post('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsStore'])->whereNumber('id')->name('api.editor.compositions.versions.store');

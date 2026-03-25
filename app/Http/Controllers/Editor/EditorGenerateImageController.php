@@ -115,6 +115,7 @@ class EditorGenerateImageController extends Controller
             'composition_id' => 'nullable|integer|min:1',
             'asset_id' => 'nullable|uuid',
             'brand_id' => 'nullable|integer',
+            'generative_layer_uuid' => 'nullable|string|max:128',
         ]);
 
         $tenant = app('tenant');
@@ -187,6 +188,12 @@ class EditorGenerateImageController extends Controller
         if (! empty($validated['asset_id'])) {
             $options['asset_id'] = $validated['asset_id'];
         }
+        if (! empty($validated['brand_context'])) {
+            $options['brand_context'] = $validated['brand_context'];
+        }
+        if (! empty($validated['generative_layer_uuid'])) {
+            $options['generative_layer_uuid'] = $validated['generative_layer_uuid'];
+        }
 
         try {
             $result = $this->aiService->executeGenerativeImageAgent(
@@ -227,11 +234,17 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Monthly limit reached'], 429);
         }
 
+        $persistContext = array_filter([
+            'composition_id' => ! empty($validated['composition_id']) ? (string) (int) $validated['composition_id'] : null,
+            'generative_layer_uuid' => isset($validated['generative_layer_uuid']) ? (string) $validated['generative_layer_uuid'] : null,
+        ], static fn ($v) => $v !== null && $v !== '');
+
         $final = $this->finalizeGenerativeImageOutput(
             (string) $result['image_ref'],
             $tenant,
             $user,
-            $this->generativeImagePersistService
+            $this->generativeImagePersistService,
+            $persistContext
         );
 
         $payload = [

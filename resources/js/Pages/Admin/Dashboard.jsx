@@ -151,6 +151,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const aiItems = perms.canViewAI
         ? [
             { name: 'AI Dashboard', description: 'Costs, models, agents', href: '/app/admin/ai', icon: BoltIcon },
+            { name: 'Editor image audit', description: 'Canvas generate & edit — generative_audit', href: '/app/admin/ai/editor-image-audit', icon: SparklesIcon },
             { name: 'AI Agent Health', description: `${ai.failures_24h ?? 0} failures (24h)`, href: '/app/admin/ai-agents', icon: BoltIcon },
             { name: 'AI Budgets', description: `$${ai.cost_24h_usd ?? 0} (24h)`, href: '/app/admin/ai/budgets', icon: ChartBarIcon },
         ]

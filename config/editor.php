@@ -15,6 +15,10 @@ return [
     */
     'generative' => [
         'persist' => env('EDITOR_GENERATIVE_PERSIST', true),
+        /** Max AssetVersion rows per generative layer asset (metadata.generative_layer_uuid). */
+        'max_versions_per_layer' => (int) env('EDITOR_GENERATIVE_MAX_VERSIONS_PER_LAYER', 20),
+        /** Days after {@code lifecycle=orphaned} before hard delete (generative_layer AI assets only). */
+        'orphan_cleanup_days' => max(1, (int) env('GENERATIVE_ORPHAN_CLEANUP_DAYS', 7)),
     ],
 
 ];

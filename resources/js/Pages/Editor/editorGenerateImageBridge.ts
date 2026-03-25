@@ -52,6 +52,11 @@ export type GenerateImagePayload = {
     asset_id?: string
     /** Active brand id for attribution (optional). */
     brand_id?: number
+    /**
+     * Stable id for this canvas layer — server versions a single DAM asset per layer across regenerates
+     * (see metadata.generative_layer_uuid). Omit for parallel variation runs to avoid races.
+     */
+    generative_layer_uuid?: string
 }
 
 export type GenerateImageResponse = {
@@ -82,6 +87,31 @@ export const GENERATIVE_ADVANCED_MODEL_OPTIONS: ReadonlyArray<{ label: string; v
     { label: 'Nano Banana 2 · Gemini 3.1 Flash (preview)', value: 'gemini-3.1-flash-image-preview' },
     { label: 'Nano Banana · Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
 ]
+
+/** Modify image (AI) only — GPT Image 1 + Nano Banana 2.5 + FLUX; Gemini 3.x disabled for edits. */
+export const GENERATIVE_EDIT_MODEL_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
+    { label: 'GPT Image 1 (OpenAI)', value: 'gpt-image-1' },
+    { label: 'Nano Banana · Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
+    { label: 'FLUX.2 [flex] (Black Forest Labs)', value: 'flux-2-flex' },
+]
+
+const EDIT_MODEL_DISABLED_IDS = new Set([
+    'gemini-3-pro-image-preview',
+    'gemini-3.1-flash-image-preview',
+])
+
+const EDIT_MODEL_ALLOWED_IDS = new Set(
+    GENERATIVE_EDIT_MODEL_OPTIONS.map((o) => o.value)
+)
+
+/** Map legacy/disabled or unknown edit model keys to a supported id (saved compositions may still reference Gemini 3). */
+export function normalizeEditModelKey(key: string | undefined): string {
+    const k = key ?? 'gpt-image-1'
+    if (EDIT_MODEL_DISABLED_IDS.has(k) || !EDIT_MODEL_ALLOWED_IDS.has(k)) {
+        return 'gpt-image-1'
+    }
+    return k
+}
 
 export function canGenerateFromUsage(usage: GenerateImageUsage | null): boolean {
     if (!usage) {

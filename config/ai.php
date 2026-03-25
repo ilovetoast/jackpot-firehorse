@@ -64,6 +64,17 @@ return [
         'api_key' => env('GEMINI_API_KEY'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Black Forest Labs FLUX (api.bfl.ai)
+    |--------------------------------------------------------------------------
+    |
+    | Used for editor image modification (FLUX.2). Get a key from https://bfl.ai
+    |
+    */
+    'flux' => [
+        'api_key' => env('FLUX_API_KEY'),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -213,6 +224,19 @@ return [
             'active' => true,
             'notes' => 'Nano Banana — speed/efficiency (gemini-2.5-flash-image)',
         ],
+        'flux-2-flex' => [
+            'provider' => 'flux',
+            'model_name' => 'flux-2-flex',
+            'capabilities' => ['image_generation'],
+            'recommended_use' => ['creative', 'image_generation'],
+            'display_name' => 'FLUX.2 [flex] (BFL)',
+            'default_cost_per_token' => [
+                'input' => 0.00001,
+                'output' => 0.00004,
+            ],
+            'active' => true,
+            'notes' => 'BFL async image edit — FLUX.2 flex (editor modify only)',
+        ],
     ],
 
     /*
@@ -224,6 +248,10 @@ return [
     | advanced model override. Empty allowed_model_keys = allow any active model
     | with image_generation capability (still merged with AIModelOverride).
     |
+    | edit_allowed_model_keys: POST /app/api/edit-image (Modify image) only.
+    | Empty = fall back to allowed_model_keys. Use a subset to disable Gemini 3.x for edits
+    | while keeping them for Generate.
+    |
     */
     'generative_editor' => [
         'allowed_model_keys' => [
@@ -231,6 +259,11 @@ return [
             'gemini-3-pro-image-preview',
             'gemini-3.1-flash-image-preview',
             'gemini-2.5-flash-image',
+        ],
+        'edit_allowed_model_keys' => [
+            'gpt-image-1',
+            'gemini-2.5-flash-image',
+            'flux-2-flex',
         ],
     ],
 
@@ -516,6 +549,13 @@ PROMPT
             'description' => 'Generates images in the generative asset editor (image layers)',
             'scope' => 'tenant',
             'default_model' => 'gpt-image-1',
+            /** Registry keys (ai.models) valid for default_model overrides — keep in sync with generative_editor.allowed_model_keys. */
+            'allowed_models' => [
+                'gpt-image-1',
+                'gemini-3-pro-image-preview',
+                'gemini-3.1-flash-image-preview',
+                'gemini-2.5-flash-image',
+            ],
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],
         ],
@@ -524,6 +564,12 @@ PROMPT
             'description' => 'Edits existing images in the asset editor via AI instructions',
             'scope' => 'tenant',
             'default_model' => 'gpt-image-1',
+            /** Registry keys (ai.models) valid for default_model overrides — keep in sync with generative_editor.edit_allowed_model_keys. */
+            'allowed_models' => [
+                'gpt-image-1',
+                'gemini-2.5-flash-image',
+                'flux-2-flex',
+            ],
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],
         ],
@@ -567,6 +613,8 @@ PROMPT
     */
     'logging' => [
         'store_prompts' => env('AI_STORE_PROMPTS', false),
+        /** When true, full prompt text is stored in ai_agent_runs.metadata.generative_audit for editor generative/edit only. */
+        'log_generative_prompts' => env('AI_LOG_GENERATIVE_PROMPTS', true),
         'retention_days' => env('AI_LOG_RETENTION_DAYS', 30),
     ],
 
