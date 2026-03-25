@@ -45,13 +45,15 @@ Phase-specific write-ups are **merged into** the operations guides above (see PH
 | [STAGING_MANIFEST_401.md](STAGING_MANIFEST_401.md) | Staging manifest 401 troubleshooting |
 | [DELETION_ERROR_TRACKING.md](DELETION_ERROR_TRACKING.md) | Deletion error system |
 
-## Billing & email
+## Billing, email & notifications
 
 | Document | Contents |
 |----------|----------|
 | [billing-expiration.md](billing-expiration.md) | Billing expiration |
 | [SUBSCRIPTION_UPGRADE_GUIDE.md](SUBSCRIPTION_UPGRADE_GUIDE.md) | Upgrades |
-| [email-notifications.md](email-notifications.md) | Email |
+| [email-notifications.md](email-notifications.md) | Email (Mailables, `EmailGate`, `MAIL_AUTOMATIONS_ENABLED`) |
+| [notification-orchestration.md](notification-orchestration.md) | In-app + push orchestration (`NotificationOrchestrator`, OneSignal, channels) |
+| [admin-notification-routing.md](admin-notification-routing.md) | **Admin reference** — event/channel matrix and future routing UI |
 
 ## Testing
 

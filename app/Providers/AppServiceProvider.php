@@ -66,6 +66,14 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 
+        $this->app->singleton(\App\Services\NotificationOrchestrator::class, function ($app) {
+            return new \App\Services\NotificationOrchestrator([
+                'in_app' => $app->make(\App\Services\Notifications\Channels\InAppChannel::class),
+                'email' => $app->make(\App\Services\Notifications\Channels\EmailChannel::class),
+                'push' => $app->make(\App\Services\Notifications\Channels\PushChannel::class),
+            ]);
+        });
+
         // Request-scoped URL metrics/state for AssetUrlService.
         $this->app->scoped(\App\Services\AssetUrlService::class, function ($app) {
             return new \App\Services\AssetUrlService(

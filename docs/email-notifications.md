@@ -1,5 +1,10 @@
 # Email notifications and automation system
 
+## Related systems
+
+- **Mailables (this document)** — Direct user and system email via `BaseMailable` and `EmailGate`.
+- **Notification orchestration** — Separate layer for in-app + push (and a future orchestrated email channel). See [notification-orchestration.md](notification-orchestration.md) and the operator-facing event matrix [admin-notification-routing.md](admin-notification-routing.md).
+
 ## Overview
 
 Outgoing mail is classified into two categories:

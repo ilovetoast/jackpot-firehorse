@@ -8,6 +8,7 @@ use App\Http\Controllers\UploadController;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\Lifecycle\LifecycleResolver;
+use App\Services\NotificationOrchestrator;
 use App\Services\UploadInitiationService;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -16,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -28,7 +30,8 @@ class EditorAssetBridgeController extends Controller
     public function __construct(
         protected LifecycleResolver $lifecycleResolver,
         protected UploadInitiationService $uploadInitiationService,
-        protected UploadController $uploadController
+        protected UploadController $uploadController,
+        protected NotificationOrchestrator $notificationOrchestrator
     ) {}
 
     /**
@@ -530,7 +533,33 @@ class EditorAssetBridgeController extends Controller
             $finalizeRequest->setLaravelSession($request->session());
         }
 
-        return $this->uploadController->finalize($finalizeRequest);
+        $response = $this->uploadController->finalize($finalizeRequest);
+
+        if ($response->getStatusCode() === 200) {
+            $decoded = json_decode((string) $response->getContent(), true);
+            $results = is_array($decoded) ? ($decoded['results'] ?? []) : [];
+            foreach ($results as $r) {
+                if (($r['status'] ?? '') === 'success' && ! empty($r['asset_id'])) {
+                    $assetId = (string) $r['asset_id'];
+                    $this->notificationOrchestrator->dispatch('generative.published', [
+                        'user_ids' => [(int) $user->id],
+                        'title' => 'Generative Ready',
+                        'message' => 'Your generative image has been published to the library.',
+                        'brand_id' => $brand->id,
+                        'brand_name' => $brand->name,
+                        'tenant_id' => $tenant->id,
+                        'tenant_name' => $tenant->name,
+                        'asset_id' => $assetId,
+                        'action_url' => Route::has('assets.view')
+                            ? route('assets.view', ['asset' => $assetId], true)
+                            : null,
+                    ]);
+                    break;
+                }
+            }
+        }
+
+        return $response;
     }
 
     protected function streamS3KeyToResponse(Asset $asset, string $s3Key, string $cacheControl): Response

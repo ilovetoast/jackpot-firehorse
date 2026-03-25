@@ -65,4 +65,12 @@ return [
         'inboxId' => env('MAILTRAP_INBOX_ID'),
     ],
 
+    /*
+    | OneSignal (web push — external user id matches numeric User id after OneSignal.login).
+    */
+    'onesignal' => [
+        'app_id' => env('ONESIGNAL_APP_ID'),
+        'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+    ],
+
 ];

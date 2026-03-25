@@ -507,6 +507,11 @@ class HandleInertiaRequests extends Middleware
             'download_policy_disable_single_asset' => $tenant ? app(\App\Services\EnterpriseDownloadPolicy::class)->disableSingleAssetDownloads($tenant) : false,
             // Brand DNA: headline appearance tags (config/headline_appearance.php) for Builder / Brand Settings / guidelines
             'headlineAppearanceCatalog' => HeadlineAppearanceCatalog::forFrontend(),
+            'oneSignal' => [
+                'app_id' => config('services.onesignal.app_id'),
+                'client_enabled' => filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN)
+                    && ! empty(config('services.onesignal.app_id')),
+            ],
         ];
 
         // Add pending items counts for notification bell (simple, lightweight)

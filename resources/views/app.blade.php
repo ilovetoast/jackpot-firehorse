@@ -32,6 +32,20 @@
         <!-- Scripts -->
         @viteReactRefresh
         <script>window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));</script>
+        @if(filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN) && config('services.onesignal.app_id'))
+            {{-- OneSignal Web SDK v16: service workers at /OneSignalSDKWorker.js + /OneSignalSDKUpdaterWorker.js (public/) --}}
+            <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+            <script>
+                window.OneSignalDeferred = window.OneSignalDeferred || [];
+                OneSignalDeferred.push(async function (OneSignal) {
+                    await OneSignal.init({
+                        appId: @json(config('services.onesignal.app_id')),
+                        allowLocalhostAsSecureOrigin: @json(app()->environment('local')),
+                        autoPrompt: false,
+                    });
+                });
+            </script>
+        @endif
     @vite('resources/js/app.jsx')
     @inertiaHead
     @routes

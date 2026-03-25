@@ -42,6 +42,7 @@ import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
+import OneSignalInit from './Components/OneSignalInit'
 import { BucketProvider } from './contexts/BucketContext'
 import { SelectionProvider } from './contexts/SelectionContext'
 
@@ -112,6 +113,7 @@ createInertiaApp({
             <>
                 <PageComponent {...props} />
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
+                {props.auth?.user && props.oneSignal?.client_enabled && <OneSignalInit />}
                 <FlashMessage />
                 <AssetProcessingTray />
                 {false && <DownloadBucketBarGlobal />}
