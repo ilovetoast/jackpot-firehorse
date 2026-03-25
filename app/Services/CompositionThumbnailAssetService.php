@@ -64,14 +64,14 @@ class CompositionThumbnailAssetService
 
             // Pre-assign UUID so we can set storage_root_path on insert (MySQL: column has no default).
             $assetId = (string) Str::uuid();
-            $path = $this->pathGenerator->generateOriginalPath(
+            $path = $this->pathGenerator->generateOriginalPathForAssetId(
                 $tenant,
-                new Asset(['id' => $assetId]),
+                $assetId,
                 1,
                 'png'
             );
 
-            $asset = Asset::create([
+            $asset = Asset::forceCreate([
                 'id' => $assetId,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,

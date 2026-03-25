@@ -542,6 +542,14 @@ class EditorAssetBridgeController extends Controller
 
         $s3Client = $this->getS3Client();
 
+        if (str_contains($s3Key, '/assets//')) {
+            Log::warning('[EditorAssetBridge] Malformed storage key (missing asset UUID segment in path)', [
+                'asset_id' => $asset->id,
+                'key' => $s3Key,
+                'hint' => 'Regenerate the image or run a repair if this row predates the generative path fix.',
+            ]);
+        }
+
         try {
             $result = $s3Client->getObject([
                 'Bucket' => $bucket->name,

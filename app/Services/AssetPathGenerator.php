@@ -39,6 +39,28 @@ class AssetPathGenerator
     }
 
     /**
+     * Canonical original path when the asset UUID is known before insert.
+     *
+     * Use this instead of {@see generateOriginalPath} with `new Asset(['id' => ...])` — `id` is not
+     * mass-assignable on {@see Asset}, so the stub model’s id would be empty and produce `assets//v1/`.
+     */
+    public function generateOriginalPathForAssetId(Tenant $tenant, string $assetId, int $version, string $extension): string
+    {
+        if (! $tenant->uuid) {
+            throw new \RuntimeException('Tenant UUID required for canonical storage path.');
+        }
+        if ($version < 1) {
+            throw new \RuntimeException('Version must be >= 1 for canonical storage path. Non-versioned path writes are not allowed.');
+        }
+        $assetId = trim($assetId);
+        if ($assetId === '') {
+            throw new \RuntimeException('Asset id required for canonical storage path.');
+        }
+
+        return "tenants/{$tenant->uuid}/assets/{$assetId}/v{$version}/original.{$extension}";
+    }
+
+    /**
      * Generate canonical path for thumbnail.
      *
      * @param Tenant $tenant Tenant model (required for isolation)

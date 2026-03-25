@@ -17,6 +17,21 @@ class AssetPathGeneratorTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_generate_original_path_for_asset_id_matches_structure_without_persisted_asset(): void
+    {
+        $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
+        $tenant->refresh();
+        $assetUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+        $generator = app(AssetPathGenerator::class);
+        $path = $generator->generateOriginalPathForAssetId($tenant, $assetUuid, 1, 'jpg');
+
+        $this->assertSame(
+            "tenants/{$tenant->uuid}/assets/{$assetUuid}/v1/original.jpg",
+            $path
+        );
+    }
+
     public function test_generate_original_path_returns_canonical_structure(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
@@ -113,6 +128,16 @@ class AssetPathGeneratorTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Tenant UUID required');
         $generator->generateOriginalPath($tenant, $asset, 1, 'jpg');
+    }
+
+    public function test_generate_original_path_for_asset_id_throws_when_asset_id_empty(): void
+    {
+        $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
+        $generator = app(AssetPathGenerator::class);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Asset id required');
+        $generator->generateOriginalPathForAssetId($tenant, '   ', 1, 'jpg');
     }
 
     public function test_throws_when_version_less_than_one(): void

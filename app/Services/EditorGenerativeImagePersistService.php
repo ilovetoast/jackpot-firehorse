@@ -69,16 +69,16 @@ final class EditorGenerativeImagePersistService
             $height
         ) {
             $assetId = (string) Str::uuid();
-            $path = $this->pathGenerator->generateOriginalPath(
+            $path = $this->pathGenerator->generateOriginalPathForAssetId(
                 $tenant,
-                new Asset(['id' => $assetId]),
+                $assetId,
                 1,
                 $extension
             );
 
             $title = 'AI Generated '.now()->format('M j, Y g:i a');
 
-            $asset = Asset::create([
+            $asset = Asset::forceCreate([
                 'id' => $assetId,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
