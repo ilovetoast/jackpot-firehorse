@@ -6,6 +6,7 @@ import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
 import ImageCropModal from '../../Components/ImageCropModal'
+import NotificationPreferences from '../../Components/NotificationPreferences'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 // Common countries list
@@ -843,7 +844,7 @@ export default function ProfileIndex({ user: userData }) {
                                 </div>
                                 {/* Right: Content */}
                                 <div className="lg:col-span-2 px-6 py-6">
-                                    <p className="text-sm text-gray-500">Notification preferences will be available soon.</p>
+                                    <NotificationPreferences />
                                 </div>
                             </div>
                         </div>

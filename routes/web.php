@@ -136,6 +136,9 @@ Route::post('/app/admin/performance/client-metric', [\App\Http\Controllers\Admin
     ->middleware(['web'])
     ->name('admin.performance.client-metric');
 
+Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
+    ->name('test-push');
+
 Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
@@ -291,6 +294,14 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
     Route::post('/api/user/push-preference', [\App\Http\Controllers\UserPushPreferenceController::class, 'store'])
         ->name('api.user.push-preference');
+
+    Route::post('/api/user/push-status', \App\Http\Controllers\UserPushStatusController::class)
+        ->name('api.user.push-status');
+
+    Route::get('/api/user/notification-preferences', [\App\Http\Controllers\UserNotificationPreferencesController::class, 'show'])
+        ->name('api.user.notification-preferences.show');
+    Route::post('/api/user/notification-preferences', [\App\Http\Controllers\UserNotificationPreferencesController::class, 'update'])
+        ->name('api.user.notification-preferences.update');
 
     // Site Admin routes - Command Center
     Route::get('/admin', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'index'])->name('admin.index');

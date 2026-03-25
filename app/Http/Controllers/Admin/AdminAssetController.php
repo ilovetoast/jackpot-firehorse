@@ -100,7 +100,12 @@ class AdminAssetController extends Controller
 
         $perPage = min((int) $request->get('per_page', 25), 100);
         $assets = $query
-            ->with(['tenant:id,name,slug,uuid', 'brand:id,name', 'user:id,first_name,last_name,email'])
+            ->with([
+                'tenant:id,name,slug,uuid',
+                'brand:id,name',
+                'user:id,first_name,last_name,email',
+                'currentVersion',
+            ])
             ->orderBy($sortColumn, $sortDirection)
             ->paginate($perPage)
             ->withQueryString();
@@ -114,9 +119,14 @@ class AdminAssetController extends Controller
             ->all();
         $request->attributes->set('admin_tenants', $tenantUuids);
 
-        $formatted = $assets->getCollection()->map(function ($a) {
+        $incidentCounts = $this->unresolvedIncidentCountsForAssetIds(
+            $assets->getCollection()->pluck('id')->all()
+        );
+
+        $formatted = $assets->getCollection()->map(function ($a) use ($incidentCounts) {
+            $count = (int) ($incidentCounts[$a->id] ?? 0);
             try {
-                return $this->formatAssetForList($a);
+                return $this->formatAssetForList($a, $count);
             } catch (\Throwable $e) {
                 Log::error('[AdminAssets] formatAssetForList failed for asset', [
                     'asset_id' => $a->id,
@@ -125,7 +135,7 @@ class AdminAssetController extends Controller
                     'trace' => $e->getTraceAsString(),
                 ]);
 
-                return $this->formatAssetForListFallback($a);
+                return $this->formatAssetForListFallback($a, $count);
             }
         });
 
@@ -965,6 +975,29 @@ class AdminAssetController extends Controller
      * No ?v= query param — signed URLs are short-lived and unique; adding ?v= would require
      * including it in the URL before signing or CloudFront returns 403.
      */
+    /**
+     * One query for unresolved incident counts for many assets (avoids N+1 in admin grid).
+     *
+     * @param  list<string>  $assetIds
+     * @return array<string, int> source_id => count
+     */
+    protected function unresolvedIncidentCountsForAssetIds(array $assetIds): array
+    {
+        if ($assetIds === []) {
+            return [];
+        }
+
+        return SystemIncident::query()
+            ->where('source_type', 'asset')
+            ->whereIn('source_id', $assetIds)
+            ->whereNull('resolved_at')
+            ->selectRaw('source_id, COUNT(*) as incident_aggregate')
+            ->groupBy('source_id')
+            ->pluck('incident_aggregate', 'source_id')
+            ->map(fn ($c) => (int) $c)
+            ->all();
+    }
+
     protected function adminThumbnailSignedUrl(Asset $asset): ?string
     {
         $path = $this->assetUrlService->getAdminThumbnailPath($asset);
@@ -990,13 +1023,18 @@ class AdminAssetController extends Controller
         }
     }
 
-    protected function formatAssetForList(Asset $asset): array
+    /**
+     * @param  int|null  $incidentCount  Precomputed for index bulk; null loads one row (e.g. detail).
+     */
+    protected function formatAssetForList(Asset $asset, ?int $incidentCount = null): array
     {
         $metadata = $asset->metadata ?? [];
-        $incidentCount = SystemIncident::where('source_type', 'asset')
-            ->where('source_id', $asset->id)
-            ->whereNull('resolved_at')
-            ->count();
+        if ($incidentCount === null) {
+            $incidentCount = SystemIncident::where('source_type', 'asset')
+                ->where('source_id', $asset->id)
+                ->whereNull('resolved_at')
+                ->count();
+        }
 
         $type = $asset->type ?? null;
         $assetTypeLabel = $type ? match ($type) {
@@ -1031,13 +1069,15 @@ class AdminAssetController extends Controller
     /**
      * Fallback when formatAssetForList throws (e.g. AssetUrlService failure). Same shape, thumbnail_url = null.
      */
-    protected function formatAssetForListFallback(Asset $asset): array
+    protected function formatAssetForListFallback(Asset $asset, ?int $incidentCount = null): array
     {
         $metadata = $asset->metadata ?? [];
-        $incidentCount = SystemIncident::where('source_type', 'asset')
-            ->where('source_id', $asset->id)
-            ->whereNull('resolved_at')
-            ->count();
+        if ($incidentCount === null) {
+            $incidentCount = SystemIncident::where('source_type', 'asset')
+                ->where('source_id', $asset->id)
+                ->whereNull('resolved_at')
+                ->count();
+        }
 
         $type = $asset->type ?? null;
         $assetTypeLabel = $type ? match ($type) {

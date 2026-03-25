@@ -35,14 +35,14 @@ Registered in **`AppServiceProvider`**: `NotificationOrchestrator` is bound with
 |---------|--------|----------|
 | `in_app` | `InAppChannel` | Calls `NotificationGroupService::upsert()` per user in `user_ids`. Respects `FeatureGate::notificationsEnabled($tenant)` when `tenant_id` is present. |
 | `email` | `EmailChannel` | Stub — reserved for future mapping to Mailables per event. |
-| `push` | `PushChannel` | OneSignal REST API only; **all** HTTP and keys live here. Gated by `PUSH_NOTIFICATIONS_ENABLED` and `config('services.onesignal.*')`. |
+| `push` | `PushChannel` | OneSignal REST API only; **all** HTTP and keys live here. Gated by `NOTIFICATIONS_ENABLED`, `PUSH_NOTIFICATIONS_ENABLED`, and `config('services.onesignal.*')`. |
 
 ## Push (OneSignal)
 
 - **Server:** `POST https://api.onesignal.com/notifications` with `Authorization: Key {ONESIGNAL_REST_API_KEY}`.
 - **Config:** `config/services.php` → `onesignal.app_id`, `onesignal.rest_api_key`.
-- **Targeting:** `include_aliases.external_id` must match the string passed to **`OneSignal.login()`** on the client (typically the numeric user id as a string).
-- **Client:** `resources/js/Components/OneSignalInit.jsx` — loads Web SDK v16, `init` with `autoPrompt: false`, then `login` when the user is authenticated. Inertia shares `oneSignal.app_id` and `oneSignal.client_enabled` from `HandleInertiaRequests`.
+- **Targeting:** `include_aliases.external_id` must match **`OneSignal.login('user_{id}')`** on the client (see `onesignal:test-push` and `PushTestController`).
+- **Client:** `resources/views/app.blade.php` loads the Web SDK v16 script when `PUSH_NOTIFICATIONS_ENABLED` is true; **`resources/js/services/pushService.js`** runs a single `OneSignal.init`, one-time permission after login (`users.push_prompted_at`), and `POST /app/api/user/push-status` for device opt-in/out. **`resources/js/Components/PushServiceInit.jsx`** mounts from `app.jsx`. Profile UI: **`NotificationPreferences`** master “Push notifications” toggle.
 
 ## Environment variables
 
@@ -52,6 +52,8 @@ Registered in **`AppServiceProvider`**: `NotificationOrchestrator` is bound with
 | `PUSH_NOTIFICATIONS_ENABLED` | `false` | Allows `PushChannel` to call OneSignal (client init also uses this for `client_enabled`). |
 | `ONESIGNAL_APP_ID` | — | OneSignal app id. |
 | `ONESIGNAL_REST_API_KEY` | — | REST API key (server only). |
+| `VITE_ONESIGNAL_APP_ID` | — | Optional; overrides meta tag for the web SDK app id in `pushService.js`. |
+| `PUSH_TEST_ROUTE_ENABLED` | `false` | When true, allows `GET /test-push` outside `local` (smoke test; keep off in production). |
 
 See `.env.example` for commented entries.
 
@@ -70,7 +72,7 @@ Callers should pass a consistent shape so all channels can use it:
 
 ## Future work (not implemented)
 
-- User-level preferences (per channel, per event).
+- Email + push unified preference matrix; per-category quiet hours; multi-device subscription management in the UI.
 - Tenant-level overrides (admin UI or plan gates).
 - **Admin UI** — see [admin-notification-routing.md](admin-notification-routing.md) for the reference table that will drive configuration.
 

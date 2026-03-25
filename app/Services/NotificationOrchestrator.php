@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use App\Services\Notifications\Contracts\NotificationChannel;
 use Illuminate\Support\Facades\Log;
 
@@ -51,8 +52,16 @@ final class NotificationOrchestrator
                 continue;
             }
 
+            $channelPayload = $payload;
+            if ($name === 'push') {
+                $channelPayload = $this->filterPushPayloadByUserPreferences($event, $payload);
+                if (($channelPayload['user_ids'] ?? []) === []) {
+                    continue;
+                }
+            }
+
             try {
-                $handler->send($event, $payload);
+                $handler->send($event, $channelPayload);
             } catch (\Throwable $e) {
                 Log::error('[NotificationOrchestrator] Channel failed', [
                     'channel' => $name,
@@ -61,5 +70,44 @@ final class NotificationOrchestrator
                 ]);
             }
         }
+    }
+
+    /**
+     * Drops user ids that opted out of push for this event's preference group (activity / account / system).
+     *
+     * Future: email channel preferences; tenant defaults merged before this filter.
+     */
+    protected function filterPushPayloadByUserPreferences(string $event, array $payload): array
+    {
+        $definition = config("notifications.events.{$event}");
+        $category = is_array($definition) ? ($definition['category'] ?? 'activity') : 'activity';
+        $category = is_string($category) && $category !== '' ? $category : 'activity';
+
+        $ids = $payload['user_ids'] ?? [];
+        if (! is_array($ids) || $ids === []) {
+            return $payload;
+        }
+
+        $intIds = array_values(array_unique(array_filter(array_map('intval', $ids), fn ($id) => $id > 0)));
+        if ($intIds === []) {
+            $payload['user_ids'] = [];
+
+            return $payload;
+        }
+
+        $users = User::query()->whereIn('id', $intIds)->get(['id', 'notification_preferences', 'push_enabled']);
+        $allowed = [];
+        foreach ($users as $user) {
+            if (! $user->push_enabled) {
+                continue;
+            }
+            if (data_get($user->getNotificationPreferences(), "{$category}.push", true)) {
+                $allowed[] = $user->id;
+            }
+        }
+
+        $payload['user_ids'] = $allowed;
+
+        return $payload;
     }
 }

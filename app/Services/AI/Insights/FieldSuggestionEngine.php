@@ -2,6 +2,7 @@
 
 namespace App\Services\AI\Insights;
 
+use App\Models\Asset;
 use App\Models\Category;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -62,6 +63,8 @@ class FieldSuggestionEngine
             ->whereNull('deleted_at')
             ->get(['id', 'slug', 'name']);
 
+        $assetCountsByCategory = Asset::countNonDeletedByCategoryForTenant($tenantId);
+
         foreach ($categories as $category) {
             $categoryId = (int) $category->id;
             $slug = (string) $category->slug;
@@ -69,7 +72,7 @@ class FieldSuggestionEngine
                 continue;
             }
 
-            $totalInCategory = $this->countAssetsInCategory($tenantId, $categoryId);
+            $totalInCategory = (int) ($assetCountsByCategory[$categoryId] ?? 0);
             if ($totalInCategory < $minAssets) {
                 continue;
             }
@@ -503,12 +506,4 @@ class FieldSuggestionEngine
             ->count();
     }
 
-    protected function countAssetsInCategory(int $tenantId, int $categoryId): int
-    {
-        return (int) DB::table('assets')
-            ->where('tenant_id', $tenantId)
-            ->whereNull('deleted_at')
-            ->where('metadata->category_id', $categoryId)
-            ->count();
-    }
 }

@@ -6,10 +6,10 @@
  * This does not replace {@see \App\Services\NotificationGroupService} or Mailables;
  * channels call those systems where appropriate.
  *
- * Future extension (not implemented here):
- * - User-level preferences (per channel, per event) stored on users or a dedicated table.
- * - Tenant/plan overrides (e.g. disable push for certain workspaces) via admin UI or plan features.
- * - Per-tenant defaults merged with user preferences before dispatch.
+ * User prefs: {@see \App\Models\User::getNotificationPreferences()} (groups: activity, account, system).
+ * Event → group: `category` on each event below. Orchestrator filters push recipients before {@see \App\Services\Notifications\Channels\PushChannel}.
+ *
+ * Future: email toggles per group; per-event overrides; tenant/plan defaults; frequency / digest controls.
  */
 return [
 
@@ -19,7 +19,12 @@ return [
 
         'generative.published' => [
             'channels' => ['in_app', 'push'],
+            'category' => 'activity',
         ],
+
+        // Reserved for when orchestrated (stubs / future wiring):
+        // 'asset.approved' => ['channels' => ['in_app', 'push'], 'category' => 'activity'],
+        // 'invite.sent' => ['channels' => ['email', 'push'], 'category' => 'account'],
 
     ],
 

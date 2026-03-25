@@ -534,6 +534,57 @@ class Asset extends Model
     }
 
     /**
+     * Single grouped query: non-deleted assets per metadata.category_id (insights jobs, admin batching).
+     *
+     * @return array<int, int> category_id => count
+     */
+    public static function countNonDeletedByCategoryForTenant(int $tenantId): array
+    {
+        $extract = static::categoryIdJsonExtract();
+        $driver = DB::getDriverName();
+
+        $base = DB::table('assets')
+            ->where('tenant_id', $tenantId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('metadata');
+
+        if ($driver === 'mysql') {
+            $rows = $base
+                ->selectRaw("CAST({$extract} AS UNSIGNED) as category_id, COUNT(*) as aggregate")
+                ->whereRaw("({$extract}) IS NOT NULL")
+                ->whereRaw("({$extract}) != ''")
+                ->whereRaw("({$extract}) != 'null'")
+                ->groupBy(DB::raw("CAST({$extract} AS UNSIGNED)"))
+                ->get();
+        } elseif ($driver === 'pgsql') {
+            $rows = $base
+                ->selectRaw("NULLIF(TRIM({$extract}), '')::bigint as category_id, COUNT(*) as aggregate")
+                ->whereRaw("({$extract}) IS NOT NULL")
+                ->whereRaw("TRIM({$extract}) != ''")
+                ->groupBy(DB::raw("NULLIF(TRIM({$extract}), '')::bigint"))
+                ->get();
+        } else {
+            $rows = $base
+                ->selectRaw("CAST({$extract} AS INTEGER) as category_id, COUNT(*) as aggregate")
+                ->whereRaw("({$extract}) IS NOT NULL")
+                ->whereRaw("({$extract}) != ''")
+                ->whereRaw("({$extract}) != 'null'")
+                ->groupBy(DB::raw("CAST({$extract} AS INTEGER)"))
+                ->get();
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $id = (int) $row->category_id;
+            if ($id > 0) {
+                $out[$id] = (int) $row->aggregate;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Apply category_id filter to scope (required for grid visibility).
      */
     protected static function applyCategoryIdScope($query, bool $requirePresent): \Illuminate\Database\Eloquent\Builder

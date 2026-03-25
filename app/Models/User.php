@@ -49,6 +49,7 @@ class User extends Authenticatable
         'last_login_at',
         'push_prompted_at',
         'push_enabled',
+        'notification_preferences',
     ];
 
     /**
@@ -83,9 +84,38 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
             'push_prompted_at' => 'datetime',
             'push_enabled' => 'boolean',
+            'notification_preferences' => 'array',
             'password' => 'hashed',
         ];
     }
+
+    /**
+     * Merged notification groups with defaults. Keys: activity, account, system — each may include
+     * push (and later email). Defaults favor product-reasonable opt-in for activity/account.
+     */
+    public function getNotificationPreferences(): array
+    {
+        $defaults = [
+            'activity' => ['push' => true],
+            'account' => ['push' => true],
+            'system' => ['push' => false],
+        ];
+
+        $stored = $this->notification_preferences;
+        if (! is_array($stored)) {
+            return $defaults;
+        }
+
+        return array_replace_recursive($defaults, $stored);
+    }
+
+    /**
+     * Reserved: category toggles no longer overwrite {@see $push_enabled} (device / OneSignal opt-in).
+     * Push delivery requires {@see $push_enabled} plus per-group keys from {@see getNotificationPreferences()}.
+     *
+     * Future: per-category caps or tenant defaults could be applied here without touching device state.
+     */
+    public function syncPushEnabledFromNotificationPreferences(): void {}
 
     /**
      * Get the user's full name.
