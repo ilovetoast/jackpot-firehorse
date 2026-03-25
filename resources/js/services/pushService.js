@@ -103,16 +103,22 @@ async function postPushStatus(enabled) {
 }
 
 /**
- * Blade loads OneSignal with `defer`; React often runs before `window.OneSignalDeferred` exists.
+ * Blade injects `window.OneSignalDeferred = []` only when push is enabled. If the meta tag is missing,
+ * the SDK was never included — do not spin for 15s waiting for something that will never exist.
  */
 async function waitForOneSignalDeferred(maxMs = 15000) {
     if (typeof window === 'undefined') {
         return false
     }
+    const appIdMeta = document.querySelector('meta[name="onesignal-app-id"]')?.getAttribute('content')?.trim()
+    if (!appIdMeta) {
+        log('waitForOneSignalDeferred: skip — no onesignal-app-id meta (PUSH_NOTIFICATIONS_ENABLED / ONESIGNAL_APP_ID off on server)')
+        return false
+    }
     const start = Date.now()
     while (!window.OneSignalDeferred) {
         if (Date.now() - start > maxMs) {
-            log('waitForOneSignalDeferred:timeout', { maxMs })
+            log('waitForOneSignalDeferred:timeout', { maxMs, hint: 'Script blocked or failed to load' })
             return false
         }
         await new Promise((r) => setTimeout(r, 50))
@@ -307,13 +313,19 @@ export async function togglePush(user, enabled) {
     }
 
     if (enabled && !(await waitForOneSignalDeferred())) {
-        log('togglePush:abort', { reason: 'no SDK (timeout)' })
-        return
+        log('togglePush:abort', { reason: 'OneSignal not available on this page' })
+        throw new Error(
+            'Push isn’t available on this page yet — the app may not have browser notifications enabled. Reload after they’re turned on, or try again later.'
+        )
     }
 
     if (!window.OneSignalDeferred) {
         if (!enabled) {
             await postPushStatus(false)
+        } else {
+            throw new Error(
+                'Push isn’t available on this page yet — the app may not have browser notifications enabled. Reload after they’re turned on, or try again later.'
+            )
         }
         return
     }

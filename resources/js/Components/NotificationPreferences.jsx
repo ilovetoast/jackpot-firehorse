@@ -159,6 +159,14 @@ export default function NotificationPreferences() {
     }
 
     const masterOn = pushEnabled === true
+    const showAllowCallout = browserPermission === 'default' && !masterOn
+
+    const savingSpinner = (
+        <span
+            className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"
+            aria-hidden
+        />
+    )
 
     return (
         <div className="space-y-6">
@@ -172,7 +180,7 @@ export default function NotificationPreferences() {
                 send alerts to this browser after you allow them in the prompt.
             </p>
 
-            {browserPermission === 'default' && !masterOn && (
+            {showAllowCallout && (
                 <div
                     className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-4 py-4 text-indigo-950 shadow-sm"
                     role="status"
@@ -190,6 +198,16 @@ export default function NotificationPreferences() {
                     >
                         Allow notifications
                     </button>
+                    {pushBusy && (
+                        <div
+                            className="mt-2 flex items-center gap-2 text-xs text-indigo-900/80"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            {savingSpinner}
+                            <span>Saving</span>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -224,6 +242,16 @@ export default function NotificationPreferences() {
                         </button>
                     </div>
                 </div>
+                {pushBusy && !showAllowCallout && (
+                    <div
+                        className="mt-3 flex items-center gap-2 text-xs text-gray-600"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        {savingSpinner}
+                        <span>Saving</span>
+                    </div>
+                )}
             </div>
 
             <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-gray-50/50">
@@ -258,7 +286,12 @@ export default function NotificationPreferences() {
                     )
                 })}
             </ul>
-            {(saving || pushBusy) && <p className="text-xs text-gray-400">Saving…</p>}
+            {saving && !pushBusy && (
+                <div className="flex items-center gap-2 text-xs text-gray-600" role="status" aria-live="polite">
+                    {savingSpinner}
+                    <span>Saving</span>
+                </div>
+            )}
         </div>
     )
 }
