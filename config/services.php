@@ -71,6 +71,8 @@ return [
     'onesignal' => [
         'app_id' => env('ONESIGNAL_APP_ID'),
         'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+        /** When true, Blade emits meta so the web SDK may use HTTP (see pushService.js + OneSignal v16). */
+        'allow_http_local' => filter_var(env('ONESIGNAL_ALLOW_HTTP_LOCAL', false), FILTER_VALIDATE_BOOLEAN),
     ],
 
 ];

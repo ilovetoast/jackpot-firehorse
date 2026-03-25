@@ -33,8 +33,9 @@
         @viteReactRefresh
         <script>window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));</script>
         @if(filter_var(env('PUSH_NOTIFICATIONS_ENABLED', false), FILTER_VALIDATE_BOOLEAN) && config('services.onesignal.app_id'))
-            {{-- OneSignal Web SDK v16: init runs in resources/js/services/pushService.js (single init). Service workers: /OneSignalSDKWorker.js --}}
+            {{-- OneSignal Web SDK v16: HTTP only with allowLocalhostAsSecureOrigin; v16 blocks plain HTTP otherwise. See pushService.js + ONESIGNAL_ALLOW_HTTP_LOCAL --}}
             <meta name="onesignal-app-id" content="{{ config('services.onesignal.app_id') }}">
+            <meta name="onesignal-allow-local-http" content="@json(app()->environment(['local', 'development']) || config('services.onesignal.allow_http_local'))">
             <script>window.OneSignalDeferred = window.OneSignalDeferred || [];</script>
             <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
         @endif

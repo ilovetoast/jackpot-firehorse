@@ -27,6 +27,61 @@ function appId() {
     )
 }
 
+function isPrivateLanIpv4(hostname) {
+    return (
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+    )
+}
+
+/**
+ * OneSignal v16 blocks non-HTTPS unless allowLocalhostAsSecureOrigin is true (SDK still validates origin).
+ * Must cover: production build on http://localhost, LAN IPs, and explicit .env opt-in via Blade meta / Vite.
+ */
+function allowLocalhostAsSecureOriginOption() {
+    if (typeof window === 'undefined') {
+        return false
+    }
+    if (window.location.protocol === 'https:') {
+        return false
+    }
+    // Explicit Vite override when APP_ENV isn’t "local" but you’re on HTTP (e.g. docker hostname)
+    if (import.meta.env.VITE_ONESIGNAL_ALLOW_HTTP === 'true') {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (VITE_ONESIGNAL_ALLOW_HTTP)')
+        return true
+    }
+    const meta = document.querySelector('meta[name="onesignal-allow-local-http"]')
+    const metaRaw = meta?.getAttribute('content') ?? ''
+    if (metaRaw === 'true' || metaRaw === '1') {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (Blade meta onesignal-allow-local-http)')
+        return true
+    }
+    const h = window.location.hostname
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (loopback hostname)', { hostname: h })
+        return true
+    }
+    if (h.endsWith('.local') || h.endsWith('.test') || h.endsWith('.localhost')) {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (dev TLD)', { hostname: h })
+        return true
+    }
+    if (isPrivateLanIpv4(h)) {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (private LAN IPv4)', { hostname: h })
+        return true
+    }
+    if (import.meta.env.DEV) {
+        log('OneSignal allowLocalhostAsSecureOrigin: true (Vite import.meta.env.DEV)')
+        return true
+    }
+    log('OneSignal allowLocalhostAsSecureOrigin: false — set ONESIGNAL_ALLOW_HTTP_LOCAL=true, or VITE_ONESIGNAL_ALLOW_HTTP=true, or use HTTPS', {
+        hostname: h,
+        protocol: window.location.protocol,
+        metaOnesignalAllowLocalHttp: metaRaw || '(missing)',
+    })
+    return false
+}
+
 async function postPushStatus(enabled) {
     log('postPushStatus', { enabled })
     const res = await fetch('/app/api/user/push-status', {
@@ -87,20 +142,37 @@ function runOnOneSignal(callback) {
 }
 
 /**
+ * Why the in-app consent modal may be hidden (browser prompt comes only after you tap Allow there).
+ *
+ * @returns {{ eligible: boolean, blockers: string[] }}
+ */
+export function getPushConsentModalEligibility(user) {
+    const blockers = []
+    if (!user?.id) {
+        blockers.push('not signed in')
+        return { eligible: false, blockers }
+    }
+    if (user.push_prompted_at != null && user.push_prompted_at !== '') {
+        blockers.push(
+            `users.push_prompted_at is set (${user.push_prompted_at}) — first-run dialog already completed in DB`
+        )
+    }
+    if (typeof Notification === 'undefined') {
+        blockers.push('Notification API unavailable')
+    } else if (Notification.permission !== 'default') {
+        blockers.push(
+            `browser permission is "${Notification.permission}" (need "default" to show first-run flow; reset in site settings if testing)`
+        )
+    }
+    return { eligible: blockers.length === 0, blockers }
+}
+
+/**
  * True when `users.push_prompted_at` is null (no consent recorded in DB) and the browser has not
  * chosen allow/deny yet. Drives the first-load site dialog — not the master toggle on settings.
  */
 export function shouldShowPushPermissionDialog(user) {
-    if (!user?.id) {
-        return false
-    }
-    if (user.push_prompted_at != null && user.push_prompted_at !== '') {
-        return false
-    }
-    if (typeof Notification === 'undefined') {
-        return false
-    }
-    return Notification.permission === 'default'
+    return getPushConsentModalEligibility(user).eligible
 }
 
 /**
@@ -129,12 +201,26 @@ export async function initPush(user) {
     }
 
     log('initPush:start', { userId: user.id, push_enabled: user.push_enabled, push_prompted_at: user.push_prompted_at })
+    const eligibility = getPushConsentModalEligibility(user)
+    log('initPush: consent modal eligibility (in-app “Stay in the loop”)', {
+        willShowModalIfClientEnabled: eligibility.eligible,
+        blockers: eligibility.blockers.length ? eligibility.blockers : '(none — modal can show)',
+    })
+    log(
+        'initPush: note — OneSignal init does not open the browser permission dialog; that happens after you tap “Allow notifications” in our modal or on Settings.'
+    )
 
     initPushInFlight = (async () => {
         await runOnOneSignal(async (OneSignal) => {
+            const allowHttp = allowLocalhostAsSecureOriginOption()
+            log('OneSignal.init calling', {
+                appId: id,
+                allowLocalhostAsSecureOrigin: allowHttp,
+                href: typeof window !== 'undefined' ? window.location.href : '',
+            })
             await OneSignal.init({
                 appId: id,
-                allowLocalhostAsSecureOrigin: import.meta.env.DEV,
+                allowLocalhostAsSecureOrigin: allowHttp,
                 autoPrompt: false,
             })
             log('initPush:OneSignal.init complete')
@@ -178,9 +264,10 @@ export async function requestPushPermission(user) {
     let granted = false
 
     await runOnOneSignal(async (OneSignal) => {
+        const allowHttp = allowLocalhostAsSecureOriginOption()
         await OneSignal.init({
             appId: id,
-            allowLocalhostAsSecureOrigin: import.meta.env.DEV,
+            allowLocalhostAsSecureOrigin: allowHttp,
             autoPrompt: false,
         })
 
@@ -234,9 +321,10 @@ export async function togglePush(user, enabled) {
     await runOnOneSignal(async (OneSignal) => {
         const id = appId()
         if (id) {
+            const allowHttp = allowLocalhostAsSecureOriginOption()
             await OneSignal.init({
                 appId: id,
-                allowLocalhostAsSecureOrigin: import.meta.env.DEV,
+                allowLocalhostAsSecureOrigin: allowHttp,
                 autoPrompt: false,
             })
         }
