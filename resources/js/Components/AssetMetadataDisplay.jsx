@@ -39,6 +39,18 @@ export default function AssetMetadataDisplay({
 
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
 
+    const applyEditablePayload = (data) => {
+        setFields(data.fields || [])
+        const count = data.pending_metadata_count || 0
+        setPendingMetadataCount(count)
+        setMetadataHealth(data.metadata_health ?? null)
+        setAnalysisStatus(data.analysis_status ?? 'uploading')
+        setThumbnailStatus(data.thumbnail_status ?? 'pending')
+        if (onPendingCountChange) {
+            onPendingCountChange(count)
+        }
+    }
+
     // Fetch editable metadata (silent = true skips loading state, used for polling)
     const fetchMetadata = (silent = false) => {
         if (!assetId) return
@@ -54,15 +66,7 @@ export default function AssetMetadataDisplay({
         })
             .then((res) => res.json())
             .then((data) => {
-                setFields(data.fields || [])
-                const count = data.pending_metadata_count || 0
-                setPendingMetadataCount(count)
-                setMetadataHealth(data.metadata_health ?? null)
-                setAnalysisStatus(data.analysis_status ?? 'uploading')
-                setThumbnailStatus(data.thumbnail_status ?? 'pending')
-                if (onPendingCountChange) {
-                    onPendingCountChange(count)
-                }
+                applyEditablePayload(data)
                 setLoading(false)
             })
             .catch((err) => {
@@ -111,10 +115,7 @@ export default function AssetMetadataDisplay({
             })
                 .then((res) => res.json())
                 .then((data) => {
-                    setFields(data.fields || [])
-                    setMetadataHealth(data.metadata_health ?? null)
-                    setAnalysisStatus(data.analysis_status ?? 'uploading')
-                    setThumbnailStatus(data.thumbnail_status ?? 'pending')
+                    applyEditablePayload(data)
                 })
                 .catch((err) => {
                     console.error('[AssetMetadataDisplay] Failed to refresh metadata', err)

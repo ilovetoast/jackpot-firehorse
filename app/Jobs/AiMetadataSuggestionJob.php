@@ -162,25 +162,32 @@ class AiMetadataSuggestionJob implements ShouldQueue
                 })->toArray(),
             ]);
 
-            // Generate AI suggestions from candidates
-            $suggestions = $service->generateSuggestions($asset, $aiMetadataValues);
-            
+            // Generate AI suggestions from candidates; merge with existing (e.g. jackpot_embedded from EmbeddedUsageRightsSuggestionJob)
+            $asset->refresh();
+            $existingSuggestions = $service->getSuggestions($asset);
+            $aiSuggestions = $service->generateSuggestions($asset, $aiMetadataValues);
+
+            $mergedSuggestions = $existingSuggestions;
+            foreach ($aiSuggestions as $fieldKey => $payload) {
+                $mergedSuggestions[$fieldKey] = $payload;
+            }
+
             Log::info('[AiMetadataSuggestionJob] Generated suggestions', [
                 'asset_id' => $asset->id,
-                'suggestions_count' => count($suggestions),
-                'suggestions' => $suggestions,
+                'ai_suggestions_count' => count($aiSuggestions),
+                'merged_suggestions_count' => count($mergedSuggestions),
+                'ai_suggestions' => $aiSuggestions,
             ]);
 
-            // Store suggestions in asset metadata
-            if (!empty($suggestions)) {
-                $service->storeSuggestions($asset, $suggestions);
+            if ($mergedSuggestions !== []) {
+                $service->storeSuggestions($asset, $mergedSuggestions);
             }
 
             // Mark as completed in asset metadata
             $currentMetadata = $asset->metadata ?? [];
             $currentMetadata['ai_metadata_suggestions_completed'] = true;
             $currentMetadata['ai_metadata_suggestions_completed_at'] = now()->toIso8601String();
-            $currentMetadata['ai_metadata_suggestions_count'] = count($suggestions);
+            $currentMetadata['ai_metadata_suggestions_count'] = count($mergedSuggestions);
 
             $asset->update([
                 'metadata' => $currentMetadata,
@@ -189,7 +196,8 @@ class AiMetadataSuggestionJob implements ShouldQueue
             // Record AI suggestions generated activity event
             ActivityRecorder::logAsset($asset, EventType::ASSET_AI_SUGGESTIONS_GENERATED, [
                 'job' => 'AiMetadataSuggestionJob',
-                'suggestions_count' => count($suggestions),
+                'suggestions_count' => count($mergedSuggestions),
+                'ai_only_count' => count($aiSuggestions),
             ]);
 
             PipelineLogger::warning('AI METADATA SUGGESTION: COMPLETE', [
@@ -198,7 +206,7 @@ class AiMetadataSuggestionJob implements ShouldQueue
 
             Log::info('[AiMetadataSuggestionJob] Completed', [
                 'asset_id' => $asset->id,
-                'suggestions_count' => count($suggestions),
+                'suggestions_count' => count($mergedSuggestions),
             ]);
         } catch (\Throwable $e) {
             $rawError = $e->getMessage();

@@ -80,10 +80,11 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
             })
     }
 
-    // Handle approve candidate
-    const handleApprove = async (candidateId) => {
+    // Handle approve candidate (DB row) or ephemeral Jackpot embedded suggestion (field_key)
+    const handleApprove = async (candidate) => {
+        const candidateId = candidate.id
         if (processing.has(candidateId)) return
-        
+
         // Check permission before approving
         if (!canApplySuggestions) {
             alert('You do not have permission to approve metadata suggestions.')
@@ -97,6 +98,29 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
             if (!csrfToken) {
                 throw new Error('CSRF token not found. Please refresh the page.')
+            }
+
+            if (candidate.ephemeral && candidate.field_key) {
+                const response = await fetch(
+                    `/app/assets/${assetId}/metadata/suggestions/${encodeURIComponent(candidate.field_key)}/accept`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            Accept: 'application/json',
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ _token: csrfToken }),
+                    }
+                )
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}))
+                    throw new Error(data.message || 'Failed to accept suggestion')
+                }
+                refreshReview()
+                return
             }
 
             const response = await fetch(`/app/metadata/candidates/${candidateId}/approve`, {
@@ -143,10 +167,10 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
         }
     }
 
-    // Handle reject candidate
-    const handleReject = async (candidateId) => {
+    const handleReject = async (candidate) => {
+        const candidateId = candidate.id
         if (processing.has(candidateId)) return
-        
+
         // Check permission before rejecting
         if (!canApplySuggestions) {
             alert('You do not have permission to reject metadata suggestions.')
@@ -160,6 +184,29 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
             if (!csrfToken) {
                 throw new Error('CSRF token not found. Please refresh the page.')
+            }
+
+            if (candidate.ephemeral && candidate.field_key) {
+                const response = await fetch(
+                    `/app/assets/${assetId}/metadata/suggestions/${encodeURIComponent(candidate.field_key)}/dismiss`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            Accept: 'application/json',
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ _token: csrfToken }),
+                    }
+                )
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}))
+                    throw new Error(data.message || 'Failed to dismiss suggestion')
+                }
+                refreshReview()
+                return
             }
 
             const response = await fetch(`/app/metadata/candidates/${candidateId}/reject`, {
@@ -205,8 +252,11 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
         }
     }
 
-    // Handle defer candidate
-    const handleDefer = async (candidateId) => {
+    const handleDefer = async (candidate) => {
+        const candidateId = candidate.id
+        if (candidate.ephemeral) {
+            return
+        }
         if (processing.has(candidateId)) return
 
         setProcessing((prev) => new Set(prev).add(candidateId))
@@ -313,6 +363,7 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
             exif: { label: 'EXIF', class: 'bg-blue-100 text-blue-800' },
             system: { label: 'System', class: 'bg-gray-100 text-gray-800' },
             user: { label: 'User', class: 'bg-green-100 text-green-800' },
+            jackpot_embedded: { label: 'Embedded', class: 'bg-teal-100 text-teal-900' },
         }
 
         const badge = badges[producer] || { label: producer, class: 'bg-gray-100 text-gray-800' }
@@ -354,7 +405,8 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
                     Metadata Candidate Review
                 </h3>
                 <p className="text-[11px] text-gray-500 mb-3">
-                    Review and approve or reject AI metadata suggestions. Approved suggestions maintain their AI attribution.
+                    Review and approve or reject metadata suggestions (AI or embedded file metadata). Approved values are
+                    written to the asset; source is recorded where applicable.
                 </p>
                 <div className="space-y-3">
                     {reviewItems.map((item) => (
@@ -408,12 +460,17 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
                                                     <span className="text-[10px] text-gray-400">
                                                         Source: {candidate.source}
                                                     </span>
+                                                    {candidate.evidence && (
+                                                        <span className="text-[10px] text-gray-400" title="Detection basis">
+                                                            · {String(candidate.evidence).replace(/_/g, ' ')}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {canApplySuggestions && (
                                                     <div className="flex items-center gap-1.5 flex-shrink-0">
                                                         <button
                                                             type="button"
-                                                            onClick={() => setShowConfirmApprove(candidate.id)}
+                                                            onClick={() => setShowConfirmApprove(candidate)}
                                                             disabled={processing.has(candidate.id)}
                                                             className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 rounded focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
@@ -422,22 +479,24 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => setShowConfirmReject(candidate.id)}
+                                                            onClick={() => setShowConfirmReject(candidate)}
                                                             disabled={processing.has(candidate.id)}
                                                             className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
                                                             <XMarkIcon className="h-2.5 w-2.5 mr-0.5" />
                                                             Reject
                                                         </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDefer(candidate.id)}
-                                                            disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            <ClockIcon className="h-2.5 w-2.5 mr-0.5" />
-                                                            Defer
-                                                        </button>
+                                                        {!candidate.ephemeral && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDefer(candidate)}
+                                                                disabled={processing.has(candidate.id)}
+                                                                className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                <ClockIcon className="h-2.5 w-2.5 mr-0.5" />
+                                                                Defer
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -453,26 +512,34 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
             {/* Confirm Approve Modal */}
             {showConfirmApprove && (
                 <ConfirmModal
-                    title="Approve Candidate"
-                    message="This AI suggestion will be approved and applied to the asset, maintaining its AI attribution and confidence score."
+                    title="Approve suggestion"
+                    message={
+                        showConfirmApprove.ephemeral
+                            ? 'This value will be applied to the asset from embedded file metadata (not AI).'
+                            : 'This AI suggestion will be approved and applied to the asset, maintaining its AI attribution and confidence score.'
+                    }
                     confirmText="Approve"
                     confirmClass="bg-green-600 hover:bg-green-700"
                     onConfirm={() => handleApprove(showConfirmApprove)}
                     onCancel={() => setShowConfirmApprove(null)}
-                    processing={processing.has(showConfirmApprove)}
+                    processing={processing.has(showConfirmApprove.id)}
                 />
             )}
 
             {/* Confirm Reject Modal */}
             {showConfirmReject && (
                 <ConfirmModal
-                    title="Reject Candidate"
-                    message="This candidate will be dismissed and excluded from future resolution. The candidate will be preserved for audit history."
-                    confirmText="Reject"
+                    title={showConfirmReject.ephemeral ? 'Dismiss suggestion' : 'Reject Candidate'}
+                    message={
+                        showConfirmReject.ephemeral
+                            ? 'This suggestion will be dismissed and will not be suggested again for this value.'
+                            : 'This candidate will be dismissed and excluded from future resolution. The candidate will be preserved for audit history.'
+                    }
+                    confirmText={showConfirmReject.ephemeral ? 'Dismiss' : 'Reject'}
                     confirmClass="bg-red-600 hover:bg-red-700"
                     onConfirm={() => handleReject(showConfirmReject)}
                     onCancel={() => setShowConfirmReject(null)}
-                    processing={processing.has(showConfirmReject)}
+                    processing={processing.has(showConfirmReject.id)}
                 />
             )}
         </>

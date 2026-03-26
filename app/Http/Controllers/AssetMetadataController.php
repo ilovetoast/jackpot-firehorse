@@ -34,8 +34,10 @@ use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Assets\Metadata\EmbeddedMetadataPresentation;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
+use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\MetadataApprovalResolver;
@@ -66,7 +68,8 @@ class AssetMetadataController extends Controller
         protected MetadataApprovalResolver $approvalResolver,
         protected AiMetadataConfidenceService $confidenceService,
         protected AiMetadataSuggestionService $suggestionService,
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected EmbeddedMetadataPresentation $embeddedMetadataPresentation
     ) {}
 
     /**
@@ -1085,6 +1088,16 @@ class AssetMetadataController extends Controller
             'metadata_health' => $metadataHealth,
             'analysis_status' => $asset->analysis_status ?? 'uploading',
             'thumbnail_status' => $thumbnailStatus,
+            'embedded_metadata' => $this->embeddedMetadataPresentation->summaryForAsset($asset->loadMissing([
+                'embeddedMetadataPayload',
+                'metadataIndexEntries',
+            ])),
+            'embedded_metadata_raw' => $user && (
+                $user->hasPermissionForTenant($tenant, 'embedded_metadata.view_raw')
+                || $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')
+            )
+                ? $this->embeddedMetadataPresentation->rawPayloadForAsset($asset, true)
+                : null,
         ]);
     }
 
@@ -1749,9 +1762,18 @@ class AssetMetadataController extends Controller
         }
 
         if (! $category) {
+            $asset->loadMissing(['embeddedMetadataPayload', 'metadataIndexEntries']);
+
             return response()->json([
                 'category' => null,
                 'fields' => [],
+                'embedded_metadata' => $this->embeddedMetadataPresentation->summaryForAsset($asset),
+                'embedded_metadata_raw' => $user && (
+                    $user->hasPermissionForTenant($tenant, 'embedded_metadata.view_raw')
+                    || $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')
+                )
+                    ? $this->embeddedMetadataPresentation->rawPayloadForAsset($asset, true)
+                    : null,
             ]);
         }
 
@@ -2149,12 +2171,21 @@ class AssetMetadataController extends Controller
             ];
         }
 
+        $asset->loadMissing(['embeddedMetadataPayload', 'metadataIndexEntries']);
+
         return response()->json([
             'category' => [
                 'id' => $category->id,
                 'name' => $category->name,
             ],
             'fields' => $allFields,
+            'embedded_metadata' => $this->embeddedMetadataPresentation->summaryForAsset($asset),
+            'embedded_metadata_raw' => $user && (
+                $user->hasPermissionForTenant($tenant, 'embedded_metadata.view_raw')
+                || $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')
+            )
+                ? $this->embeddedMetadataPresentation->rawPayloadForAsset($asset, true)
+                : null,
         ]);
     }
 
@@ -3703,6 +3734,7 @@ class AssetMetadataController extends Controller
             $canApply = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply');
             $canDismiss = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss');
 
+            $source = $suggestion['source'] ?? 'ai';
             $formattedSuggestions[] = [
                 'field_key' => $fieldKey,
                 'field_id' => $fieldDef['field_id'],
@@ -3711,7 +3743,11 @@ class AssetMetadataController extends Controller
                 'options' => $fieldDef['options'] ?? [],
                 'value' => $suggestion['value'],
                 'confidence' => $suggestion['confidence'] ?? null,
-                'source' => $suggestion['source'] ?? 'ai',
+                'source' => $source,
+                'source_label' => $source === EmbeddedUsageRightsSuggestionService::SOURCE
+                    ? 'Embedded file metadata'
+                    : ($source === 'ai' ? 'AI' : $source),
+                'evidence' => $suggestion['evidence'] ?? null,
                 'generated_at' => $suggestion['generated_at'] ?? null,
                 'can_edit' => $canEdit,
                 'can_apply' => $canApply && $canEdit,
@@ -3753,17 +3789,7 @@ class AssetMetadataController extends Controller
 
         $suggestion = $suggestions[$fieldKey];
 
-        // Get field ID
-        $field = DB::table('metadata_fields')
-            ->where('key', $fieldKey)
-            ->where('tenant_id', $asset->tenant_id)
-            ->first();
-
-        if (! $field) {
-            return response()->json(['message' => 'Field not found'], 404);
-        }
-
-        // Load category for schema resolution
+        // Load category for schema resolution (canonical field_id for this asset/category)
         $category = null;
         if ($asset->metadata && isset($asset->metadata['category_id'])) {
             $categoryId = $asset->metadata['category_id'];
@@ -3776,10 +3802,8 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Category not found'], 404);
         }
 
-        // Determine asset type
         $assetType = $this->determineAssetType($asset);
 
-        // Resolve metadata schema
         $schema = $this->metadataSchemaResolver->resolve(
             $asset->tenant_id,
             $asset->brand_id,
@@ -3787,10 +3811,9 @@ class AssetMetadataController extends Controller
             $assetType
         );
 
-        // Find field in schema
         $fieldDef = null;
         foreach ($schema['fields'] ?? [] as $f) {
-            if ($f['field_id'] === $field->id) {
+            if (($f['key'] ?? null) === $fieldKey) {
                 $fieldDef = $f;
                 break;
             }
@@ -3798,6 +3821,14 @@ class AssetMetadataController extends Controller
 
         if (! $fieldDef) {
             return response()->json(['message' => 'Field not found in schema'], 404);
+        }
+
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldDef['field_id'])
+            ->first();
+
+        if (! $field) {
+            return response()->json(['message' => 'Field not found'], 404);
         }
 
         // Check edit permission
@@ -3837,17 +3868,20 @@ class AssetMetadataController extends Controller
                 ->delete();
 
             // Insert new value
-            // Preserve AI origin: if suggestion came from AI, keep source='ai' and set producer='ai'
-            // This allows the UI to show "AI" badge even though user accepted it
-            $suggestionSource = $suggestion['source'] ?? 'ai'; // Default to 'ai' for AI suggestions
-            $isAISuggestion = ($suggestionSource === 'ai' || isset($suggestion['confidence']));
+            // Preserve AI origin only when source is AI (embedded suggestions also carry confidence=1.0)
+            $suggestionSource = $suggestion['source'] ?? 'ai';
+            $isAISuggestion = $suggestionSource === 'ai';
+            $isJackpotEmbedded = $suggestionSource === EmbeddedUsageRightsSuggestionService::SOURCE;
+
+            $rowSource = $isAISuggestion ? 'ai' : 'user';
+            $rowProducer = $isAISuggestion ? 'ai' : ($isJackpotEmbedded ? 'jackpot_embedded' : 'user');
 
             $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $field->id,
                 'value_json' => json_encode($suggestion['value']),
-                'source' => $isAISuggestion ? 'ai' : 'user', // Preserve AI source if it was an AI suggestion
-                'producer' => $isAISuggestion ? 'ai' : 'user', // Mark producer as 'ai' for AI suggestions
+                'source' => $rowSource,
+                'producer' => $rowProducer,
                 'confidence' => $suggestion['confidence'] ?? null,
                 'approved_at' => $requiresApproval ? null : now(),
                 'approved_by' => $requiresApproval ? null : $user->id,
@@ -3940,10 +3974,16 @@ class AssetMetadataController extends Controller
             $fieldLabel = null;
             $field = DB::table('metadata_fields')
                 ->where('key', $fieldKey)
-                ->where('tenant_id', $tenant->id)
+                ->where(function ($q) use ($asset) {
+                    $q->where('scope', 'system')
+                        ->orWhere(function ($q2) use ($asset) {
+                            $q2->where('tenant_id', $asset->tenant_id)
+                                ->where('scope', '!=', 'system');
+                        });
+                })
                 ->first();
             if ($field) {
-                $fieldLabel = $field->label ?? $field->name ?? $fieldKey;
+                $fieldLabel = $field->system_label ?? $field->key ?? $fieldKey;
             }
 
             ActivityRecorder::record(

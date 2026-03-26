@@ -258,6 +258,7 @@ class Asset extends Model
         'archived_at',
         'archived_by_id',
         'expires_at',
+        'captured_at',
         'approval_status',
         'approved_at',
         'approved_by_user_id',
@@ -306,6 +307,8 @@ class Asset extends Model
             'published_at' => 'datetime',
             'archived_at' => 'datetime',
             'expires_at' => 'datetime',
+            // Nullable: optional capture time from embedded EXIF when mapped (fill_if_empty). Safe null everywhere — no sorts assume non-null.
+            'captured_at' => 'datetime',
             'approval_status' => ApprovalStatus::class,
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
@@ -714,6 +717,30 @@ class Asset extends Model
     public function embedding(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(AssetEmbedding::class);
+    }
+
+    /**
+     * Raw embedded metadata payloads (Layer B), keyed by source.
+     */
+    public function metadataPayloads(): HasMany
+    {
+        return $this->hasMany(AssetMetadataPayload::class);
+    }
+
+    /**
+     * Convenience: current embedded file-native payload (source = embedded).
+     */
+    public function embeddedMetadataPayload(): HasOne
+    {
+        return $this->hasOne(AssetMetadataPayload::class)->where('source', 'embedded');
+    }
+
+    /**
+     * Derived searchable index rows (Layer C).
+     */
+    public function metadataIndexEntries(): HasMany
+    {
+        return $this->hasMany(AssetMetadataIndexEntry::class);
     }
 
     /**

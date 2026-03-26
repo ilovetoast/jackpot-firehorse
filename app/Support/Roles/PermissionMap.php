@@ -91,6 +91,7 @@ class PermissionMap
         // DAM Metadata permissions (tenant-scoped)
         $metadataPermissions = [
             'metadata.set_on_upload',
+            'embedded_metadata.view_raw',
             'metadata.edit_post_upload',
             'metadata.bypass_approval',
             'metadata.override_automatic',
@@ -168,6 +169,7 @@ class PermissionMap
                 $tagPermissions,
                 [
                     'metadata.set_on_upload',
+                    'embedded_metadata.view_raw',
                     'metadata.edit_post_upload',
                     'metadata.review_candidates',
                 ],
@@ -182,6 +184,7 @@ class PermissionMap
                 $tagPermissions,
                 [
                     'metadata.set_on_upload',
+                    'embedded_metadata.view_raw',
                     'metadata.edit_post_upload',
                     'metadata.review_candidates',
                     'metadata.suggestions.view',
@@ -233,6 +236,7 @@ class PermissionMap
         // Metadata permissions
         $metadataPermissions = [
             'metadata.set_on_upload',
+            'embedded_metadata.view_raw',
             'metadata.edit_post_upload',
             'metadata.bypass_approval',
             'metadata.override_automatic',
@@ -281,6 +285,7 @@ class PermissionMap
                 ['assets.delete'],
                 [
                     'metadata.bypass_approval', // Phase M-1: Brand Manager edits bypass approval
+                    'embedded_metadata.view_raw',
                     'metadata.suggestions.view',
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
@@ -297,6 +302,7 @@ class PermissionMap
                 $tagPermissions,
                 [
                     'metadata.set_on_upload',
+                    'embedded_metadata.view_raw',
                     'metadata.edit_post_upload',
                     'metadata.review_candidates',
                 ],

@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { SparklesIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { SparklesIcon, CheckIcon, XMarkIcon, DocumentMagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 // Global guard to prevent multiple simultaneous usage checks across all component instances
@@ -292,36 +292,43 @@ export default function AiMetadataSuggestionsInline({ assetId }) {
     if (loading) {
         return (
             <div className="px-6 py-4 border-t border-gray-200">
-                <div className="text-sm text-gray-500">Loading AI suggestions...</div>
-            </div>
-        )
-    }
-
-    // If suggestions are paused due to cap, show notice instead
-    if (suggestionsPaused) {
-        return (
-            <div className="px-6 py-4 border-t border-gray-200">
-                <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
-                    <div className="flex items-center gap-2">
-                        <SparklesIcon className="h-4 w-4 text-gray-400" />
-                        <p className="text-sm text-gray-600">
-                            AI suggestions paused until next month
-                        </p>
-                    </div>
-                </div>
+                <div className="text-sm text-gray-500">Loading suggestions…</div>
             </div>
         )
     }
 
     if (suggestions.length === 0) {
-        return null // Hide if no suggestions
+        if (suggestionsPaused) {
+            return (
+                <div className="px-6 py-4 border-t border-gray-200">
+                    <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
+                        <div className="flex items-center gap-2">
+                            <SparklesIcon className="h-4 w-4 text-gray-400" />
+                            <p className="text-sm text-gray-600">AI suggestions paused until next month</p>
+                        </div>
+                    </div>
+                </div>
+            )
+        }
+        return null
     }
 
     return (
         <div className="px-6 py-4 border-t border-gray-200">
+            {suggestionsPaused && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 mb-4">
+                    <div className="flex items-center gap-2">
+                        <SparklesIcon className="h-4 w-4 text-amber-600" />
+                        <p className="text-sm text-amber-900">
+                            AI suggestions are paused this period. Non-AI suggestions (e.g. from embedded file
+                            metadata) may still appear below.
+                        </p>
+                    </div>
+                </div>
+            )}
             <div className="flex items-center gap-2 mb-4">
                 <SparklesIcon className="h-5 w-5 text-indigo-500" />
-                <h3 className="text-sm font-semibold text-gray-900">Suggested by AI</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Suggestions</h3>
                 {/* TODO (Optional Enhancement): UI Copy Refinement
                     At some point, you may want to add trust-building microcopy like:
                     <span className="text-xs text-gray-500 ml-2">· You're always in control</span>
@@ -340,9 +347,24 @@ export default function AiMetadataSuggestionsInline({ assetId }) {
                         >
                             <div className="flex items-start justify-between mb-2">
                                 <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                        {suggestion.source === 'jackpot_embedded' ? (
+                                            <DocumentMagnifyingGlassIcon className="h-4 w-4 text-teal-600 flex-shrink-0" title="Embedded metadata" />
+                                        ) : (
+                                            <SparklesIcon className="h-4 w-4 text-indigo-500 flex-shrink-0" title="AI" />
+                                        )}
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+                                            {suggestion.source_label || suggestion.source || 'Suggestion'}
+                                        </span>
+                                    </div>
                                     <div className="text-sm font-medium text-gray-900 mb-1">
                                         {suggestion.display_label}
                                     </div>
+                                    {suggestion.evidence && (
+                                        <p className="text-xs text-gray-500 mb-1">
+                                            Based on {suggestion.evidence.replace(/_/g, ' ')} in the file
+                                        </p>
+                                    )}
                                     <div className="text-sm text-gray-600">
                                         {formatValue(suggestion)}
                                     </div>

@@ -100,6 +100,7 @@ export default function CompanyPermissions({
             type: 'brand',
             permissions: [
                 'metadata.set_on_upload',
+                'embedded_metadata.view_raw',
                 'metadata.edit_post_upload',
                 'metadata.bypass_approval',
                 'metadata.override_automatic',

@@ -62,6 +62,7 @@ class PermissionSeeder extends Seeder
         // DAM Metadata permissions (tenant-scoped)
         $metadataPermissions = [
             'metadata.set_on_upload',
+            'embedded_metadata.view_raw',
             'metadata.edit_post_upload',
             'metadata.bypass_approval',
             'metadata.override_automatic',
@@ -190,6 +191,7 @@ class PermissionSeeder extends Seeder
             $tagPermissions,
             [
                 'metadata.set_on_upload',
+                'embedded_metadata.view_raw',
                 'metadata.edit_post_upload',
                 'metadata.bypass_approval',
                 'metadata.override_automatic',

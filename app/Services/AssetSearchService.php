@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Scoped asset search: filename, title, user/AI tags, collection name only.
+ * Scoped asset search: filename, title, user/AI tags, collection name, embedded metadata index (search_text).
  * Tokens ANDed; quoted phrases exact; partial word matches.
  * No type/dates/numeric/hidden fields. Composes into existing query pipeline.
  */
@@ -69,6 +69,12 @@ class AssetSearchService
                                 ->join('collections', 'collections.id', '=', 'asset_collections.collection_id')
                                 ->whereColumn('asset_collections.asset_id', 'assets.id')
                                 ->where('collections.name', $like, $pattern);
+                        })
+                        ->orWhereExists(function ($sub) use ($pattern, $like) {
+                            $sub->select(DB::raw(1))
+                                ->from('asset_metadata_index')
+                                ->whereColumn('asset_metadata_index.asset_id', 'assets.id')
+                                ->where('asset_metadata_index.search_text', $like, $pattern);
                         });
                 });
             }

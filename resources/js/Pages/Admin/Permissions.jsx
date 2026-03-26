@@ -208,6 +208,7 @@ export default function AdminPermissions({
             title: 'Metadata Management',
             permissions: [
                 'metadata.set_on_upload',
+                'embedded_metadata.view_raw',
                 'metadata.edit_post_upload',
                 'metadata.bypass_approval',
                 'metadata.override_automatic',
@@ -298,6 +299,7 @@ export default function AdminPermissions({
             'asset.download',
             'asset.upload',
             'metadata.set_on_upload',
+            'embedded_metadata.view_raw',
             'metadata.edit_post_upload',
             'metadata.bypass_approval',
             'metadata.override_automatic',
@@ -312,6 +314,7 @@ export default function AdminPermissions({
             'asset.download',
             'asset.upload',
             'metadata.set_on_upload',
+            'embedded_metadata.view_raw',
             'metadata.edit_post_upload',
             'metadata.review_candidates',
             'tickets.create',

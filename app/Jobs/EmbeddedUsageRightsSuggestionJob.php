@@ -1,0 +1,46 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Enums\AssetStatus;
+use App\Models\Asset;
+use App\Services\AiMetadataSuggestionService;
+use App\Services\EmbeddedUsageRightsSuggestionService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+
+/**
+ * After embedded metadata is indexed, may suggest {@see usage_rights} from IPTC copyright notice etc.
+ * Runs for every processed asset (no AI quota). Pairs with {@see AiMetadataSuggestionJob} merge logic.
+ */
+class EmbeddedUsageRightsSuggestionJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public $tries = 3;
+
+    public $backoff = [60, 300, 900];
+
+    public function __construct(
+        public string $assetId
+    ) {}
+
+    public function handle(
+        EmbeddedUsageRightsSuggestionService $embeddedService,
+        AiMetadataSuggestionService $suggestionService
+    ): void {
+        $asset = Asset::find($this->assetId);
+        if (! $asset) {
+            return;
+        }
+
+        if ($asset->status !== AssetStatus::VISIBLE) {
+            return;
+        }
+
+        $embeddedService->mergeEmbeddedUsageRightsIntoAsset($asset, $suggestionService);
+    }
+}

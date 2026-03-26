@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Capture queue failures for asset-processing jobs.
  *
- * Records system_incident when GenerateThumbnailsJob, ProcessAssetJob, or ExtractMetadataJob fails.
+ * Records system_incident when GenerateThumbnailsJob, ProcessAssetJob, ExtractMetadataJob, or ExtractEmbeddedMetadataJob fails.
  * Ensures MaxAttemptsExceededException and timeout failures are captured.
  */
 class QueueFailureListener
@@ -18,6 +18,7 @@ class QueueFailureListener
         'GenerateThumbnailsJob',
         'ProcessAssetJob',
         'ExtractMetadataJob',
+        'ExtractEmbeddedMetadataJob',
     ];
 
     public function handle(JobFailed $event): void

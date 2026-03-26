@@ -665,4 +665,22 @@ class AiMetadataSuggestionService
 
         return $suggestions;
     }
+
+    /**
+     * Public wrappers for {@see EmbeddedUsageRightsSuggestionService} (embedded metadata, not AI).
+     */
+    public function isFieldEmptyForSuggestions(Asset $asset, string $fieldKey): bool
+    {
+        return $this->isFieldEmpty($asset, $fieldKey);
+    }
+
+    public function isSuggestionDismissedPublic(Asset $asset, string $fieldKey, $value): bool
+    {
+        return $this->isSuggestionDismissed($asset, $fieldKey, $value);
+    }
+
+    public function isValueAllowedForField(string $fieldKey, $value): bool
+    {
+        return $this->isValueAllowed($fieldKey, $value);
+    }
 }

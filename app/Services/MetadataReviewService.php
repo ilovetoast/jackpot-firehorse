@@ -27,10 +27,25 @@ class MetadataReviewService
     /**
      * Get reviewable candidates for an asset.
      *
+     * Includes: (1) DB rows in asset_metadata_candidates (confidence &lt; 1, not user).
+     * (2) Ephemeral suggestions from asset.metadata['_ai_suggestions'] with source jackpot_embedded
+     * (e.g. usage_rights from embedded copyright — confidence 1.0, never in candidates table).
+     *
      * @param Asset $asset
      * @return array Review items grouped by field
      */
     public function getReviewableCandidates(Asset $asset): array
+    {
+        $reviewItems = $this->buildReviewItemsFromDatabaseCandidates($asset);
+        $this->appendEphemeralJackpotEmbeddedSuggestions($asset, $reviewItems);
+
+        return $reviewItems;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildReviewItemsFromDatabaseCandidates(Asset $asset): array
     {
         // Get all unresolved, non-dismissed candidates
         $candidates = DB::table('asset_metadata_candidates')
@@ -132,6 +147,123 @@ class MetadataReviewService
         }
 
         return $reviewItems;
+    }
+
+    /**
+     * Merge Jackpot embedded-metadata suggestions (e.g. licensed from IPTC copyright) into review list.
+     *
+     * @param  array<int, array<string, mixed>>  $reviewItems
+     */
+    protected function appendEphemeralJackpotEmbeddedSuggestions(Asset $asset, array &$reviewItems): void
+    {
+        $suggestions = $asset->metadata['_ai_suggestions'] ?? [];
+        if (! is_array($suggestions) || $suggestions === []) {
+            return;
+        }
+
+        $manualOverrideFieldIds = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('source', 'manual_override')
+            ->whereNotNull('approved_at')
+            ->pluck('metadata_field_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $resolvedValues = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->whereNotNull('approved_at')
+            ->get()
+            ->keyBy('metadata_field_id');
+
+        foreach ($suggestions as $fieldKey => $payload) {
+            if (! is_array($payload)) {
+                continue;
+            }
+            if (($payload['source'] ?? '') !== EmbeddedUsageRightsSuggestionService::SOURCE) {
+                continue;
+            }
+
+            $field = DB::table('metadata_fields')
+                ->where('key', $fieldKey)
+                ->where(function ($q) use ($asset) {
+                    $q->where('scope', 'system')
+                        ->orWhere(function ($q2) use ($asset) {
+                            $q2->where('tenant_id', $asset->tenant_id)
+                                ->where('scope', '!=', 'system');
+                        });
+                })
+                ->first();
+
+            if (! $field) {
+                continue;
+            }
+
+            $fieldId = (int) $field->id;
+
+            if (in_array($fieldId, $manualOverrideFieldIds, true)) {
+                continue;
+            }
+
+            $candidateRow = [
+                'id' => 'ephemeral_jackpot_'.$fieldKey,
+                'ephemeral' => true,
+                'field_key' => $fieldKey,
+                'value' => $payload['value'] ?? null,
+                'source' => $payload['source'] ?? EmbeddedUsageRightsSuggestionService::SOURCE,
+                'confidence' => $payload['confidence'] ?? 1.0,
+                'producer' => 'jackpot_embedded',
+                'evidence' => $payload['evidence'] ?? null,
+                'created_at' => $payload['generated_at'] ?? null,
+            ];
+
+            $idx = null;
+            foreach ($reviewItems as $i => $item) {
+                if ((int) ($item['metadata_field_id'] ?? 0) === $fieldId) {
+                    $idx = $i;
+                    break;
+                }
+            }
+
+            if ($idx !== null) {
+                $ids = collect($reviewItems[$idx]['candidates'] ?? [])->pluck('id')->all();
+                if (! in_array($candidateRow['id'], $ids, true)) {
+                    $reviewItems[$idx]['candidates'][] = $candidateRow;
+                }
+
+                continue;
+            }
+
+            $currentResolved = $resolvedValues->get($fieldId);
+
+            $options = [];
+            if (in_array($field->type, ['select', 'multiselect'], true)) {
+                $fieldOptions = DB::table('metadata_options')
+                    ->where('metadata_field_id', $fieldId)
+                    ->orderBy('system_label')
+                    ->get();
+
+                foreach ($fieldOptions as $option) {
+                    $options[] = [
+                        'value' => $option->value,
+                        'display_label' => $option->system_label,
+                    ];
+                }
+            }
+
+            $reviewItems[] = [
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $fieldId,
+                'field_key' => $field->key,
+                'field_label' => $field->system_label ?? $field->key,
+                'field_type' => $field->type,
+                'options' => $options,
+                'current_resolved_value' => $currentResolved ? json_decode($currentResolved->value_json, true) : null,
+                'current_resolved_source' => $currentResolved ? $currentResolved->source : null,
+                'current_resolved_confidence' => $currentResolved ? $currentResolved->confidence : null,
+                'current_resolved_producer' => $currentResolved ? $currentResolved->producer : null,
+                'candidates' => [$candidateRow],
+            ];
+        }
     }
 
     /**

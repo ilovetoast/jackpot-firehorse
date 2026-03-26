@@ -42,6 +42,7 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
 import AssetTimeline from './AssetTimeline'
 import CollapsibleSection from './CollapsibleSection'
+import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PermissionGate from './PermissionGate'
 import StarRating from './StarRating'
 import CollectionSelector from './Collections/CollectionSelector'
@@ -149,6 +150,8 @@ export default function AssetDetailPanel({
 
     const [metadataEditGroup, setMetadataEditGroup] = useState(null)
     const [metadataDirty, setMetadataDirty] = useState({})
+    /** Details panel (not quick view): schema fields vs embedded file metadata */
+    const [detailMetadataTab, setDetailMetadataTab] = useState('fields')
 
     const [isExiting, setIsExiting] = useState(false)
     const [hasEntered, setHasEntered] = useState(false)
@@ -180,6 +183,10 @@ export default function AssetDetailPanel({
             setEditingFilename(false)
         }
     }, [isOpen, asset?.id])
+
+    useEffect(() => {
+        setDetailMetadataTab('fields')
+    }, [asset?.id])
 
     // Enter animation: start off-screen, then slide in
     useEffect(() => {
@@ -1035,6 +1042,52 @@ export default function AssetDetailPanel({
                         {!loading && !error && metadata && (
                             <section className="border-t border-gray-200 mb-6" aria-labelledby="section-metadata">
                                 <CollapsibleSection title="Metadata" defaultExpanded={true}>
+                                <div className="flex gap-1 border-b border-gray-200 mb-4" role="tablist" aria-label="Metadata sections">
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={detailMetadataTab === 'fields'}
+                                        onClick={() => setDetailMetadataTab('fields')}
+                                        className={`px-3 py-2 text-sm font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                            detailMetadataTab === 'fields'
+                                                ? ''
+                                                : 'border-transparent text-gray-500 hover:text-gray-800'
+                                        }`}
+                                        style={
+                                            detailMetadataTab === 'fields'
+                                                ? { borderBottomColor: brandPrimary, color: brandPrimary }
+                                                : undefined
+                                        }
+                                    >
+                                        Metadata
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={detailMetadataTab === 'embedded'}
+                                        onClick={() => setDetailMetadataTab('embedded')}
+                                        className={`px-3 py-2 text-sm font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                            detailMetadataTab === 'embedded'
+                                                ? ''
+                                                : 'border-transparent text-gray-500 hover:text-gray-800'
+                                        }`}
+                                        style={
+                                            detailMetadataTab === 'embedded'
+                                                ? { borderBottomColor: brandPrimary, color: brandPrimary }
+                                                : undefined
+                                        }
+                                    >
+                                        Embedded metadata
+                                    </button>
+                                </div>
+
+                                {detailMetadataTab === 'embedded' && (
+                                    <div className="mb-6">
+                                        <AssetEmbeddedMetadataPanel embeddedMetadata={metadata.embedded_metadata} />
+                                    </div>
+                                )}
+
+                                {detailMetadataTab === 'fields' && (
                                 <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
                                 {metadataByGroup.map(({ key: groupKey, fields }) => {
                                     const isEditing = metadataEditGroup === groupKey
@@ -1308,6 +1361,7 @@ export default function AssetDetailPanel({
                                     )
                                 })}
                                 </div>
+                                )}
                                 </CollapsibleSection>
                             </section>
                         )}

@@ -282,18 +282,20 @@ class ProcessAssetJob implements ShouldQueue
 
         // Dispatch processing chain using Bus::chain()
         // Processing pipeline:
-        // 1. ExtractMetadataJob - Extract file metadata
-        // 2. GenerateThumbnailsJob - Generate thumbnail styles
-        // 3. GeneratePreviewJob - Generate preview images
-        // 4. GenerateVideoPreviewJob - Generate video hover previews (video assets only)
-        // 5. ComputedMetadataJob - Compute technical metadata (Phase 5)
-        // 6. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
-        // 7. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
-        // 8. AITaggingJob - AI-powered tagging
-        // 9. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
-        // 10. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
-        // 11. FinalizeAssetJob - Mark asset as completed
-        // 12. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        // 1. ExtractMetadataJob - Extract file metadata (canonical / video basics)
+        // 2. ExtractEmbeddedMetadataJob - EXIF/IPTC/PDF tags → payload + governed index (best-effort)
+        // 2b. EmbeddedUsageRightsSuggestionJob - optional usage_rights suggestion from embedded copyright (no AI quota)
+        // 3. GenerateThumbnailsJob - Generate thumbnail styles
+        // 4. GeneratePreviewJob - Generate preview images
+        // 5. GenerateVideoPreviewJob - Generate video hover previews (video assets only)
+        // 6. ComputedMetadataJob - Compute technical metadata (Phase 5)
+        // 7. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
+        // 8. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
+        // 9. AITaggingJob - AI-powered tagging
+        // 10. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
+        // 11. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
+        // 12. FinalizeAssetJob - Mark asset as completed
+        // 13. PromoteAssetJob - Move from temp/ to canonical assets/ location
         //    (runs after thumbnail generation, requires COMPLETED status)
         
         // Check if asset is a video to conditionally add video preview job
@@ -316,6 +318,8 @@ class ProcessAssetJob implements ShouldQueue
 
         $chainJobs = [
             new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
+            new ExtractEmbeddedMetadataJob($asset->id, $version?->id),
+            new EmbeddedUsageRightsSuggestionJob($asset->id),
             new GenerateThumbnailsJob($thumbnailJobId), // Version ID when version-aware
             new GeneratePreviewJob($asset->id),
         ];

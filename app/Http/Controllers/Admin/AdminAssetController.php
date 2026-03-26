@@ -20,6 +20,7 @@ use App\Models\Category;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Assets\Metadata\EmbeddedMetadataDebugPayload;
 use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
@@ -289,6 +290,7 @@ class AdminAssetController extends Controller
             'failed_jobs' => $failedJobs,
             'versions' => $versions,
             'plan_allows_versions' => $planAllowsVersions,
+            'embedded_metadata_debug' => EmbeddedMetadataDebugPayload::assemble($asset->fresh()),
         ]);
     }
 

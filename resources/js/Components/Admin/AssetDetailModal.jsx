@@ -5,7 +5,7 @@
  * Shows asset details with tabs, actions (Attempt Repair, Retry Pipeline), and optional thumbnail on left.
  *
  * @param {Object} props
- * @param {Object} props.data - { asset, incidents, pipeline_flags } from /app/admin/assets/{id}
+ * @param {Object} props.data - { asset, incidents, pipeline_flags, embedded_metadata_debug, ... } from /app/admin/assets/{id}
  * @param {Function} props.onClose - Callback when modal should close
  * @param {Function} props.onAction - (assetId, action) for repair, retry-pipeline, restore
  * @param {Function} props.onRefresh - Callback after action that refreshes parent
@@ -52,12 +52,21 @@ const STATUS_COLORS = {
 export default function AssetDetailModal({ data, onClose, onAction, onRefresh, showThumbnail = false }) {
     const [tab, setTab] = useState('overview')
     const [restoreVersionLoading, setRestoreVersionLoading] = useState(false)
-    const { asset, incidents, pipeline_flags, failed_jobs, versions = [], plan_allows_versions = false } = data || {}
+    const {
+        asset,
+        incidents,
+        pipeline_flags,
+        failed_jobs,
+        versions = [],
+        plan_allows_versions = false,
+        embedded_metadata_debug = null,
+    } = data || {}
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
         ...(versions?.length ? [{ id: 'versions', label: `Versions (${versions.length})` }] : []),
         { id: 'metadata', label: 'Metadata JSON' },
+        { id: 'embedded', label: 'Embedded meta' },
         { id: 'pipeline', label: 'Pipeline State' },
         { id: 'incidents', label: 'Incidents' },
         { id: 'thumbnails', label: 'Thumbnail Paths' },
@@ -314,6 +323,17 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                     {tab === 'metadata' && (
                         <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-96 [&_.w-rjv]:text-xs">
                             <JsonView value={asset?.metadata ?? {}} collapsed={2} enableClipboard />
+                        </div>
+                    )}
+                    {tab === 'embedded' && (
+                        <div className="space-y-3 text-sm">
+                            <p className="text-slate-500">
+                                Raw namespaces, index rows, extractor warnings (<code className="text-xs bg-slate-100 px-1 rounded">other</code>), and
+                                canonical mapping hints. Best-effort extraction; empty state after reprocess means extractors returned nothing.
+                            </p>
+                            <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-[28rem] [&_.w-rjv]:text-xs">
+                                <JsonView value={embedded_metadata_debug ?? {}} collapsed={2} enableClipboard />
+                            </div>
                         </div>
                     )}
                     {tab === 'pipeline' && (
