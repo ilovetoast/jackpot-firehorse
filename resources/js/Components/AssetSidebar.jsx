@@ -3,9 +3,9 @@
  * Used by Assets, Executions, and Generative pages.
  *
  * LIBRARY: All, category list (Logos, Photography, etc.)
- * SYSTEM: Staged, Research, Trash (workflow queues)
+ * SYSTEM: Staged, References, Trash (workflow queues)
  *
- * Research = reference materials (source=reference_materials, type=REFERENCE)
+ * References = builder reference materials (source=reference_materials, type=REFERENCE)
  * Staged = assets without category (intake_state=staged)
  * Trash = soft-deleted assets
  */
@@ -340,8 +340,8 @@ export default function AssetSidebar({
                                                 isSelected={isResearchView}
                                                 onClick={onResearchClick ?? (() => router.get(baseUrl, { source: 'reference_materials' }))}
                                                 icon={DocumentTextIcon}
-                                                label="Research"
-                                                title="Reference materials for brand research — PDFs, screenshots, ads, packaging. Used for AI analysis and visual reference; not yet published to the main library."
+                                                label="References"
+                                                title="Builder reference materials — PDFs, screenshots, ads, packaging. Used for Brand Guidelines and AI analysis; not shown in the main library until published."
                                                 count={researchCount}
                                                 activeBgColor={activeBgColor}
                                                 activeTextColor={activeTextColor}

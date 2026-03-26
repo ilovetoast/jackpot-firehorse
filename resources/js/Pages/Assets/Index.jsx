@@ -38,6 +38,17 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
+/** Refetch with asset grid updates so sidebar category counts and system badges stay correct (partial Inertia reloads omit props not listed). */
+const ASSET_INDEX_SIDEBAR_COUNT_PROPS = [
+    'categories',
+    'categories_by_type',
+    'show_all_button',
+    'total_asset_count',
+    'staged_count',
+    'reference_materials_count',
+    'trash_count',
+]
+
 export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -495,7 +506,16 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         router.get('/app/assets', params, {
             preserveState: true,
             preserveScroll: true,
-            only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'source', 'reference_materials_count']
+            only: [
+                'filterable_schema',
+                'available_values',
+                'assets',
+                'next_page_url',
+                'selected_category',
+                'selected_category_slug',
+                'source',
+                ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
+            ],
         })
     }, [source])
 
@@ -507,7 +527,16 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         router.get('/app/assets', { source: 'reference_materials' }, {
             preserveState: true,
             preserveScroll: true,
-            only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'source', 'reference_materials_count']
+            only: [
+                'filterable_schema',
+                'available_values',
+                'assets',
+                'next_page_url',
+                'selected_category',
+                'selected_category_slug',
+                'source',
+                ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
+            ],
         })
     }, [])
 
@@ -521,8 +550,8 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         visibleMobileCategories.forEach((cat) => {
             tabs.push({ key: String(cat.id), label: cat.name, count: cat.asset_count > 0 ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false, isReferenceMaterials: false })
         })
-        // Always show Research tab so users can access reference materials (type=REFERENCE)
-        tabs.push({ key: 'reference_materials', label: 'Research', count: reference_materials_count > 0 ? reference_materials_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
+        // Always show References tab so users can open builder reference materials (type=REFERENCE)
+        tabs.push({ key: 'reference_materials', label: 'References', count: reference_materials_count > 0 ? reference_materials_count : null, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
         // Staged: assets without category, shown when count > 0
         if (staged_count > 0) {
             tabs.push({ key: 'staged', label: 'Staged', count: staged_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false, isStaged: true })
@@ -598,9 +627,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         // Force page remount by incrementing remount key
         setRemountKey(prev => prev + 1)
         
-        // Reload assets to show newly uploaded assets
-        router.reload({ 
-            only: ['assets'], 
+        // Reload assets and sidebar counts (new uploads change staged/category totals)
+        router.reload({
+            only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
             preserveScroll: true,
             preserveState: false, // Prevent state preservation to avoid dialog reopening
             onSuccess: () => {
@@ -879,7 +908,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                                 </button>
                                             )
                                         })}
-                                        {/* Research - always visible so users can access reference materials (type=REFERENCE) */}
+                                        {/* References — always visible so users can open builder reference materials (type=REFERENCE) */}
                                         <>
                                             <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
                                             <button
@@ -888,7 +917,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                                 style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
                                             >
                                                 <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
-                                                <span className="flex-1">Research</span>
+                                                <span className="flex-1">References</span>
                                                 {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
                                             </button>
                                         </>
@@ -1235,7 +1264,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                     bulkCategoriesByAssetType={bulk_categories_by_asset_type}
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
-                        router.reload({ only: ['assets', 'next_page_url', 'staged_count', 'reference_materials_count'] })
+                        router.reload({
+                            only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
+                        })
                         // Clear selection when items leave the view (trash, force delete, or assign category from staged)
                         if (result?.actionId === 'SOFT_DELETE' || result?.actionId === 'FORCE_DELETE' || result?.assignCategory) {
                             setBulkSelectedAssetIds([])
@@ -1260,7 +1291,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         setBulkMetadataInitialOp(null)
                     }}
                     onComplete={() => {
-                        router.reload({ only: ['assets', 'next_page_url'] })
+                        router.reload({ only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS] })
                         setBulkSelectedAssetIds([])
                         setIsBulkMode(false)
                         clearSelection()

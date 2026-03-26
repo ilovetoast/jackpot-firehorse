@@ -631,6 +631,13 @@ export default function AssetDrawer({
     const [pdfFullExtractionLoading, setPdfFullExtractionLoading] = useState(false)
     const [pdfFullExtractionRequested, setPdfFullExtractionRequested] = useState(false)
     const pdfPollTimeoutRef = useRef(null)
+    /** Debounce rapid prev/next so we only hit /pdf-page for the page the user lands on */
+    const pdfPageNavDebounceRef = useRef(null)
+    const pdfPendingFetchPageRef = useRef(null)
+    const pdfPageCacheRef = useRef({})
+    useEffect(() => {
+        pdfPageCacheRef.current = pdfPageCache
+    }, [pdfPageCache])
 
     const [debugMode, setDebugMode] = useState(false)
     const [debugOverlayHold, setDebugOverlayHold] = useState(false)
@@ -768,6 +775,11 @@ export default function AssetDrawer({
             clearTimeout(pdfPollTimeoutRef.current)
             pdfPollTimeoutRef.current = null
         }
+        if (pdfPageNavDebounceRef.current) {
+            clearTimeout(pdfPageNavDebounceRef.current)
+            pdfPageNavDebounceRef.current = null
+        }
+        pdfPendingFetchPageRef.current = null
 
         setPdfCurrentPage(1)
         setPdfPageCache({})
@@ -788,19 +800,36 @@ export default function AssetDrawer({
                 clearTimeout(pdfPollTimeoutRef.current)
                 pdfPollTimeoutRef.current = null
             }
+            if (pdfPageNavDebounceRef.current) {
+                clearTimeout(pdfPageNavDebounceRef.current)
+                pdfPageNavDebounceRef.current = null
+            }
         }
         // Re-fetch PDF page when asset updates (e.g. after Retry Processing completes and thumbnail_status becomes completed)
     }, [displayAsset?.id, displayAsset?.thumbnail_status?.value ?? displayAsset?.thumbnail_status ?? '', fetchPdfPage, isPdf])
+
+    const scheduleDebouncedPdfFetch = useCallback((pageToFetch) => {
+        pdfPendingFetchPageRef.current = pageToFetch
+        if (pdfPageNavDebounceRef.current) {
+            clearTimeout(pdfPageNavDebounceRef.current)
+        }
+        pdfPageNavDebounceRef.current = setTimeout(() => {
+            pdfPageNavDebounceRef.current = null
+            const page = pdfPendingFetchPageRef.current
+            if (!page || !displayAsset?.id) return
+            if (pdfPageCacheRef.current[page]) return
+            fetchPdfPage(page)
+        }, 220)
+    }, [displayAsset?.id, fetchPdfPage])
 
     const handlePdfPageNavigate = useCallback((nextPage) => {
         if (!isPdf) return
         if (nextPage < 1 || nextPage > effectivePdfPageCount) return
 
         setPdfCurrentPage(nextPage)
-        if (!pdfPageCache[nextPage]) {
-            fetchPdfPage(nextPage)
-        }
-    }, [effectivePdfPageCount, fetchPdfPage, isPdf, pdfPageCache])
+        if (pdfPageCache[nextPage]) return
+        scheduleDebouncedPdfFetch(nextPage)
+    }, [effectivePdfPageCount, isPdf, pdfPageCache, scheduleDebouncedPdfFetch])
 
     const handleRequestFullPdfExtraction = useCallback(async () => {
         if (!isPdf || !displayAsset?.id || pdfFullExtractionLoading || !canRequestFullPdfExtraction) {

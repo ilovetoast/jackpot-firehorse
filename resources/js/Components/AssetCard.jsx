@@ -15,7 +15,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
-import { DocumentTextIcon, EyeSlashIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
@@ -504,7 +504,7 @@ export default function AssetCard({
                         </span>
                     </div>
                 )}
-                {/* Top-right badges: health (when warning/critical) + file type + star + unpublished */}
+                {/* Top-right badges: health (when warning/critical) + file type + star + trash + guideline */}
                 <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
                     <div className="inline-flex items-center gap-1.5">
                         {/* Asset health badge — warning/critical (support visibility) */}
@@ -532,21 +532,10 @@ export default function AssetCard({
                                 <TrashIcon className="h-3 w-3" aria-label="In trash" />
                             </span>
                         )}
-                        {/* Reference material badge - builder-staged (Brand Guidelines uploads) */}
-                        {!asset.deleted_at && asset.builder_staged && (
-                            <span className="inline-flex items-center rounded-md bg-slate-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Reference material">
-                                <DocumentTextIcon className="h-3 w-3" aria-label="Reference material" />
-                            </span>
-                        )}
                         {!asset.deleted_at && asset.reference_promotion?.kind === 'guideline' && (
                             <span className="inline-flex items-center rounded-md bg-violet-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Brand guideline reference">
                                 Guideline
                             </span>
-                        )}
-                        {/* Subtle unpublished icon (hidden when in trash) */}
-                        {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
-                        {!asset.deleted_at && !asset.archived_at && asset.is_published === false && (
-                            <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
                         )}
                     </div>
                 </div>

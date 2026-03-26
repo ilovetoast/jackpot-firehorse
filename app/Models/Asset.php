@@ -961,6 +961,41 @@ class Asset extends Model
     }
 
     /**
+     * Scope: exclude editor composition preview / WIP assets (metadata flags).
+     */
+    public function scopeExcludeCompositionTagged(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereNot(function ($q) {
+            $q->where('metadata->composition_wip', true)
+                ->orWhere('metadata->composition_preview', true);
+        });
+    }
+
+    /**
+     * Scope: only editor composition WIP / preview assets (metadata flags).
+     */
+    public function scopeCompositionTaggedOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(function ($q) {
+            $q->where('metadata->composition_wip', true)
+                ->orWhere('metadata->composition_preview', true);
+        });
+    }
+
+    /**
+     * Scope: main-library rows that lack category_id (standard assets + executions only).
+     * Excludes generative, reference, and composition-tagged assets — they are not expected to use the same grid category model.
+     */
+    public function scopeMissingCategoryForGridLibrary(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereNotNull('metadata')
+            ->whereNull('deleted_at')
+            ->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE])
+            ->excludeCompositionTagged()
+            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")');
+    }
+
+    /**
      * Scope: only staged assets (no category yet, shown on /assets/staged).
      */
     public function scopeStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void

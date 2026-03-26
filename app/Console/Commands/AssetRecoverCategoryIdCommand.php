@@ -7,7 +7,8 @@ use App\Models\Category;
 use Illuminate\Console\Command;
 
 /**
- * Recover assets that have null category_id in metadata.
+ * Recover library assets (standard + execution) that have null category_id in metadata.
+ * Skips generative, reference, and composition-tagged assets (same rules as admin alert).
  *
  * FinalizeAssetJob (before fix) replaced asset metadata with version metadata,
  * which wiped category_id and caused assets to disappear from the grid.
@@ -24,7 +25,7 @@ class AssetRecoverCategoryIdCommand extends Command
                             {--dry-run : Show affected assets without making changes}
                             {--limit=1000 : Maximum number of assets to process}';
 
-    protected $description = 'Recover assets with null category_id in metadata (fixes FinalizeAssetJob metadata wipe)';
+    protected $description = 'Recover library assets (standard + execution) with null category_id; excludes generative, reference, composition';
 
     public function handle(): int
     {
@@ -34,10 +35,7 @@ class AssetRecoverCategoryIdCommand extends Command
         $dryRun = $this->option('dry-run');
         $limit = (int) $this->option('limit');
 
-        $query = Asset::query()
-            ->whereNotNull('metadata')
-            ->whereNull('deleted_at')
-            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")');
+        $query = Asset::query()->missingCategoryForGridLibrary();
 
         if ($tenantId) {
             $query->where('tenant_id', $tenantId);

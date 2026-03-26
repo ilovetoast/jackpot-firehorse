@@ -458,6 +458,39 @@ export default function Research({
     const isProcessing = (polling || analyzing) && !isStuckOrFailed
     const hasResearchInputs = Boolean(pdfAsset || normalizeWebsiteUrl(websiteUrl))
 
+    /** Hide the whole Processing Status card until the user adds inputs or a run is active / finalized */
+    const showProcessingStatusSection =
+        hasResearchInputs ||
+        isFinalized ||
+        isProcessing ||
+        isStuckOrFailed ||
+        polling ||
+        version.research_status === 'running'
+
+    const canSkipResearch =
+        Boolean(brandResearchGate?.allowed) &&
+        !hasResearchInputs &&
+        !isFinalized &&
+        !isProcessing &&
+        !isStuckOrFailed &&
+        !polling &&
+        version.research_status !== 'running' &&
+        version.lifecycle_stage === 'research'
+
+    const handleSkipToReview = useCallback(async () => {
+        if (!canSkipResearch) return
+        try {
+            await axios.post(route('brands.research.advance-to-review', { brand: brand.id }), {
+                skip_research: true,
+            })
+            router.visit(route('brands.review.show', { brand: brand.id }))
+        } catch (err) {
+            const msg = err?.response?.data?.error || err?.response?.data?.message || 'Could not continue without research.'
+            console.error('[Research] Skip to review failed', err)
+            alert(msg)
+        }
+    }, [brand.id, canSkipResearch])
+
     const handleAdvanceToReview = useCallback(async () => {
         try {
             await axios.post(route('brands.research.advance-to-review', { brand: brand.id }))
@@ -609,7 +642,8 @@ export default function Research({
                         </h1>
                         <p className="text-white/50 mt-2 text-base">
                             Upload reference materials and analyze your brand presence. Results feed into
-                            the brand guidelines builder.
+                            the brand guidelines builder — or continue without research and fill in the next
+                            steps manually.
                         </p>
                     </div>
 
@@ -756,7 +790,8 @@ export default function Research({
                             </div>
                         </SectionCard>
 
-                        {/* Section 2 — Processing Status */}
+                        {/* Section 2 — Processing Status (only after inputs exist or a run is active / done) */}
+                        {showProcessingStatusSection && (
                         <SectionCard title="Processing Status">
                             <div className="space-y-3">
                                 {(() => {
@@ -1065,6 +1100,7 @@ export default function Research({
                                 )}
                             </div>
                         </SectionCard>
+                        )}
 
                         {/* Section 3 — Results */}
                         {effectiveStatus.snapshot_ready && hasExtractedData && (
@@ -1327,21 +1363,32 @@ export default function Research({
                             )}
 
                             {!(isStuckOrFailed && health.can_retry) && (
-                                <button
-                                    type="button"
-                                    onClick={handleAnalyzeAndContinue}
-                                    disabled={combinedPrimaryDisabled}
-                                    className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-40 min-w-[14rem] sm:min-w-0"
-                                    style={{
-                                        backgroundColor:
-                                            combinedPrimaryDisabled && !canContinue
-                                                ? undefined
-                                                : primaryColor,
-                                    }}
-                                    aria-busy={Boolean(pendingAdvanceAfterRun && (polling || analyzing))}
-                                >
-                                    {combinedPrimaryLabel}
-                                </button>
+                                <>
+                                    {canSkipResearch && (
+                                        <button
+                                            type="button"
+                                            onClick={handleSkipToReview}
+                                            className="px-4 py-2.5 rounded-lg text-sm font-medium text-white/75 border border-white/15 hover:border-white/30 hover:bg-white/[0.06] transition order-first sm:order-none"
+                                        >
+                                            Continue without research →
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleAnalyzeAndContinue}
+                                        disabled={combinedPrimaryDisabled}
+                                        className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition disabled:opacity-40 min-w-[14rem] sm:min-w-0"
+                                        style={{
+                                            backgroundColor:
+                                                combinedPrimaryDisabled && !canContinue
+                                                    ? undefined
+                                                    : primaryColor,
+                                        }}
+                                        aria-busy={Boolean(pendingAdvanceAfterRun && (polling || analyzing))}
+                                    >
+                                        {combinedPrimaryLabel}
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>

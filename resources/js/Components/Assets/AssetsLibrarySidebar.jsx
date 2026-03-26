@@ -3,7 +3,7 @@
  *
  * Structure:
  *   LIBRARY — All, categories (library content)
- *   SYSTEM   — Staged, Research, Trash (workflow queues)
+ *   SYSTEM   — Staged, References, Trash (workflow queues)
  *
  * Each page can show/hide system items via props.
  * Backend queries unchanged; only sidebar grouping and labels.
@@ -54,7 +54,7 @@ export default function AssetsLibrarySidebar({
     emptyLabel = 'No categories yet',
 }) {
     const hasSystemItems = showStaged || showResearch || (showTrash && canViewTrash)
-    // Research always shown when enabled (like legacy Reference materials) so users can access it
+    // References always shown when enabled so users can open builder reference materials
     const hasAnySystemContent = (showStaged && stagedCount > 0) || showResearch || (showTrash && canViewTrash && (trashCount > 0 || lifecycle === 'deleted'))
 
     const sectionLabelColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
@@ -213,7 +213,7 @@ export default function AssetsLibrarySidebar({
                                                 }}
                                             >
                                                 <MagnifyingGlassIcon className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5" style={{ color: isResearchView ? activeTextColor : unselectedIconColor }} />
-                                                <span className="flex-1">Research</span>
+                                                <span className="flex-1">References</span>
                                                 {researchCount > 0 && (
                                                     <span className="text-xs font-normal opacity-80" style={{ color: isResearchView ? activeTextColor : unselectedCountColor }}>
                                                         {researchCount}

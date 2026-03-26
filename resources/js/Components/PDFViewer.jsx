@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+
+/** Delay before loading PDF page images after rapid prev/next (clicks or arrow keys). */
+const PDF_PAGE_NAV_DEBOUNCE_MS = 220
 
 function buildPageEndpoint(asset, page) {
     const template = asset?.pdf_page_api_endpoint
@@ -14,23 +17,36 @@ export default function PDFViewer({ asset }) {
     // Use page_count from API when available (full-screen zoom may receive asset from grid with stale pdf_page_count)
     const [knownPageCount, setKnownPageCount] = useState(null)
     const totalPages = Math.max(1, Number(knownPageCount ?? asset?.pdf_page_count ?? 1))
+    const totalPagesRef = useRef(totalPages)
+    useEffect(() => {
+        totalPagesRef.current = totalPages
+    }, [totalPages])
+
     const [currentPage, setCurrentPage] = useState(1)
     const [pageCache, setPageCache] = useState({})
+    const pageCacheRef = useRef({})
+    useEffect(() => {
+        pageCacheRef.current = pageCache
+    }, [pageCache])
+
     const [loadingPage, setLoadingPage] = useState(1)
     const [processingPage, setProcessingPage] = useState(null)
     const [error, setError] = useState(null)
     const [isFading, setIsFading] = useState(false)
     const retryTimersRef = useRef(new Map())
+    const navDebounceRef = useRef(null)
+    const lastAssetIdRef = useRef(null)
 
     const clearRetryTimers = () => {
         retryTimersRef.current.forEach((timerId) => clearTimeout(timerId))
         retryTimersRef.current.clear()
     }
 
-    const fetchPage = async (page, attempt = 0) => {
-        if (!asset?.id || page < 1 || page > totalPages) return
+    const fetchPage = useCallback(async (page, attempt = 0) => {
+        const maxPage = totalPagesRef.current
+        if (!asset?.id || page < 1 || page > maxPage) return
 
-        if (pageCache[page]) {
+        if (pageCacheRef.current[page]) {
             setLoadingPage(null)
             setProcessingPage(null)
             return
@@ -79,27 +95,64 @@ export default function PDFViewer({ asset }) {
             setLoadingPage(null)
             setProcessingPage(null)
         }
-    }
+    }, [asset?.id])
 
     useEffect(() => {
         clearRetryTimers()
+        if (navDebounceRef.current) {
+            clearTimeout(navDebounceRef.current)
+            navDebounceRef.current = null
+        }
         setKnownPageCount(null)
         setCurrentPage(1)
         setError(null)
         setLoadingPage(1)
         setProcessingPage(null)
         setPageCache(asset?.first_page_url ? { 1: asset.first_page_url } : {})
+        lastAssetIdRef.current = null
 
-        return () => clearRetryTimers()
+        return () => {
+            clearRetryTimers()
+            if (navDebounceRef.current) {
+                clearTimeout(navDebounceRef.current)
+                navDebounceRef.current = null
+            }
+        }
     }, [asset?.id, asset?.first_page_url])
 
     useEffect(() => {
-        fetchPage(currentPage)
-
-        if (currentPage < totalPages) {
-            fetchPage(currentPage + 1)
+        if (navDebounceRef.current) {
+            clearTimeout(navDebounceRef.current)
+            navDebounceRef.current = null
         }
-    }, [currentPage, totalPages, asset?.id])
+
+        const assetChanged = lastAssetIdRef.current !== asset?.id
+        lastAssetIdRef.current = asset?.id ?? null
+
+        const runFetches = () => {
+            fetchPage(currentPage)
+            if (currentPage < totalPagesRef.current) {
+                fetchPage(currentPage + 1)
+            }
+        }
+
+        if (assetChanged) {
+            runFetches()
+            return undefined
+        }
+
+        navDebounceRef.current = setTimeout(() => {
+            navDebounceRef.current = null
+            runFetches()
+        }, PDF_PAGE_NAV_DEBOUNCE_MS)
+
+        return () => {
+            if (navDebounceRef.current) {
+                clearTimeout(navDebounceRef.current)
+                navDebounceRef.current = null
+            }
+        }
+    }, [currentPage, totalPages, asset?.id, fetchPage])
 
     useEffect(() => {
         setIsFading(true)
@@ -111,7 +164,21 @@ export default function PDFViewer({ asset }) {
     const isBusy = loadingPage === currentPage || processingPage === currentPage
 
     return (
-        <div className="w-full h-full flex flex-col">
+        <div
+            className="w-full h-full flex flex-col outline-none"
+            tabIndex={0}
+            role="region"
+            aria-label="PDF preview"
+            onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault()
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault()
+                    setCurrentPage((prev) => Math.min(totalPagesRef.current, prev + 1))
+                }
+            }}
+        >
             <div className="mb-4 flex items-center justify-center gap-3">
                 <button
                     type="button"

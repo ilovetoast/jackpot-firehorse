@@ -7,6 +7,7 @@ use App\Jobs\ExtractPdfTextJob;
 use App\Jobs\RunBrandResearchJob;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\BrandModelVersion;
 use App\Models\BrandPipelineRun;
 use App\Models\BrandPipelineSnapshot;
 use App\Models\PdfTextExtraction;
@@ -369,6 +370,9 @@ class BrandResearchController extends Controller
     /**
      * POST /brands/{brand}/research/advance-to-review
      * User explicitly advances from research to review stage.
+     *
+     * Body: optional { "skip_research": true } — advance without running research when no PDF/URL/materials
+     * are attached and nothing is actively processing.
      */
     public function advanceToReview(Request $request, Brand $brand): JsonResponse
     {
@@ -378,7 +382,35 @@ class BrandResearchController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
+        $request->validate([
+            'skip_research' => 'sometimes|boolean',
+        ]);
+
         $version = $this->versionService->getWorkingVersion($brand);
+
+        if ($request->boolean('skip_research')) {
+            if ($version->lifecycle_stage !== BrandModelVersion::LIFECYCLE_RESEARCH) {
+                return response()->json(['error' => 'Cannot skip research from this stage.'], 422);
+            }
+            if ($this->hasPersistedResearchSources($version)) {
+                return response()->json(['error' => 'Remove research materials or run analysis before skipping.'], 422);
+            }
+            if ($this->hasActiveResearchPipeline($version)) {
+                return response()->json(['error' => 'Research is still running. Wait for it to finish or retry.'], 422);
+            }
+
+            $this->versionService->advanceToReview($version);
+            $version->refresh();
+            $payload = $version->model_payload ?? [];
+            $payload['builder_meta'] = array_merge($payload['builder_meta'] ?? [], ['research_skipped' => true]);
+            $version->update(['model_payload' => $payload]);
+
+            return response()->json([
+                'advanced' => true,
+                'skipped' => true,
+                'lifecycle_stage' => $version->fresh()->lifecycle_stage,
+            ]);
+        }
 
         if (! $version->isResearchComplete()) {
             $guidelinesPdfAsset = $version->assetsForContext('guidelines_pdf')->first();
@@ -546,5 +578,49 @@ class BrandResearchController extends Controller
             'is_disabled' => ($status['cap'] ?? 0) === 0,
             'is_exceeded' => $status['is_exceeded'] ?? false,
         ];
+    }
+
+    /**
+     * True when the draft version has any persisted research source (PDF, URL, social, or brand materials).
+     */
+    protected function hasPersistedResearchSources(BrandModelVersion $version): bool
+    {
+        if ($version->assetsForContext('guidelines_pdf')->exists()) {
+            return true;
+        }
+        if ($version->assetsForContext('brand_material')->exists()) {
+            return true;
+        }
+        $sources = $version->model_payload['sources'] ?? [];
+        if (! empty(trim((string) ($sources['website_url'] ?? '')))) {
+            return true;
+        }
+        $social = $sources['social_urls'] ?? [];
+        if (! empty(array_filter($social, fn ($u) => is_string($u) && trim($u) !== ''))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * True when ingestion / crawl / snapshot work may still be in flight for this draft.
+     */
+    protected function hasActiveResearchPipeline(BrandModelVersion $version): bool
+    {
+        if ($version->research_status === BrandModelVersion::RESEARCH_RUNNING) {
+            return true;
+        }
+
+        $activeRun = BrandPipelineRun::where('brand_model_version_id', $version->id)
+            ->whereIn('status', [BrandPipelineRun::STATUS_PENDING, BrandPipelineRun::STATUS_PROCESSING])
+            ->exists();
+        if ($activeRun) {
+            return true;
+        }
+
+        return BrandPipelineSnapshot::where('brand_model_version_id', $version->id)
+            ->whereIn('status', [BrandPipelineSnapshot::STATUS_PENDING, BrandPipelineSnapshot::STATUS_RUNNING])
+            ->exists();
     }
 }

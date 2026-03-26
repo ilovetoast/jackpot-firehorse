@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\StorageBucket;
@@ -134,8 +135,47 @@ class AssetUrlService
                 }
             }
 
+            // Composition previews / some generative rows skip GenerateThumbnailsJob; derivatives may not exist
+            // even when thumbnail_status is "complete". Admin grid can safely show the image original as preview.
+            if ($this->shouldFallbackAdminThumbnailToOriginal($asset)) {
+                $original = $this->pathResolver->resolve($asset, AssetVariant::ORIGINAL->value);
+
+                return $original !== '' ? $original : null;
+            }
+
             return null;
         });
+    }
+
+    /**
+     * Use stored original image for admin list thumbs when no derivative paths are available.
+     *
+     * Scoped to canvas/composition workflow and AI-generated images so we do not load huge library masters
+     * when thumbnails are merely missing for other reasons.
+     */
+    protected function shouldFallbackAdminThumbnailToOriginal(Asset $asset): bool
+    {
+        $root = $asset->storage_root_path ?? '';
+        if ($root === '') {
+            return false;
+        }
+
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if ($mime === '' || ! str_starts_with($mime, 'image/')) {
+            return false;
+        }
+
+        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
+
+        if (($meta['composition_preview'] ?? false) === true || ($meta['composition_wip'] ?? false) === true) {
+            return true;
+        }
+
+        if (($meta['asset_role'] ?? null) === 'composition_thumbnail') {
+            return true;
+        }
+
+        return $asset->type === AssetType::AI_GENERATED;
     }
 
     /**

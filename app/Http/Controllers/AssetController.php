@@ -218,7 +218,10 @@ class AssetController extends Controller
         $isTrashView = $normalizedLifecycle === 'deleted';
         $sourceParam = $request->get('source');
         $isStagedView = $sourceParam === 'staged';
-        if (! empty($viewableCategoryIds) && ! $isStagedView) {
+        // Per-category counts always reflect the library (published lifecycle, etc.), even on the staged
+        // queue view — so the sidebar stays accurate. total_asset_count for the response is still
+        // overridden to stagedCount when source=staged (see Inertia props below).
+        if (! empty($viewableCategoryIds)) {
             $countQuery = Asset::query()
                 ->normalIntakeOnly()
                 ->excludeBuilderStaged()
@@ -237,22 +240,22 @@ class AssetController extends Controller
             );
             $totalAssetCount = (clone $countQuery)->count();
             if (! empty($categoryIds)) {
-                $counts = (clone $countQuery)
+                $countRows = (clone $countQuery)
                     ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
                     ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
-                    ->get()
-                    ->pluck('count', 'category_id')
-                    ->toArray();
-                foreach ($counts as $catId => $count) {
-                    $assetCounts[$catId] = $count;
+                    ->get();
+                foreach ($countRows as $row) {
+                    $cid = (int) ($row->category_id ?? 0);
+                    if ($cid > 0) {
+                        $assetCounts[$cid] = (int) ($row->count ?? 0);
+                    }
                 }
             }
         }
-        // Add counts to categories
+        // Add counts to categories (integer keys — MySQL/pluck often returns string category_id keys)
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
-            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
-                ? $assetCounts[$category['id']]
-                : 0;
+            $id = isset($category['id']) ? (int) $category['id'] : 0;
+            $category['asset_count'] = $id > 0 ? ($assetCounts[$id] ?? 0) : 0;
 
             return $category;
         });

@@ -150,19 +150,12 @@ class AdminAssetController extends Controller
             'brands' => Brand::select('id', 'name', 'tenant_id')->orderBy('name')->get(),
         ];
 
-        // Assets without category_id disappear from grid — show warning and recovery option
-        $assetsWithoutCategoryCount = Asset::query()
-            ->whereNotNull('metadata')
-            ->whereNull('deleted_at')
-            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")')
-            ->count();
+        // Library assets (standard + execution) missing category_id — generative / reference / composition-tagged rows are excluded
+        $assetsWithoutCategoryCount = $this->queryAssetsMissingCategoryForGrid()->count();
 
         $categoriesForRecovery = [];
         if ($assetsWithoutCategoryCount > 0) {
-            $brandIdsWithAffected = Asset::query()
-                ->whereNotNull('metadata')
-                ->whereNull('deleted_at')
-                ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")')
+            $brandIdsWithAffected = $this->queryAssetsMissingCategoryForGrid()
                 ->distinct()
                 ->pluck('brand_id');
             $categoriesForRecovery = Category::query()
@@ -435,11 +428,8 @@ class AdminAssetController extends Controller
             return response()->json(['error' => 'Category not found'], 404);
         }
 
-        $query = Asset::query()
-            ->whereNotNull('metadata')
-            ->whereNull('deleted_at')
-            ->where('brand_id', $category->brand_id)
-            ->whereRaw('(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "" OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = "null")');
+        $query = $this->queryAssetsMissingCategoryForGrid()
+            ->where('brand_id', $category->brand_id);
 
         $assets = $query->limit(1000)->get();
         $updated = 0;
@@ -455,6 +445,16 @@ class AdminAssetController extends Controller
             'category' => ['id' => $category->id, 'name' => $category->name],
             'message' => "Assigned category \"{$category->name}\" to {$updated} asset(s).",
         ]);
+    }
+
+    /**
+     * Assets that should appear in the main library grid but have no category_id.
+     *
+     * @see Asset::scopeMissingCategoryForGridLibrary()
+     */
+    protected function queryAssetsMissingCategoryForGrid(): \Illuminate\Database\Eloquent\Builder
+    {
+        return Asset::query()->missingCategoryForGridLibrary();
     }
 
     /**
@@ -682,13 +682,56 @@ class AdminAssetController extends Controller
             'include_trashed' => $this->parseBoolParam($request, 'include_trashed'),
             'asset_role' => $request->filled('asset_role') ? trim($request->asset_role) : null,
             'editor_wip_only' => $this->parseBoolParam($request, 'editor_wip_only'),
+            'types' => null,
+            'include_composition' => null,
+            'composition_only' => false,
         ];
 
         if ($search !== '') {
             $this->parseSmartFilter($search, $parsed);
         }
 
+        $this->applyAdminPrimaryTypeScope($request, $parsed);
+
+        $parsed['composition_only'] = $request->boolean('composition_only');
+
         return $parsed;
+    }
+
+    /**
+     * Primary type scope for the admin asset grid: defaults to asset + execution (deliverable),
+     * excludes composition-tagged rows unless requested. Use types=all for no restriction.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    protected function applyAdminPrimaryTypeScope(Request $request, array &$parsed): void
+    {
+        if (! empty($parsed['asset_type'])) {
+            return;
+        }
+
+        $typesParam = $request->get('types');
+        if ($typesParam === 'all') {
+            $parsed['types'] = null;
+            $parsed['include_composition'] = true;
+
+            return;
+        }
+
+        if ($typesParam !== null && $typesParam !== '') {
+            $parts = array_values(array_filter(array_map('trim', explode(',', (string) $typesParam))));
+            $allowed = ['asset', 'deliverable', 'ai_generated', 'reference'];
+            $parsed['types'] = array_values(array_intersect($parts, $allowed));
+            if ($parsed['types'] === []) {
+                $parsed['types'] = ['asset', 'deliverable'];
+            }
+            $parsed['include_composition'] = $request->boolean('composition');
+
+            return;
+        }
+
+        $parsed['types'] = ['asset', 'deliverable'];
+        $parsed['include_composition'] = false;
     }
 
     protected function parseBoolParam(Request $request, string $key): ?bool
@@ -761,6 +804,43 @@ class AdminAssetController extends Controller
                 }
             }
         }
+
+        // Free-text search must not include smart-filter tokens; otherwise buildQuery ANDs an impossible
+        // LIKE on the full query string (matches Admin UI plainSearch behavior).
+        $parsed['search'] = $this->stripAdminSmartFilterSyntax($search);
+    }
+
+    /**
+     * Remove smart-filter tokens from the search box so remaining text is used only for filename/title/tag LIKE.
+     * Order: numeric brand before slug brand; same regexes as parseSmartFilter().
+     */
+    protected function stripAdminSmartFilterSyntax(string $search): string
+    {
+        $patterns = [
+            '/tenant:\d+/i',
+            '/brand:\d+/i',
+            '/brand:[a-z0-9_-]+/i',
+            '/status:\w+/i',
+            '/type:(?:asset|deliverable|ai_generated|execution|generative)/i',
+            '/analysis:\w+/i',
+            '/thumb:\w+/i',
+            '/incident:(?:true|false|1|0)/i',
+            '/visible:(?:true|false|1|0)/i',
+            '/tag:[a-z0-9_-]+/i',
+            '/category:\w+/i',
+            '/user:\d+/i',
+            '/dead:(?:true|1)/i',
+            '/deleted:(?:true|false|1|0)/i',
+            '/builder:(?:true|false|1|0)/i',
+            '/staged:(?:true|1)/i',
+            '/intake:(?:staged|normal)/i',
+        ];
+        $out = $search;
+        foreach ($patterns as $re) {
+            $out = preg_replace($re, '', $out) ?? '';
+        }
+
+        return trim(preg_replace('/\s+/', ' ', $out) ?? '');
     }
 
     protected function resolveSortColumn(?string $sort): string
@@ -838,6 +918,13 @@ class AdminAssetController extends Controller
         }
         if (! empty($filters['asset_type'])) {
             $query->where('type', $filters['asset_type']);
+        } elseif (! empty($filters['types']) && is_array($filters['types'])) {
+            $query->whereIn('type', $filters['types']);
+        }
+        if (! empty($filters['composition_only'])) {
+            $query->compositionTaggedOnly();
+        } elseif (($filters['include_composition'] ?? true) === false) {
+            $query->excludeCompositionTagged();
         }
         if (($filters['visible_in_grid'] ?? null) === true) {
             $query->visibleInGrid();
@@ -1026,6 +1113,52 @@ class AdminAssetController extends Controller
     }
 
     /**
+     * How this row relates to the main library grid vs canvas/generative workflows (admin list UX).
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array{kind: string, label: string, composition_id: string|null}
+     */
+    protected function adminAssetRowContext(Asset $asset, array $metadata): array
+    {
+        $wip = ($metadata['composition_wip'] ?? false) === true;
+        $preview = ($metadata['composition_preview'] ?? false) === true;
+        $rawCompId = $metadata['composition_id'] ?? null;
+        $compositionId = $rawCompId !== null && $rawCompId !== ''
+            ? (string) $rawCompId
+            : null;
+
+        if ($wip || $preview) {
+            return [
+                'kind' => 'composition_canvas',
+                'label' => 'Canvas export',
+                'composition_id' => $compositionId,
+            ];
+        }
+
+        $type = $asset->type;
+        if ($type === AssetType::AI_GENERATED) {
+            return [
+                'kind' => 'generative',
+                'label' => 'Generative',
+                'composition_id' => $compositionId,
+            ];
+        }
+        if ($type === AssetType::REFERENCE) {
+            return [
+                'kind' => 'reference',
+                'label' => 'Reference',
+                'composition_id' => null,
+            ];
+        }
+
+        return [
+            'kind' => 'library',
+            'label' => 'Library',
+            'composition_id' => $compositionId,
+        ];
+    }
+
+    /**
      * @param  int|null  $incidentCount  Precomputed for index bulk; null loads one row (e.g. detail).
      */
     protected function formatAssetForList(Asset $asset, ?int $incidentCount = null): array
@@ -1043,6 +1176,7 @@ class AdminAssetController extends Controller
             AssetType::ASSET => 'Asset',
             AssetType::DELIVERABLE => 'Execution',
             AssetType::AI_GENERATED => 'Generative',
+            AssetType::REFERENCE => 'Reference',
             default => $type->value,
         } : '—';
 
@@ -1055,6 +1189,7 @@ class AdminAssetController extends Controller
             'brand' => $asset->brand ? ['id' => $asset->brand->id, 'name' => $asset->brand->name] : null,
             'asset_type' => ['value' => $type?->value ?? null, 'label' => $assetTypeLabel],
             'category_id' => $metadata['category_id'] ?? null,
+            'row_context' => $this->adminAssetRowContext($asset, $metadata),
             'analysis_status' => $asset->analysis_status ?? 'unknown',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
             'storage_missing' => $asset->isStorageMissing(),
@@ -1062,6 +1197,7 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name.' '.$asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'size_bytes' => $asset->size_bytes,
             'builder_staged' => (bool) ($asset->builder_staged ?? false),
             'builder_context' => $asset->builder_context ?? null,
             'admin_thumbnail_url' => $this->adminThumbnailSignedUrl($asset),
@@ -1086,6 +1222,7 @@ class AdminAssetController extends Controller
             AssetType::ASSET => 'Asset',
             AssetType::DELIVERABLE => 'Execution',
             AssetType::AI_GENERATED => 'Generative',
+            AssetType::REFERENCE => 'Reference',
             default => $type->value,
         } : '—';
 
@@ -1098,6 +1235,7 @@ class AdminAssetController extends Controller
             'brand' => $asset->brand ? ['id' => $asset->brand->id, 'name' => $asset->brand->name] : null,
             'asset_type' => ['value' => $type?->value ?? null, 'label' => $assetTypeLabel],
             'category_id' => $metadata['category_id'] ?? null,
+            'row_context' => $this->adminAssetRowContext($asset, $metadata),
             'analysis_status' => $asset->analysis_status ?? 'unknown',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
             'storage_missing' => $asset->isStorageMissing(),
@@ -1105,6 +1243,7 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name.' '.$asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'size_bytes' => $asset->size_bytes,
             'builder_staged' => (bool) ($asset->builder_staged ?? false),
             'builder_context' => $asset->builder_context ?? null,
             'admin_thumbnail_url' => null,

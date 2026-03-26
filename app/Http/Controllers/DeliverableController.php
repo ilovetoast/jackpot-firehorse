@@ -201,21 +201,21 @@ class DeliverableController extends Controller
             );
             $totalDeliverableCount = (clone $countQuery)->count();
             if (! empty($categoryIds)) {
-                $counts = (clone $countQuery)
+                $countRows = (clone $countQuery)
                     ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
                     ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
-                    ->get()
-                    ->pluck('count', 'category_id')
-                    ->toArray();
-                foreach ($counts as $catId => $count) {
-                    $assetCounts[$catId] = $count;
+                    ->get();
+                foreach ($countRows as $row) {
+                    $cid = (int) ($row->category_id ?? 0);
+                    if ($cid > 0) {
+                        $assetCounts[$cid] = (int) ($row->count ?? 0);
+                    }
                 }
             }
         }
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
-            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
-                ? $assetCounts[$category['id']]
-                : 0;
+            $id = isset($category['id']) ? (int) $category['id'] : 0;
+            $category['asset_count'] = $id > 0 ? ($assetCounts[$id] ?? 0) : 0;
 
             return $category;
         });

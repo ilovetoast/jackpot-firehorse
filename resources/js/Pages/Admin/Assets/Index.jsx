@@ -1,6 +1,6 @@
 import { Link, router } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -25,6 +25,15 @@ import {
     WrenchScrewdriverIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
+import { CheckIcon } from '@heroicons/react/20/solid'
+
+/** Admin list: where this asset sits vs library grid / canvas / generative (see AdminAssetController::adminAssetRowContext) */
+const ROW_CONTEXT_BADGES = {
+    library: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/90',
+    composition_canvas: 'bg-violet-50 text-violet-900 ring-1 ring-violet-200/90',
+    generative: 'bg-sky-50 text-sky-900 ring-1 ring-sky-200/90',
+    reference: 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/90',
+}
 
 const STATUS_COLORS = {
     complete: 'bg-emerald-100 text-emerald-800',
@@ -85,9 +94,41 @@ function buildQueryParams(filters, overrides = {}) {
     const q = { ...filters, ...overrides }
     const out = {}
     for (const [k, v] of Object.entries(q)) {
-        if (v !== null && v !== undefined && v !== '') out[k] = v
+        if (v === null || v === undefined || v === '') continue
+        if (k === 'types' && Array.isArray(v)) {
+            out[k] = v.join(',')
+            continue
+        }
+        out[k] = v
     }
     return out
+}
+
+function formatFileSize(bytes) {
+    if (bytes == null || bytes < 0 || Number.isNaN(bytes)) return null
+    const u = ['B', 'KB', 'MB', 'GB', 'TB']
+    let n = Number(bytes)
+    let i = 0
+    while (n >= 1024 && i < u.length - 1) {
+        n /= 1024
+        i += 1
+    }
+    const digits = i === 0 ? 0 : n >= 10 ? 1 : 2
+    return `${n.toFixed(digits)} ${u[i]}`
+}
+
+/** Default admin grid: standard assets + executions, no generative / composition-tagged rows */
+function isDefaultPrimaryTypeScope(f) {
+    if (!f || f.types === 'all') return false
+    const t = f.types
+    if (!Array.isArray(t) || t.length !== 2) return false
+    const sorted = [...t].map(String).sort()
+    return (
+        sorted[0] === 'asset'
+        && sorted[1] === 'deliverable'
+        && f.include_composition === false
+        && f.composition_only !== true
+    )
 }
 
 function formatDateTime(isoString) {
@@ -157,9 +198,177 @@ export default function AdminAssetsIndex({
 
     const applyFilters = useCallback((overrides) => {
         const { plainSearch, filters: parsed } = parseSmartFilter(searchInput)
-        const merged = buildQueryParams({ ...initialFilters, ...parsed, search: plainSearch }, overrides)
-        router.get('/app/admin/assets', merged, { preserveState: true, preserveScroll: true })
+        const base = { ...initialFilters, ...parsed, search: plainSearch }
+        const merged = { ...base, ...overrides }
+        if (Object.prototype.hasOwnProperty.call(overrides, 'asset_type') && overrides.asset_type === null) {
+            delete merged.asset_type
+            // Do not wipe types/composition when this request explicitly sets them (e.g. faceted toggles).
+            if (!Object.prototype.hasOwnProperty.call(overrides, 'types')) {
+                delete merged.types
+            }
+            if (!Object.prototype.hasOwnProperty.call(overrides, 'composition') && !Object.prototype.hasOwnProperty.call(overrides, 'include_composition')) {
+                delete merged.include_composition
+            }
+        }
+        if (overrides.asset_type) {
+            delete merged.types
+            delete merged.include_composition
+            delete merged.composition_only
+        }
+        const params = buildQueryParams(merged, {})
+        router.get('/app/admin/assets', params, { preserveState: true, preserveScroll: true })
     }, [searchInput, initialFilters])
+
+    const primaryTypeState = useMemo(() => {
+        const f = initialFilters
+        if (f?.types === 'all') {
+            return {
+                mode: 'all',
+                asset: true,
+                execution: true,
+                generative: true,
+                composition: true,
+                compositionOnly: false,
+            }
+        }
+        const types = Array.isArray(f?.types) ? f.types : []
+        if (types.length > 0) {
+            return {
+                mode: 'custom',
+                asset: types.includes('asset'),
+                execution: types.includes('deliverable'),
+                generative: types.includes('ai_generated'),
+                composition: f?.include_composition === true,
+                compositionOnly: f?.composition_only === true,
+            }
+        }
+        // Smart search / advanced dropdown can set asset_type alone — mirror that in toggles
+        if (f?.asset_type) {
+            const at = f.asset_type
+            return {
+                mode: 'custom',
+                asset: at === 'asset',
+                execution: at === 'deliverable',
+                generative: at === 'ai_generated',
+                composition: f?.include_composition === true,
+                compositionOnly: f?.composition_only === true,
+            }
+        }
+        return {
+            mode: 'custom',
+            asset: true,
+            execution: true,
+            generative: false,
+            composition: f?.include_composition === true,
+            compositionOnly: f?.composition_only === true,
+        }
+    }, [initialFilters])
+
+    const applyPrimaryTypeToggles = useCallback((next) => {
+        if (next.mode === 'all') {
+            applyFilters({ asset_type: null, types: 'all', composition_only: false, page: 1 })
+            return
+        }
+        const parts = []
+        if (next.asset) parts.push('asset')
+        if (next.execution) parts.push('deliverable')
+        if (next.generative) parts.push('ai_generated')
+        if (parts.length === 0) {
+            parts.push('asset', 'deliverable')
+        }
+        applyFilters({
+            asset_type: null,
+            types: parts.join(','),
+            composition: next.composition ? '1' : '0',
+            composition_only: next.compositionOnly ? '1' : '0',
+            page: 1,
+        })
+    }, [applyFilters])
+
+    /** One-click views: library = what members usually see in the asset grid; canvas = composition WIP/preview only; generative = AI outputs */
+    const applyViewPreset = useCallback(
+        (preset) => {
+            if (preset === 'all') {
+                applyPrimaryTypeToggles({ mode: 'all' })
+                return
+            }
+            if (preset === 'library') {
+                applyFilters({
+                    asset_type: null,
+                    types: ['asset', 'deliverable'],
+                    composition: '0',
+                    composition_only: '0',
+                    page: 1,
+                })
+                return
+            }
+            if (preset === 'canvas') {
+                applyFilters({
+                    asset_type: null,
+                    types: ['asset', 'deliverable', 'ai_generated'],
+                    composition: '1',
+                    composition_only: '1',
+                    page: 1,
+                })
+                return
+            }
+            if (preset === 'generative') {
+                applyFilters({
+                    asset_type: null,
+                    types: ['ai_generated'],
+                    composition: '0',
+                    composition_only: '0',
+                    page: 1,
+                })
+            }
+        },
+        [applyFilters, applyPrimaryTypeToggles],
+    )
+
+    const togglePrimaryType = useCallback(
+        (key) => {
+            if (key === 'compositionOnly') {
+                const base =
+                    primaryTypeState.mode === 'all'
+                        ? {
+                            mode: 'custom',
+                            asset: true,
+                            execution: true,
+                            generative: true,
+                            composition: true,
+                            compositionOnly: false,
+                        }
+                        : { ...primaryTypeState, mode: 'custom' }
+                const next = { ...base, compositionOnly: !base.compositionOnly }
+                if (next.compositionOnly) {
+                    next.composition = true
+                }
+                applyPrimaryTypeToggles(next)
+                return
+            }
+            const base =
+                primaryTypeState.mode === 'all'
+                    ? {
+                        mode: 'custom',
+                        asset: true,
+                        execution: true,
+                        generative: true,
+                        composition: true,
+                        compositionOnly: false,
+                    }
+                    : { ...primaryTypeState, mode: 'custom' }
+            const next = { ...base, [key]: !base[key] }
+            if (key === 'composition' && !next.composition) {
+                next.compositionOnly = false
+            }
+            if (!next.asset && !next.execution && !next.generative) {
+                next.asset = true
+                next.execution = true
+            }
+            applyPrimaryTypeToggles(next)
+        },
+        [applyPrimaryTypeToggles, primaryTypeState]
+    )
 
     const handleSearchSubmit = (e) => {
         e?.preventDefault()
@@ -188,7 +397,10 @@ export default function AdminAssetsIndex({
         initialFilters?.category_id ||
         initialFilters?.tag ||
         initialFilters?.date_from ||
-        initialFilters?.date_to
+        initialFilters?.date_to ||
+        initialFilters?.types === 'all' ||
+        (initialFilters?.types && !isDefaultPrimaryTypeScope(initialFilters))
+        || initialFilters?.composition_only === true
     )
 
     const clearFilters = () => {
@@ -337,7 +549,7 @@ export default function AdminAssetsIndex({
                     </Link>
                 </div>
 
-                {/* Warning: Assets without category (disappear from grid) */}
+                {/* Warning: Library assets (asset + execution) missing category — generative / reference / composition excluded */}
                 {assetsWithoutCategoryCount > 0 && (
                     <div className="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -345,10 +557,10 @@ export default function AdminAssetsIndex({
                                 <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                                 <div>
                                     <p className="text-sm font-medium text-amber-900">
-                                        {assetsWithoutCategoryCount} asset{assetsWithoutCategoryCount !== 1 ? 's' : ''} do not have a category and will not appear in the grid.
+                                        {assetsWithoutCategoryCount} library asset{assetsWithoutCategoryCount !== 1 ? 's' : ''} (standard + execution) {assetsWithoutCategoryCount !== 1 ? 'are' : 'is'} missing a category and will not appear in the main grid.
                                     </p>
                                     <p className="mt-1 text-xs text-amber-800">
-                                        Assign a category to restore visibility. Only assets in the same brand as the chosen category will be updated.
+                                        AI generative, reference, and composition (WIP/preview) assets are excluded — they are not expected to use the same category rules. Assign a category to fix visibility; only assets in the same brand as the chosen category are updated.
                                     </p>
                                 </div>
                             </div>
@@ -370,9 +582,12 @@ export default function AdminAssetsIndex({
                         <div className="fixed inset-0 z-40 bg-slate-900/50" aria-hidden onClick={() => setRecoverCategoryModalOpen(false)} />
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                             <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-                                <h3 className="text-lg font-semibold text-slate-900">Assign category to affected assets</h3>
+                                <h3 className="text-lg font-semibold text-slate-900">Assign category to affected library assets</h3>
                                 <p className="mt-2 text-sm text-slate-600">
-                                    Select a category. Only assets in the same brand as the category will be updated.
+                                    Applies to standard and execution assets missing <code className="text-xs bg-slate-100 px-1 rounded">category_id</code>. Generative, reference, and composition-tagged assets are not modified.
+                                </p>
+                                <p className="mt-2 text-sm text-slate-600">
+                                    Only assets in the same brand as the selected category will be updated.
                                 </p>
                                 <div className="mt-4">
                                     <label className="block text-sm font-medium text-slate-700">Category</label>
@@ -469,6 +684,175 @@ export default function AdminAssetsIndex({
                     )}
                 </div>
 
+                {/* Primary type scope — library `type` column vs composition metadata (orthogonal) */}
+                <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Show in grid</span>
+                        {initialFilters?.asset_type && !Array.isArray(initialFilters?.types) && (
+                            <span className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-0.5">
+                                Narrowed by asset type elsewhere — click a facet to use quick filters instead
+                            </span>
+                        )}
+                    </div>
+
+                    <p className="mt-2 text-xs text-slate-600 leading-relaxed max-w-4xl">
+                        Compositions are saved canvases; each still stores files as normal <strong className="text-slate-800">assets</strong> with extra metadata.
+                        Most visits here are for <strong className="text-slate-800">library + execution</strong> rows that match what appears in the brand asset grid.
+                        Canvas exports and many generative layers are usually out of the normal grid—use quick views or the <strong className="text-slate-800">Context</strong> column instead of mixing them blindly.
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Quick view</span>
+                        {[
+                            { id: 'library', label: 'Library + executions' },
+                            { id: 'canvas', label: 'Canvas exports only' },
+                            { id: 'generative', label: 'Generative only' },
+                            { id: 'all', label: 'All types' },
+                        ].map(({ id, label }) => (
+                            <button
+                                key={id}
+                                type="button"
+                                onClick={() => applyViewPreset(id)}
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300"
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-medium text-slate-600 mb-2">Library type</p>
+                            <p className="text-[10px] text-slate-400 mb-2 leading-snug max-w-xl">
+                                DB <span className="text-slate-500">type</span> on each row: file, execution deliverable, or AI output. Combine types; this is separate from the composition canvas flags below.
+                            </p>
+                            <div
+                                className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
+                                role="group"
+                                aria-label="Filter by library asset type"
+                            >
+                                {[
+                                    { key: 'asset', label: 'Asset' },
+                                    { key: 'execution', label: 'Execution' },
+                                    { key: 'generative', label: 'AI generative' },
+                                ].map(({ key, label }) => {
+                                    const active = primaryTypeState.mode === 'all' || primaryTypeState[key]
+                                    return (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            aria-pressed={active}
+                                            onClick={() => togglePrimaryType(key)}
+                                            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                                active
+                                                    ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                                    : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                            }`}
+                                        >
+                                            <span
+                                                className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                                                    active ? 'border-indigo-500 bg-indigo-600' : 'border-slate-300 bg-white'
+                                                }`}
+                                                aria-hidden
+                                            >
+                                                {active && <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />}
+                                            </span>
+                                            {label}
+                                        </button>
+                                    )
+                                })}
+                                <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-300/90" aria-hidden />
+                                <button
+                                    type="button"
+                                    aria-pressed={primaryTypeState.mode === 'all'}
+                                    onClick={() => applyPrimaryTypeToggles({ mode: 'all' })}
+                                    className={`inline-flex items-center rounded-md px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                        primaryTypeState.mode === 'all'
+                                            ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-700/20'
+                                            : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+                                    }`}
+                                >
+                                    All types
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="lg:border-l lg:border-slate-200 lg:pl-8 lg:min-w-[220px]">
+                            <p className="text-[11px] font-medium text-slate-600 mb-2">Composition workflow</p>
+                            <p className="text-[10px] text-slate-400 mb-2 leading-snug max-w-sm">
+                                Not a separate DB type — canvas WIP/preview exports are still normal assets with extra metadata. By default those rows are hidden so the grid stays clean.
+                            </p>
+                            <div
+                                className="flex flex-col gap-2"
+                                role="group"
+                                aria-label="Composition workflow filters"
+                            >
+                                <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner">
+                                    <button
+                                        type="button"
+                                        aria-pressed={primaryTypeState.mode === 'all' || primaryTypeState.composition}
+                                        onClick={() => togglePrimaryType('composition')}
+                                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                            primaryTypeState.mode === 'all' || primaryTypeState.composition
+                                                ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                                : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                        }`}
+                                    >
+                                        <span
+                                            className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                                                primaryTypeState.mode === 'all' || primaryTypeState.composition
+                                                    ? 'border-indigo-500 bg-indigo-600'
+                                                    : 'border-slate-300 bg-white'
+                                            }`}
+                                            aria-hidden
+                                        >
+                                            {(primaryTypeState.mode === 'all' || primaryTypeState.composition) && (
+                                                <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />
+                                            )}
+                                        </span>
+                                        Include composition-tagged
+                                    </button>
+                                </div>
+                                <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner">
+                                    <button
+                                        type="button"
+                                        aria-pressed={primaryTypeState.compositionOnly}
+                                        onClick={() => togglePrimaryType('compositionOnly')}
+                                        title="Hide non-composition library rows; still uses Library type checkboxes above"
+                                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                            primaryTypeState.compositionOnly
+                                                ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                                : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                        }`}
+                                    >
+                                        <span
+                                            className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                                                primaryTypeState.compositionOnly
+                                                    ? 'border-indigo-500 bg-indigo-600'
+                                                    : 'border-slate-300 bg-white'
+                                            }`}
+                                            aria-hidden
+                                        >
+                                            {primaryTypeState.compositionOnly && (
+                                                <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />
+                                            )}
+                                        </span>
+                                        Only composition-tagged
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                        Default: <strong className="text-slate-700">Asset</strong> + <strong className="text-slate-700">Execution</strong>, composition-tagged rows <strong className="text-slate-700">hidden</strong>.
+                        {' '}
+                        <strong className="text-slate-700">Include</strong> adds them next to your other files.
+                        {' '}
+                        <strong className="text-slate-700">Only composition-tagged</strong> narrows to canvas WIP/preview rows (still filtered by library types above).
+                    </p>
+                </div>
+
                 {/* Advanced Filter Drawer */}
                 {advancedOpen && (
                     <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -503,13 +887,18 @@ export default function AdminAssetsIndex({
                                 <label className="block text-xs font-medium text-slate-500 mb-1">Asset type</label>
                                 <select
                                     value={initialFilters?.asset_type ?? ''}
-                                    onChange={(e) => applyFilters({ asset_type: e.target.value || null, page: 1 })}
+                                    onChange={(e) => {
+                                        const v = e.target.value || null
+                                        if (v) applyFilters({ asset_type: v, page: 1 })
+                                        else applyFilters({ asset_type: null, page: 1 })
+                                    }}
                                     className="block w-full rounded border-slate-300 text-sm"
                                 >
-                                    <option value="">All</option>
+                                    <option value="">All (use quick types above)</option>
                                     <option value="asset">Asset</option>
                                     <option value="deliverable">Execution</option>
                                     <option value="ai_generated">Generative</option>
+                                    <option value="reference">Reference</option>
                                 </select>
                             </div>
                             <div>
@@ -688,6 +1077,9 @@ export default function AdminAssetsIndex({
                                         sortDirection={initialFilters?.sort_direction ?? 'desc'}
                                         onSort={handleSort}
                                     />
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase w-[140px]" title="Library vs canvas export vs generative">
+                                        Context
+                                    </th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tenant</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Brand</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase" title="Builder-staged (detached) assets">Builder</th>
@@ -718,7 +1110,7 @@ export default function AdminAssetsIndex({
                             <tbody className="divide-y divide-slate-200 bg-white">
                                 {!assets?.length ? (
                                     <tr>
-                                        <td colSpan={11} className="px-4 py-12 text-center text-slate-500">
+                                        <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
                                             No assets found
                                         </td>
                                     </tr>
@@ -747,8 +1139,31 @@ export default function AdminAssetsIndex({
                                                     </div>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-2 text-sm text-slate-900 truncate max-w-[200px]" title={a.original_filename}>
-                                                {a.original_filename || a.title || '—'}
+                                            <td className="px-4 py-2 text-sm text-slate-900 max-w-[220px]" title={a.original_filename}>
+                                                <div className="truncate font-medium text-slate-900">
+                                                    {a.original_filename || a.title || '—'}
+                                                </div>
+                                                {formatFileSize(a.size_bytes) && (
+                                                    <div className="text-xs text-slate-500 mt-0.5">{formatFileSize(a.size_bytes)}</div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-2 align-top">
+                                                {a.row_context ? (
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span
+                                                            className={`inline-flex w-fit rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROW_CONTEXT_BADGES[a.row_context.kind] || ROW_CONTEXT_BADGES.library}`}
+                                                        >
+                                                            {a.row_context.label}
+                                                        </span>
+                                                        {a.row_context.composition_id && (
+                                                            <span className="font-mono text-[10px] text-slate-500" title="Composition id in metadata">
+                                                                comp #{a.row_context.composition_id}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-400">—</span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-2 text-sm text-slate-600">{a.tenant?.name ?? '—'}</td>
                                             <td className="px-4 py-2 text-sm text-slate-600">{a.brand?.name ?? '—'}</td>
