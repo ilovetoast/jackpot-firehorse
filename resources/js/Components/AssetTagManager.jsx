@@ -27,8 +27,11 @@ export default function AssetTagManager({
     compact = false,
     inline = false,
     detailed = false,
-    primaryColor = null
+    primaryColor = null,
+    /** 'dark' = light text for embedded lightbox details column */
+    variant = 'default',
 }) {
+    const isDark = variant === 'dark'
     const [refreshTrigger, setRefreshTrigger] = useState(0)
     const [tagCount, setTagCount] = useState(0)
     
@@ -114,13 +117,13 @@ export default function AssetTagManager({
                 <>
                     {/* Header */}
                     {showTitle && (
-                        <div className="flex items-center gap-2 mb-2">
-                            <TagIcon className="h-3 w-3 text-gray-500" />
-                            <h5 className={`font-medium text-gray-700 ${compact ? 'text-xs' : 'text-xs'}`}>
+                        <div className="flex items-center gap-2 mb-3">
+                            <TagIcon className={`h-4 w-4 ${isDark ? 'text-neutral-500' : 'text-gray-500'}`} />
+                            <h5 className={`font-semibold tracking-tight ${isDark ? 'text-sm text-neutral-100' : compact ? 'text-xs' : 'text-xs text-gray-700'}`}>
                                 Tags
                             </h5>
                             {tagCount > 0 && (
-                                <span className={`text-gray-500 text-xs`}>
+                                <span className={`text-xs ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                                     ({tagCount})
                                 </span>
                             )}
@@ -140,6 +143,7 @@ export default function AssetTagManager({
                         compact={compact}
                         detailed={detailed}
                         primaryColor={primaryColor}
+                        variant={variant}
                     />
 
                     {/* Add new tag input */}
@@ -156,7 +160,7 @@ export default function AssetTagManager({
 
                     {/* Permission message if can't add tags */}
                     {showInput && !canAddTags && canView && (
-                        <div className={`text-gray-500 italic ${compact ? 'text-xs' : 'text-sm'}`}>
+                        <div className={`italic ${compact ? 'text-xs' : 'text-sm'} ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                             You don't have permission to add tags
                         </div>
                     )}

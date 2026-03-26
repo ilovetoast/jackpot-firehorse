@@ -100,6 +100,8 @@ export default function AssetDrawer({
     /** One-shot: grid double-click initial zoom per drawer mount */
     const initialZoomAppliedRef = useRef(false)
     const [showZoomModal, setShowZoomModal] = useState(false)
+    /** When true, lightbox shows AssetDetailPanel in the right column (or below on small screens) */
+    const [showLightboxDetails, setShowLightboxDetails] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
     // Track layout settling to prevent preview jump during grid recalculation
@@ -120,8 +122,6 @@ export default function AssetDrawer({
     const [extractAllLoading, setExtractAllLoading] = useState(false)
     const [extractAllError, setExtractAllError] = useState(null)
     const [extractAllBatchId, setExtractAllBatchId] = useState(null)
-    // Details modal state
-    const [showDetailsModal, setShowDetailsModal] = useState(false)
     // Publish confirmation modal state
     const [showPublishModal, setShowPublishModal] = useState(false)
     const [publishLoading, setPublishLoading] = useState(false)
@@ -996,6 +996,12 @@ export default function AssetDrawer({
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [showZoomModal, canNavigateLeft, canNavigateRight, isTransitioning])
 
+    useEffect(() => {
+        if (!showZoomModal) {
+            setShowLightboxDetails(false)
+        }
+    }, [showZoomModal])
+
     // Extract file extension
     // Use displayAsset (with live updates) instead of prop asset
     const fileExtension = displayAsset.file_extension || displayAsset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
@@ -1032,6 +1038,7 @@ export default function AssetDrawer({
             setCarouselIndex(idx)
         }
         setShowZoomModal(true)
+        setShowLightboxDetails(false)
         onInitialZoomConsumed?.()
     }, [initialZoomOpen, displayAsset?.id, hasThumbnailSupport, isVideo, imageAssets, onInitialZoomConsumed])
 
@@ -1881,6 +1888,7 @@ export default function AssetDrawer({
                                     onClick={() => {
                                         // Open gallery view (zoom modal) for videos
                                         setShowZoomModal(true)
+                                        setShowLightboxDetails(false)
                                     }}
                                     onMouseEnter={() => !isMobile && setIsHoveringVideo(true)}
                                     onMouseLeave={() => {
@@ -1935,6 +1943,7 @@ export default function AssetDrawer({
                                     onClick={() => {
                                         if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
                                             setShowZoomModal(true)
+                                            setShowLightboxDetails(false)
                                         }
                                     }}
                                     role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
@@ -1943,6 +1952,7 @@ export default function AssetDrawer({
                                         if ((pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (e.key === 'Enter' || e.key === ' ')) {
                                             e.preventDefault()
                                             setShowZoomModal(true)
+                                            setShowLightboxDetails(false)
                                         }
                                     }}
                                 >
@@ -1995,6 +2005,7 @@ export default function AssetDrawer({
                                         const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
                                         if (state === 'AVAILABLE') {
                                             setShowZoomModal(true)
+                                            setShowLightboxDetails(false)
                                         }
                                     }}
                                 >
@@ -2477,7 +2488,10 @@ export default function AssetDrawer({
                                         <div className={`grid gap-2 ${showAddToDownload ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                             <button
                                                 type="button"
-                                                onClick={() => setShowDetailsModal(true)}
+                                                onClick={() => {
+                                                    setShowZoomModal(true)
+                                                    setShowLightboxDetails(true)
+                                                }}
                                                 className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
                                             >
                                                 <EyeIcon className="h-4 w-4 mr-2" />
@@ -3527,49 +3541,65 @@ export default function AssetDrawer({
                 
             </div>
 
-            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos */}
+            {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) */}
             {showZoomModal && (hasThumbnailSupport || isVideo) && currentCarouselAsset?.id && (
                 <div
-                    className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+                    className="fixed inset-0 z-[60] flex flex-col bg-black/90 md:flex-row"
                     onClick={() => setShowZoomModal(false)}
                 >
-                    {/* Close button */}
-                    <button
-                        type="button"
-                        onClick={() => setShowZoomModal(false)}
-                        className="absolute top-4 right-4 z-10 text-white hover:text-gray-300 transition-colors"
-                        aria-label="Close"
+                    <div
+                        className={`relative order-1 flex min-h-0 min-w-0 flex-col bg-black/90 ${
+                            showLightboxDetails ? 'flex-1 md:flex-[1_1_55%]' : 'flex-1'
+                        }`}
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        <XMarkIcon className="h-8 w-8" />
-                    </button>
+                        <div className="absolute right-4 top-4 z-20 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <button
+                                type="button"
+                                onClick={() => setShowLightboxDetails((v) => !v)}
+                                className={`rounded-md px-3 py-2 text-sm font-semibold shadow-sm transition-colors ${
+                                    showLightboxDetails
+                                        ? 'bg-white text-gray-900 ring-2 ring-white'
+                                        : 'bg-white/15 text-white hover:bg-white/25'
+                                }`}
+                                aria-pressed={showLightboxDetails}
+                            >
+                                Details
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowZoomModal(false)}
+                                className="rounded-md p-2 text-white transition-colors hover:bg-white/10"
+                                aria-label="Close"
+                            >
+                                <XMarkIcon className="h-8 w-8" />
+                            </button>
+                        </div>
 
-                    {/* Left arrow - Previous asset */}
-                    {canNavigateLeft && (
-                        <button
-                            type="button"
-                            onClick={handlePrevious}
-                            className="absolute left-4 z-10 text-white hover:text-gray-300 transition-colors p-2 rounded-full hover:bg-white/10"
-                            aria-label="Previous asset"
-                        >
-                            <ChevronLeftIcon className="h-10 w-10" />
-                        </button>
-                    )}
+                        {canNavigateLeft && (
+                            <button
+                                type="button"
+                                onClick={handlePrevious}
+                                className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full p-2 text-white transition-colors hover:bg-white/10"
+                                aria-label="Previous asset"
+                            >
+                                <ChevronLeftIcon className="h-10 w-10" />
+                            </button>
+                        )}
 
-                    {/* Right arrow - Next asset */}
-                    {canNavigateRight && (
-                        <button
-                            type="button"
-                            onClick={handleNext}
-                            className="absolute right-4 z-10 text-white hover:text-gray-300 transition-colors p-2 rounded-full hover:bg-white/10"
-                            aria-label="Next asset"
-                        >
-                            <ChevronRightIcon className="h-10 w-10" />
-                        </button>
-                    )}
+                        {canNavigateRight && (
+                            <button
+                                type="button"
+                                onClick={handleNext}
+                                className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full p-2 text-white transition-colors hover:bg-white/10"
+                                aria-label="Next asset"
+                            >
+                                <ChevronRightIcon className="h-10 w-10" />
+                            </button>
+                        )}
 
-                    {/* Image or Video with smooth slide transition */}
                     <div 
-                        className="relative w-full h-full flex items-center justify-center overflow-hidden"
+                        className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden p-4"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Phase V-1: Check if current asset is a video */}
@@ -3631,7 +3661,6 @@ export default function AssetDrawer({
                             } else {
                                 // Image/PDF thumbnail
                                 const carouselImgUrl = currentCarouselAsset.thumbnail_url_large ?? currentCarouselAsset.final_thumbnail_url ?? currentCarouselAsset.thumbnail_url ?? currentCarouselAsset.preview_thumbnail_url ?? ''
-                                console.log('IMAGE LARGE URL FROM API:', carouselImgUrl)
                                 return (
                                     <img
                                         key={currentCarouselAsset.id}
@@ -3652,12 +3681,38 @@ export default function AssetDrawer({
                         })()}
                     </div>
 
-                    {/* Title at bottom center - subtle and small */}
-                    <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-                        <p className="text-white/80 text-sm font-medium text-center px-4 py-2 bg-black/40 backdrop-blur-sm rounded-lg">
+                    <div className="pointer-events-none absolute bottom-8 left-1/2 z-10 -translate-x-1/2 transform">
+                        <p className="rounded-lg bg-black/40 px-4 py-2 text-center text-sm font-medium text-white/80 backdrop-blur-sm">
                             {currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Untitled Asset'}
                         </p>
                     </div>
+                    </div>
+
+                    {showLightboxDetails && currentCarouselAsset?.id && (
+                        <div
+                            className="order-2 flex max-h-[min(50vh,520px)] w-full min-h-0 flex-col overflow-hidden bg-neutral-950 md:max-h-none md:h-full md:w-[min(500px,50vw)] md:flex-shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <AssetDetailPanel
+                                asset={currentCarouselAsset}
+                                isOpen
+                                embeddedInLightbox
+                                onClose={() => setShowLightboxDetails(false)}
+                                activityEvents={activityEvents}
+                                activityLoading={activityLoading}
+                                onReplaceFile={() => setShowReplaceFileModal(true)}
+                                onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
+                                onReprocessAsset={canRetryThumbnails ? handleReprocessAsset : undefined}
+                                reprocessLoading={reprocessLoading}
+                                onToast={(msg, type) => {
+                                    setToastMessage(msg ?? null)
+                                    setToastType(type || 'success')
+                                    if (msg) setTimeout(() => setToastMessage(null), 3000)
+                                }}
+                                primaryColor={brandPrimary}
+                            />
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -3926,27 +3981,6 @@ export default function AssetDrawer({
                 </div>
             )}
 
-            {/* Asset Detail Panel (full-height slide panel, 80% width) */}
-            {displayAsset && (
-                <AssetDetailPanel
-                    asset={displayAsset}
-                    isOpen={showDetailsModal}
-                    onClose={() => setShowDetailsModal(false)}
-                    activityEvents={activityEvents}
-                    activityLoading={activityLoading}
-                    onReplaceFile={() => setShowReplaceFileModal(true)}
-                    onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
-                    onReprocessAsset={canRetryThumbnails ? handleReprocessAsset : undefined}
-                    reprocessLoading={reprocessLoading}
-                    onToast={(msg, type) => {
-                        setToastMessage(msg ?? null)
-                        setToastType(type || 'success')
-                        if (msg) setTimeout(() => setToastMessage(null), 3000)
-                    }}
-                    primaryColor={brandPrimary}
-                />
-            )}
-            
             {/* Phase AF-2: Resubmit Modal */}
             {/* Phase AF-5: Only show if approvals are enabled */}
             {/* Phase J.3.1: Updated to include file uploader */}

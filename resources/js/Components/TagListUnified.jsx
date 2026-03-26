@@ -21,42 +21,66 @@ import { XMarkIcon } from '@heroicons/react/24/outline'
 import ConfirmDialog from './ConfirmDialog'
 
 // Source styling configuration. When primaryColor is set, manual/default tags use brand primary.
-const getTagStyle = (source, primaryColor = null) => {
+const getTagStyle = (source, primaryColor = null, darkSurface = false) => {
     const useBrand = primaryColor && (source === 'manual' || source == null || source === '')
     const manualStyle = useBrand
         ? {
             container: 'border bg-transparent',
             inlineStyle: { backgroundColor: 'transparent', borderColor: primaryColor, color: primaryColor },
             text: '',
-            button: 'opacity-80 hover:opacity-100 hover:bg-black/5',
+            button: darkSurface ? 'opacity-80 hover:opacity-100 hover:bg-white/10' : 'opacity-80 hover:opacity-100 hover:bg-black/5',
             tooltip: 'Manually added'
         }
-        : {
-            container: 'bg-gray-100 border-gray-300 text-gray-900',
-            inlineStyle: null,
-            text: 'text-gray-900',
-            button: 'text-gray-600 hover:text-gray-800 hover:bg-gray-200',
-            tooltip: 'Manually added'
-        }
+        : darkSurface
+          ? {
+                container: 'bg-neutral-800 border-neutral-600 text-neutral-100',
+                inlineStyle: null,
+                text: 'text-neutral-100',
+                button: 'text-neutral-300 hover:text-white hover:bg-neutral-700',
+                tooltip: 'Manually added'
+            }
+          : {
+                container: 'bg-gray-100 border-gray-300 text-gray-900',
+                inlineStyle: null,
+                text: 'text-gray-900',
+                button: 'text-gray-600 hover:text-gray-800 hover:bg-gray-200',
+                tooltip: 'Manually added'
+            }
     switch (source) {
         case 'manual':
             return manualStyle
         case 'ai':
-            return {
-                container: 'bg-indigo-50 border-indigo-200 text-indigo-900',
-                inlineStyle: null,
-                text: 'text-indigo-900',
-                button: 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100',
-                tooltip: 'AI suggested and accepted'
-            }
+            return darkSurface
+                ? {
+                      container: 'bg-neutral-900/70 border-neutral-600 text-neutral-100',
+                      inlineStyle: null,
+                      text: 'text-neutral-100',
+                      button: 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/90',
+                      tooltip: 'AI suggested and accepted'
+                  }
+                : {
+                      container: 'bg-indigo-50 border-indigo-200 text-indigo-900',
+                      inlineStyle: null,
+                      text: 'text-indigo-900',
+                      button: 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100',
+                      tooltip: 'AI suggested and accepted'
+                  }
         case 'ai:auto':
-            return {
-                container: 'bg-purple-50 border-purple-200 text-purple-900',
-                inlineStyle: null,
-                text: 'text-purple-900',
-                button: 'text-purple-600 hover:text-purple-800 hover:bg-purple-100',
-                tooltip: 'Auto-applied by AI'
-            }
+            return darkSurface
+                ? {
+                      container: 'bg-neutral-900/60 border-neutral-700 text-neutral-200',
+                      inlineStyle: null,
+                      text: 'text-neutral-200',
+                      button: 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/80',
+                      tooltip: 'Auto-applied by AI'
+                  }
+                : {
+                      container: 'bg-purple-50 border-purple-200 text-purple-900',
+                      inlineStyle: null,
+                      text: 'text-purple-900',
+                      button: 'text-purple-600 hover:text-purple-800 hover:bg-purple-100',
+                      tooltip: 'Auto-applied by AI'
+                  }
         default:
             return manualStyle
     }
@@ -88,8 +112,12 @@ export default function TagListUnified({
     detailed = false,
     
     // Brand primary for tag badge styling (manual tags)
-    primaryColor = null
+    primaryColor = null,
+
+    /** 'dark' = surfaces for light-on-dark panels (e.g. lightbox details) */
+    variant = 'default',
 }) {
+    const darkSurface = variant === 'dark'
     const [loadedTags, setLoadedTags] = useState([])
     const [loading, setLoading] = useState(mode === 'full')
     const [removing, setRemoving] = useState(new Set())
@@ -206,7 +234,7 @@ export default function TagListUnified({
     if (loading && mode === 'full') {
         return (
             <div className={className}>
-                <div className={`text-gray-500 ${compact ? 'text-xs' : 'text-sm'}`}>
+                <div className={`${darkSurface ? 'text-neutral-500' : 'text-gray-500'} ${compact ? 'text-xs' : 'text-sm'}`}>
                     Loading tags...
                 </div>
             </div>
@@ -219,7 +247,7 @@ export default function TagListUnified({
         
         return (
             <div className={className}>
-                <div className={`text-gray-500 ${compact ? 'text-xs' : 'text-sm'}`}>
+                <div className={`${darkSurface ? 'text-neutral-500' : 'text-gray-500'} ${compact ? 'text-xs' : 'text-sm'}`}>
                     No tags yet
                 </div>
             </div>
@@ -229,49 +257,66 @@ export default function TagListUnified({
     return (
         <div className={className}>
             {detailed ? (
-                /* Detailed view - each tag on its own line with full metadata */
-                <div className="space-y-2">
+                /* Detailed view — tag-like row + compact insight line (dark: inline pill + AI %) */
+                <div className={darkSurface ? 'flex flex-wrap gap-2' : 'space-y-2'}>
                     {finalTags.map((tag) => {
-                        const style = getTagStyle(tag.source, primaryColor)
+                        const style = getTagStyle(tag.source, primaryColor, darkSurface)
                         const isRemoving = removing.has(tag.id)
                         const tagKey = tag.id || `${tag.tag}-${tag.source}`
+                        const aiPct = tag.source === 'ai' && tag.confidence != null ? Math.round(tag.confidence * 100) : null
 
                         return (
                             <div
                                 key={tagKey}
-                                className={`flex items-center justify-between py-2 px-3 rounded-lg ${
-                                    style.container
-                                } ${isRemoving ? 'opacity-50 pointer-events-none' : ''}`}
+                                className={
+                                    darkSurface
+                                        ? `inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-full border py-1 pl-2.5 pr-1.5 ${
+                                              style.container
+                                          } ${isRemoving ? 'opacity-50 pointer-events-none' : ''}`
+                                        : `flex items-center justify-between py-2 px-3 rounded-lg ${style.container} ${
+                                              isRemoving ? 'opacity-50 pointer-events-none' : ''
+                                          }`
+                                }
                                 style={style.inlineStyle || undefined}
+                                title={
+                                    tag.source === 'ai' && tag.created_at
+                                        ? `Added ${new Date(tag.created_at).toLocaleDateString()}`
+                                        : tag.source === 'manual' && tag.created_at
+                                          ? `Added ${new Date(tag.created_at).toLocaleDateString()}`
+                                          : undefined
+                                }
                             >
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-3">
-                                        <span className={`font-medium ${style.text} text-sm`}>
-                                            {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
+                                <div className={`min-w-0 ${darkSurface ? 'flex flex-wrap items-center gap-1.5' : 'flex-1'}`}>
+                                    <span className={`font-medium ${style.text} ${darkSurface ? 'text-sm' : 'text-sm'}`}>
+                                        {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
+                                    </span>
+                                    {darkSurface && tag.source === 'ai' && aiPct != null && (
+                                        <span className="shrink-0 rounded-md border border-neutral-600/80 bg-neutral-800/90 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-neutral-400">
+                                            AI {aiPct}%
                                         </span>
-                                        
-                                        {/* Source badge */}
-                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                            tag.source === 'ai' ? 'bg-pink-100 text-pink-800' : 'bg-blue-100 text-blue-800'
-                                        }`}>
-                                            {tag.source === 'ai' ? (
-                                                tag.confidence ? `AI (${Math.round(tag.confidence * 100)}%)` : 'AI'
-                                            ) : 'Manual'}
-                                        </span>
-                                    </div>
-                                    
-                                    {/* Additional metadata */}
-                                    <div className="mt-1 text-xs text-gray-500">
-                                        {tag.source === 'ai' && tag.confidence && (
-                                            <span>
-                                                Confidence: {Math.round(tag.confidence * 100)}% 
-                                                {tag.created_at && ` • Added ${new Date(tag.created_at).toLocaleDateString()}`}
+                                    )}
+                                    {!darkSurface && (
+                                        <>
+                                            <span
+                                                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                    tag.source === 'ai' ? 'bg-pink-100 text-pink-800' : 'bg-blue-100 text-blue-800'
+                                                }`}
+                                            >
+                                                {tag.source === 'ai' ? (tag.confidence ? `AI (${Math.round(tag.confidence * 100)}%)` : 'AI') : 'Manual'}
                                             </span>
-                                        )}
-                                        {tag.source === 'manual' && tag.created_at && (
-                                            <span>Added manually on {new Date(tag.created_at).toLocaleDateString()}</span>
-                                        )}
-                                    </div>
+                                            <div className={`mt-1 text-xs text-gray-500`}>
+                                                {tag.source === 'ai' && tag.confidence && (
+                                                    <span>
+                                                        Confidence: {Math.round(tag.confidence * 100)}%
+                                                        {tag.created_at && ` • Added ${new Date(tag.created_at).toLocaleDateString()}`}
+                                                    </span>
+                                                )}
+                                                {tag.source === 'manual' && tag.created_at && (
+                                                    <span>Added manually on {new Date(tag.created_at).toLocaleDateString()}</span>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
 
                                 {/* Remove button */}
@@ -280,7 +325,7 @@ export default function TagListUnified({
                                         type="button"
                                         onClick={() => requestRemoveTag(tag.id, tag.tag)}
                                         disabled={isRemoving}
-                                        className={`ml-3 inline-flex items-center p-1 rounded focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed ${style.button}`}
+                                        className={`${darkSurface ? 'ml-0.5' : 'ml-3'} inline-flex shrink-0 items-center p-1 rounded focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed ${style.button}`}
                                         title="Remove tag"
                                         aria-label={`Remove tag "${tag.tag}"`}
                                     >
@@ -299,7 +344,7 @@ export default function TagListUnified({
                 /* Standard compact view - tags in a row */
                 <div className={`flex flex-wrap gap-2 ${inline ? 'inline-flex' : ''}`}>
                     {finalTags.map((tag) => {
-                        const style = getTagStyle(tag.source, primaryColor)
+                        const style = getTagStyle(tag.source, primaryColor, darkSurface)
                         const isRemoving = removing.has(tag.id)
                         const tagKey = tag.id || `${tag.tag}-${tag.source}`
 
@@ -366,7 +411,7 @@ export default function TagListUnified({
 
             {/* Show hidden count if there are more tags (only in standard view) */}
             {!detailed && hiddenCount > 0 && (
-                <div className={`mt-2 text-gray-500 ${compact ? 'text-xs' : 'text-sm'}`}>
+                <div className={`mt-2 ${darkSurface ? 'text-neutral-500' : 'text-gray-500'} ${compact ? 'text-xs' : 'text-sm'}`}>
                     +{hiddenCount} more tag{hiddenCount !== 1 ? 's' : ''}
                 </div>
             )}

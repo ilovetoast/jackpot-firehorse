@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Asset;
 use App\Models\AssetVersion;
+use App\Support\AssetVariant;
+use App\Support\CdnUrl;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -32,12 +35,31 @@ class AssetVersionController extends Controller
             ->with('uploadedBy:id,first_name,last_name')
             ->orderByDesc('version_number');
 
+        $thumbnailUrlForVersion = function (AssetVersion $v) use ($asset): ?string {
+            $meta = $v->metadata ?? [];
+            foreach (['medium', 'thumb', 'large'] as $style) {
+                $path = $meta['thumbnails'][$style]['path'] ?? null;
+                if (is_string($path) && $path !== '') {
+                    return CdnUrl::url($path);
+                }
+            }
+            // Current version: use same delivery URL as the asset grid (asset points at this file)
+            if ($v->is_current) {
+                $url = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+
+                return $url !== '' ? $url : null;
+            }
+
+            return null;
+        };
+
         $mapVersion = fn ($v) => [
             'id' => $v->id,
             'version_number' => $v->version_number,
             'is_current' => $v->is_current,
             'file_size' => $v->file_size,
             'mime_type' => $v->mime_type,
+            'thumbnail_url' => $thumbnailUrlForVersion($v),
             'uploaded_by' => $v->uploadedBy ? [
                 'id' => $v->uploadedBy->id,
                 'name' => $v->uploadedBy->name,

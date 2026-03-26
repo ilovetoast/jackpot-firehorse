@@ -14,7 +14,15 @@
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { Activity, AlertCircle, Slash, RefreshCw, History } from 'lucide-react'
 
-export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0, onVideoPreviewRetry = null }) {
+export default function AssetTimeline({
+    events = [],
+    loading = false,
+    onThumbnailRetry = null,
+    thumbnailRetryCount = 0,
+    onVideoPreviewRetry = null,
+    variant = 'default',
+}) {
+    const isDark = variant === 'dark'
     // Format event type to human-readable description
     const formatEventType = (eventType, metadata = {}) => {
         const eventMap = {
@@ -188,6 +196,23 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
         }
     }
 
+    /** Lightbox / dark panels: replace light icon wells (bg-blue-50 etc.) with neutral */
+    const mapIconForDarkSurface = (cfg) => {
+        if (!isDark) return cfg
+        const c = cfg.color || ''
+        const iconColor =
+            c.includes('red') ? 'text-red-400' :
+            c.includes('green') ? 'text-emerald-400' :
+            c.includes('amber') ? 'text-amber-400' :
+            c.includes('blue') || c.includes('indigo') ? 'text-neutral-300' :
+            'text-neutral-200'
+        return {
+            ...cfg,
+            bgColor: 'bg-neutral-800',
+            color: iconColor,
+        }
+    }
+
     // Format relative time
     const formatRelativeTime = (dateString) => {
         if (!dateString) return 'Unknown time'
@@ -219,15 +244,15 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
     if (loading) {
         return (
             <div className="text-center py-4">
-                <ArrowPathIcon className="h-5 w-5 text-gray-400 mx-auto animate-spin" />
-                <p className="mt-2 text-xs text-gray-500">Loading timeline...</p>
+                <ArrowPathIcon className={`h-5 w-5 mx-auto animate-spin ${isDark ? 'text-neutral-500' : 'text-gray-400'}`} />
+                <p className={`mt-2 text-xs ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>Loading timeline...</p>
             </div>
         )
     }
 
     if (!events || events.length === 0) {
         return (
-            <div className="text-center py-4 text-xs text-gray-500">
+            <div className={`text-center py-4 text-xs ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                 No activity yet
             </div>
         )
@@ -236,12 +261,12 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
     return (
         <div className="relative">
                 {/* Timeline line */}
-                <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200"></div>
+                <div className={`absolute left-3 top-0 bottom-0 w-0.5 ${isDark ? 'bg-neutral-700' : 'bg-gray-200'}`}></div>
                 
                 {/* Events */}
                 <div className="space-y-4">
                     {events.map((event, index) => {
-                        const eventConfig = getEventIcon(event.event_type, events)
+                        const eventConfig = mapIconForDarkSurface(getEventIcon(event.event_type, events))
                         const EventIcon = eventConfig.icon
                         const isAnimated = eventConfig.animated
                         
@@ -256,11 +281,11 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                 <div className="flex-1 min-w-0 pt-0.5">
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-medium text-gray-900">
+                                            <p className={`text-xs font-medium ${isDark ? 'text-neutral-100' : 'text-gray-900'}`}>
                                                 {formatEventType(event.event_type, event.metadata)}
                                             </p>
                                             {event.metadata && Object.keys(event.metadata).length > 0 && (
-                                                <div className="mt-1 text-xs text-gray-500">
+                                                <div className={`mt-1 text-xs ${isDark ? 'text-neutral-400' : 'text-gray-500'}`}>
                                                     {/* Show error for non-AI events */}
                                                     {event.metadata.error && 
                                                      event.event_type !== 'asset.ai_metadata.failed' && 
@@ -302,14 +327,14 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                     )}
                                                     {/* Show manual trigger indicator for thumbnail started events */}
                                                     {event.metadata.triggered_by === 'user_manual_request' && event.event_type === 'asset.thumbnail.started' && (
-                                                        <p className="text-indigo-600 italic">
+                                                        <p className={`italic ${isDark ? 'text-neutral-400' : 'text-indigo-600'}`}>
                                                             Manually triggered by user
                                                         </p>
                                                     )}
                                                     {/* Show style indicators for thumbnail completed events (hide when styles is empty) */}
                                                     {event.metadata.styles?.length > 0 && event.event_type === 'asset.thumbnail.completed' && (
                                                         <div className="mt-1.5 flex items-center gap-2">
-                                                            <span className="text-xs text-gray-500">Styles:</span>
+                                                            <span className={`text-xs ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>Styles:</span>
                                                             <div className="flex items-center gap-1.5">
                                                                 {event.metadata.styles.map((style) => (
                                                                     <span
@@ -319,13 +344,27 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                                     >
                                                                         {/* Style indicator dot */}
                                                                         <span className={`inline-block h-2 w-2 rounded-full ${
-                                                                            style === 'preview' ? 'bg-blue-400' :
-                                                                            style === 'thumb' ? 'bg-green-500' :
-                                                                            style === 'medium' ? 'bg-yellow-500' :
-                                                                            style === 'large' ? 'bg-purple-500' :
-                                                                            'bg-gray-400'
+                                                                            isDark
+                                                                                ? style === 'preview'
+                                                                                    ? 'bg-neutral-500'
+                                                                                    : style === 'thumb'
+                                                                                      ? 'bg-neutral-400'
+                                                                                      : style === 'medium'
+                                                                                        ? 'bg-neutral-600'
+                                                                                        : style === 'large'
+                                                                                          ? 'bg-neutral-500'
+                                                                                          : 'bg-neutral-600'
+                                                                                : style === 'preview'
+                                                                                  ? 'bg-blue-400'
+                                                                                  : style === 'thumb'
+                                                                                    ? 'bg-green-500'
+                                                                                    : style === 'medium'
+                                                                                      ? 'bg-yellow-500'
+                                                                                      : style === 'large'
+                                                                                        ? 'bg-purple-500'
+                                                                                        : 'bg-gray-400'
                                                                         }`} />
-                                                                        <span className="text-gray-600 capitalize">{style}</span>
+                                                                        <span className={`capitalize ${isDark ? 'text-neutral-300' : 'text-gray-600'}`}>{style}</span>
                                                                     </span>
                                                                 ))}
                                                             </div>
@@ -333,7 +372,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                     )}
                                                     {/* Show text for other events that mention styles */}
                                                     {event.metadata.styles?.length > 0 && event.event_type !== 'asset.thumbnail.completed' && (
-                                                        <p className="text-xs text-gray-500">Styles: {event.metadata.styles.join(', ')}</p>
+                                                        <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-gray-500'}`}>Styles: {event.metadata.styles.join(', ')}</p>
                                                     )}
                                                     {/* Phase 3.1: Hide temp upload paths from timeline (internal-only detail, confusing for users) */}
                                                     {event.metadata.from && event.metadata.to && 
@@ -378,7 +417,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                 </div>
                                             )}
                                         </div>
-                                        <span className="flex-shrink-0 text-xs text-gray-400 whitespace-nowrap">
+                                        <span className={`flex-shrink-0 text-xs whitespace-nowrap ${isDark ? 'text-neutral-500' : 'text-gray-400'}`}>
                                             {formatRelativeTime(event.created_at)}
                                         </span>
                                     </div>

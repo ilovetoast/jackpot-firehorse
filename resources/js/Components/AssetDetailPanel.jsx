@@ -78,6 +78,8 @@ export default function AssetDetailPanel({
     onToast = null,
     primaryColor,
     fullPage = false,
+    /** Render inside lightbox right column (no slide-out overlay, no backdrop) */
+    embeddedInLightbox = false,
 }) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -132,6 +134,7 @@ export default function AssetDetailPanel({
     const [restoreRerunPipeline, setRestoreRerunPipeline] = useState(false)
     const [restoreLoading, setRestoreLoading] = useState(false)
     const [expandedVersionId, setExpandedVersionId] = useState(null)
+    const [showVersionsWideModal, setShowVersionsWideModal] = useState(false)
 
     const [showActionsDropdown, setShowActionsDropdown] = useState(false)
     const actionsDropdownRef = useRef(null)
@@ -188,11 +191,15 @@ export default function AssetDetailPanel({
         setDetailMetadataTab('fields')
     }, [asset?.id])
 
-    // Enter animation: start off-screen, then slide in
+    // Enter animation: start off-screen, then slide in (skip for lightbox column)
     useEffect(() => {
         if (!isOpen) {
             setHasEntered(false)
             setIsExiting(false)
+            return
+        }
+        if (embeddedInLightbox) {
+            setHasEntered(true)
             return
         }
         setHasEntered(false)
@@ -200,7 +207,7 @@ export default function AssetDetailPanel({
             requestAnimationFrame(() => setHasEntered(true))
         })
         return () => cancelAnimationFrame(frame)
-    }, [isOpen])
+    }, [isOpen, embeddedInLightbox])
 
     // Exit animation: slide out, then notify parent
     useEffect(() => {
@@ -469,28 +476,29 @@ export default function AssetDetailPanel({
     }
     const getSourceBadge = (field) => {
         if (!field.metadata) return null
+        const dark = embeddedInLightbox
         const { source, producer, confidence, is_overridden } = field.metadata
         if (is_overridden)
             return (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${dark ? 'bg-neutral-800 text-neutral-200' : 'bg-yellow-100 text-yellow-800'}`}>
                     Manual Override
                 </span>
             )
         if (source === 'ai' || producer === 'ai')
             return (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${dark ? 'bg-neutral-800 text-neutral-200' : 'bg-pink-100 text-pink-800'}`}>
                     AI {confidence ? `(${(confidence * 100).toFixed(0)}%)` : ''}
                 </span>
             )
         if (source === 'user')
             return (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${dark ? 'bg-neutral-800 text-neutral-200' : 'bg-blue-100 text-blue-800'}`}>
                     User
                 </span>
             )
         if (source === 'automatic' || source === 'system')
             return (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${dark ? 'bg-neutral-800 text-neutral-200' : 'bg-purple-100 text-purple-800'}`}>
                     {producer === 'system' ? 'System' : 'Automatic'}
                 </span>
             )
@@ -542,6 +550,10 @@ export default function AssetDetailPanel({
     const panelWidth = fullPage ? '100%' : '92vw'
 
     const handleRequestClose = () => {
+        if (embeddedInLightbox) {
+            onClose?.()
+            return
+        }
         if (fullPage) {
             onClose?.()
         } else {
@@ -553,9 +565,40 @@ export default function AssetDetailPanel({
     const backdropOpacityClass = hasEntered && !isExiting ? 'opacity-100' : 'opacity-0'
     const backdropPointerClass = isExiting ? 'pointer-events-none' : ''
 
+    const panelOuterClass = embeddedInLightbox
+        ? 'relative h-full w-full min-h-0 flex flex-col bg-neutral-950 text-neutral-100 shadow-none z-10'
+        : `fixed top-0 right-0 h-full bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${panelSlideClass}`
+
+    const lb = embeddedInLightbox
+    /** Lightbox: avoid brand purple — neutral interaction color */
+    const lbAccent = '#e5e5e5'
+    const cardClass = lb
+        ? 'bg-neutral-900/85 border border-neutral-800 rounded-lg p-5 mb-4'
+        : 'bg-white border border-gray-200 rounded-lg p-6 mb-6'
+    /** Lightbox: no heavy section dividers; CollapsibleSection titleInCard supplies the card */
+    const sectionClass = lb ? 'mb-0' : 'border-t border-gray-200 mb-6'
+    const dtClass = lb ? 'font-semibold text-neutral-400' : 'font-semibold text-gray-700'
+    const ddClass = lb ? 'text-xs text-neutral-200' : 'text-sm text-gray-900'
+    const collapsibleVariant = lb ? 'dark' : 'default'
+    const dropdownItemClass = lb
+        ? 'w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2 text-neutral-200 hover:bg-neutral-800'
+        : 'w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2'
+    const dropdownDividerClass = lb ? 'border-t border-neutral-700 my-2' : 'border-t border-gray-100 my-2'
+    const metaTabListClass = lb ? 'flex gap-1 border-b border-neutral-800/50 mb-3' : 'flex gap-1 border-b border-gray-200 mb-4'
+    const metaTabInactive = lb ? 'border-transparent text-neutral-500 hover:text-neutral-200' : 'border-transparent text-gray-500 hover:text-gray-800'
+    const metaMuted = lb ? 'text-neutral-400' : 'text-gray-500'
+    const reprocessBtnClass = lb
+        ? 'w-full text-left px-3 py-2 text-sm font-medium text-neutral-200 hover:bg-neutral-800 rounded-md flex items-center gap-2'
+        : 'w-full text-left px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 rounded-md flex items-center gap-2'
+    const metaFieldInputClass = lb
+        ? 'mt-1 block w-full max-w-xs rounded-md border-neutral-600 bg-neutral-900 text-neutral-200 text-sm'
+        : 'mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm'
+
+    const versionThumbnailSrc = (v) => (v?.thumbnail_url ? String(v.thumbnail_url) : null)
+
     return (
         <>
-            {!fullPage && (
+            {!fullPage && !embeddedInLightbox && (
                 <div
                     className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${backdropOpacityClass} ${backdropPointerClass}`}
                     aria-hidden
@@ -563,14 +606,20 @@ export default function AssetDetailPanel({
                 />
             )}
             <div
-                className={`fixed top-0 right-0 h-full bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${panelSlideClass}`}
-                style={{ width: panelWidth, maxWidth: fullPage ? '100%' : '1240px' }}
+                className={panelOuterClass}
+                style={embeddedInLightbox ? undefined : { width: panelWidth, maxWidth: fullPage ? '100%' : '1240px' }}
                 role="dialog"
                 aria-labelledby="asset-detail-panel-title"
+                onClick={embeddedInLightbox ? (e) => e.stopPropagation() : undefined}
             >
                 {/* Sticky Header */}
-                <header className="sticky top-0 z-10 bg-white border-b border-gray-200 pb-3 mb-4 flex-shrink-0">
-                    <div className="p-4 space-y-3">
+                <header
+                    className={`sticky top-0 z-10 flex-shrink-0 border-b ${
+                        lb ? 'border-transparent bg-neutral-950 pb-4' : 'border-gray-200 bg-white pb-3 mb-4'
+                    }`}
+                    onClick={lb ? (e) => e.stopPropagation() : undefined}
+                >
+                    <div className={lb ? 'space-y-4 px-5 py-4' : 'space-y-3 p-4'}>
                         {/* Row: Title + Actions + Close */}
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0 flex items-start gap-2">
@@ -603,7 +652,11 @@ export default function AssetDetailPanel({
                                                 onChange={(e) => setTitleEditValue(e.target.value)}
                                                 onBlur={saveTitle}
                                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); saveTitle(); } }}
-                                                className="text-lg font-semibold text-gray-900 border border-gray-300 rounded px-2 py-1 w-full max-w-md focus:ring-2 focus:ring-offset-1 focus:border-gray-400"
+                                                className={`text-lg font-semibold border rounded px-2 py-1 w-full max-w-md focus:ring-2 focus:ring-offset-1 ${
+                                                    lb
+                                                        ? 'border-neutral-600 bg-neutral-900 text-neutral-100 focus:border-neutral-500'
+                                                        : 'border-gray-300 text-gray-900 focus:border-gray-400'
+                                                }`}
                                                 aria-label="Edit title"
                                             />
                                         </div>
@@ -611,7 +664,7 @@ export default function AssetDetailPanel({
                                 })()}
                                 {(!editingTitle || !canEditMetadata) && (
                                     <div className="flex-1 min-w-0">
-                                        <h2 id="asset-detail-panel-title" className="text-lg font-semibold text-gray-900 truncate">
+                                        <h2 id="asset-detail-panel-title" className={`text-lg font-semibold truncate ${lb ? 'text-white' : 'text-gray-900'}`}>
                                             {asset?.title || asset?.original_filename || 'Asset'}
                                         </h2>
                                         {canEditMetadata && metadata?.fields?.some((f) => (f.key || f.field_key) === 'title') && (
@@ -622,7 +675,7 @@ export default function AssetDetailPanel({
                                                     setEditingTitle(true)
                                                     setTimeout(() => titleInputRef.current?.focus(), 0)
                                                 }}
-                                                className="mt-0.5 inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+                                                className={`mt-0.5 inline-flex items-center gap-1 text-xs ${lb ? 'text-neutral-500 hover:text-neutral-300' : 'text-gray-500 hover:text-gray-700'}`}
                                                 aria-label="Edit title"
                                             >
                                                 <PencilIcon className="h-3.5 w-3.5" />
@@ -655,14 +708,19 @@ export default function AssetDetailPanel({
                                         return canToggleStar ? (
                                             <button
                                                 type="button"
-                                                onClick={toggleStar}
-                                                className="p-1.5 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-1"
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    e.preventDefault()
+                                                    toggleStar()
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                className={`p-1.5 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 ${lb ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
                                                 aria-label={isStarred ? 'Unstar' : 'Star'}
                                             >
                                                 {isStarred ? (
                                                     <StarIconSolid className="h-5 w-5 text-amber-500" />
                                                 ) : (
-                                                    <StarIconOutline className="h-5 w-5 text-gray-400 hover:text-amber-500" />
+                                                    <StarIconOutline className={`h-5 w-5 hover:text-amber-500 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
                                                 )}
                                             </button>
                                         ) : isStarred ? (
@@ -673,7 +731,7 @@ export default function AssetDetailPanel({
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 {lifecycleError && (
-                                    <p className="text-sm text-red-600 max-w-[10rem] truncate" title={lifecycleError}>
+                                    <p className="text-sm text-red-400 max-w-[10rem] truncate" title={lifecycleError}>
                                         {lifecycleError}
                                     </p>
                                 )}
@@ -681,7 +739,11 @@ export default function AssetDetailPanel({
                                     <button
                                         type="button"
                                         onClick={() => setShowActionsDropdown(!showActionsDropdown)}
-                                        className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                        className={
+                                            lb
+                                                ? 'inline-flex items-center rounded-md border border-neutral-600 bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-100 shadow-sm hover:bg-neutral-800'
+                                                : 'inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50'
+                                        }
                                     >
                                         Actions
                                         <ChevronDownIcon
@@ -689,7 +751,13 @@ export default function AssetDetailPanel({
                                         />
                                     </button>
                                     {showActionsDropdown && (
-                                        <div className="absolute right-0 z-20 mt-2 w-60 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5 py-2">
+                                        <div
+                                            className={
+                                                lb
+                                                    ? 'absolute right-0 z-20 mt-2 w-60 origin-top-right rounded-lg border border-neutral-700 bg-neutral-900 py-2 shadow-xl'
+                                                    : 'absolute right-0 z-20 mt-2 w-60 origin-top-right rounded-lg bg-white py-2 shadow-lg ring-1 ring-black ring-opacity-5'
+                                            }
+                                        >
                                             {/* Section 1 — Primary Actions */}
                                             <div className="px-2 py-1">
                                                 {canPublishWithFallback && asset?.is_published === false && !asset?.archived_at && (
@@ -697,7 +765,7 @@ export default function AssetDetailPanel({
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); handlePublish(); }}
                                                         disabled={publishing}
-                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                        className={dropdownItemClass}
                                                     >
                                                         <CheckCircleIcon className="h-4 w-4 flex-shrink-0" />
                                                         Publish
@@ -708,7 +776,7 @@ export default function AssetDetailPanel({
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); handleUnpublish(); }}
                                                         disabled={unpublishing}
-                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                        className={dropdownItemClass}
                                                     >
                                                         <XCircleIcon className="h-4 w-4 flex-shrink-0" />
                                                         Unpublish
@@ -719,7 +787,7 @@ export default function AssetDetailPanel({
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); handleArchive(); }}
                                                         disabled={archiving}
-                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                        className={dropdownItemClass}
                                                     >
                                                         <ArchiveBoxIcon className="h-4 w-4 flex-shrink-0" />
                                                         Archive
@@ -730,7 +798,7 @@ export default function AssetDetailPanel({
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); handleRestore(); }}
                                                         disabled={restoring}
-                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                        className={dropdownItemClass}
                                                     >
                                                         <ArrowUturnLeftIcon className="h-4 w-4 flex-shrink-0" />
                                                         Restore
@@ -741,7 +809,7 @@ export default function AssetDetailPanel({
                                                     <button
                                                         type="button"
                                                         onClick={() => { setShowActionsDropdown(false); onReplaceFile(); }}
-                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                        className={dropdownItemClass}
                                                     >
                                                         <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                         Replace file
@@ -750,15 +818,15 @@ export default function AssetDetailPanel({
                                             </div>
                                             {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || (canRetryThumbnails && onReprocessAsset)) && (
                                                 <>
-                                                    <div className="border-t border-gray-100 my-2" />
+                                                    <div className={dropdownDividerClass} />
                                                     <div className="px-2 py-1">
-                                                        <p className="px-3 py-1 text-xs font-medium text-gray-400 uppercase tracking-wider">Reprocess</p>
+                                                        <p className={`px-3 py-1 text-xs font-medium uppercase tracking-wider ${lb ? 'text-neutral-500' : 'text-gray-400'}`}>Reprocess</p>
                                                         {canRetryThumbnails && onReprocessAsset && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => { setShowActionsDropdown(false); onReprocessAsset(); }}
                                                                 disabled={reprocessLoading}
-                                                                className="w-full text-left px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 rounded-md flex items-center gap-2"
+                                                                className={reprocessBtnClass}
                                                             >
                                                                 <ArrowPathIcon className={`h-4 w-4 flex-shrink-0 ${reprocessLoading ? 'animate-spin' : ''}`} />
                                                                 Reprocess asset (full pipeline)
@@ -770,7 +838,7 @@ export default function AssetDetailPanel({
                                                                     type="button"
                                                                     onClick={() => { setShowActionsDropdown(false); handleRegenerateAiMetadata(); }}
                                                                     disabled={regeneratingAiMetadata}
-                                                                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                    className={dropdownItemClass}
                                                                 >
                                                                     <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                     Re-run AI analysis
@@ -779,7 +847,7 @@ export default function AssetDetailPanel({
                                                                     type="button"
                                                                     onClick={() => { setShowActionsDropdown(false); handleRegenerateSystemMetadata(); }}
                                                                     disabled={regeneratingSystemMetadata}
-                                                                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                    className={dropdownItemClass}
                                                                 >
                                                                     <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                     Reprocess metadata
@@ -788,7 +856,7 @@ export default function AssetDetailPanel({
                                                                     type="button"
                                                                     onClick={() => { setShowActionsDropdown(false); handleRegenerateAiTagging(); }}
                                                                     disabled={regeneratingAiTagging}
-                                                                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                    className={dropdownItemClass}
                                                                 >
                                                                     <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                     Reprocess tags
@@ -800,7 +868,7 @@ export default function AssetDetailPanel({
                                                                 type="button"
                                                                 onClick={() => { setShowActionsDropdown(false); handleRegenerateThumbnails(); }}
                                                                 disabled={regeneratingThumbnails}
-                                                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                className={dropdownItemClass}
                                                             >
                                                                 <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                 Regenerate previews
@@ -811,14 +879,14 @@ export default function AssetDetailPanel({
                                             )}
                                             {(supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split?.('.')?.pop()) || isVideo) && (
                                                 <>
-                                                    <div className="border-t border-gray-100 my-2" />
+                                                    <div className={dropdownDividerClass} />
                                                     <div className="px-2 py-1">
                                                         {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split?.('.')?.pop()) && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => { setShowActionsDropdown(false); handleRemovePreview(); }}
                                                                 disabled={removePreviewLoading}
-                                                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                className={dropdownItemClass}
                                                             >
                                                                 <TrashIcon className="h-4 w-4 flex-shrink-0" />
                                                                 Remove preview
@@ -829,7 +897,7 @@ export default function AssetDetailPanel({
                                                                 type="button"
                                                                 onClick={() => { setShowActionsDropdown(false); handleRegenerateVideoPreview(); }}
                                                                 disabled={regeneratingVideoPreview}
-                                                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
+                                                                className={dropdownItemClass}
                                                             >
                                                                 <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                 Regenerate video preview
@@ -840,13 +908,17 @@ export default function AssetDetailPanel({
                                             )}
                                             {onDelete && (
                                                 <>
-                                                    <div className="border-t border-gray-100 my-2" />
+                                                    <div className={dropdownDividerClass} />
                                                     <div className="px-2 py-1">
-                                                        <p className="px-3 py-1 text-xs font-medium text-red-600 uppercase tracking-wider">Danger zone</p>
+                                                        <p className={`px-3 py-1 text-xs font-medium uppercase tracking-wider ${lb ? 'text-red-400' : 'text-red-600'}`}>Danger zone</p>
                                                         <button
                                                             type="button"
                                                             onClick={() => { setShowActionsDropdown(false); onDelete(); }}
-                                                            className="w-full text-left px-3 py-2 text-sm text-red-700 hover:bg-red-50 rounded-md flex items-center gap-2 font-medium"
+                                                            className={
+                                                                lb
+                                                                    ? 'w-full text-left px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 rounded-md flex items-center gap-2 font-medium'
+                                                                    : 'w-full text-left px-3 py-2 text-sm text-red-700 hover:bg-red-50 rounded-md flex items-center gap-2 font-medium'
+                                                            }
                                                         >
                                                             <TrashIcon className="h-4 w-4 flex-shrink-0" />
                                                             Delete asset
@@ -861,7 +933,7 @@ export default function AssetDetailPanel({
                                     <button
                                         type="button"
                                         onClick={handleRequestClose}
-                                        className="rounded-md p-2 text-gray-400 hover:text-gray-600"
+                                        className={`rounded-md p-2 ${lb ? 'text-neutral-400 hover:text-white' : 'text-gray-400 hover:text-gray-600'}`}
                                         aria-label="Close"
                                     >
                                         <XMarkIcon className="h-6 w-6" />
@@ -869,7 +941,8 @@ export default function AssetDetailPanel({
                                 )}
                             </div>
                         </div>
-                        {/* Filename (secondary, smaller) */}
+                        {/* Filename in header — hidden in lightbox (still editable under File information) */}
+                        {!lb && (
                         <div className="flex items-center gap-2">
                             {editingFilename ? (
                                 <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -877,21 +950,29 @@ export default function AssetDetailPanel({
                                         type="text"
                                         value={filenameEditValue}
                                         onChange={(e) => setFilenameEditValue(e.target.value)}
-                                        className="text-sm text-gray-600 border border-gray-300 rounded px-2 py-1 flex-1 max-w-sm focus:ring-2 focus:ring-offset-1"
+                                        className={`text-sm border rounded px-2 py-1 flex-1 max-w-sm focus:ring-2 focus:ring-offset-1 ${
+                                            lb
+                                                ? 'border-neutral-600 bg-neutral-900 text-neutral-100 focus:border-neutral-500'
+                                                : 'text-gray-600 border-gray-300'
+                                        }`}
                                         placeholder="Filename"
                                     />
                                     <button
                                         type="button"
                                         onClick={() => { setEditingFilename(false); setFilenameEditValue(asset?.original_filename || ''); }}
-                                        className="text-xs font-medium text-white rounded px-2 py-1"
-                                        style={{ backgroundColor: brandPrimary }}
+                                        className={
+                                            lb
+                                                ? 'text-xs font-medium rounded px-2 py-1 bg-neutral-200 text-neutral-900 hover:bg-white'
+                                                : 'text-xs font-medium text-white rounded px-2 py-1'
+                                        }
+                                        style={!lb ? { backgroundColor: brandPrimary } : undefined}
                                     >
                                         Save
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(false); }}
-                                        className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                                        className={`text-xs font-medium ${lb ? 'text-neutral-400 hover:text-neutral-200' : 'text-gray-600 hover:text-gray-900'}`}
                                     >
                                         Cancel
                                     </button>
@@ -900,37 +981,40 @@ export default function AssetDetailPanel({
                                 <button
                                     type="button"
                                     onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(true); }}
-                                    className="text-sm text-gray-500 truncate max-w-md hover:text-gray-700 text-left"
+                                    className={`text-sm truncate max-w-md text-left ${lb ? 'text-neutral-400 hover:text-neutral-200' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
                                     {asset?.original_filename || '—'}
                                 </button>
                             )}
                         </div>
+                        )}
                         {/* Badges: Category + Lifecycle only */}
                         <div className="flex flex-wrap items-center gap-2">
                             {metadata?.category && (
-                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${lb ? 'bg-neutral-800 text-neutral-200' : 'bg-gray-100 text-gray-800'}`}>
                                     {metadata.category.name}
                                 </span>
                             )}
                             {asset?.archived_at && (
-                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${lb ? 'bg-neutral-900 text-neutral-300 border-neutral-600' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
                                     Archived
                                 </span>
                             )}
                             {asset?.is_published === true && !asset?.archived_at && (
-                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 border border-green-300">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${lb ? 'bg-emerald-900/50 text-emerald-200 border-emerald-700/50' : 'bg-green-100 text-green-700 border-green-300'}`}>
                                     Published
                                 </span>
                             )}
                             {asset?.is_published === false && !asset?.archived_at && (
-                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${lb ? 'bg-amber-900/40 text-amber-100 border-amber-700/40' : 'bg-yellow-100 text-yellow-700 border-yellow-300'}`}>
                                     Unpublished
                                 </span>
                             )}
                         </div>
-                        {/* Preview: max-height 360px, neutral container, file type badge, expand toggle */}
-                        <div className="relative rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center" style={{ maxHeight: previewExpanded ? '70vh' : '360px', minHeight: '200px' }}>
+                        {!lb && (
+                            <>
+                            {/* Preview: hidden in lightbox embed — main stage already shows the asset */}
+                            <div className="relative rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center" style={{ maxHeight: previewExpanded ? '70vh' : '360px', minHeight: '200px' }}>
                             {asset?.id && (
                                 <ThumbnailPreview
                                     asset={asset}
@@ -973,38 +1057,47 @@ export default function AssetDetailPanel({
                                 View preview video
                             </a>
                         )}
+                            </>
+                        )}
                     </div>
                 </header>
 
                 {/* Scrollable body */}
-                <div className="flex-1 overflow-y-auto">
-                    <div className="p-4 sm:p-5 divide-y divide-gray-200">
+                <div className={`flex-1 overflow-y-auto ${lb ? 'bg-neutral-950 text-xs' : ''}`}>
+                    <div className={lb ? 'space-y-1 px-4 py-4' : 'divide-y divide-gray-200 p-4 sm:p-5'}>
                         {loading && (
-                            <div className="py-8 text-center text-sm text-gray-500">
+                            <div className={`py-8 text-center text-sm ${lb ? 'text-neutral-500' : 'text-gray-500'}`}>
                                 Loading metadata…
                             </div>
                         )}
                         {error && (
-                            <div className="p-4 bg-red-50 border-b border-red-100">
-                                <p className="text-sm text-red-800">{error}</p>
+                            <div className={lb ? 'border-b border-red-900/60 bg-red-950/40 p-4' : 'border-b border-red-100 bg-red-50 p-4'}>
+                                <p className={`text-sm ${lb ? 'text-red-200' : 'text-red-800'}`}>{error}</p>
                             </div>
                         )}
 
                         {/* Section 1 — Overview (expanded by default) */}
-                        <section className="border-t border-gray-200 mb-6" aria-labelledby="section-overview">
-                            <CollapsibleSection title="Overview" defaultExpanded={true}>
-                                <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                        <section className={sectionClass} aria-labelledby="section-overview">
+                            <CollapsibleSection
+                                variant={collapsibleVariant}
+                                titleInCard={lb}
+                                title="Overview"
+                                defaultExpanded={true}
+                            >
+                                {lb ? (
+                                    <dl className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 sm:gap-x-4">
                                         {asset?.created_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Created at</dt>
-                                                <dd className="text-sm text-gray-900">{new Date(asset.created_at).toLocaleString()}</dd>
+                                                <dt className="sr-only">Created at</dt>
+                                                <dd className={ddClass} title="Created at">
+                                                    {new Date(asset.created_at).toLocaleString()}
+                                                </dd>
                                             </>
                                         )}
                                         {asset?.created_by && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Created by</dt>
-                                                <dd className="text-sm text-gray-900">
+                                                <dt className="sr-only">Created by</dt>
+                                                <dd className={ddClass} title="Created by">
                                                     {asset.created_by.name ||
                                                         [asset.created_by.first_name, asset.created_by.last_name].filter(Boolean).join(' ') ||
                                                         '—'}
@@ -1013,48 +1106,99 @@ export default function AssetDetailPanel({
                                         )}
                                         {asset?.updated_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Last modified</dt>
-                                                <dd className="text-sm text-gray-900">{new Date(asset.updated_at).toLocaleString()}</dd>
+                                                <dt className="sr-only">Last modified</dt>
+                                                <dd className={ddClass} title="Last modified">
+                                                    {new Date(asset.updated_at).toLocaleString()}
+                                                </dd>
                                             </>
                                         )}
                                         {auth?.approval_features?.approvals_enabled && asset?.approved_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Approved at</dt>
-                                                <dd className="text-sm text-gray-900">{new Date(asset.approved_at).toLocaleString()}</dd>
+                                                <dt className="sr-only">Approved at</dt>
+                                                <dd className={ddClass} title="Approved at">
+                                                    {new Date(asset.approved_at).toLocaleString()}
+                                                </dd>
                                             </>
                                         )}
                                         {auth?.approval_features?.approvals_enabled && asset?.approved_by && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Approved by</dt>
-                                                <dd className="text-sm text-gray-900">{asset.approved_by.name || '—'}</dd>
+                                                <dt className="sr-only">Approved by</dt>
+                                                <dd className={ddClass} title="Approved by">
+                                                    {asset.approved_by.name || '—'}
+                                                </dd>
                                             </>
                                         )}
-                                        <dt className="font-semibold text-gray-700">Lifecycle</dt>
-                                        <dd className="text-sm text-gray-900">
+                                        <dt className="sr-only">Lifecycle</dt>
+                                        <dd className={ddClass} title="Lifecycle">
                                             {asset?.archived_at ? 'Archived' : asset?.is_published ? 'Published' : 'Unpublished'}
                                         </dd>
                                     </dl>
-                                </div>
+                                ) : (
+                                    <div className={cardClass}>
+                                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                                            {asset?.created_at && (
+                                                <>
+                                                    <dt className={dtClass}>Created at</dt>
+                                                    <dd className={ddClass}>{new Date(asset.created_at).toLocaleString()}</dd>
+                                                </>
+                                            )}
+                                            {asset?.created_by && (
+                                                <>
+                                                    <dt className={dtClass}>Created by</dt>
+                                                    <dd className={ddClass}>
+                                                        {asset.created_by.name ||
+                                                            [asset.created_by.first_name, asset.created_by.last_name].filter(Boolean).join(' ') ||
+                                                            '—'}
+                                                    </dd>
+                                                </>
+                                            )}
+                                            {asset?.updated_at && (
+                                                <>
+                                                    <dt className={dtClass}>Last modified</dt>
+                                                    <dd className={ddClass}>{new Date(asset.updated_at).toLocaleString()}</dd>
+                                                </>
+                                            )}
+                                            {auth?.approval_features?.approvals_enabled && asset?.approved_at && (
+                                                <>
+                                                    <dt className={dtClass}>Approved at</dt>
+                                                    <dd className={ddClass}>{new Date(asset.approved_at).toLocaleString()}</dd>
+                                                </>
+                                            )}
+                                            {auth?.approval_features?.approvals_enabled && asset?.approved_by && (
+                                                <>
+                                                    <dt className={dtClass}>Approved by</dt>
+                                                    <dd className={ddClass}>{asset.approved_by.name || '—'}</dd>
+                                                </>
+                                            )}
+                                            <dt className={dtClass}>Lifecycle</dt>
+                                            <dd className={ddClass}>
+                                                {asset?.archived_at ? 'Archived' : asset?.is_published ? 'Published' : 'Unpublished'}
+                                            </dd>
+                                        </dl>
+                                    </div>
+                                )}
                             </CollapsibleSection>
                         </section>
 
                         {/* Section 2 — Metadata (grouped, section-based edit; expanded by default) */}
                         {!loading && !error && metadata && (
-                            <section className="border-t border-gray-200 mb-6" aria-labelledby="section-metadata">
-                                <CollapsibleSection title="Metadata" defaultExpanded={true}>
-                                <div className="flex gap-1 border-b border-gray-200 mb-4" role="tablist" aria-label="Metadata sections">
+                            <section className={sectionClass} aria-labelledby="section-metadata">
+                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Metadata" defaultExpanded={true}>
+                                <div className={metaTabListClass} role="tablist" aria-label="Metadata sections">
                                     <button
                                         type="button"
                                         role="tab"
                                         aria-selected={detailMetadataTab === 'fields'}
                                         onClick={() => setDetailMetadataTab('fields')}
-                                        className={`px-3 py-2 text-sm font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                        className={`px-3 py-2 font-medium rounded-t-md border-b-2 -mb-px transition-colors ${lb ? 'text-xs' : 'text-sm'} ${
                                             detailMetadataTab === 'fields'
-                                                ? ''
-                                                : 'border-transparent text-gray-500 hover:text-gray-800'
+                                                ? lb
+                                                    ? 'border-neutral-200 text-neutral-100'
+                                                    : 'border-transparent'
+                                                : metaTabInactive
                                         }`}
                                         style={
-                                            detailMetadataTab === 'fields'
+                                            detailMetadataTab === 'fields' && !lb
                                                 ? { borderBottomColor: brandPrimary, color: brandPrimary }
                                                 : undefined
                                         }
@@ -1066,13 +1210,15 @@ export default function AssetDetailPanel({
                                         role="tab"
                                         aria-selected={detailMetadataTab === 'embedded'}
                                         onClick={() => setDetailMetadataTab('embedded')}
-                                        className={`px-3 py-2 text-sm font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                        className={`px-3 py-2 font-medium rounded-t-md border-b-2 -mb-px transition-colors ${lb ? 'text-xs' : 'text-sm'} ${
                                             detailMetadataTab === 'embedded'
-                                                ? ''
-                                                : 'border-transparent text-gray-500 hover:text-gray-800'
+                                                ? lb
+                                                    ? 'border-neutral-200 text-neutral-100'
+                                                    : 'border-transparent'
+                                                : metaTabInactive
                                         }`}
                                         style={
-                                            detailMetadataTab === 'embedded'
+                                            detailMetadataTab === 'embedded' && !lb
                                                 ? { borderBottomColor: brandPrimary, color: brandPrimary }
                                                 : undefined
                                         }
@@ -1083,12 +1229,12 @@ export default function AssetDetailPanel({
 
                                 {detailMetadataTab === 'embedded' && (
                                     <div className="mb-6">
-                                        <AssetEmbeddedMetadataPanel embeddedMetadata={metadata.embedded_metadata} />
+                                        <AssetEmbeddedMetadataPanel embeddedMetadata={metadata.embedded_metadata} variant={lb ? 'dark' : 'default'} />
                                     </div>
                                 )}
 
                                 {detailMetadataTab === 'fields' && (
-                                <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+                                <div className={lb ? 'space-y-3' : cardClass}>
                                 {metadataByGroup.map(({ key: groupKey, fields }) => {
                                     const isEditing = metadataEditGroup === groupKey
                                     const dirty = metadataDirty[groupKey]
@@ -1096,25 +1242,51 @@ export default function AssetDetailPanel({
                                     return (
                                         <div
                                             key={groupKey}
-                                            className={`mb-5 last:mb-0 rounded-lg border transition-colors ${isEditing ? 'bg-gray-50 border-gray-200 shadow-sm' : 'border-transparent'}`}
+                                            className={`mb-5 last:mb-0 rounded-lg border transition-colors ${
+                                                isEditing
+                                                    ? lb
+                                                        ? 'bg-neutral-900/80 border-neutral-700 shadow-sm'
+                                                        : 'bg-gray-50 border-gray-200 shadow-sm'
+                                                    : lb
+                                                      ? 'border-neutral-800/80'
+                                                      : 'border-transparent'
+                                            }`}
                                         >
-                                            <div className="flex items-center justify-between px-3 pt-3 pb-2">
-                                                <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                                                    {groupLabel(groupKey)}
-                                                    {dirty && Object.keys(dirty).length > 0 && (
-                                                        <span className="text-amber-600 text-xs font-normal">Unsaved changes</span>
-                                                    )}
-                                                </h4>
-                                                {canEdit && !isEditing && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setMetadataEditGroup(groupKey)}
-                                                        className="text-xs font-medium rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-offset-1"
-                                                        style={{ color: brandPrimary }}
-                                                    >
-                                                        Edit
-                                                    </button>
+                                            <div className="flex items-center justify-between px-3 pt-3 pb-2 gap-2">
+                                                {!lb ? (
+                                                    <h4 className="text-sm font-semibold flex items-center gap-2 text-gray-800">
+                                                        {groupLabel(groupKey)}
+                                                        {dirty && Object.keys(dirty).length > 0 && (
+                                                            <span className="text-xs font-normal text-amber-600">Unsaved changes</span>
+                                                        )}
+                                                    </h4>
+                                                ) : (
+                                                    <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                                                        {groupLabel(groupKey)}
+                                                        {dirty && Object.keys(dirty).length > 0 && (
+                                                            <span className="ml-2 font-normal normal-case tracking-normal text-amber-400">· Unsaved</span>
+                                                        )}
+                                                    </h4>
                                                 )}
+                                                <div className={`flex items-center gap-2 ${lb ? 'ml-auto' : ''}`}>
+                                                    {lb && dirty && Object.keys(dirty).length > 0 && (
+                                                        <span className="sr-only">Unsaved changes</span>
+                                                    )}
+                                                    {canEdit && !isEditing && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setMetadataEditGroup(groupKey)}
+                                                            className={`text-xs font-medium rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                                                                lb
+                                                                    ? 'text-neutral-200 hover:text-white hover:underline decoration-neutral-600 underline-offset-2'
+                                                                    : ''
+                                                            }`}
+                                                            style={!lb ? { color: brandPrimary } : undefined}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                             <dl className="px-3 pb-3">
                                                 {fields.map((field) => {
@@ -1146,11 +1318,43 @@ export default function AssetDetailPanel({
                                                     return (
                                                         <div
                                                             key={metadataFieldId}
-                                                            className={`flex items-start justify-between gap-2 py-3 border-b border-gray-100 last:border-b-0 ${!isSystemField ? 'group hover:bg-gray-50 cursor-pointer rounded-md px-2 -mx-2 transition' : ''}`}
-                                                            title={isSystemField ? 'Automatically generated. Cannot be edited.' : undefined}
+                                                            role={!isSystemField && !isEditing && canEdit && isEditableField ? 'button' : undefined}
+                                                            tabIndex={!isSystemField && !isEditing && canEdit && isEditableField ? 0 : undefined}
+                                                            aria-label={
+                                                                !isSystemField && !isEditing && canEdit && isEditableField
+                                                                    ? `Edit ${field.display_label}`
+                                                                    : undefined
+                                                            }
+                                                            onClick={(e) => {
+                                                                if (isEditing || isSystemField || !canEdit || !isEditableField) return
+                                                                if (e.target.closest('button, a, input, select, textarea, [role="slider"]')) return
+                                                                setMetadataEditGroup(groupKey)
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key !== 'Enter' && e.key !== ' ') return
+                                                                if (isEditing || isSystemField || !canEdit || !isEditableField) return
+                                                                e.preventDefault()
+                                                                setMetadataEditGroup(groupKey)
+                                                            }}
+                                                            className={`flex items-start justify-between gap-2 ${
+                                                                lb ? 'py-2' : 'border-b last:border-b-0 border-gray-100 py-3'
+                                                            } ${!isSystemField ? `group cursor-pointer rounded-md px-2 -mx-2 transition ${lb ? 'hover:bg-neutral-800/60' : 'hover:bg-gray-50'}` : ''}`}
+                                                            title={
+                                                                isSystemField
+                                                                    ? 'Automatically generated. Cannot be edited.'
+                                                                    : lb
+                                                                      ? field.display_label
+                                                                      : undefined
+                                                            }
                                                         >
                                                             <div className="min-w-0 flex-1">
-                                                                <span className="text-sm font-semibold text-gray-700">{field.display_label}</span>
+                                                                {lb ? (
+                                                                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                                                                        {field.display_label}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-sm font-semibold text-gray-700">{field.display_label}</span>
+                                                                )}
                                                                 {isEditing && isEditableField ? (
                                                                     <div className="mt-1">
                                                                         {isRating ? (
@@ -1160,7 +1364,7 @@ export default function AssetDetailPanel({
                                                                                 editable
                                                                                 maxStars={5}
                                                                                 size="md"
-                                                                                primaryColor={brandPrimary}
+                                                                                primaryColor={lb ? lbAccent : brandPrimary}
                                                                             />
                                                                         ) : isToggleBoolean ? (
                                                                             <label className="flex items-center gap-2 cursor-pointer">
@@ -1172,14 +1376,16 @@ export default function AssetDetailPanel({
                                                                                         className="sr-only peer"
                                                                                     />
                                                                                     <div
-                                                                                        className="relative w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4"
+                                                                                        className={`relative w-11 h-6 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4 ${lb ? 'bg-neutral-700' : 'bg-gray-200'}`}
                                                                                         style={{
-                                                                                            ['--tw-ring-color']: brandPrimary,
-                                                                                            ...(editValue === true || editValue === 'true' ? { backgroundColor: brandPrimary } : {}),
+                                                                                            ['--tw-ring-color']: lb ? '#a3a3a3' : brandPrimary,
+                                                                                            ...(editValue === true || editValue === 'true'
+                                                                                                ? { backgroundColor: lb ? lbAccent : brandPrimary }
+                                                                                                : {}),
                                                                                         }}
                                                                                     />
                                                                                 </div>
-                                                                                <span className="text-sm text-gray-700">{editValue === true || editValue === 'true' ? 'Yes' : 'No'}</span>
+                                                                                <span className={`text-sm ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>{editValue === true || editValue === 'true' ? 'Yes' : 'No'}</span>
                                                                             </label>
                                                                         ) : field.type === 'boolean' ? (
                                                                             <label className="flex items-center gap-2">
@@ -1187,15 +1393,15 @@ export default function AssetDetailPanel({
                                                                                     type="checkbox"
                                                                                     checked={!!editValue}
                                                                                     onChange={(e) => setDirtyValue(e.target.checked)}
-                                                                                    className="rounded border-gray-300"
+                                                                                    className={`rounded ${lb ? 'border-neutral-600 bg-neutral-900' : 'border-gray-300'}`}
                                                                                 />
-                                                                                <span className="text-sm text-gray-700">{editValue ? 'Yes' : 'No'}</span>
+                                                                                <span className={`text-sm ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>{editValue ? 'Yes' : 'No'}</span>
                                                                             </label>
                                                                         ) : field.type === 'select' && Array.isArray(field.options) ? (
                                                                             <select
                                                                                 value={editValue ?? ''}
                                                                                 onChange={(e) => setDirtyValue(e.target.value)}
-                                                                                className="mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm"
+                                                                                className={metaFieldInputClass}
                                                                             >
                                                                                 <option value="">—</option>
                                                                                 {field.options.map((opt) => (
@@ -1209,14 +1415,14 @@ export default function AssetDetailPanel({
                                                                                 type="number"
                                                                                 value={editValue ?? ''}
                                                                                 onChange={(e) => setDirtyValue(e.target.value === '' ? null : Number(e.target.value))}
-                                                                                className="mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm"
+                                                                                className={metaFieldInputClass}
                                                                             />
                                                                         ) : field.type === 'date' ? (
                                                                             <input
                                                                                 type="date"
                                                                                 value={editValue ? (typeof editValue === 'string' ? editValue.slice(0, 10) : new Date(editValue).toISOString().slice(0, 10)) : ''}
                                                                                 onChange={(e) => setDirtyValue(e.target.value || null)}
-                                                                                className="mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm"
+                                                                                className={metaFieldInputClass}
                                                                             />
                                                                         ) : (
                                                                             <input
@@ -1230,7 +1436,7 @@ export default function AssetDetailPanel({
                                                                                         setDirtyValue(v)
                                                                                     }
                                                                                 }}
-                                                                                className="mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm"
+                                                                                className={metaFieldInputClass}
                                                                             />
                                                                         )}
                                                                     </div>
@@ -1241,38 +1447,48 @@ export default function AssetDetailPanel({
                                                                             editable={false}
                                                                             maxStars={5}
                                                                             size="md"
-                                                                            primaryColor={brandPrimary}
+                                                                            primaryColor={lb ? lbAccent : brandPrimary}
                                                                         />
                                                                     </span>
                                                                 ) : isToggleBoolean ? (
-                                                                    <span className="text-sm text-gray-900 mt-1">
+                                                                    <span className={`text-sm mt-1 ${lb ? 'text-neutral-100' : 'text-gray-900'}`}>
                                                                         {field.current_value === true || field.current_value === 'true' ? 'Yes' : 'No'}
                                                                     </span>
                                                                 ) : (displayValue || dominantColorsArray) ? (
-                                                                    <>
-                                                                        <span className="text-gray-400 mx-1">:</span>
-                                                                        <span className={isSystemField ? 'text-sm text-gray-600' : 'text-sm text-gray-900'}>
+                                                                    lb ? (
+                                                                        <span className={isSystemField ? 'text-xs text-neutral-300' : 'text-xs text-neutral-100'}>
                                                                             {dominantColorsArray ? (
                                                                                 <DominantColorsSwatches dominantColors={dominantColorsArray} />
                                                                             ) : (
                                                                                 displayValue
                                                                             )}
                                                                         </span>
-                                                                    </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className="text-gray-400 mx-1">:</span>
+                                                                            <span className={isSystemField ? 'text-sm text-gray-600' : 'text-sm text-gray-900'}>
+                                                                                {dominantColorsArray ? (
+                                                                                    <DominantColorsSwatches dominantColors={dominantColorsArray} />
+                                                                                ) : (
+                                                                                    displayValue
+                                                                                )}
+                                                                            </span>
+                                                                        </>
+                                                                    )
                                                                 ) : null}
                                                             </div>
                                                             <div className="flex-shrink-0 flex items-center gap-2">
                                                                 {isSystemField ? (
                                                                     <>
-                                                                        <LockClosedIcon className="h-3.5 w-3.5 text-gray-400" aria-hidden />
-                                                                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">System</span>
+                                                                        <LockClosedIcon className={`h-3.5 w-3.5 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} aria-hidden />
+                                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${lb ? 'bg-neutral-800 text-neutral-300' : 'bg-gray-100 text-gray-600'}`}>System</span>
                                                                     </>
                                                                 ) : (
                                                                     <>
                                                                         {getSourceBadge(field)}
                                                                         {canEditMetadata && !isEditing && (
                                                                             <span className="opacity-0 group-hover:opacity-100 transition" aria-hidden>
-                                                                                <PencilIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                                                <PencilIcon className={`h-3.5 w-3.5 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
                                                                             </span>
                                                                         )}
                                                                     </>
@@ -1283,13 +1499,25 @@ export default function AssetDetailPanel({
                                                 })}
                                             </dl>
                                             {hasCollectionField(metadata.fields) && groupKey === 'general' && (
-                                                <div className="flex items-start justify-between gap-2 py-3 border-b border-gray-100 last:border-b-0 px-3">
-                                                    <span className="text-sm font-semibold text-gray-700">Collection</span>
+                                                <div
+                                                    className={`flex items-start justify-between gap-2 py-3 px-3 ${
+                                                        lb ? 'flex-col gap-1' : ''
+                                                    } ${lb ? '' : 'border-b last:border-b-0 border-gray-100'}`}
+                                                >
+                                                    <span
+                                                        className={
+                                                            lb
+                                                                ? 'text-[11px] font-medium uppercase tracking-wide text-neutral-500'
+                                                                : 'text-sm font-semibold text-gray-700'
+                                                        }
+                                                    >
+                                                        Collection
+                                                    </span>
                                                     <div className="min-w-0 flex-1 flex justify-end">
                                                         {isEditing && canEdit ? (
                                                             <div className="w-full max-w-sm">
                                                                 {dropdownCollectionsLoading ? (
-                                                                    <p className="text-sm text-gray-500">Loading collections…</p>
+                                                                    <p className={`text-sm ${metaMuted}`}>Loading collections…</p>
                                                                 ) : (
                                                                     <CollectionSelector
                                                                         collections={dropdownCollections}
@@ -1319,7 +1547,7 @@ export default function AssetDetailPanel({
                                                                 )}
                                                             </div>
                                                         ) : (
-                                                            <span className="text-sm text-gray-900">
+                                                            <span className={`text-sm ${lb ? 'text-neutral-100' : 'text-gray-900'}`} title={lb ? 'Collection' : undefined}>
                                                                 {assetCollectionsLoading
                                                                     ? 'Loading…'
                                                                     : assetCollections.length > 0
@@ -1331,7 +1559,7 @@ export default function AssetDetailPanel({
                                                 </div>
                                             )}
                                             {isEditing && canEdit && (
-                                                <div className="sticky bottom-0 left-0 right-0 flex items-center justify-end gap-2 px-3 py-3 mt-2 bg-gray-50 border-t border-gray-200 rounded-b-lg">
+                                                <div className={`sticky bottom-0 left-0 right-0 flex items-center justify-end gap-2 px-3 py-3 mt-2 rounded-b-lg border-t ${lb ? 'bg-neutral-900/90 border-neutral-700' : 'bg-gray-50 border-gray-200'}`}>
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -1342,7 +1570,7 @@ export default function AssetDetailPanel({
                                                                 return next
                                                             })
                                                         }}
-                                                        className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-1.5"
+                                                        className={`text-sm font-medium px-3 py-1.5 ${lb ? 'text-neutral-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
                                                     >
                                                         Cancel
                                                     </button>
@@ -1350,8 +1578,12 @@ export default function AssetDetailPanel({
                                                         type="button"
                                                         onClick={() => saveMetadataGroup(groupKey)}
                                                         disabled={!dirty || Object.keys(dirty).length === 0}
-                                                        className="text-sm font-medium text-white rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        style={{ backgroundColor: brandPrimary }}
+                                                        className={
+                                                            lb
+                                                                ? 'text-sm font-medium rounded-md px-3 py-1.5 bg-neutral-200 text-neutral-900 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed'
+                                                                : 'text-sm font-medium text-white rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed'
+                                                        }
+                                                        style={!lb ? { backgroundColor: brandPrimary } : undefined}
                                                     >
                                                         Save
                                                     </button>
@@ -1367,21 +1599,25 @@ export default function AssetDetailPanel({
                         )}
 
                         {/* Section 3 — File Information (at least quick-view parity: status + tooltip, publish/who, filename editable) */}
-                        <section className="border-t border-gray-200 mb-6" aria-labelledby="section-file">
-                            <CollapsibleSection title="File information" defaultExpanded={true}>
-                                <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                        <section className={sectionClass} aria-labelledby="section-file">
+                            <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="File information" defaultExpanded={true}>
+                                <div className={lb ? '' : cardClass}>
+                                    <dl className={`grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 ${lb ? 'gap-y-2.5' : 'text-sm'}`}>
                                         {/* Filename (editable when permission) */}
                                         <div className="sm:col-span-2">
-                                            <dt className="font-semibold text-gray-700 mb-1">Filename</dt>
-                                            <dd className="text-sm text-gray-900">
+                                            <dt className={lb ? 'sr-only' : 'font-semibold mb-1 text-gray-700'}>Filename</dt>
+                                            <dd className={`${lb ? ddClass : 'text-sm text-gray-900'}`} title={lb ? 'Filename' : undefined}>
                                                 {editingFilename ? (
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         <input
                                                             type="text"
                                                             value={filenameEditValue}
                                                             onChange={(e) => setFilenameEditValue(e.target.value)}
-                                                            className="text-sm text-gray-800 border border-gray-300 rounded px-2 py-1 flex-1 min-w-0 max-w-md font-mono focus:ring-2 focus:ring-offset-1"
+                                                            className={`text-sm border rounded px-2 py-1 flex-1 min-w-0 max-w-md font-mono focus:ring-2 focus:ring-offset-1 ${
+                                                                lb
+                                                                    ? 'border-neutral-600 bg-neutral-900 text-neutral-100'
+                                                                    : 'text-gray-800 border-gray-300'
+                                                            }`}
                                                             placeholder="Filename"
                                                         />
                                                         <button
@@ -1409,15 +1645,19 @@ export default function AssetDetailPanel({
                                                                     setFilenameEditValue(asset?.original_filename || '')
                                                                 }
                                                             }}
-                                                            className="text-xs font-medium text-white rounded px-2 py-1"
-                                                            style={{ backgroundColor: brandPrimary }}
+                                                            className={
+                                                                lb
+                                                                    ? 'text-xs font-medium rounded px-2 py-1 bg-neutral-200 text-neutral-900 hover:bg-white'
+                                                                    : 'text-xs font-medium text-white rounded px-2 py-1'
+                                                            }
+                                                            style={!lb ? { backgroundColor: brandPrimary } : undefined}
                                                         >
                                                             Save
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(false) }}
-                                                            className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                                                            className={`text-xs font-medium ${lb ? 'text-neutral-400 hover:text-neutral-200' : 'text-gray-600 hover:text-gray-900'}`}
                                                         >
                                                             Cancel
                                                         </button>
@@ -1429,8 +1669,12 @@ export default function AssetDetailPanel({
                                                             <button
                                                                 type="button"
                                                                 onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(true) }}
-                                                                className="ml-2 inline-flex items-center gap-1 text-xs font-medium rounded focus:outline-none focus:ring-2 focus:ring-offset-1"
-                                                                style={{ color: brandPrimary }}
+                                                                className={`ml-2 inline-flex items-center gap-1 text-xs font-medium rounded focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                                                                    lb
+                                                                        ? 'text-neutral-200 hover:text-white hover:underline decoration-neutral-600 underline-offset-2'
+                                                                        : ''
+                                                                }`}
+                                                                style={!lb ? { color: brandPrimary } : undefined}
                                                             >
                                                                 <PencilIcon className="h-3.5 w-3.5" />
                                                                 Edit
@@ -1441,16 +1685,36 @@ export default function AssetDetailPanel({
                                             </dd>
                                         </div>
                                         {/* Status (thumbnail/visibility) with tooltip */}
-                                        <dt className="font-semibold text-gray-700">Status</dt>
-                                        <dd className="text-sm text-gray-900">
+                                        <dt className={lb ? 'sr-only' : dtClass}>Status</dt>
+                                        <dd className={ddClass} title={lb ? 'Status' : undefined}>
                                             {(() => {
                                                 const status = (asset?.thumbnail_status ?? asset?.status ?? '').toString().toLowerCase()
                                                 const label = status === 'completed' ? 'Completed' : status === 'processing' ? 'Processing' : status === 'failed' ? 'Failed' : status === 'skipped' ? 'Skipped' : status === 'pending' ? 'Pending' : (asset?.thumbnail_status ?? asset?.status ?? '—')
                                                 const tooltip = status === 'completed' ? 'Thumbnail and preview generation completed.' : status === 'processing' ? 'Thumbnail or preview is being generated.' : status === 'failed' ? (asset?.thumbnail_error ? `Thumbnail generation failed: ${asset.thumbnail_error}` : 'Thumbnail generation failed.') : status === 'skipped' ? (asset?.metadata?.thumbnail_skip_message || asset?.metadata?.thumbnail_skip_reason ? `Preview skipped: ${asset.metadata.thumbnail_skip_message || asset.metadata.thumbnail_skip_reason}` : 'Preview not generated for this file type.') : 'Thumbnail or preview is pending.'
+                                                const pill =
+                                                    status === 'completed'
+                                                        ? lb
+                                                            ? 'bg-emerald-900/50 text-emerald-200'
+                                                            : 'bg-green-100 text-green-800'
+                                                        : status === 'processing'
+                                                          ? lb
+                                                              ? 'bg-amber-900/50 text-amber-100'
+                                                              : 'bg-amber-100 text-amber-800'
+                                                          : status === 'failed'
+                                                            ? lb
+                                                                ? 'bg-red-950/60 text-red-200'
+                                                                : 'bg-red-100 text-red-800'
+                                                            : status === 'skipped'
+                                                              ? lb
+                                                                  ? 'bg-neutral-800 text-neutral-300'
+                                                                  : 'bg-gray-100 text-gray-700'
+                                                              : lb
+                                                                ? 'bg-neutral-800 text-neutral-400'
+                                                                : 'bg-gray-100 text-gray-600'
                                                 return (
                                                     <span
                                                         title={tooltip}
-                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${status === 'completed' ? 'bg-green-100 text-green-800' : status === 'processing' ? 'bg-amber-100 text-amber-800' : status === 'failed' ? 'bg-red-100 text-red-800' : status === 'skipped' ? 'bg-gray-100 text-gray-700' : 'bg-gray-100 text-gray-600'}`}
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${pill}`}
                                                     >
                                                         {label}
                                                     </span>
@@ -1460,25 +1724,29 @@ export default function AssetDetailPanel({
                                         {/* Category (grid sends asset.category; metadata may have category object) */}
                                         {(asset?.category?.name || metadata?.category?.name) && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Category</dt>
-                                                <dd className="text-sm text-gray-900">{asset?.category?.name || metadata?.category?.name}</dd>
+                                                <dt className={lb ? 'sr-only' : dtClass}>Category</dt>
+                                                <dd className={ddClass} title={lb ? 'Category' : undefined}>
+                                                    {asset?.category?.name || metadata?.category?.name}
+                                                </dd>
                                             </>
                                         )}
                                         {/* Uploaded (created_at) */}
                                         {asset?.created_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Uploaded</dt>
-                                                <dd className="text-sm text-gray-900">{new Date(asset.created_at).toLocaleString()}</dd>
+                                                <dt className={lb ? 'sr-only' : dtClass}>Uploaded</dt>
+                                                <dd className={ddClass} title={lb ? 'Uploaded' : undefined}>
+                                                    {new Date(asset.created_at).toLocaleString()}
+                                                </dd>
                                             </>
                                         )}
                                         {/* Published (date + by) when not redundant with Overview lifecycle */}
                                         {asset?.published_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Published</dt>
-                                                <dd className="text-sm text-gray-900">
+                                                <dt className={lb ? 'sr-only' : dtClass}>Published</dt>
+                                                <dd className={ddClass} title={lb ? 'Published' : undefined}>
                                                     {new Date(asset.published_at).toLocaleString()}
                                                     {asset.published_by && (
-                                                        <span className="ml-1 text-gray-500">
+                                                        <span className={`ml-1 ${metaMuted}`}>
                                                             by {asset.published_by.name || [asset.published_by.first_name, asset.published_by.last_name].filter(Boolean).join(' ') || '—'}
                                                         </span>
                                                     )}
@@ -1488,21 +1756,23 @@ export default function AssetDetailPanel({
                                         {/* Archived (date + by) */}
                                         {asset?.archived_at && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Archived</dt>
-                                                <dd className="text-sm text-gray-900">
+                                                <dt className={lb ? 'sr-only' : dtClass}>Archived</dt>
+                                                <dd className={ddClass} title={lb ? 'Archived' : undefined}>
                                                     {new Date(asset.archived_at).toLocaleString()}
                                                     {asset.archived_by && (
-                                                        <span className="ml-1 text-gray-500">
+                                                        <span className={`ml-1 ${metaMuted}`}>
                                                             by {asset.archived_by.name || [asset.archived_by.first_name, asset.archived_by.last_name].filter(Boolean).join(' ') || '—'}
                                                         </span>
                                                     )}
                                                 </dd>
                                             </>
                                         )}
-                                        <dt className="font-semibold text-gray-700">File type</dt>
-                                        <dd className="text-sm text-gray-900">{asset?.mime_type || '—'}</dd>
-                                        <dt className="font-semibold text-gray-700">File size</dt>
-                                        <dd className="text-sm text-gray-900">
+                                        <dt className={lb ? 'sr-only' : dtClass}>File type</dt>
+                                        <dd className={ddClass} title={lb ? 'File type' : undefined}>
+                                            {asset?.mime_type || '—'}
+                                        </dd>
+                                        <dt className={lb ? 'sr-only' : dtClass}>File size</dt>
+                                        <dd className={ddClass} title={lb ? 'File size' : undefined}>
                                             {asset?.size_bytes != null && asset.size_bytes > 0
                                                 ? (() => {
                                                     const b = Number(asset.size_bytes)
@@ -1515,8 +1785,8 @@ export default function AssetDetailPanel({
                                         </dd>
                                         {((asset?.width != null && asset?.height != null) || (asset?.metadata?.image_width && asset?.metadata?.image_height)) && (
                                             <>
-                                                <dt className="font-semibold text-gray-700">Dimensions</dt>
-                                                <dd className="text-sm text-gray-900">
+                                                <dt className={lb ? 'sr-only' : dtClass}>Dimensions</dt>
+                                                <dd className={ddClass} title={lb ? 'Dimensions' : undefined}>
                                                     {asset?.width != null && asset?.height != null
                                                         ? `${asset.width} × ${asset.height}`
                                                         : `${asset.metadata?.image_width} × ${asset.metadata?.image_height}`}
@@ -1524,13 +1794,18 @@ export default function AssetDetailPanel({
                                                 </dd>
                                             </>
                                         )}
-                                        <dt className="font-semibold text-gray-700">Thumbnail status</dt>
-                                        <dd className="text-sm text-gray-900">{asset?.thumbnail_status ?? '—'}</dd>
+                                        <dt className={lb ? 'sr-only' : dtClass}>Thumbnail status</dt>
+                                        <dd className={ddClass} title={lb ? 'Thumbnail status' : undefined}>
+                                            {asset?.thumbnail_status ?? '—'}
+                                        </dd>
                                         {/* Asset ID (UUID) — at bottom for copy/reference */}
                                         {asset?.id && (
-                                            <div className="sm:col-span-2 pt-3 mt-3 border-t border-gray-200">
-                                                <dt className="font-semibold text-gray-700 mb-1">Asset ID</dt>
-                                                <dd className="text-sm font-mono text-gray-900 break-all" title={asset.id}>
+                                            <div className={`sm:col-span-2 pt-3 mt-3 border-t ${lb ? 'border-neutral-800/60' : 'border-gray-200'}`}>
+                                                <dt className={lb ? 'sr-only' : 'font-semibold mb-1 text-gray-700'}>Asset ID</dt>
+                                                <dd
+                                                    className={`font-mono break-all ${lb ? 'text-xs text-neutral-100' : 'text-sm text-gray-900'}`}
+                                                    title={lb ? 'Asset ID' : asset.id}
+                                                >
                                                     {asset.id}
                                                 </dd>
                                             </div>
@@ -1541,26 +1816,32 @@ export default function AssetDetailPanel({
                         </section>
 
                         {/* Section 4 — Activity (collapsed by default) */}
-                        <section className="border-t border-gray-200 mb-6" aria-labelledby="section-activity">
-                            <CollapsibleSection title="Activity" defaultExpanded={false}>
-                                <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                    <AssetTimeline events={displayActivityEvents} loading={displayActivityLoading} />
-                                </div>
+                        <section className={sectionClass} aria-labelledby="section-activity">
+                            <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Activity" defaultExpanded={false}>
+                                {lb ? (
+                                    <AssetTimeline events={displayActivityEvents} loading={displayActivityLoading} variant="dark" />
+                                ) : (
+                                    <div className={cardClass}>
+                                        <AssetTimeline events={displayActivityEvents} loading={displayActivityLoading} variant="default" />
+                                    </div>
+                                )}
                             </CollapsibleSection>
                         </section>
 
                         {/* Section 5 — Versions (Phase 4B: plan-gated, collapsed by default) */}
                         {planAllowsVersions && (
                             <PermissionGate permission="asset.view">
-                                <section className="border-t border-gray-200 mb-6" aria-labelledby="section-versions">
+                                <section className={sectionClass} aria-labelledby="section-versions">
                                     <CollapsibleSection
+                                        variant={collapsibleVariant}
+                                        titleInCard={lb}
                                         title={
                                             versionsLoading ? (
                                                 'Versions'
                                             ) : versions.length > 0 ? (
                                                 <span className="inline-flex items-center gap-1.5">
                                                     Versions
-                                                    <span className="text-gray-400 font-normal">({versions.length})</span>
+                                                    <span className={`font-normal ${lb ? 'text-neutral-500' : 'text-gray-400'}`}>({versions.length})</span>
                                                 </span>
                                             ) : (
                                                 'Versions'
@@ -1568,46 +1849,77 @@ export default function AssetDetailPanel({
                                         }
                                         defaultExpanded={false}
                                     >
-                                        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+                                        <div className={lb ? '' : cardClass}>
                                             {onReplaceFile && (
-                                                <div className="flex justify-end mb-4">
+                                                <div
+                                                    className={`mb-4 flex flex-col gap-2 ${lb ? 'items-stretch pt-3' : 'items-end justify-end'}`}
+                                                >
                                                     <button
                                                         type="button"
                                                         onClick={onReplaceFile}
-                                                        className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 rounded"
+                                                        className={
+                                                            lb
+                                                                ? 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-600 bg-neutral-200 px-4 py-2.5 text-sm font-semibold text-neutral-900 shadow-sm hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500 focus:ring-offset-2 focus:ring-offset-neutral-950 sm:w-auto sm:justify-start'
+                                                                : 'inline-flex items-center px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 rounded'
+                                                        }
                                                     >
-                                                        <CloudArrowUpIcon className="h-4 w-4 mr-2" />
+                                                        <CloudArrowUpIcon className="h-5 w-5 shrink-0" />
                                                         Upload New Version
                                                     </button>
+                                                    {lb && versions.length > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowVersionsWideModal(true)}
+                                                            className="text-left text-xs font-medium text-neutral-300 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
+                                                        >
+                                                            View full version history ({versions.length})
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
                                             {versionsLoading ? (
                                                 <div className="animate-pulse space-y-3">
                                                     {[1, 2, 3].map((i) => (
-                                                        <div key={i} className="h-10 bg-gray-200 rounded" />
+                                                        <div key={i} className={`h-10 rounded ${lb ? 'bg-neutral-800' : 'bg-gray-200'}`} />
                                                     ))}
                                                 </div>
                                             ) : versions.length === 0 ? (
-                                                <p className="text-sm text-gray-500">No previous versions</p>
-                                            ) : (
+                                                <p className={`text-sm ${lb ? 'text-neutral-500' : 'text-gray-500'}`}>No previous versions</p>
+                                            ) : !lb ? (
                                                 <div className="overflow-x-auto">
                                                     <table className="min-w-full divide-y divide-gray-200">
                                                         <thead>
                                                             <tr>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8" aria-label="Expand" />
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Uploaded</th>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current</th>
-                                                                {canRestoreVersion && <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>}
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider w-8 text-gray-500" aria-label="Expand" />
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-16" aria-label="Preview">
+                                                                    Preview
+                                                                </th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Version</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Status</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Uploaded</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">User</th>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Current</th>
+                                                                {canRestoreVersion && (
+                                                                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
+                                                                )}
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-gray-200">
                                                             {versions.map((v) => {
                                                                 const status = (v.pipeline_status || 'pending').toLowerCase()
-                                                                const statusPillClass = status === 'complete' ? 'bg-green-100 text-green-800' : status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                                                const statusPillClass =
+                                                                    status === 'complete'
+                                                                        ? lb
+                                                                            ? 'bg-emerald-900/50 text-emerald-200'
+                                                                            : 'bg-green-100 text-green-800'
+                                                                        : status === 'failed'
+                                                                          ? lb
+                                                                              ? 'bg-red-950/60 text-red-200'
+                                                                              : 'bg-red-100 text-red-800'
+                                                                          : lb
+                                                                            ? 'bg-amber-900/50 text-amber-100'
+                                                                            : 'bg-amber-100 text-amber-800'
                                                                 const fmtSize = (b) => (!b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`)
                                                                 const fmtDate = (d) => (!d ? '—' : (() => { try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) } catch { return '—' } })())
                                                                 const isArchived = ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'].includes(v.storage_class || '')
@@ -1615,18 +1927,38 @@ export default function AssetDetailPanel({
                                                                 const isExpanded = expandedVersionId === v.id
                                                                 return (
                                                                     <Fragment key={v.id}>
-                                                                        <tr className={isArchived ? 'bg-gray-50' : ''}>
+                                                                        <tr className={isArchived ? (lb ? 'bg-neutral-900/50' : 'bg-gray-50') : ''}>
                                                                             <td className="px-4 py-3 text-sm">
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => setExpandedVersionId(isExpanded ? null : v.id)}
-                                                                                    className="text-gray-500 hover:text-gray-700 p-0.5 rounded"
+                                                                                    className={`p-0.5 rounded ${lb ? 'text-neutral-500 hover:text-neutral-200' : 'text-gray-500 hover:text-gray-700'}`}
                                                                                     aria-expanded={isExpanded}
                                                                                 >
                                                                                     {isExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
                                                                                 </button>
                                                                             </td>
-                                                                            <td className="px-4 py-3 text-sm font-medium text-gray-900">v{v.version_number}</td>
+                                                                            <td className="px-4 py-2 align-middle">
+                                                                                {(() => {
+                                                                                    const src = versionThumbnailSrc(v)
+                                                                                    return src ? (
+                                                                                        <img
+                                                                                            src={src}
+                                                                                            alt=""
+                                                                                            className="h-10 w-10 rounded object-cover border border-gray-200 bg-gray-100"
+                                                                                            loading="lazy"
+                                                                                        />
+                                                                                    ) : (
+                                                                                        <div
+                                                                                            className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50"
+                                                                                            title="No preview"
+                                                                                        >
+                                                                                            <FileTypeIcon mimeType={v.mime_type} size="sm" iconClassName="text-gray-400" />
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
+                                                                            </td>
+                                                                            <td className={`px-4 py-3 text-sm font-medium ${lb ? 'text-neutral-100' : 'text-gray-900'}`}>v{v.version_number}</td>
                                                                             <td className="px-4 py-3 text-sm">
                                                                                 <span
                                                                                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusPillClass}`}
@@ -1636,19 +1968,19 @@ export default function AssetDetailPanel({
                                                                                 </span>
                                                                                 {isArchived && (
                                                                                     <span
-                                                                                        className="ml-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-200 text-slate-700"
+                                                                                        className={`ml-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${lb ? 'bg-neutral-700 text-neutral-200' : 'bg-slate-200 text-slate-700'}`}
                                                                                         title="This version is archived in Glacier and must be restored before use."
                                                                                     >
                                                                                         Archived
                                                                                     </span>
                                                                                 )}
                                                                             </td>
-                                                                            <td className="px-4 py-3 text-sm text-gray-700">{fmtSize(v.file_size)}</td>
-                                                                            <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(v.created_at)}</td>
-                                                                            <td className="px-4 py-3 text-sm text-gray-700">{v.uploaded_by?.name ?? '—'}</td>
+                                                                            <td className={`px-4 py-3 text-sm ${lb ? 'text-neutral-300' : 'text-gray-700'}`}>{fmtSize(v.file_size)}</td>
+                                                                            <td className={`px-4 py-3 text-sm ${lb ? 'text-neutral-300' : 'text-gray-700'}`}>{fmtDate(v.created_at)}</td>
+                                                                            <td className={`px-4 py-3 text-sm ${lb ? 'text-neutral-300' : 'text-gray-700'}`}>{v.uploaded_by?.name ?? '—'}</td>
                                                                             <td className="px-4 py-3 text-sm">
                                                                                 {v.is_current && (
-                                                                                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800" title="Current version">
+                                                                                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${lb ? 'bg-neutral-800 text-neutral-100' : 'bg-indigo-100 text-indigo-800'}`} title="Current version">
                                                                                         <CheckIcon className="h-3.5 w-3.5 mr-0.5" aria-hidden />
                                                                                         Current
                                                                                     </span>
@@ -1659,7 +1991,7 @@ export default function AssetDetailPanel({
                                                                                     {!v.is_current && (
                                                                                         isArchived ? (
                                                                                             <span
-                                                                                                className="text-gray-400 cursor-not-allowed"
+                                                                                                className={`cursor-not-allowed ${lb ? 'text-neutral-600' : 'text-gray-400'}`}
                                                                                                 title="This version is archived in Glacier and must be restored before use."
                                                                                             >
                                                                                                 Restore
@@ -1673,7 +2005,7 @@ export default function AssetDetailPanel({
                                                                                                     setRestoreRerunPipeline(false)
                                                                                                     setShowRestoreModal(true)
                                                                                                 }}
-                                                                                                className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                                                className={`font-medium ${lb ? 'text-neutral-200 hover:text-white hover:underline decoration-neutral-600 underline-offset-2' : 'text-indigo-600 hover:text-indigo-800'}`}
                                                                                             >
                                                                                                 Restore
                                                                                             </button>
@@ -1684,13 +2016,13 @@ export default function AssetDetailPanel({
                                                                         </tr>
                                                                         {isExpanded && (
                                                                             <tr key={`${v.id}-expanded`}>
-                                                                                <td colSpan={canRestoreVersion ? 8 : 7} className="px-4 py-3 text-sm bg-gray-50 border-b border-gray-200">
-                                                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-gray-600">
-                                                                                        {v.change_note && <div><span className="font-medium text-gray-700">Comment:</span> {v.change_note}</div>}
-                                                                                        {restoredFrom && <div><span className="font-medium text-gray-700">Restored from:</span> v{restoredFrom.version_number}</div>}
-                                                                                        {v.storage_class && <div><span className="font-medium text-gray-700">Storage:</span> {v.storage_class}</div>}
-                                                                                        <div><span className="font-medium text-gray-700">Pipeline:</span> {status}</div>
-                                                                                        <div><span className="font-medium text-gray-700">Uploaded by:</span> {v.uploaded_by?.name ?? '—'}</div>
+                                                                                <td colSpan={canRestoreVersion ? 9 : 8} className={`px-4 py-3 text-sm border-b ${lb ? 'bg-neutral-900/80 border-neutral-700 text-neutral-300' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                                                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                                                        {v.change_note && <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Comment:</span> {v.change_note}</div>}
+                                                                                        {restoredFrom && <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Restored from:</span> v{restoredFrom.version_number}</div>}
+                                                                                        {v.storage_class && <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Storage:</span> {v.storage_class}</div>}
+                                                                                        <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Pipeline:</span> {status}</div>
+                                                                                        <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Uploaded by:</span> {v.uploaded_by?.name ?? '—'}</div>
                                                                                     </div>
                                                                                 </td>
                                                                             </tr>
@@ -1701,6 +2033,57 @@ export default function AssetDetailPanel({
                                                         </tbody>
                                                     </table>
                                                 </div>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {versions.map((v) => {
+                                                        const fmtSize = (b) => (!b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`)
+                                                        const fmtDate = (d) => (!d ? '—' : (() => { try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) } catch { return '—' } })())
+                                                        const status = (v.pipeline_status || 'pending').toLowerCase()
+                                                        const thumbSrc = versionThumbnailSrc(v)
+                                                        return (
+                                                            <div key={v.id} className="rounded-lg border border-neutral-800/70 bg-neutral-900/40 px-3 py-2.5 text-xs">
+                                                                <div className="flex gap-3">
+                                                                    <div className="shrink-0">
+                                                                        {thumbSrc ? (
+                                                                            <img
+                                                                                src={thumbSrc}
+                                                                                alt=""
+                                                                                className="h-14 w-14 rounded-md object-cover border border-neutral-700 bg-neutral-800"
+                                                                                loading="lazy"
+                                                                            />
+                                                                        ) : (
+                                                                            <div
+                                                                                className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-neutral-600 bg-neutral-800/80"
+                                                                                title="No preview"
+                                                                            >
+                                                                                <FileTypeIcon mimeType={v.mime_type} size="sm" iconClassName="text-neutral-500" />
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                                                            <span className="font-semibold text-neutral-100">v{v.version_number}</span>
+                                                                            <span className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">{status}</span>
+                                                                        </div>
+                                                                        <div className="mt-1 text-sm text-neutral-400">
+                                                                            {fmtSize(v.file_size)} · {fmtDate(v.created_at)}
+                                                                            {v.uploaded_by?.name ? ` · ${v.uploaded_by.name}` : ''}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                            {lb && versions.length > 0 && !onReplaceFile && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowVersionsWideModal(true)}
+                                                    className="mt-2 text-left text-xs font-medium text-neutral-300 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
+                                                >
+                                                    View full version history ({versions.length})
+                                                </button>
                                             )}
                                         </div>
                                     </CollapsibleSection>
@@ -1710,22 +2093,30 @@ export default function AssetDetailPanel({
 
                         {/* Section 6 — Approval Workflow (stub, collapsed by default) */}
                         <PermissionGate permission="asset.view">
-                            <section className="border-t border-gray-200 mb-6" aria-labelledby="section-approval">
-                                <CollapsibleSection title="Approval workflow" defaultExpanded={false}>
-                                    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                        <p className="text-sm text-gray-500">Coming soon.</p>
-                                    </div>
+                            <section className={sectionClass} aria-labelledby="section-approval">
+                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Approval workflow" defaultExpanded={false}>
+                                    {lb ? (
+                                        <p className="text-sm text-neutral-500">Coming soon.</p>
+                                    ) : (
+                                        <div className={cardClass}>
+                                            <p className="text-sm text-gray-500">Coming soon.</p>
+                                        </div>
+                                    )}
                                 </CollapsibleSection>
                             </section>
                         </PermissionGate>
 
                         {/* Section 7 — Download History (collapsed by default; Tenant Owner/Admin, Brand Manager/Admin only) */}
                         {showDownloadHistory && (
-                            <section className="border-t border-gray-200 mb-6" aria-labelledby="section-downloads">
-                                <CollapsibleSection title="Download history" defaultExpanded={false}>
-                                    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                        <p className="text-sm text-gray-500">No download history available for this asset.</p>
-                                    </div>
+                            <section className={sectionClass} aria-labelledby="section-downloads">
+                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Download history" defaultExpanded={false}>
+                                    {lb ? (
+                                        <p className="text-sm text-neutral-500">No download history available for this asset.</p>
+                                    ) : (
+                                        <div className={cardClass}>
+                                            <p className="text-sm text-gray-500">No download history available for this asset.</p>
+                                        </div>
+                                    )}
                                 </CollapsibleSection>
                             </section>
                         )}
@@ -1783,28 +2174,193 @@ export default function AssetDetailPanel({
                         </div>
                     )}
 
+                    {/* Lightbox: full-width version history (wide table) */}
+                    {showVersionsWideModal && lb && versions.length > 0 && (
+                        <div
+                            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="versions-wide-title"
+                            onClick={() => setShowVersionsWideModal(false)}
+                        >
+                            <div
+                                className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+                                    <h2 id="versions-wide-title" className="text-sm font-semibold text-white">
+                                        Version history
+                                    </h2>
+                                    <button
+                                        type="button"
+                                        className="rounded-md p-2 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                                        onClick={() => setShowVersionsWideModal(false)}
+                                        aria-label="Close"
+                                    >
+                                        <XMarkIcon className="h-6 w-6" />
+                                    </button>
+                                </div>
+                                <div className="overflow-auto p-4">
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-[980px] w-full divide-y divide-neutral-700 text-xs">
+                                            <thead>
+                                                <tr>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500 w-16" aria-label="Preview">
+                                                        Preview
+                                                    </th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Version</th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Status</th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Size</th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Uploaded</th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">User</th>
+                                                    <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Current</th>
+                                                    {canRestoreVersion && (
+                                                        <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Actions</th>
+                                                    )}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-neutral-700">
+                                                {versions.map((v) => {
+                                                    const status = (v.pipeline_status || 'pending').toLowerCase()
+                                                    const statusPillClass =
+                                                        status === 'complete'
+                                                            ? 'bg-emerald-900/50 text-emerald-200'
+                                                            : status === 'failed'
+                                                              ? 'bg-red-950/60 text-red-200'
+                                                              : 'bg-amber-900/50 text-amber-100'
+                                                    const fmtSize = (b) =>
+                                                        !b ? '—' : b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`
+                                                    const fmtDate = (d) =>
+                                                        !d
+                                                            ? '—'
+                                                            : (() => {
+                                                                  try {
+                                                                      return new Date(d).toLocaleDateString('en-US', {
+                                                                          month: 'short',
+                                                                          day: 'numeric',
+                                                                          year: 'numeric',
+                                                                      })
+                                                                  } catch {
+                                                                      return '—'
+                                                                  }
+                                                              })()
+                                                    const isArchived = ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'].includes(v.storage_class || '')
+                                                    return (
+                                                        <tr key={v.id} className={isArchived ? 'bg-neutral-900/50' : ''}>
+                                                            <td className="px-3 py-2 align-middle">
+                                                                {(() => {
+                                                                    const src = versionThumbnailSrc(v)
+                                                                    return src ? (
+                                                                        <img
+                                                                            src={src}
+                                                                            alt=""
+                                                                            className="h-11 w-11 rounded object-cover border border-neutral-700 bg-neutral-900"
+                                                                            loading="lazy"
+                                                                        />
+                                                                    ) : (
+                                                                        <div
+                                                                            className="flex h-11 w-11 items-center justify-center rounded border border-dashed border-neutral-600 bg-neutral-900/80"
+                                                                            title="No preview"
+                                                                        >
+                                                                            <FileTypeIcon mimeType={v.mime_type} size="sm" iconClassName="text-neutral-500" />
+                                                                        </div>
+                                                                    )
+                                                                })()}
+                                                            </td>
+                                                            <td className="px-3 py-2.5 font-medium text-neutral-100">v{v.version_number}</td>
+                                                            <td className="px-3 py-2.5">
+                                                                <span
+                                                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusPillClass}`}
+                                                                >
+                                                                    {status}
+                                                                </span>
+                                                                {isArchived && (
+                                                                    <span className="ml-1.5 inline-flex rounded-full bg-neutral-700 px-2 py-0.5 text-[11px] text-neutral-200">
+                                                                        Archived
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-3 py-2.5 text-neutral-300">{fmtSize(v.file_size)}</td>
+                                                            <td className="px-3 py-2.5 text-neutral-300">{fmtDate(v.created_at)}</td>
+                                                            <td className="px-3 py-2.5 text-neutral-300">{v.uploaded_by?.name ?? '—'}</td>
+                                                            <td className="px-3 py-2.5">
+                                                                {v.is_current && (
+                                                                    <span className="inline-flex items-center rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-100">
+                                                                        <CheckIcon className="mr-0.5 h-3 w-3" aria-hidden />
+                                                                        Current
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            {canRestoreVersion && (
+                                                                <td className="px-3 py-2.5">
+                                                                    {!v.is_current &&
+                                                                        (isArchived ? (
+                                                                            <span className="cursor-not-allowed text-neutral-600">Restore</span>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="font-medium text-neutral-200 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
+                                                                                onClick={() => {
+                                                                                    setRestoreVersion(v)
+                                                                                    setRestorePreserveMetadata(true)
+                                                                                    setRestoreRerunPipeline(false)
+                                                                                    setShowVersionsWideModal(false)
+                                                                                    setShowRestoreModal(true)
+                                                                                }}
+                                                                            >
+                                                                                Restore
+                                                                            </button>
+                                                                        ))}
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    )
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Tags at bottom */}
                     {!loading && asset?.id && (
-                        <div className="p-8 border-t border-gray-200">
+                        <div
+                            className={`border-t px-5 py-6 ${
+                                lb
+                                    ? 'border-neutral-800 bg-neutral-950'
+                                    : 'border-gray-200 p-8'
+                            }`}
+                        >
                             <AssetTagManager
                                 asset={asset}
                                 showTitle
                                 showInput={false}
                                 detailed
-                                primaryColor={brandPrimary}
+                                primaryColor={lb ? lbAccent : brandPrimary}
+                                variant={lb ? 'dark' : 'default'}
                             />
                         </div>
                     )}
                 </div>
 
                 {!fullPage && (
-                    <div className="flex-shrink-0 border-t border-gray-200 p-4 bg-gray-50 flex justify-end">
+                    <div
+                        className={`flex-shrink-0 border-t p-4 flex justify-end ${embeddedInLightbox ? 'md:hidden' : ''} ${
+                            embeddedInLightbox ? 'border-neutral-800 bg-neutral-950' : 'border-gray-200 bg-gray-50'
+                        }`}
+                    >
                         <button
                             type="button"
                             onClick={handleRequestClose}
-                            className="rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                            className={
+                                embeddedInLightbox
+                                    ? 'rounded-md border border-neutral-600 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 shadow-sm hover:bg-neutral-800'
+                                    : 'rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50'
+                            }
                         >
-                            Close
+                            {embeddedInLightbox ? 'Hide details' : 'Close'}
                         </button>
                     </div>
                 )}
