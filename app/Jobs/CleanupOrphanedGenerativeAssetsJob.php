@@ -45,13 +45,25 @@ class CleanupOrphanedGenerativeAssetsJob implements ShouldQueue
                 continue;
             }
 
+            $assetId = (string) $asset->id;
+            $logContext = [
+                'asset_id' => $assetId,
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+                'grace_days' => $days,
+                'orphaned_since_before' => $threshold->toIso8601String(),
+                'asset_updated_at' => $asset->updated_at?->toIso8601String(),
+                'event' => 'orphan_hard_delete_queued',
+            ];
             $asset->delete();
-            DeleteAssetJob::dispatch((string) $asset->id);
+            DeleteAssetJob::dispatch($assetId);
             $count++;
+
+            Log::info('[CleanupOrphanedGenerativeAssets] Queued hard deletion for orphaned generative layer asset', $logContext);
         }
 
         if ($count > 0) {
-            Log::info('[CleanupOrphanedGenerativeAssets] Queued hard deletion', ['count' => $count]);
+            Log::info('[CleanupOrphanedGenerativeAssets] Batch completed', ['count' => $count, 'grace_days' => $days]);
         }
     }
 }

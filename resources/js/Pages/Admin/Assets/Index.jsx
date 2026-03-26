@@ -25,8 +25,6 @@ import {
     WrenchScrewdriverIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { CheckIcon } from '@heroicons/react/20/solid'
-
 /** Admin list: where this asset sits vs library grid / canvas / generative (see AdminAssetController::adminAssetRowContext) */
 const ROW_CONTEXT_BADGES = {
     library: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/90',
@@ -90,11 +88,46 @@ function parseSmartFilter(search) {
     return { plainSearch: plain.replace(/\s+/g, ' ').trim(), filters }
 }
 
+/** Drop query keys that match server defaults so URLs stay short (composition scope, first page, default sort). */
+function shouldOmitFromQuery(key, value) {
+    if (value === null || value === undefined || value === '') return true
+    if (key === 'composition' || key === 'composition_only' || key === 'composition_layers_only') {
+        return value === '0' || value === 0 || value === false || value === 'false'
+    }
+    if (key === 'include_composition') {
+        return value === false || value === 'false'
+    }
+    if (key === 'reference_materials') {
+        return value === false || value === 'false'
+    }
+    if (key === 'generative_workspace') {
+        return value === false || value === 'false' || value == null
+    }
+    if (key === 'page') {
+        return value === 1 || value === '1'
+    }
+    if (key === 'sort') {
+        return value === 'created_at'
+    }
+    if (key === 'sort_direction') {
+        return value === 'desc'
+    }
+    return false
+}
+
 function buildQueryParams(filters, overrides = {}) {
     const q = { ...filters, ...overrides }
+    // Laravel reads `composition`, not `include_composition` — never put include_composition in the URL.
+    if (Object.prototype.hasOwnProperty.call(q, 'include_composition')) {
+        if (q.include_composition === true) {
+            q.composition = '1'
+        }
+        delete q.include_composition
+    }
+
     const out = {}
     for (const [k, v] of Object.entries(q)) {
-        if (v === null || v === undefined || v === '') continue
+        if (shouldOmitFromQuery(k, v)) continue
         if (k === 'types' && Array.isArray(v)) {
             out[k] = v.join(',')
             continue
@@ -102,6 +135,14 @@ function buildQueryParams(filters, overrides = {}) {
         out[k] = v
     }
     return out
+}
+
+/** Short id for grid: last four characters, full id in title tooltip */
+function formatIdPreview(id) {
+    if (id == null || id === '') return '—'
+    const s = String(id)
+    if (s.length <= 4) return s
+    return `…${s.slice(-4)}`
 }
 
 function formatFileSize(bytes) {
@@ -119,7 +160,7 @@ function formatFileSize(bytes) {
 
 /** Default admin grid: standard assets + executions, no generative / composition-tagged rows */
 function isDefaultPrimaryTypeScope(f) {
-    if (!f || f.types === 'all') return false
+    if (!f || f.types === 'all' || f.generative_workspace === true) return false
     const t = f.types
     if (!Array.isArray(t) || t.length !== 2) return false
     const sorted = [...t].map(String).sort()
@@ -128,7 +169,103 @@ function isDefaultPrimaryTypeScope(f) {
         && sorted[1] === 'deliverable'
         && f.include_composition === false
         && f.composition_only !== true
+        && f.composition_layers_only !== true
     )
+}
+
+/** Toggle state for Asset / Execution / All (DB types). Queue filters clear the type row. */
+function deriveAssetExecutionToggles(f) {
+    if (!f) return { asset: true, execution: true, allTypesActive: false, ambiguous: false, generativeWorkspace: false }
+    if (f.reference_materials === true || f.intake_state === 'staged') {
+        return { asset: false, execution: false, allTypesActive: false, ambiguous: true, generativeWorkspace: false }
+    }
+    if (f.generative_workspace === true) {
+        return { asset: false, execution: false, allTypesActive: false, ambiguous: false, generativeWorkspace: true }
+    }
+    // URL ?types=all → server may send types: 'all' or (legacy) null; both mean no DB type restriction — not asset+deliverable only.
+    if (f.types === 'all' || (f.types == null && !f.asset_type)) {
+        return { asset: false, execution: false, allTypesActive: true, ambiguous: false, generativeWorkspace: false }
+    }
+    if (f.asset_type === 'asset') return { asset: true, execution: false, allTypesActive: false, ambiguous: false, generativeWorkspace: false }
+    if (f.asset_type === 'deliverable') return { asset: false, execution: true, allTypesActive: false, ambiguous: false, generativeWorkspace: false }
+    if (f.asset_type === 'ai_generated') return { asset: false, execution: false, allTypesActive: false, ambiguous: true, generativeWorkspace: false }
+    const types = Array.isArray(f.types) ? f.types.map(String) : []
+    const hasAsset = types.includes('asset')
+    const hasDel = types.includes('deliverable')
+    const hasOther = types.some((t) => !['asset', 'deliverable'].includes(t))
+    if (hasOther) return { asset: hasAsset, execution: hasDel, allTypesActive: false, ambiguous: true, generativeWorkspace: false }
+    if (Array.isArray(f.types) && types.length === 0 && !f.asset_type) {
+        return { asset: true, execution: true, allTypesActive: false, ambiguous: false, generativeWorkspace: false }
+    }
+    return { asset: hasAsset, execution: hasDel, allTypesActive: false, ambiguous: false, generativeWorkspace: false }
+}
+
+/**
+ * Human-readable lines for “why no rows?” — driven by server-parsed filters (search box tokens are parsed into these).
+ */
+function summarizeActiveAdminFilters(f) {
+    if (!f) return []
+    const lines = []
+    if (f.asset_type === 'deliverable') {
+        lines.push('Type is limited to executions / deliverables (type:execution in search). Plain library files use DB type “asset” — they are excluded here.')
+    } else if (f.asset_type === 'asset') {
+        lines.push('Type is limited to file assets only (type:asset).')
+    } else if (f.asset_type === 'ai_generated') {
+        lines.push('Type is limited to AI generative assets.')
+    } else if (f.types === 'all') {
+        lines.push('No DB type restriction (all types: asset, execution, generative, reference).')
+    } else if (Array.isArray(f.types) && f.types.length > 0) {
+        lines.push(`DB types included: ${f.types.join(', ')}`)
+    }
+    if (f.composition_layers_only) {
+        lines.push('Only composition-linked layers (metadata composition_id, not canvas export rows).')
+    } else if (f.composition_only) {
+        lines.push('Only composition-tagged (canvas WIP/preview) rows.')
+    } else if (f.include_composition === false) {
+        lines.push('Canvas export rows (WIP/preview) are hidden (default).')
+    } else if (f.include_composition === true) {
+        lines.push('Canvas export rows are included with other rows.')
+    }
+    if (f.generative_workspace === true) {
+        lines.push(
+            'Generative workspace: AI-generated assets and canvas export (WIP/preview) rows. Composition / Comp ref columns group editor assets; stale = only in version history; orphaned = unreferenced (cleanup).',
+        )
+    }
+    if (f.reference_materials === true) {
+        lines.push('Reference materials view: DB type reference and/or legacy Brand Builder staged rows.')
+    }
+    if (f.intake_state === 'staged') {
+        lines.push('Intake staged only (awaiting category — member /assets/staged queue).')
+    }
+    if (f.builder_staged === true) {
+        lines.push('Builder-staged only (builder:true).')
+    } else if (f.builder_staged === false) {
+        lines.push('Builder-staged assets excluded (builder:false).')
+    }
+    if (f.tag) {
+        lines.push(`Must have tag “${f.tag}”.`)
+    }
+    if (f.tenant_id) {
+        lines.push(`Tenant id ${f.tenant_id}.`)
+    }
+    if (f.brand_id) {
+        lines.push(`Brand id ${f.brand_id}.`)
+    }
+    if (f.brand_slug) {
+        lines.push(`Brand name matches “${f.brand_slug}” (from brand:… in search).`)
+    }
+    if (f.composition_ref_state) {
+        lines.push(`Composition ref state: ${f.composition_ref_state} (editor-linked generative / preview rows).`)
+    }
+    if (f.deleted === true || f.deleted === '1') {
+        lines.push('Soft-deleted assets only.')
+    } else if (f.deleted === false || f.deleted === '0') {
+        lines.push('Active assets only (soft-deleted hidden).')
+    }
+    if (f.search && String(f.search).trim()) {
+        lines.push(`Free-text filter: “${String(f.search).trim()}”.`)
+    }
+    return lines
 }
 
 function formatDateTime(isoString) {
@@ -137,14 +274,14 @@ function formatDateTime(isoString) {
     return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
-function SortableTh({ label, sortKey, currentSort, sortDirection, onSort, className = '' }) {
+function SortableTh({ label, sortKey, currentSort, sortDirection, onSort, className = '', title: thTitle }) {
     const isActive = currentSort === sortKey
     const handleClick = () => {
         const nextDir = isActive && sortDirection === 'desc' ? 'asc' : 'desc'
         onSort(sortKey, nextDir)
     }
     return (
-        <th className={`px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer hover:bg-slate-100 select-none ${className}`} onClick={handleClick}>
+        <th title={thTitle} className={`px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer hover:bg-slate-100 select-none ${className}`} onClick={handleClick}>
             <span className="inline-flex items-center gap-1">
                 {label}
                 {isActive ? (
@@ -185,6 +322,8 @@ export default function AdminAssetsIndex({
     const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
 
+    const emptyStateHints = useMemo(() => summarizeActiveAdminFilters(initialFilters), [initialFilters])
+
     useEffect(() => {
         if (!actionsOpen) return
         const handleClickOutside = (e) => {
@@ -196,179 +335,151 @@ export default function AdminAssetsIndex({
         return () => document.removeEventListener('click', handleClickOutside)
     }, [actionsOpen])
 
-    const applyFilters = useCallback((overrides) => {
-        const { plainSearch, filters: parsed } = parseSmartFilter(searchInput)
-        const base = { ...initialFilters, ...parsed, search: plainSearch }
-        const merged = { ...base, ...overrides }
-        if (Object.prototype.hasOwnProperty.call(overrides, 'asset_type') && overrides.asset_type === null) {
-            delete merged.asset_type
-            // Do not wipe types/composition when this request explicitly sets them (e.g. faceted toggles).
-            if (!Object.prototype.hasOwnProperty.call(overrides, 'types')) {
+    // Keep the search box aligned with the server after Inertia navigations (stale tokens were confusing facets).
+    useEffect(() => {
+        setSearchInput(initialFilters?.search ?? '')
+    }, [initialFilters?.search])
+
+    const applyFilters = useCallback(
+        (overrides = {}) => {
+            const hasExplicitSearchOverride = Object.prototype.hasOwnProperty.call(overrides, 'search')
+            const effectiveSearch = hasExplicitSearchOverride ? (overrides.search ?? '') : searchInput
+
+            const prevParsed = parseSmartFilter(initialFilters?.search ?? '').filters
+            const { plainSearch, filters: parsed } = parseSmartFilter(effectiveSearch)
+
+            const base = { ...initialFilters }
+            for (const k of Object.keys(prevParsed)) {
+                if (!(k in parsed)) {
+                    delete base[k]
+                }
+            }
+            Object.assign(base, parsed)
+            base.search = plainSearch
+
+            const merged = { ...base, ...overrides }
+            if (Object.prototype.hasOwnProperty.call(overrides, 'asset_type') && overrides.asset_type === null) {
+                delete merged.asset_type
+                if (!Object.prototype.hasOwnProperty.call(overrides, 'types')) {
+                    delete merged.types
+                }
+                if (!Object.prototype.hasOwnProperty.call(overrides, 'composition') && !Object.prototype.hasOwnProperty.call(overrides, 'include_composition')) {
+                    delete merged.include_composition
+                }
+            }
+            if (overrides.asset_type) {
                 delete merged.types
-            }
-            if (!Object.prototype.hasOwnProperty.call(overrides, 'composition') && !Object.prototype.hasOwnProperty.call(overrides, 'include_composition')) {
                 delete merged.include_composition
+                delete merged.composition_only
+                merged.generative_workspace = false
             }
-        }
-        if (overrides.asset_type) {
-            delete merged.types
-            delete merged.include_composition
-            delete merged.composition_only
-        }
-        const params = buildQueryParams(merged, {})
-        router.get('/app/admin/assets', params, { preserveState: true, preserveScroll: true })
-    }, [searchInput, initialFilters])
+            const params = buildQueryParams(merged, {})
+            router.get('/app/admin/assets', params, { preserveState: true, preserveScroll: true })
+        },
+        [searchInput, initialFilters],
+    )
 
-    const primaryTypeState = useMemo(() => {
-        const f = initialFilters
-        if (f?.types === 'all') {
-            return {
-                mode: 'all',
-                asset: true,
-                execution: true,
-                generative: true,
-                composition: true,
-                compositionOnly: false,
-            }
-        }
-        const types = Array.isArray(f?.types) ? f.types : []
-        if (types.length > 0) {
-            return {
-                mode: 'custom',
-                asset: types.includes('asset'),
-                execution: types.includes('deliverable'),
-                generative: types.includes('ai_generated'),
-                composition: f?.include_composition === true,
-                compositionOnly: f?.composition_only === true,
-            }
-        }
-        // Smart search / advanced dropdown can set asset_type alone — mirror that in toggles
-        if (f?.asset_type) {
-            const at = f.asset_type
-            return {
-                mode: 'custom',
-                asset: at === 'asset',
-                execution: at === 'deliverable',
-                generative: at === 'ai_generated',
-                composition: f?.include_composition === true,
-                compositionOnly: f?.composition_only === true,
-            }
-        }
-        return {
-            mode: 'custom',
-            asset: true,
-            execution: true,
-            generative: false,
-            composition: f?.include_composition === true,
-            compositionOnly: f?.composition_only === true,
-        }
-    }, [initialFilters])
+    const typeToggles = useMemo(() => deriveAssetExecutionToggles(initialFilters), [initialFilters])
 
-    const applyPrimaryTypeToggles = useCallback((next) => {
-        if (next.mode === 'all') {
-            applyFilters({ asset_type: null, types: 'all', composition_only: false, page: 1 })
-            return
-        }
-        const parts = []
-        if (next.asset) parts.push('asset')
-        if (next.execution) parts.push('deliverable')
-        if (next.generative) parts.push('ai_generated')
-        if (parts.length === 0) {
-            parts.push('asset', 'deliverable')
-        }
+    const toggleAssetExecutionType = useCallback(
+        (key) => {
+            let nextAsset = key === 'asset' ? !typeToggles.asset : typeToggles.asset
+            let nextExecution = key === 'execution' ? !typeToggles.execution : typeToggles.execution
+            if (!nextAsset && !nextExecution) {
+                nextAsset = true
+                nextExecution = true
+            }
+            const parts = []
+            if (nextAsset) parts.push('asset')
+            if (nextExecution) parts.push('deliverable')
+            applyFilters({
+                asset_type: null,
+                types: parts,
+                reference_materials: false,
+                intake_state: null,
+                generative_workspace: false,
+                composition_only: false,
+                composition_layers_only: false,
+                page: 1,
+            })
+        },
+        [applyFilters, typeToggles],
+    )
+
+    const applyAllDbTypes = useCallback(() => {
         applyFilters({
             asset_type: null,
-            types: parts.join(','),
-            composition: next.composition ? '1' : '0',
-            composition_only: next.compositionOnly ? '1' : '0',
+            types: 'all',
+            reference_materials: false,
+            intake_state: null,
+            generative_workspace: false,
+            composition_only: false,
+            composition_layers_only: false,
             page: 1,
         })
     }, [applyFilters])
 
-    /** One-click views: library = what members usually see in the asset grid; canvas = composition WIP/preview only; generative = AI outputs */
-    const applyViewPreset = useCallback(
-        (preset) => {
-            if (preset === 'all') {
-                applyPrimaryTypeToggles({ mode: 'all' })
-                return
-            }
-            if (preset === 'library') {
-                applyFilters({
-                    asset_type: null,
-                    types: ['asset', 'deliverable'],
-                    composition: '0',
-                    composition_only: '0',
-                    page: 1,
-                })
-                return
-            }
-            if (preset === 'canvas') {
-                applyFilters({
-                    asset_type: null,
-                    types: ['asset', 'deliverable', 'ai_generated'],
-                    composition: '1',
-                    composition_only: '1',
-                    page: 1,
-                })
-                return
-            }
-            if (preset === 'generative') {
-                applyFilters({
-                    asset_type: null,
-                    types: ['ai_generated'],
-                    composition: '0',
-                    composition_only: '0',
-                    page: 1,
-                })
-            }
-        },
-        [applyFilters, applyPrimaryTypeToggles],
+    const applyGenerativeWorkspace = useCallback(() => {
+        applyFilters({
+            asset_type: null,
+            types: null,
+            reference_materials: false,
+            intake_state: null,
+            generative_workspace: true,
+            composition_only: false,
+            composition_layers_only: false,
+            page: 1,
+        })
+    }, [applyFilters])
+
+    const queueToggles = useMemo(
+        () => ({
+            stagedIntake: initialFilters?.intake_state === 'staged',
+            referenceMaterials: initialFilters?.reference_materials === true,
+        }),
+        [initialFilters],
     )
 
-    const togglePrimaryType = useCallback(
-        (key) => {
-            if (key === 'compositionOnly') {
-                const base =
-                    primaryTypeState.mode === 'all'
-                        ? {
-                            mode: 'custom',
-                            asset: true,
-                            execution: true,
-                            generative: true,
-                            composition: true,
-                            compositionOnly: false,
-                        }
-                        : { ...primaryTypeState, mode: 'custom' }
-                const next = { ...base, compositionOnly: !base.compositionOnly }
-                if (next.compositionOnly) {
-                    next.composition = true
-                }
-                applyPrimaryTypeToggles(next)
-                return
-            }
-            const base =
-                primaryTypeState.mode === 'all'
-                    ? {
-                        mode: 'custom',
-                        asset: true,
-                        execution: true,
-                        generative: true,
-                        composition: true,
-                        compositionOnly: false,
-                    }
-                    : { ...primaryTypeState, mode: 'custom' }
-            const next = { ...base, [key]: !base[key] }
-            if (key === 'composition' && !next.composition) {
-                next.compositionOnly = false
-            }
-            if (!next.asset && !next.execution && !next.generative) {
-                next.asset = true
-                next.execution = true
-            }
-            applyPrimaryTypeToggles(next)
-        },
-        [applyPrimaryTypeToggles, primaryTypeState]
-    )
+    const toggleStagedIntake = useCallback(() => {
+        if (queueToggles.stagedIntake) {
+            applyFilters({
+                intake_state: null,
+                types: ['asset', 'deliverable'],
+                generative_workspace: false,
+                page: 1,
+            })
+        } else {
+            applyFilters({
+                intake_state: 'staged',
+                reference_materials: false,
+                generative_workspace: false,
+                asset_type: null,
+                types: null,
+                page: 1,
+            })
+        }
+    }, [applyFilters, queueToggles.stagedIntake])
+
+    const toggleReferenceMaterials = useCallback(() => {
+        if (queueToggles.referenceMaterials) {
+            applyFilters({
+                reference_materials: false,
+                generative_workspace: false,
+                asset_type: null,
+                types: ['asset', 'deliverable'],
+                page: 1,
+            })
+        } else {
+            applyFilters({
+                reference_materials: true,
+                intake_state: null,
+                generative_workspace: false,
+                asset_type: null,
+                types: null,
+                page: 1,
+            })
+        }
+    }, [applyFilters, queueToggles.referenceMaterials])
 
     const handleSearchSubmit = (e) => {
         e?.preventDefault()
@@ -378,6 +489,21 @@ export default function AdminAssetsIndex({
     const handleSort = (sortKey, sortDirection) => {
         applyFilters({ sort: sortKey, sort_direction: sortDirection, page: 1 })
     }
+
+    const clearSearchShowAllTypes = useCallback(() => {
+        setSearchInput('')
+        applyFilters({
+            search: '',
+            asset_type: null,
+            types: ['asset', 'deliverable'],
+            reference_materials: false,
+            intake_state: null,
+            generative_workspace: false,
+            composition_only: false,
+            composition_layers_only: false,
+            page: 1,
+        })
+    }, [applyFilters])
 
     const hasActiveFilters = !!(
         initialFilters?.asset_id ||
@@ -401,6 +527,11 @@ export default function AdminAssetsIndex({
         initialFilters?.types === 'all' ||
         (initialFilters?.types && !isDefaultPrimaryTypeScope(initialFilters))
         || initialFilters?.composition_only === true
+        || initialFilters?.composition_layers_only === true
+        || initialFilters?.reference_materials === true
+        || initialFilters?.intake_state === 'staged'
+        || initialFilters?.generative_workspace === true
+        || !!initialFilters?.composition_ref_state
     )
 
     const clearFilters = () => {
@@ -650,7 +781,7 @@ export default function AdminAssetsIndex({
                                 type="text"
                                 value={searchInput}
                                 onChange={(e) => setSearchInput(e.target.value)}
-                                placeholder="Search assets... tenant:3 brand:augusta type:execution builder:true tag:whiskey"
+                                placeholder="Filename, title, or tags — optional tenant:1 brand:slug tag:…"
                                 className="relative z-10 block w-full rounded-lg border-slate-300 pl-10 pr-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                             />
                         </div>
@@ -659,6 +790,14 @@ export default function AdminAssetsIndex({
                             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
                         >
                             Search
+                        </button>
+                        <button
+                            type="button"
+                            onClick={clearSearchShowAllTypes}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            title="Remove search tokens (tenant, brand, tag, builder, type:…) and show all assets and executions"
+                        >
+                            Clear search
                         </button>
                     </form>
                     <button
@@ -684,173 +823,123 @@ export default function AdminAssetsIndex({
                     )}
                 </div>
 
-                {/* Primary type scope — library `type` column vs composition metadata (orthogonal) */}
-                <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Show in grid</span>
-                        {initialFilters?.asset_type && !Array.isArray(initialFilters?.types) && (
-                            <span className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-0.5">
-                                Narrowed by asset type elsewhere — click a facet to use quick filters instead
-                            </span>
-                        )}
-                    </div>
-
-                    <p className="mt-2 text-xs text-slate-600 leading-relaxed max-w-4xl">
-                        Compositions are saved canvases; each still stores files as normal <strong className="text-slate-800">assets</strong> with extra metadata.
-                        Most visits here are for <strong className="text-slate-800">library + execution</strong> rows that match what appears in the brand asset grid.
-                        Canvas exports and many generative layers are usually out of the normal grid—use quick views or the <strong className="text-slate-800">Context</strong> column instead of mixing them blindly.
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Quick view</span>
-                        {[
-                            { id: 'library', label: 'Library + executions' },
-                            { id: 'canvas', label: 'Canvas exports only' },
-                            { id: 'generative', label: 'Generative only' },
-                            { id: 'all', label: 'All types' },
-                        ].map(({ id, label }) => (
+                {/* Type + Queue filters (single row) */}
+                <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Type</span>
+                        <div
+                            className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
+                            role="group"
+                            aria-label="Library asset types"
+                        >
                             <button
-                                key={id}
                                 type="button"
-                                onClick={() => applyViewPreset(id)}
-                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300"
+                                aria-pressed={typeToggles.asset && !typeToggles.allTypesActive}
+                                onClick={() => toggleAssetExecutionType('asset')}
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    typeToggles.asset && !typeToggles.allTypesActive
+                                        ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
                             >
-                                {label}
+                                Asset
                             </button>
-                        ))}
-                    </div>
-
-                    <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
-                        <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-medium text-slate-600 mb-2">Library type</p>
-                            <p className="text-[10px] text-slate-400 mb-2 leading-snug max-w-xl">
-                                DB <span className="text-slate-500">type</span> on each row: file, execution deliverable, or AI output. Combine types; this is separate from the composition canvas flags below.
-                            </p>
-                            <div
-                                className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
-                                role="group"
-                                aria-label="Filter by library asset type"
+                            <button
+                                type="button"
+                                aria-pressed={typeToggles.execution && !typeToggles.allTypesActive}
+                                onClick={() => toggleAssetExecutionType('execution')}
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    typeToggles.execution && !typeToggles.allTypesActive
+                                        ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
                             >
-                                {[
-                                    { key: 'asset', label: 'Asset' },
-                                    { key: 'execution', label: 'Execution' },
-                                    { key: 'generative', label: 'AI generative' },
-                                ].map(({ key, label }) => {
-                                    const active = primaryTypeState.mode === 'all' || primaryTypeState[key]
-                                    return (
-                                        <button
-                                            key={key}
-                                            type="button"
-                                            aria-pressed={active}
-                                            onClick={() => togglePrimaryType(key)}
-                                            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
-                                                active
-                                                    ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
-                                                    : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
-                                            }`}
-                                        >
-                                            <span
-                                                className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                                                    active ? 'border-indigo-500 bg-indigo-600' : 'border-slate-300 bg-white'
-                                                }`}
-                                                aria-hidden
-                                            >
-                                                {active && <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />}
-                                            </span>
-                                            {label}
-                                        </button>
-                                    )
-                                })}
-                                <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-300/90" aria-hidden />
-                                <button
-                                    type="button"
-                                    aria-pressed={primaryTypeState.mode === 'all'}
-                                    onClick={() => applyPrimaryTypeToggles({ mode: 'all' })}
-                                    className={`inline-flex items-center rounded-md px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
-                                        primaryTypeState.mode === 'all'
-                                            ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-700/20'
-                                            : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                                    }`}
-                                >
-                                    All types
-                                </button>
-                            </div>
+                                Execution
+                            </button>
+                            <button
+                                type="button"
+                                aria-pressed={typeToggles.generativeWorkspace === true}
+                                onClick={applyGenerativeWorkspace}
+                                title="AI-generated assets (DB type) and canvas export rows (WIP/preview metadata)"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 ${
+                                    typeToggles.generativeWorkspace
+                                        ? 'bg-sky-100 text-sky-900 shadow-sm ring-1 ring-sky-300/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
+                            >
+                                Generative
+                            </button>
+                            <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-300/90" aria-hidden />
+                            <button
+                                type="button"
+                                aria-pressed={typeToggles.allTypesActive}
+                                onClick={applyAllDbTypes}
+                                title="Show every DB type (asset, execution, generative, reference)"
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    typeToggles.allTypesActive
+                                        ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-700/20'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+                                }`}
+                            >
+                                All
+                            </button>
                         </div>
 
-                        <div className="lg:border-l lg:border-slate-200 lg:pl-8 lg:min-w-[220px]">
-                            <p className="text-[11px] font-medium text-slate-600 mb-2">Composition workflow</p>
-                            <p className="text-[10px] text-slate-400 mb-2 leading-snug max-w-sm">
-                                Not a separate DB type — canvas WIP/preview exports are still normal assets with extra metadata. By default those rows are hidden so the grid stays clean.
-                            </p>
-                            <div
-                                className="flex flex-col gap-2"
-                                role="group"
-                                aria-label="Composition workflow filters"
+                        <span className="hidden sm:block h-5 w-px shrink-0 bg-slate-300/90" aria-hidden />
+
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Queue</span>
+                        <div
+                            className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
+                            role="radiogroup"
+                            aria-label="Queue: staged intake or reference materials (one at a time)"
+                        >
+                            <button
+                                type="button"
+                                role="radio"
+                                aria-checked={queueToggles.stagedIntake}
+                                onClick={toggleStagedIntake}
+                                title="Assets with intake_state=staged (awaiting category — same idea as /assets/staged)"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    queueToggles.stagedIntake
+                                        ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
                             >
-                                <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner">
-                                    <button
-                                        type="button"
-                                        aria-pressed={primaryTypeState.mode === 'all' || primaryTypeState.composition}
-                                        onClick={() => togglePrimaryType('composition')}
-                                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
-                                            primaryTypeState.mode === 'all' || primaryTypeState.composition
-                                                ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
-                                                : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
-                                        }`}
-                                    >
-                                        <span
-                                            className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                                                primaryTypeState.mode === 'all' || primaryTypeState.composition
-                                                    ? 'border-indigo-500 bg-indigo-600'
-                                                    : 'border-slate-300 bg-white'
-                                            }`}
-                                            aria-hidden
-                                        >
-                                            {(primaryTypeState.mode === 'all' || primaryTypeState.composition) && (
-                                                <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />
-                                            )}
-                                        </span>
-                                        Include composition-tagged
-                                    </button>
-                                </div>
-                                <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner">
-                                    <button
-                                        type="button"
-                                        aria-pressed={primaryTypeState.compositionOnly}
-                                        onClick={() => togglePrimaryType('compositionOnly')}
-                                        title="Hide non-composition library rows; still uses Library type checkboxes above"
-                                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
-                                            primaryTypeState.compositionOnly
-                                                ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
-                                                : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
-                                        }`}
-                                    >
-                                        <span
-                                            className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                                                primaryTypeState.compositionOnly
-                                                    ? 'border-indigo-500 bg-indigo-600'
-                                                    : 'border-slate-300 bg-white'
-                                            }`}
-                                            aria-hidden
-                                        >
-                                            {primaryTypeState.compositionOnly && (
-                                                <CheckIcon className="h-2.5 w-2.5 text-white" aria-hidden />
-                                            )}
-                                        </span>
-                                        Only composition-tagged
-                                    </button>
-                                </div>
-                            </div>
+                                Staged intake
+                            </button>
+                            <button
+                                type="button"
+                                role="radio"
+                                aria-checked={queueToggles.referenceMaterials}
+                                onClick={toggleReferenceMaterials}
+                                title="Reference materials: type=reference OR legacy builder_staged (Brand Builder uploads)"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    queueToggles.referenceMaterials
+                                        ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
+                            >
+                                Reference materials
+                            </button>
                         </div>
                     </div>
-
-                    <p className="mt-3 text-xs text-slate-500 border-t border-slate-100 pt-3">
-                        Default: <strong className="text-slate-700">Asset</strong> + <strong className="text-slate-700">Execution</strong>, composition-tagged rows <strong className="text-slate-700">hidden</strong>.
-                        {' '}
-                        <strong className="text-slate-700">Include</strong> adds them next to your other files.
-                        {' '}
-                        <strong className="text-slate-700">Only composition-tagged</strong> narrows to canvas WIP/preview rows (still filtered by library types above).
-                    </p>
+                    {typeToggles.ambiguous && (
+                        <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5">
+                            {queueToggles.referenceMaterials ? (
+                                <>
+                                    <strong className="text-amber-900">Reference materials</strong> is on — type pills are off until you switch back or turn off Reference in Queue.
+                                </>
+                            ) : queueToggles.stagedIntake ? (
+                                <>
+                                    <strong className="text-amber-900">Staged intake</strong> is on — type pills are off until you turn off Staged or pick a type above.
+                                </>
+                            ) : (
+                                <>
+                                    Other DB types or filters are active (e.g. advanced asset type, or <code className="text-[11px]">type:</code> in search).
+                                </>
+                            )}
+                        </p>
+                    )}
                 </div>
 
                 {/* Advanced Filter Drawer */}
@@ -889,12 +978,12 @@ export default function AdminAssetsIndex({
                                     value={initialFilters?.asset_type ?? ''}
                                     onChange={(e) => {
                                         const v = e.target.value || null
-                                        if (v) applyFilters({ asset_type: v, page: 1 })
-                                        else applyFilters({ asset_type: null, page: 1 })
+                                        if (v) applyFilters({ asset_type: v, generative_workspace: false, page: 1 })
+                                        else applyFilters({ asset_type: null, generative_workspace: false, page: 1 })
                                     }}
                                     className="block w-full rounded border-slate-300 text-sm"
                                 >
-                                    <option value="">All (use quick types above)</option>
+                                    <option value="">All (use type toggles above)</option>
                                     <option value="asset">Asset</option>
                                     <option value="deliverable">Execution</option>
                                     <option value="ai_generated">Generative</option>
@@ -967,6 +1056,21 @@ export default function AdminAssetsIndex({
                                 </select>
                             </div>
                             <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1" title="Editor-linked generative / canvas rows (metadata)">
+                                    Comp ref
+                                </label>
+                                <select
+                                    value={initialFilters?.composition_ref_state ?? ''}
+                                    onChange={(e) => applyFilters({ composition_ref_state: e.target.value || null, page: 1 })}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="active">Active</option>
+                                    <option value="stale">Stale</option>
+                                    <option value="orphaned">Orphaned</option>
+                                </select>
+                            </div>
+                            <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1">Grid visibility</label>
                                 <select
                                     value={initialFilters?.visible_in_grid === true ? '1' : initialFilters?.visible_in_grid === false ? '0' : ''}
@@ -1012,7 +1116,9 @@ export default function AdminAssetsIndex({
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1">Deleted</label>
+                                <label className="block text-xs font-medium text-slate-500 mb-1" title="All lists both active and soft-deleted assets (same total as active + deleted-only)">
+                                    Deleted
+                                </label>
                                 <select
                                     value={initialFilters?.deleted === true ? '1' : initialFilters?.deleted === false ? '0' : ''}
                                     onChange={(e) => {
@@ -1021,7 +1127,7 @@ export default function AdminAssetsIndex({
                                     }}
                                     className="block w-full rounded border-slate-300 text-sm"
                                 >
-                                    <option value="">All</option>
+                                    <option value="">All (active + deleted)</option>
                                     <option value="1">Deleted only</option>
                                     <option value="0">Not deleted</option>
                                 </select>
@@ -1068,8 +1174,12 @@ export default function AdminAssetsIndex({
                                             className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                                         />
                                     </th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">ID</th>
-                                    <th className="w-16 px-2 py-3" />
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase w-[4.5rem]" title="Last four characters; full id on hover">
+                                        ID
+                                    </th>
+                                    <th className="w-16 px-2 py-3 text-left text-xs font-medium text-slate-500 uppercase" title="Grid preview image">
+                                        Preview
+                                    </th>
                                     <SortableTh
                                         label="Filename"
                                         sortKey="filename"
@@ -1077,25 +1187,35 @@ export default function AdminAssetsIndex({
                                         sortDirection={initialFilters?.sort_direction ?? 'desc'}
                                         onSort={handleSort}
                                     />
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase w-[140px]" title="Library vs canvas export vs generative">
+                                    <SortableTh
+                                        label="Size"
+                                        sortKey="size"
+                                        currentSort={initialFilters?.sort ?? 'created_at'}
+                                        sortDirection={initialFilters?.sort_direction ?? 'desc'}
+                                        onSort={handleSort}
+                                        title="File size (bytes on asset row)"
+                                    />
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase w-[140px]" title="Library vs canvas / generative; soft-deleted assets show a Deleted badge first">
                                         Context
                                     </th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tenant</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Brand</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase" title="Builder-staged (detached) assets">Builder</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase max-w-[9rem]" title="Tenant and brand (narrow with filters)">
+                                        Tenant / brand
+                                    </th>
                                     <SortableTh
                                         label="Analysis"
                                         sortKey="analysis_status"
                                         currentSort={initialFilters?.sort ?? 'created_at'}
                                         sortDirection={initialFilters?.sort_direction ?? 'desc'}
                                         onSort={handleSort}
+                                        title="Pipeline stage for the asset (upload → extract → thumbnails → embedding → complete)"
                                     />
                                     <SortableTh
-                                        label="Thumb"
+                                        label="Thumb status"
                                         sortKey="thumbnail_status"
                                         currentSort={initialFilters?.sort ?? 'created_at'}
                                         sortDirection={initialFilters?.sort_direction ?? 'desc'}
                                         onSort={handleSort}
+                                        title="Thumbnail generation pipeline status (Preview column shows the image)"
                                     />
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Incident</th>
                                     <SortableTh
@@ -1110,15 +1230,36 @@ export default function AdminAssetsIndex({
                             <tbody className="divide-y divide-slate-200 bg-white">
                                 {!assets?.length ? (
                                     <tr>
-                                        <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
-                                            No assets found
+                                        <td colSpan={11} className="px-4 py-12 text-center text-slate-600">
+                                            <p className="text-base font-medium text-slate-800">No assets match this query</p>
+                                            {emptyStateHints.length > 0 && (
+                                                <div className="mt-4 max-w-2xl mx-auto text-left">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                                                        Active constraints (search bar tokens narrow results; <code className="text-[10px]">type:…</code> is overridden by Asset / Execution checkboxes)
+                                                    </p>
+                                                    <ul className="text-sm list-disc pl-5 space-y-1.5 text-slate-600">
+                                                        {emptyStateHints.map((line, i) => (
+                                                            <li key={i}>{line}</li>
+                                                        ))}
+                                                    </ul>
+                                                    <p className="mt-4 text-sm text-slate-500">
+                                                        Example: a Photography file like <span className="font-mono text-slate-700">green.jpg</span> is usually DB type{' '}
+                                                        <strong className="text-slate-700">asset</strong>. It will not appear if the search still contains{' '}
+                                                        <span className="font-mono bg-slate-100 px-1 rounded">type:execution</span> (deliverables only), or a different{' '}
+                                                        <span className="font-mono bg-slate-100 px-1 rounded">brand:…</span> than that file’s brand.
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {emptyStateHints.length === 0 && (
+                                                <p className="mt-2 text-sm text-slate-500">Try clearing the search box or use Clear all.</p>
+                                            )}
                                         </td>
                                     </tr>
                                 ) : (
                                     assets.map((a) => (
                                         <tr
                                             key={a.id}
-                                            className="hover:bg-slate-50 cursor-pointer"
+                                            className={`hover:bg-slate-50 cursor-pointer ${a.deleted_at ? 'bg-slate-50/90' : ''}`}
                                             onClick={() => openDetail(a)}
                                         >
                                             <td className="w-10 px-4 py-2" onClick={(e) => e.stopPropagation()}>
@@ -1129,7 +1270,11 @@ export default function AdminAssetsIndex({
                                                     className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                                                 />
                                             </td>
-                                            <td className="px-4 py-2 font-mono text-xs text-slate-600" title={a.id}>{a.id_short}</td>
+                                            <td className="px-4 py-2 max-w-[5rem]">
+                                                <span className="font-mono text-xs text-slate-600 block truncate" title={a.id}>
+                                                    {formatIdPreview(a.id)}
+                                                </span>
+                                            </td>
                                             <td className="w-16 px-2 py-2">
                                                 {a.admin_thumbnail_url ? (
                                                     <img src={a.admin_thumbnail_url} alt="" className="h-10 w-10 object-cover rounded" />
@@ -1143,38 +1288,41 @@ export default function AdminAssetsIndex({
                                                 <div className="truncate font-medium text-slate-900">
                                                     {a.original_filename || a.title || '—'}
                                                 </div>
-                                                {formatFileSize(a.size_bytes) && (
-                                                    <div className="text-xs text-slate-500 mt-0.5">{formatFileSize(a.size_bytes)}</div>
-                                                )}
+                                            </td>
+                                            <td className="px-4 py-2 text-sm text-slate-600 whitespace-nowrap tabular-nums" title={a.size_bytes != null ? `${a.size_bytes} bytes` : undefined}>
+                                                {formatFileSize(a.size_bytes) || '—'}
                                             </td>
                                             <td className="px-4 py-2 align-top">
-                                                {a.row_context ? (
-                                                    <div className="flex flex-col gap-0.5">
+                                                <div className="flex flex-col gap-0.5">
+                                                    {a.deleted_at && (
                                                         <span
-                                                            className={`inline-flex w-fit rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROW_CONTEXT_BADGES[a.row_context.kind] || ROW_CONTEXT_BADGES.library}`}
+                                                            className="inline-flex w-fit rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-rose-100 text-rose-900 ring-1 ring-rose-200/80"
+                                                            title={a.deleted_at ? `Soft-deleted ${formatDateTime(a.deleted_at)}` : undefined}
                                                         >
-                                                            {a.row_context.label}
+                                                            Deleted
                                                         </span>
-                                                        {a.row_context.composition_id && (
-                                                            <span className="font-mono text-[10px] text-slate-500" title="Composition id in metadata">
-                                                                comp #{a.row_context.composition_id}
+                                                    )}
+                                                    {a.row_context ? (
+                                                        <>
+                                                            <span
+                                                                className={`inline-flex w-fit rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROW_CONTEXT_BADGES[a.row_context.kind] || ROW_CONTEXT_BADGES.library}`}
+                                                            >
+                                                                {a.row_context.label}
                                                             </span>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
+                                                            {a.row_context.composition_id && (
+                                                                <span className="font-mono text-[10px] text-slate-500" title="Composition id in metadata">
+                                                                    comp #{a.row_context.composition_id}
+                                                                </span>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        !a.deleted_at && <span className="text-slate-400">—</span>
+                                                    )}
+                                                </div>
                                             </td>
-                                            <td className="px-4 py-2 text-sm text-slate-600">{a.tenant?.name ?? '—'}</td>
-                                            <td className="px-4 py-2 text-sm text-slate-600">{a.brand?.name ?? '—'}</td>
-                                            <td className="px-4 py-2">
-                                                {a.builder_staged ? (
-                                                    <span className="inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800" title={a.builder_context || 'Builder staged'}>
-                                                        {a.builder_context || 'Staged'}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
+                                            <td className="px-4 py-2 max-w-[9rem]" title={`${a.tenant?.name ?? '—'} · ${a.brand?.name ?? '—'}`}>
+                                                <div className="truncate text-sm text-slate-800">{a.tenant?.name ?? '—'}</div>
+                                                <div className="truncate text-xs text-slate-500">{a.brand?.name ?? '—'}</div>
                                             </td>
                                             <td className="px-4 py-2">
                                                 <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.analysis_status] || STATUS_COLORS.unknown}`}>
@@ -1294,7 +1442,7 @@ export default function AdminAssetsIndex({
             {(detailAsset !== null || detailLoading) && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeDetail}>
                     <div
-                        className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-xl bg-white shadow-xl"
+                        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {detailLoading ? (

@@ -17,6 +17,7 @@ use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
+use App\Models\Composition;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Services\Assets\AssetStateReconciliationService;
@@ -124,10 +125,12 @@ class AdminAssetController extends Controller
             $assets->getCollection()->pluck('id')->all()
         );
 
-        $formatted = $assets->getCollection()->map(function ($a) use ($incidentCounts) {
+        $compositionNamesById = $this->compositionNamesByIdForAssets($assets->getCollection());
+
+        $formatted = $assets->getCollection()->map(function ($a) use ($incidentCounts, $compositionNamesById) {
             $count = (int) ($incidentCounts[$a->id] ?? 0);
             try {
-                return $this->formatAssetForList($a, $count);
+                return $this->formatAssetForList($a, $count, $compositionNamesById);
             } catch (\Throwable $e) {
                 Log::error('[AdminAssets] formatAssetForList failed for asset', [
                     'asset_id' => $a->id,
@@ -136,7 +139,7 @@ class AdminAssetController extends Controller
                     'trace' => $e->getTraceAsString(),
                 ]);
 
-                return $this->formatAssetForListFallback($a, $count);
+                return $this->formatAssetForListFallback($a, $count, $compositionNamesById);
             }
         });
 
@@ -681,57 +684,115 @@ class AdminAssetController extends Controller
             'date_to' => $request->filled('date_to') ? trim($request->date_to) : null,
             'include_trashed' => $this->parseBoolParam($request, 'include_trashed'),
             'asset_role' => $request->filled('asset_role') ? trim($request->asset_role) : null,
+            'composition_ref_state' => $request->filled('composition_ref_state') ? trim($request->composition_ref_state) : null,
             'editor_wip_only' => $this->parseBoolParam($request, 'editor_wip_only'),
             'types' => null,
             'include_composition' => null,
             'composition_only' => false,
+            'reference_materials' => false,
+            'generative_workspace' => false,
         ];
 
         if ($search !== '') {
             $this->parseSmartFilter($search, $parsed);
         }
 
+        // Queue row is either/or: if both appear (legacy URL), prefer reference materials over staged intake.
+        if ($request->boolean('reference_materials') && $request->filled('intake_state') && $request->get('intake_state') === 'staged') {
+            $parsed['intake_state'] = null;
+        }
+
         $this->applyAdminPrimaryTypeScope($request, $parsed);
 
         $parsed['composition_only'] = $request->boolean('composition_only');
+        $parsed['composition_layers_only'] = $request->boolean('composition_layers_only');
+        $parsed['reference_materials'] = $request->boolean('reference_materials');
+
+        if (! empty($parsed['generative_workspace'])) {
+            $parsed['reference_materials'] = false;
+            $parsed['intake_state'] = null;
+        }
 
         return $parsed;
     }
 
     /**
-     * Primary type scope for the admin asset grid: defaults to asset + execution (deliverable),
-     * excludes composition-tagged rows unless requested. Use types=all for no restriction.
+     * Primary type scope for the admin asset grid: defaults to asset + execution (deliverable).
+     * Canvas WIP/preview rows are included unless `composition=0` is sent (missing `composition` means include).
+     * Use types=all for no DB type restriction.
      *
      * @param  array<string, mixed>  $parsed
      */
     protected function applyAdminPrimaryTypeScope(Request $request, array &$parsed): void
     {
-        if (! empty($parsed['asset_type'])) {
-            return;
-        }
-
-        $typesParam = $request->get('types');
-        if ($typesParam === 'all') {
+        // Reference materials: type=REFERENCE or legacy builder_staged — separate from intake_state=staged.
+        if ($request->boolean('reference_materials')) {
+            $parsed['asset_type'] = null;
             $parsed['types'] = null;
             $parsed['include_composition'] = true;
+            $parsed['generative_workspace'] = false;
 
             return;
         }
 
-        if ($typesParam !== null && $typesParam !== '') {
+        // AI-generated rows + canvas WIP/preview exports (admin Type → Generative).
+        if ($request->boolean('generative_workspace')) {
+            $parsed['asset_type'] = null;
+            $parsed['types'] = null;
+            $parsed['include_composition'] = true;
+            $parsed['generative_workspace'] = true;
+
+            return;
+        }
+
+        // Staged intake queue: show the category queue without forcing library asset+execution types.
+        if ($request->filled('intake_state') && $request->get('intake_state') === 'staged' && ! $request->filled('types')) {
+            $parsed['asset_type'] = null;
+            $parsed['types'] = null;
+            $parsed['include_composition'] = $request->has('composition')
+                ? $request->boolean('composition')
+                : true;
+            $parsed['generative_workspace'] = false;
+
+            return;
+        }
+
+        // Explicit `types` from the URL (facet buttons) wins over `type:…` tokens parsed from the search box.
+        if ($request->filled('types')) {
+            $typesParam = $request->get('types');
+            $parsed['asset_type'] = null;
+
+            if ($typesParam === 'all') {
+                // Keep the string so Inertia filters match the URL (null was misread as “asset+deliverable” in the UI).
+                $parsed['types'] = 'all';
+                $parsed['include_composition'] = true;
+
+                return;
+            }
+
             $parts = array_values(array_filter(array_map('trim', explode(',', (string) $typesParam))));
             $allowed = ['asset', 'deliverable', 'ai_generated', 'reference'];
             $parsed['types'] = array_values(array_intersect($parts, $allowed));
             if ($parsed['types'] === []) {
                 $parsed['types'] = ['asset', 'deliverable'];
             }
-            $parsed['include_composition'] = $request->boolean('composition');
+            // Missing `composition` must not mean "hide": boolean() is false when the key is absent,
+            // which was excluding every canvas-tagged row and often yielded an empty admin grid.
+            $parsed['include_composition'] = $request->has('composition')
+                ? $request->boolean('composition')
+                : true;
 
             return;
         }
 
+        if (! empty($parsed['asset_type'])) {
+            return;
+        }
+
         $parsed['types'] = ['asset', 'deliverable'];
-        $parsed['include_composition'] = false;
+        $parsed['include_composition'] = $request->has('composition')
+            ? $request->boolean('composition')
+            : true;
     }
 
     protected function parseBoolParam(Request $request, string $key): ?bool
@@ -849,6 +910,7 @@ class AdminAssetController extends Controller
             'created_at' => 'assets.created_at',
             'filename' => 'assets.original_filename',
             'title' => 'assets.title',
+            'size' => 'assets.size_bytes',
             'analysis_status' => 'assets.analysis_status',
             'thumbnail_status' => 'assets.thumbnail_status',
         ];
@@ -860,7 +922,10 @@ class AdminAssetController extends Controller
     {
         $includeTrashed = ($filters['include_trashed'] ?? null) === true;
         $deletedOnly = ($filters['deleted'] ?? null) === true || ($filters['deleted'] ?? null) === '1';
-        $query = ($includeTrashed || $deletedOnly)
+        // Default (no deleted filter): include soft-deleted rows so "All" is active + deleted. Without withTrashed(),
+        // Laravel hides trashed rows and the list count will not match "Deleted only" filtered rows.
+        $deletedFilterUnset = ($filters['deleted'] ?? null) === null;
+        $query = ($includeTrashed || $deletedOnly || $deletedFilterUnset)
             ? Asset::query()->withTrashed()
             : Asset::query();
 
@@ -916,14 +981,26 @@ class AdminAssetController extends Controller
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
-        if (! empty($filters['asset_type'])) {
+        if (! empty($filters['reference_materials'])) {
+            $query->referenceMaterialsOnly();
+        } elseif (! empty($filters['generative_workspace'])) {
+            $query->where(function (\Illuminate\Database\Eloquent\Builder $q) {
+                $q->where('type', AssetType::AI_GENERATED)
+                    ->orWhere(function (\Illuminate\Database\Eloquent\Builder $q2) {
+                        $q2->where('metadata->composition_wip', true)
+                            ->orWhere('metadata->composition_preview', true);
+                    });
+            });
+        } elseif (! empty($filters['asset_type'])) {
             $query->where('type', $filters['asset_type']);
         } elseif (! empty($filters['types']) && is_array($filters['types'])) {
             $query->whereIn('type', $filters['types']);
         }
-        if (! empty($filters['composition_only'])) {
+        if (! empty($filters['composition_layers_only'])) {
+            $query->compositionLayersOnly();
+        } elseif (! empty($filters['composition_only'])) {
             $query->compositionTaggedOnly();
-        } elseif (($filters['include_composition'] ?? true) === false) {
+        } elseif (($filters['include_composition'] ?? true) === false && empty($filters['generative_workspace'])) {
             $query->excludeCompositionTagged();
         }
         if (($filters['visible_in_grid'] ?? null) === true) {
@@ -978,6 +1055,12 @@ class AdminAssetController extends Controller
                 $q->where('metadata->composition_wip', true)
                     ->orWhere('metadata->composition_preview', true);
             });
+        }
+        if (! empty($filters['composition_ref_state'])) {
+            $allowedCompRef = ['active', 'stale', 'orphaned'];
+            if (in_array($filters['composition_ref_state'], $allowedCompRef, true)) {
+                $query->where('metadata->composition_ref_state', $filters['composition_ref_state']);
+            }
         }
 
         return $query;
@@ -1159,9 +1242,34 @@ class AdminAssetController extends Controller
     }
 
     /**
-     * @param  int|null  $incidentCount  Precomputed for index bulk; null loads one row (e.g. detail).
+     * @param  array<int, string>  $compositionNamesById  composition primary key => name
      */
-    protected function formatAssetForList(Asset $asset, ?int $incidentCount = null): array
+    protected function compositionNamesByIdForAssets(\Illuminate\Support\Collection $assets): array
+    {
+        $ids = [];
+        foreach ($assets as $a) {
+            $m = $a->metadata ?? [];
+            $cid = $m['composition_id'] ?? null;
+            if ($cid !== null && $cid !== '' && ! is_array($cid)) {
+                $n = (int) $cid;
+                if ($n > 0) {
+                    $ids[] = $n;
+                }
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return [];
+        }
+
+        return Composition::query()->whereIn('id', $ids)->pluck('name', 'id')->all();
+    }
+
+    /**
+     * @param  int|null  $incidentCount  Precomputed for index bulk; null loads one row (e.g. detail).
+     * @param  array<int, string>  $compositionNamesById
+     */
+    protected function formatAssetForList(Asset $asset, ?int $incidentCount = null, array $compositionNamesById = []): array
     {
         $metadata = $asset->metadata ?? [];
         if ($incidentCount === null) {
@@ -1180,6 +1288,15 @@ class AdminAssetController extends Controller
             default => $type->value,
         } : '—';
 
+        $compIdMeta = $metadata['composition_id'] ?? null;
+        $compIdInt = null;
+        if (is_numeric($compIdMeta)) {
+            $compIdInt = (int) $compIdMeta;
+        }
+        $compositionName = ($compIdInt !== null && $compIdInt > 0 && isset($compositionNamesById[$compIdInt]))
+            ? $compositionNamesById[$compIdInt]
+            : null;
+
         return [
             'id' => $asset->id,
             'id_short' => substr($asset->id, 0, 12),
@@ -1189,6 +1306,8 @@ class AdminAssetController extends Controller
             'brand' => $asset->brand ? ['id' => $asset->brand->id, 'name' => $asset->brand->name] : null,
             'asset_type' => ['value' => $type?->value ?? null, 'label' => $assetTypeLabel],
             'category_id' => $metadata['category_id'] ?? null,
+            'composition_name' => $compositionName,
+            'composition_ref_state' => $metadata['composition_ref_state'] ?? null,
             'row_context' => $this->adminAssetRowContext($asset, $metadata),
             'analysis_status' => $asset->analysis_status ?? 'unknown',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
@@ -1207,7 +1326,7 @@ class AdminAssetController extends Controller
     /**
      * Fallback when formatAssetForList throws (e.g. AssetUrlService failure). Same shape, thumbnail_url = null.
      */
-    protected function formatAssetForListFallback(Asset $asset, ?int $incidentCount = null): array
+    protected function formatAssetForListFallback(Asset $asset, ?int $incidentCount = null, array $compositionNamesById = []): array
     {
         $metadata = $asset->metadata ?? [];
         if ($incidentCount === null) {
@@ -1226,6 +1345,15 @@ class AdminAssetController extends Controller
             default => $type->value,
         } : '—';
 
+        $compIdMeta = $metadata['composition_id'] ?? null;
+        $compIdInt = null;
+        if (is_numeric($compIdMeta)) {
+            $compIdInt = (int) $compIdMeta;
+        }
+        $compositionName = ($compIdInt !== null && $compIdInt > 0 && isset($compositionNamesById[$compIdInt]))
+            ? $compositionNamesById[$compIdInt]
+            : null;
+
         return [
             'id' => $asset->id,
             'id_short' => substr($asset->id, 0, 12),
@@ -1235,6 +1363,8 @@ class AdminAssetController extends Controller
             'brand' => $asset->brand ? ['id' => $asset->brand->id, 'name' => $asset->brand->name] : null,
             'asset_type' => ['value' => $type?->value ?? null, 'label' => $assetTypeLabel],
             'category_id' => $metadata['category_id'] ?? null,
+            'composition_name' => $compositionName,
+            'composition_ref_state' => $metadata['composition_ref_state'] ?? null,
             'row_context' => $this->adminAssetRowContext($asset, $metadata),
             'analysis_status' => $asset->analysis_status ?? 'unknown',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',

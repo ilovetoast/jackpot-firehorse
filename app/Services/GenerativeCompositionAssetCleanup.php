@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Support\CompositionDocumentAssetIdCollector;
 
 /**
  * When composition JSON changes, orphan generative layer AI assets that are no longer referenced
@@ -12,7 +13,8 @@ final class GenerativeCompositionAssetCleanup
 {
     public function __construct(
         protected AssetUsageService $usage,
-        protected AssetLifecycleService $lifecycle
+        protected AssetLifecycleService $lifecycle,
+        protected CompositionAssetReferenceStateService $compositionRefState
     ) {}
 
     /**
@@ -33,6 +35,7 @@ final class GenerativeCompositionAssetCleanup
             if (! $this->usage->isAssetReferencedInCompositions($assetId, $tenantId, $brandId)) {
                 $this->lifecycle->markOrphanedIfEligible($asset);
             }
+            $this->compositionRefState->refreshForAsset($asset);
         }
 
         foreach ($newIds as $assetId) {
@@ -41,6 +44,7 @@ final class GenerativeCompositionAssetCleanup
                 continue;
             }
             $this->lifecycle->reactivateIfOrphaned($asset);
+            $this->compositionRefState->refreshForAsset($asset);
         }
     }
 
@@ -59,6 +63,7 @@ final class GenerativeCompositionAssetCleanup
             if (! $this->usage->isAssetReferencedInCompositions($assetId, $tenantId, $brandId)) {
                 $this->lifecycle->markOrphanedIfEligible($asset);
             }
+            $this->compositionRefState->refreshForAsset($asset);
         }
     }
 
@@ -68,20 +73,7 @@ final class GenerativeCompositionAssetCleanup
      */
     public function collectReferencedAssetIds(array $document): array
     {
-        $ids = [];
-        foreach ($document['layers'] ?? [] as $layer) {
-            if (! is_array($layer)) {
-                continue;
-            }
-            if (! empty($layer['assetId']) && is_string($layer['assetId'])) {
-                $ids[] = $layer['assetId'];
-            }
-            if (! empty($layer['resultAssetId']) && is_string($layer['resultAssetId'])) {
-                $ids[] = $layer['resultAssetId'];
-            }
-        }
-
-        return array_values(array_unique($ids));
+        return CompositionDocumentAssetIdCollector::collectReferencedAssetIds($document);
     }
 
     private function findScopedAsset(string $assetId, int $tenantId, int $brandId): ?Asset

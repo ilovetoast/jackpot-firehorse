@@ -605,7 +605,7 @@ export default function OperationsCenterIndex({
             {(quickViewData !== null || quickViewLoading) && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeQuickView}>
                     <div
-                        className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-xl bg-white shadow-xl"
+                        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {quickViewLoading ? (

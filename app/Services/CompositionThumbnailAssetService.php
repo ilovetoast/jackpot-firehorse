@@ -38,6 +38,7 @@ class CompositionThumbnailAssetService
     /**
      * Store PNG bytes for a composition thumbnail: reuse existing asset id when $replaceAssetId is set.
      *
+     * @param  int|null  $compositionId  When set, stamps {@code metadata.composition_id} for admin grouping / lifecycle.
      * @return non-empty-string Asset UUID
      */
     public function createFromPngBinary(
@@ -45,7 +46,8 @@ class CompositionThumbnailAssetService
         Brand $brand,
         User $user,
         string $pngBinary,
-        ?string $replaceAssetId = null
+        ?string $replaceAssetId = null,
+        ?int $compositionId = null
     ): string {
         if ($tenant->uuid === null || $tenant->uuid === '') {
             throw new RuntimeException('Tenant UUID is required for composition thumbnail storage.');
@@ -58,11 +60,11 @@ class CompositionThumbnailAssetService
                     $existing->restore();
                 }
 
-                return $this->appendVersionToExistingAsset($tenant, $brand, $user, $existing, $pngBinary);
+                return $this->appendVersionToExistingAsset($tenant, $brand, $user, $existing, $pngBinary, $compositionId);
             }
         }
 
-        return $this->createNewThumbnailAsset($tenant, $brand, $user, $pngBinary);
+        return $this->createNewThumbnailAsset($tenant, $brand, $user, $pngBinary, $compositionId);
     }
 
     /**
@@ -73,9 +75,10 @@ class CompositionThumbnailAssetService
         Brand $brand,
         User $user,
         Asset $asset,
-        string $pngBinary
+        string $pngBinary,
+        ?int $compositionId
     ): string {
-        return DB::transaction(function () use ($tenant, $brand, $user, $asset, $pngBinary) {
+        return DB::transaction(function () use ($tenant, $brand, $user, $asset, $pngBinary, $compositionId) {
             $size = strlen($pngBinary);
             $dims = @getimagesizefromstring($pngBinary);
             $width = isset($dims[0]) ? (int) $dims[0] : null;
@@ -125,6 +128,9 @@ class CompositionThumbnailAssetService
             $meta['composition_wip'] = true;
             $meta['asset_role'] = 'composition_thumbnail';
             $meta['last_preview_at'] = now()->toIso8601String();
+            if ($compositionId !== null && $compositionId > 0) {
+                $meta['composition_id'] = (string) $compositionId;
+            }
 
             $asset->update([
                 'storage_root_path' => $path,
@@ -166,9 +172,10 @@ class CompositionThumbnailAssetService
         Tenant $tenant,
         Brand $brand,
         User $user,
-        string $pngBinary
+        string $pngBinary,
+        ?int $compositionId
     ): string {
-        return DB::transaction(function () use ($tenant, $brand, $user, $pngBinary) {
+        return DB::transaction(function () use ($tenant, $brand, $user, $pngBinary, $compositionId) {
             $size = strlen($pngBinary);
             $dims = @getimagesizefromstring($pngBinary);
             $width = isset($dims[0]) ? (int) $dims[0] : null;
@@ -203,11 +210,12 @@ class CompositionThumbnailAssetService
                 'source' => 'composition_editor',
                 'builder_staged' => false,
                 'intake_state' => 'normal',
-                'metadata' => [
+                'metadata' => array_filter([
                     'composition_preview' => true,
                     'composition_wip' => true,
                     'asset_role' => 'composition_thumbnail',
-                ],
+                    'composition_id' => ($compositionId !== null && $compositionId > 0) ? (string) $compositionId : null,
+                ], static fn ($v) => $v !== null),
             ]);
 
             Storage::disk('s3')->put($path, $pngBinary, 'private');
@@ -284,6 +292,6 @@ class CompositionThumbnailAssetService
             return null;
         }
 
-        return $this->createFromPngBinary($tenant, $brand, $user, $binary, null);
+        return $this->createFromPngBinary($tenant, $brand, $user, $binary, null, null);
     }
 }

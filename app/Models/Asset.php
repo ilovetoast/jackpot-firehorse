@@ -983,6 +983,22 @@ class Asset extends Model
     }
 
     /**
+     * Scope: assets linked to a composition via metadata (layers, parts) but not canvas WIP/preview export rows.
+     */
+    public function scopeCompositionLayersOnly(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereNotNull('metadata')
+            ->where(function ($q) {
+                $q->whereNotNull('metadata->composition_id')
+                    ->where('metadata->composition_id', '!=', '');
+            })
+            ->whereNot(function ($q) {
+                $q->where('metadata->composition_wip', true)
+                    ->orWhere('metadata->composition_preview', true);
+            });
+    }
+
+    /**
      * Scope: main-library rows that lack category_id (standard assets + executions only).
      * Excludes generative, reference, and composition-tagged assets — they are not expected to use the same grid category model.
      */

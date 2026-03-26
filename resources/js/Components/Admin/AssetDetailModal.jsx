@@ -2,14 +2,14 @@
  * AssetDetailModal Component
  *
  * Shared modal for asset operations (Admin Assets, Operations Center).
- * Shows asset details with tabs, actions (Attempt Repair, Retry Pipeline), and optional thumbnail on left.
+ * Vertical tabs on the left, optional compact thumbnail strip above the main pane, scrollable content.
  *
  * @param {Object} props
  * @param {Object} props.data - { asset, incidents, pipeline_flags, embedded_metadata_debug, ... } from /app/admin/assets/{id}
  * @param {Function} props.onClose - Callback when modal should close
  * @param {Function} props.onAction - (assetId, action) for repair, retry-pipeline, restore
  * @param {Function} props.onRefresh - Callback after action that refreshes parent
- * @param {boolean} props.showThumbnail - When true, show thumbnail on the left of content
+ * @param {boolean} props.showThumbnail - When true, show a compact thumbnail above the tab content
  */
 import { useState } from 'react'
 import JsonView from '@uiw/react-json-view'
@@ -35,6 +35,12 @@ const PIPELINE_FLAG_SEMANTICS = {
     thumbnail_timeout: 'invert',     // false = good (no timeout)
     stuck_state_detected: 'invert',  // false = good (not stuck)
     auto_recover_attempted: 'warn', // true = amber (recovery was attempted)
+}
+
+const COMP_REF_STATE_BADGES = {
+    active: 'bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200/85',
+    stale: 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/85',
+    orphaned: 'bg-rose-50 text-rose-900 ring-1 ring-rose-200/85',
 }
 
 const STATUS_COLORS = {
@@ -78,45 +84,45 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
     const hasThumbnail = showThumbnail && thumbnailUrl
 
     return (
-        <div className="flex">
-            {/* Thumbnail on left (when available) */}
-            {hasThumbnail && (
-                <div className="flex-shrink-0 w-32 border-r border-slate-200 bg-slate-50 p-4 flex items-center justify-center">
-                    <img
-                        src={thumbnailUrl}
-                        alt={asset?.original_filename || asset?.title || 'Asset'}
-                        className="max-w-full max-h-32 object-contain rounded border border-slate-200"
-                    />
-                </div>
-            )}
-
-            <div className="flex-1 min-w-0">
-                <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-                    <h2 className="text-lg font-semibold text-slate-900 truncate">
-                        {asset?.original_filename || asset?.title || asset?.id_short}
-                    </h2>
-                    <button type="button" onClick={onClose} className="rounded p-1 hover:bg-slate-100">
-                        <XMarkIcon className="h-5 w-5" />
-                    </button>
-                </div>
-                <div className="border-b border-slate-200">
-                    <nav className="flex gap-4 px-6">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+                <h2 className="min-w-0 flex-1 pr-4 text-lg font-semibold text-slate-900 truncate">
+                    {asset?.original_filename || asset?.title || asset?.id_short}
+                </h2>
+                <button type="button" onClick={onClose} className="shrink-0 rounded p-1 hover:bg-slate-100" aria-label="Close">
+                    <XMarkIcon className="h-5 w-5" />
+                </button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+                <aside className="w-44 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50 py-2">
+                    <nav className="flex flex-col gap-0.5 px-2" aria-label="Asset detail sections">
                         {TABS.map((t) => (
                             <button
                                 key={t.id}
+                                type="button"
                                 onClick={() => setTab(t.id)}
-                                className={`whitespace-nowrap border-b-2 py-3 text-sm font-medium ${
+                                className={`rounded-md px-3 py-2 text-left text-sm font-medium transition ${
                                     tab === t.id
-                                        ? 'border-indigo-600 text-indigo-600'
-                                        : 'border-transparent text-slate-500 hover:text-slate-700'
+                                        ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-200/80'
+                                        : 'text-slate-600 hover:bg-slate-100/90'
                                 }`}
                             >
                                 {t.label}
                             </button>
                         ))}
                     </nav>
-                </div>
-                <div className="p-6">
+                </aside>
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                    {hasThumbnail && (
+                        <div className="flex max-h-28 shrink-0 items-center justify-center border-b border-slate-200 bg-slate-50/90 px-4 py-2">
+                            <img
+                                src={thumbnailUrl}
+                                alt={asset?.original_filename || asset?.title || 'Asset'}
+                                className="max-h-24 max-w-full object-contain rounded border border-slate-200/80"
+                            />
+                        </div>
+                    )}
+                    <div className="min-h-0 flex-1 overflow-y-auto p-6">
                     {tab === 'overview' && (
                         <div className="space-y-4">
                             {asset?.storage_missing && (
@@ -148,8 +154,53 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                             )}
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div><span className="text-slate-500">ID</span><br />{asset?.id}</div>
-                                <div><span className="text-slate-500">Tenant</span><br />{asset?.tenant?.name ?? '—'}</div>
-                                <div><span className="text-slate-500">Brand</span><br />{asset?.brand?.name ?? '—'}</div>
+                                <div>
+                                    <span className="text-slate-500">Tenant / brand</span>
+                                    <br />
+                                    <span className="text-slate-800">{asset?.tenant?.name ?? '—'}</span>
+                                    <span className="text-slate-400"> · </span>
+                                    <span className="text-slate-800">{asset?.brand?.name ?? '—'}</span>
+                                </div>
+                                <div>
+                                    <span className="text-slate-500">Brand Builder</span>
+                                    <br />
+                                    {asset?.builder_staged ? (
+                                        <span className="inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800" title={asset?.builder_context || 'Staged for Brand Builder'}>
+                                            {asset?.builder_context || 'Staged'}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-600">—</span>
+                                    )}
+                                </div>
+                                <div>
+                                    <span className="text-slate-500">Composition</span>
+                                    <br />
+                                    {asset?.composition_name ? (
+                                        <span className="text-slate-800">{asset.composition_name}</span>
+                                    ) : (
+                                        <span className="text-slate-600">—</span>
+                                    )}
+                                    {asset?.metadata?.composition_id != null && String(asset.metadata.composition_id) !== '' && (
+                                        <span className="ml-1 font-mono text-[10px] text-slate-500" title="metadata.composition_id">
+                                            #{String(asset.metadata.composition_id)}
+                                        </span>
+                                    )}
+                                </div>
+                                <div>
+                                    <span className="text-slate-500">Composition ref</span>
+                                    <span className="sr-only"> — editor membership for generative / canvas rows</span>
+                                    <br />
+                                    {asset?.composition_ref_state ? (
+                                        <span
+                                            className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${COMP_REF_STATE_BADGES[asset.composition_ref_state] || 'bg-slate-100 text-slate-700'}`}
+                                            title="active = in current doc or thumbnail; stale = version history only; orphaned = unreferenced"
+                                        >
+                                            {asset.composition_ref_state}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-600">—</span>
+                                    )}
+                                </div>
                                 <div><span className="text-slate-500">Asset type</span><br />{asset?.asset_type?.label ?? '—'}</div>
                                 <div><span className="text-slate-500">Category</span><br />{asset?.category?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Created by</span><br />{asset?.created_by?.name ?? '—'}</div>
@@ -160,7 +211,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         <span className="rounded px-2 py-0.5 text-xs bg-red-100 text-red-800">No</span>
                                     )}
                                 </div>
-                                <div><span className="text-slate-500">Analysis</span><br />
+                                <div><span className="text-slate-500">Analysis (pipeline stage)</span><br />
                                     <span
                                         className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${STATUS_COLORS[asset?.analysis_status] || ''}`}
                                         title={getPipelineStageTooltip(asset?.analysis_status)}
@@ -171,7 +222,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         )}
                                     </span>
                                 </div>
-                                <div><span className="text-slate-500">Thumbnail</span><br />
+                                <div><span className="text-slate-500">Thumb status (pipeline)</span><br />
                                     <span className={`rounded px-2 py-0.5 text-xs ${STATUS_COLORS[asset?.thumbnail_status] || ''}`}>
                                         {asset?.thumbnail_status}
                                     </span>
@@ -420,6 +471,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                     {tab === 'tickets' && (
                         <p className="text-slate-500">Support tickets would be listed here (placeholder)</p>
                     )}
+                    </div>
                 </div>
             </div>
         </div>

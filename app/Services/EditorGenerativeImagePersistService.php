@@ -27,7 +27,8 @@ final class EditorGenerativeImagePersistService
 {
     public function __construct(
         protected AssetPathGenerator $pathGenerator,
-        protected TenantBucketService $tenantBucketService
+        protected TenantBucketService $tenantBucketService,
+        protected CompositionAssetReferenceStateService $compositionRefState
     ) {}
 
     /**
@@ -83,7 +84,7 @@ final class EditorGenerativeImagePersistService
             }
         }
 
-        return DB::transaction(function () use (
+        $result = DB::transaction(function () use (
             $tenant,
             $brand,
             $user,
@@ -171,6 +172,12 @@ final class EditorGenerativeImagePersistService
 
             return ['url' => $url, 'asset_id' => $asset->id];
         });
+        $created = Asset::query()->find($result['asset_id']);
+        if ($created !== null) {
+            $this->compositionRefState->refreshForAsset($created);
+        }
+
+        return $result;
     }
 
     private function findGenerativeLayerAsset(Tenant $tenant, Brand $brand, string $layerUuid): ?Asset
@@ -301,6 +308,8 @@ final class EditorGenerativeImagePersistService
             ]);
 
             $url = route('api.editor.assets.file', ['asset' => $asset->id], absolute: true);
+
+            $this->compositionRefState->refreshForAsset($asset->fresh());
 
             return ['url' => $url, 'asset_id' => $asset->id];
         });

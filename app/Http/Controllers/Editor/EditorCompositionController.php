@@ -7,6 +7,7 @@ use App\Models\Asset;
 use App\Models\Composition;
 use App\Models\CompositionVersion;
 use App\Models\User;
+use App\Services\CompositionAssetReferenceStateService;
 use App\Services\CompositionThumbnailAssetService;
 use App\Services\GenerativeCompositionAssetCleanup;
 use Illuminate\Http\JsonResponse;
@@ -26,7 +27,8 @@ class EditorCompositionController extends Controller
 {
     public function __construct(
         protected CompositionThumbnailAssetService $thumbnailAssets,
-        protected GenerativeCompositionAssetCleanup $generativeCompositionAssetCleanup
+        protected GenerativeCompositionAssetCleanup $generativeCompositionAssetCleanup,
+        protected CompositionAssetReferenceStateService $compositionRefState
     ) {}
 
     private function resolveComposition(Request $request, int $id): ?Composition
@@ -174,9 +176,14 @@ class EditorCompositionController extends Controller
             $brand,
             $user,
             $binary,
-            $c->thumbnail_asset_id
+            $c->thumbnail_asset_id,
+            (int) $c->id
         );
         $c->thumbnail_asset_id = $id;
+        $thumb = Asset::query()->find($id);
+        if ($thumb !== null) {
+            $this->compositionRefState->refreshForAsset($thumb);
+        }
     }
 
     private function persistVersionThumbnail(Composition $c, CompositionVersion $v, string $binary, User $user): void
@@ -192,10 +199,15 @@ class EditorCompositionController extends Controller
             $brand,
             $user,
             $binary,
-            $v->thumbnail_asset_id
+            $v->thumbnail_asset_id,
+            (int) $c->id
         );
         $v->thumbnail_asset_id = $id;
         $v->save();
+        $thumb = Asset::query()->find($id);
+        if ($thumb !== null) {
+            $this->compositionRefState->refreshForAsset($thumb);
+        }
     }
 
     /**
