@@ -7,6 +7,7 @@ import AssetDetailModal from '../../../Components/Admin/AssetDetailModal'
 import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
+    ExclamationCircleIcon,
     XCircleIcon,
     ClockIcon,
     QueueListIcon,
@@ -14,6 +15,7 @@ import {
     ServerStackIcon,
     ChartBarIcon,
     ChartBarSquareIcon,
+    BoltIcon,
 } from '@heroicons/react/24/outline'
 
 function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick }) {
@@ -120,6 +122,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
 const TABS = [
     { id: 'overview', label: 'Overview', icon: ChartBarSquareIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
+    { id: 'application-errors', label: 'Application errors', icon: BoltIcon },
     { id: 'reliability', label: 'Reliability Metrics', icon: ChartBarIcon },
     { id: 'failed-jobs', label: 'Failed Jobs', icon: ServerStackIcon },
 ]
@@ -129,6 +132,7 @@ export default function OperationsCenterIndex({
     tab = 'overview',
     incidents,
     failedJobs,
+    applicationErrors = [],
     queueHealth,
     schedulerHealth,
     reliabilityMetrics,
@@ -175,6 +179,7 @@ export default function OperationsCenterIndex({
     }
 
     const incidentList = incidents || []
+    const applicationErrorList = applicationErrors || []
     const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
     const someSelected = selectedIds.size > 0
 
@@ -282,7 +287,7 @@ export default function OperationsCenterIndex({
                     </Link>
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900">Operations Center</h1>
                     <p className="mt-2 text-sm text-gray-700">
-                        Unified view of incidents, queue, scheduler, and failed jobs. Data from system_incidents and failed_jobs.
+                        Unified view of incidents, application errors, queue, scheduler, and failed jobs. Data from system_incidents, application_error_events, and failed_jobs.
                     </p>
 
                     {/* Tabs */}
@@ -453,6 +458,58 @@ export default function OperationsCenterIndex({
                                     </table>
                                     {incidentList.length === 0 && (
                                         <p className="py-8 text-center text-sm text-gray-500">No unresolved incidents</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'application-errors' && (
+                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+                                <div className="px-4 py-4 sm:px-6">
+                                    <h2 className="text-lg font-semibold text-gray-900">Application errors</h2>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        User-impacting errors that are not queue hard-failures (for example AI provider overload). Newest first.
+                                    </p>
+                                </div>
+                                <div className="border-t border-gray-200 overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-300">
+                                        <thead>
+                                            <tr>
+                                                <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">When</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Category</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Code</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Tenant</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Message</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200">
+                                            {applicationErrorList.map((row) => (
+                                                <tr key={row.id}>
+                                                    <td className="whitespace-nowrap py-3 pl-4 pr-3 text-sm text-gray-500">
+                                                        {formatDate(row.created_at)}
+                                                    </td>
+                                                    <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-900">{row.category}</td>
+                                                    <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">{row.code || '—'}</td>
+                                                    <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">
+                                                        {row.tenant_id != null ? `tenant ${row.tenant_id}` : '—'}
+                                                    </td>
+                                                    <td className="py-3 px-3 text-sm text-gray-500">
+                                                        {row.source_type}/{row.source_id || '—'}
+                                                    </td>
+                                                    <td className="py-3 px-3 text-sm text-gray-900 max-w-md">
+                                                        <span className="line-clamp-3" title={row.message}>
+                                                            {row.message}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {applicationErrorList.length === 0 && (
+                                        <p className="py-8 text-center text-sm text-gray-500">
+                                            No application errors recorded yet, or the table has not been migrated on this environment.
+                                        </p>
                                     )}
                                 </div>
                             </div>

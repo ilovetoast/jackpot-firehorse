@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApplicationErrorEvent;
 use App\Models\SystemIncident;
 use App\Services\Reliability\ReliabilityMetricsService;
 use Illuminate\Http\JsonResponse;
@@ -12,13 +13,14 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
  * Unified Operations Center.
  *
- * All data from system_incidents OR failed_jobs. No log scraping.
+ * Data from system_incidents, failed_jobs, and application_error_events. No log scraping.
  */
 class OperationsCenterController extends Controller
 {
@@ -75,6 +77,25 @@ class OperationsCenterController extends Controller
                 ];
             });
 
+        $applicationErrors = collect();
+        if (Schema::hasTable('application_error_events')) {
+            $applicationErrors = ApplicationErrorEvent::query()
+                ->orderByDesc('created_at')
+                ->limit(100)
+                ->get()
+                ->map(fn ($e) => [
+                    'id' => $e->id,
+                    'category' => $e->category,
+                    'code' => $e->code,
+                    'source_type' => $e->source_type,
+                    'source_id' => $e->source_id,
+                    'tenant_id' => $e->tenant_id,
+                    'message' => $e->message,
+                    'context' => $e->context,
+                    'created_at' => $e->created_at?->toIso8601String(),
+                ]);
+        }
+
         $metricsService = app(ReliabilityMetricsService::class);
         $queueHealth = $this->getQueueHealth();
         $schedulerHealth = $this->getSchedulerHealth();
@@ -87,6 +108,7 @@ class OperationsCenterController extends Controller
             'tab' => $tab,
             'incidents' => $incidents,
             'failedJobs' => $failedJobs,
+            'applicationErrors' => $applicationErrors,
             'queueHealth' => $queueHealth,
             'schedulerHealth' => $schedulerHealth,
             'reliabilityMetrics' => $reliabilityMetrics,
