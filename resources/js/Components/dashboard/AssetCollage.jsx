@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 
 const NUM_COLUMNS = 3
 const MAX_ASSETS = 12
+/** Minimum thumbnails before columns get the slow vertical drift (needs enough visual mass per column). */
+const MIN_ASSETS_FOR_COLUMN_DRIFT = 6
 
 /** Vertical stagger between columns (slot-machine reel offset) */
 const COLUMN_BOTTOM_OFFSETS = ['-42%', '0%', '48%']
@@ -59,6 +61,7 @@ export default function AssetCollage({ assets = [] }) {
 
     const hasAssets = thumbs.length > 0
     const isFew = thumbs.length <= 2
+    const enableColumnDrift = thumbs.length >= MIN_ASSETS_FOR_COLUMN_DRIFT && !isFew
 
     if (!hasAssets) return null
 
@@ -105,7 +108,7 @@ export default function AssetCollage({ assets = [] }) {
             >
                 {displayColumns.map((imgs, ci) => {
                     const isEmpty = !imgs || imgs.length === 0
-                    const driftClass = `animate-slot-drift-${(ci % 3) + 1}`
+                    const driftClass = enableColumnDrift ? `animate-slot-drift-${(ci % 3) + 1}` : ''
 
                     return (
                         <div

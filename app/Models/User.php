@@ -161,9 +161,15 @@ class User extends Authenticatable
     /**
      * Check if the user belongs to a tenant (by tenant id).
      * Uses loaded tenants when available to avoid N+1 tenant_user queries.
+     *
+     * @param  string|int|null  $tenantId  Null means no tenant context (e.g. legacy or inconsistent asset rows) — not a match.
      */
-    public function belongsToTenant(string|int $tenantId): bool
+    public function belongsToTenant(string|int|null $tenantId): bool
     {
+        if ($tenantId === null) {
+            return false;
+        }
+
         $tenantId = (string) $tenantId;
         if ($this->relationLoaded('tenants')) {
             return $this->tenants->contains(fn (Tenant $t) => (string) $t->id === $tenantId);

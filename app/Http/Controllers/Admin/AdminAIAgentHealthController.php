@@ -31,12 +31,18 @@ class AdminAIAgentHealthController extends Controller
     {
         $this->authorizeAdmin();
 
-        // Latest row per agent_id via MAX(id) (avoids N+1 timeouts on large ai_agent_runs tables).
+        // Bound GROUP BY scans — unbounded aggregates on multi-million-row tables exhaust MySQL temp/sort memory.
+        // Health UI only needs recent history; widen window here if you need older "last success" dates.
+        $metricsSince = Carbon::now()->subYears(2);
+
+        // Latest row per agent_id via MAX(id) among recent runs (index-friendly with ai_agent_runs_agent_id_started_at_index).
         $latestRunIdsSub = AIAgentRun::query()
+            ->where('started_at', '>=', $metricsSince)
             ->selectRaw('MAX(id) as id')
             ->groupBy('agent_id');
 
         $aggByAgent = AIAgentRun::query()
+            ->where('started_at', '>=', $metricsSince)
             ->select('agent_id')
             ->selectRaw('MAX(CASE WHEN status = "success" THEN started_at END) as last_success_at')
             ->selectRaw('MAX(CASE WHEN status = "failed" THEN started_at END) as last_failed_at')
@@ -47,6 +53,7 @@ class AdminAIAgentHealthController extends Controller
         $lastRunPerAgent = AIAgentRun::query()
             ->joinSub($latestRunIdsSub, 'latest_agent_runs', 'ai_agent_runs.id', '=', 'latest_agent_runs.id')
             ->orderByDesc('ai_agent_runs.started_at')
+            // Never select * — JSON metadata / large text can inflate sort buffers and PHP memory.
             ->get([
                 'ai_agent_runs.agent_id',
                 'ai_agent_runs.agent_name',

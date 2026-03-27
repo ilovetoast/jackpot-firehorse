@@ -75,13 +75,7 @@ export default function AgencyDashboard({
         )
     }
     const dashLinks = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
-    const hasDashboardLinks = Boolean(
-        dashLinks.company ||
-            dashLinks.agency ||
-            dashLinks.brand ||
-            dashLinks.company_current ||
-            dashLinks.brand_current
-    )
+    const hasDashboardLinks = Boolean(dashLinks.company || dashLinks.brand)
 
     const { incubated = [], activated = [], pending_transfers = [] } = clients
     const { total: totalReferrals = 0, activated: activatedReferrals = [], pending: pendingReferrals = [] } = referrals
@@ -163,6 +157,8 @@ export default function AgencyDashboard({
                     brand={authFromPage?.activeBrand || auth?.activeBrand}
                     tenant={tenant}
                     variant="transparent"
+                    hideWorkspaceAppNav
+                    hideAgencyStrip
                 />
             </div>
 

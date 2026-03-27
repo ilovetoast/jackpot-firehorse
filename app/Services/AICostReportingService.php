@@ -61,7 +61,19 @@ class AICostReportingService
             $query->where('environment', $filters['environment']);
         }
 
-        $runs = $query->get();
+        // Never hydrate full rows: metadata/summary/error_message JSON can be huge — was OOM-ing admin /app/admin/ai (tab=reports) on large datasets.
+        $runs = $query->select([
+            'id',
+            'agent_id',
+            'model_used',
+            'task_type',
+            'triggering_context',
+            'status',
+            'estimated_cost',
+            'tokens_in',
+            'tokens_out',
+            'started_at',
+        ])->get();
 
         // Calculate metrics
         $totalRuns = $runs->count();

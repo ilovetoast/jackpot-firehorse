@@ -8,11 +8,32 @@ use App\Models\TenantAgency;
 use App\Models\User;
 
 /**
- * Contextual “Dashboards” header links (Company / Agency / Brand).
- * Company and Brand stay in the current tenant/brand workspace; only Agency may switch to the agency’s own tenant.
+ * Contextual “Dashboards” header links (Company / Brand). Agency dashboard access is in the top app bar.
  */
 final class DashboardLinks
 {
+    /**
+     * Labels for settings links in headers/menus. When company and brand names match, use role-only
+     * wording so “Velvet Hammer” is not repeated next to the workspace selector and both links.
+     *
+     * @return array{company: string, brand: string}
+     */
+    public static function workspaceSettingsLabels(?string $companyName, ?string $brandName): array
+    {
+        $c = $companyName !== null ? trim($companyName) : '';
+        $b = $brandName !== null ? trim($brandName) : '';
+        $same = $c !== '' && $b !== '' && strcasecmp($c, $b) === 0;
+
+        if ($same) {
+            return ['company' => 'Company settings', 'brand' => 'Brand settings'];
+        }
+
+        return [
+            'company' => $c !== '' ? $c.' settings' : 'Company settings',
+            'brand' => $b !== '' ? $b.' settings' : 'Brand settings',
+        ];
+    }
+
     public static function companyOverviewHref(User $user, Tenant $tenant): ?string
     {
         if (! $user->hasPermissionForTenant($tenant, 'company.view')) {

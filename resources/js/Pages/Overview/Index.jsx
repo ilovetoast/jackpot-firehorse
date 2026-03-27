@@ -49,20 +49,12 @@ export default function Overview({
 
     const isAgencyAccount = authFromPage?.activeCompany?.is_agency === true
     const dashLinksRaw = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
-    // Cinematic brand overview = you’re on the brand page — never show Brand (link or “· here”) in this row.
+    // Cinematic brand overview: company settings link only (you’re already on brand overview).
     const dashLinks = {
         company: dashLinksRaw.company,
-        agency: dashLinksRaw.agency,
-        agency_switch_tenant_id: dashLinksRaw.agency_switch_tenant_id,
-        company_current: dashLinksRaw.company_current,
-        agency_current: dashLinksRaw.agency_current,
+        company_label: dashLinksRaw.company_label,
     }
-    const hasDashboardLinks = Boolean(
-        dashLinks.company ||
-            dashLinks.agency ||
-            dashLinks.company_current ||
-            dashLinks.agency_current
-    )
+    const hasDashboardLinks = Boolean(dashLinks.company)
 
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
     const collageAssets = collage_assets?.length

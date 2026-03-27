@@ -57,7 +57,10 @@ class Handler
         $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
 
         $message = 'Something went wrong.';
-        if ($e instanceof BindingResolutionException) {
+        if ($e instanceof AIProviderException) {
+            $message = $e->getPublicMessage();
+            $status = $e->getStatusCode();
+        } elseif ($e instanceof BindingResolutionException) {
             // Container wiring — never leak class names to the browser.
             $message = 'Something went wrong.';
         } elseif ($e instanceof InvalidArgumentException) {

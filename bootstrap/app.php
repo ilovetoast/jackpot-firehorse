@@ -1,9 +1,11 @@
 <?php
 
+use App\Exceptions\AIProviderException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Sentry\Laravel\Integration;
@@ -93,6 +95,18 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return redirect()->route('assets.index')->with('warning', $msg);
+        });
+
+        // AI provider errors: safe message for clients; exception message remains internal for Sentry/logs.
+        $exceptions->render(function (AIProviderException $e, Request $request) {
+            if (! $request->expectsJson() && ! $request->header('X-Inertia')) {
+                return null;
+            }
+
+            return new JsonResponse([
+                'message' => $e->getPublicMessage(),
+                'code' => $e->getStatusCode(),
+            ], $e->getStatusCode());
         });
 
         // Inertia SPA: JSON error payload so the client can show a modal instead of a full-page HTML exception.

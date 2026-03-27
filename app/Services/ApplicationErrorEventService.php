@@ -84,7 +84,7 @@ class ApplicationErrorEventService
             return;
         }
 
-        if (! config('sentry.application_error_messages', true)) {
+        if (! config('application_errors.sentry_capture_messages', true)) {
             return;
         }
 

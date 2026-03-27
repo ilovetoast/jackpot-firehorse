@@ -263,10 +263,14 @@ class AIDashboardController extends Controller
             foreach ($automations as &$automation) {
                 $agentId = $this->getAgentIdForTrigger($automation['key']);
                 if ($agentId) {
-                    $lastRun = AIAgentRun::where('agent_id', $agentId)
-                        ->orderBy('started_at', 'desc')
-                        ->first();
-                    $automation['last_triggered_at'] = $lastRun?->started_at?->toISOString();
+                    // value() avoids select * + hydrate; composite index (agent_id, started_at) avoids filesort OOM on huge tables.
+                    $startedAt = AIAgentRun::query()
+                        ->where('agent_id', $agentId)
+                        ->orderByDesc('started_at')
+                        ->value('started_at');
+                    $automation['last_triggered_at'] = $startedAt
+                        ? \Carbon\Carbon::parse($startedAt)->toISOString()
+                        : null;
                 } else {
                     $automation['last_triggered_at'] = null;
                 }
@@ -755,11 +759,13 @@ class AIDashboardController extends Controller
         foreach ($automations as &$automation) {
             $agentId = $this->getAgentIdForTrigger($automation['key']);
             if ($agentId) {
-                $lastRun = AIAgentRun::where('agent_id', $agentId)
-                    ->orderBy('started_at', 'desc')
-                    ->first();
-
-                $automation['last_triggered_at'] = $lastRun?->started_at?->toISOString();
+                $startedAt = AIAgentRun::query()
+                    ->where('agent_id', $agentId)
+                    ->orderByDesc('started_at')
+                    ->value('started_at');
+                $automation['last_triggered_at'] = $startedAt
+                    ? \Carbon\Carbon::parse($startedAt)->toISOString()
+                    : null;
             } else {
                 $automation['last_triggered_at'] = null;
             }
@@ -877,9 +883,15 @@ class AIDashboardController extends Controller
      */
     protected function getModelOptions(): array
     {
-        $models = config('ai.models', []);
-        $uniqueModels = AIAgentRun::distinct('model_used')->pluck('model_used')->filter();
-        
+        // Distinct values only — avoid pluck without tight query on multi-million-row tables (memory + sort buffer).
+        $uniqueModels = AIAgentRun::query()
+            ->select('model_used')
+            ->whereNotNull('model_used')
+            ->where('model_used', '!=', '')
+            ->groupBy('model_used')
+            ->orderBy('model_used')
+            ->pluck('model_used');
+
         return $uniqueModels->map(function ($model) {
             return [
                 'value' => $model,
@@ -893,8 +905,14 @@ class AIDashboardController extends Controller
      */
     protected function getTaskTypeOptions(): array
     {
-        $uniqueTaskTypes = AIAgentRun::distinct('task_type')->pluck('task_type')->filter();
-        
+        $uniqueTaskTypes = AIAgentRun::query()
+            ->select('task_type')
+            ->whereNotNull('task_type')
+            ->where('task_type', '!=', '')
+            ->groupBy('task_type')
+            ->orderBy('task_type')
+            ->pluck('task_type');
+
         return $uniqueTaskTypes->map(function ($taskType) {
             return [
                 'value' => $taskType,
@@ -908,8 +926,14 @@ class AIDashboardController extends Controller
      */
     protected function getEnvironmentOptions(): array
     {
-        $uniqueEnvironments = AIAgentRun::distinct('environment')->pluck('environment')->filter();
-        
+        $uniqueEnvironments = AIAgentRun::query()
+            ->select('environment')
+            ->whereNotNull('environment')
+            ->where('environment', '!=', '')
+            ->groupBy('environment')
+            ->orderBy('environment')
+            ->pluck('environment');
+
         return $uniqueEnvironments->map(function ($env) {
             return [
                 'value' => $env,

@@ -11,6 +11,8 @@ import NotificationBell from './NotificationBell'
 import {
     ArrowDownTrayIcon,
     BookOpenIcon,
+    ChevronRightIcon,
+    Cog6ToothIcon,
     FolderIcon,
     HomeIcon,
     PhotoIcon,
@@ -19,7 +21,7 @@ import {
     Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 
-export default function AppNav({ brand, tenant, variant }) {
+export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = false, hideAgencyStrip = false }) {
     const page = usePage()
     const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
     const showBrandGuidelinesNav = auth?.permissions?.show_brand_guidelines_nav === true
@@ -172,19 +174,34 @@ export default function AppNav({ brand, tenant, variant }) {
     // Also show when user has brand_settings.manage permission even if brands array is empty (e.g. stale/cache) — so Brand Settings stays reachable
     const hasAnyBrandAccess = (hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)) || (activeBrand && hasBrandSettingsAccess)
 
-    /** Distinct “Company” vs “Brand” so labels don’t duplicate when the names match (e.g. same string). */
-    const companySettingsLabel = activeCompany?.name ? `${activeCompany.name} · Company` : 'Company settings'
-    const brandSettingsLabel = activeBrand?.name ? `${activeBrand.name} · Brand` : 'Brand settings'
-    const agencyWorkspaceTitle = agencyHomeCompany?.name
-        ? `${agencyHomeCompany.name} · Dashboard`
-        : 'Agency dashboard'
+    // Workspace header already shows the company name; when company and brand share the same label, avoid repeating it on both links.
+    const workspaceNameKey = (n) => (typeof n === 'string' ? n.trim().toLowerCase() : '')
+    const companyNm = activeCompany?.name?.trim() ?? ''
+    const brandNm = activeBrand?.name?.trim() ?? ''
+    const companyAndBrandSameName =
+        Boolean(companyNm && brandNm && workspaceNameKey(companyNm) === workspaceNameKey(brandNm))
+    const companySettingsLabel = companyAndBrandSameName
+        ? 'Company settings'
+        : companyNm
+          ? `${companyNm} settings`
+          : 'Company settings'
+    const brandSettingsLabel = companyAndBrandSameName
+        ? 'Brand settings'
+        : brandNm
+          ? `${brandNm} settings`
+          : 'Brand settings'
 
     /** Company default brand color (from shared auth) + active brand; drives workspace menu accent */
     const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || '#6366f1'
     const agencyBrandColor = agencyHomeCompany?.primary_color || '#4f46e5'
+    const agencyMonogramChar = agencyHomeCompany
+        ? (agencyHomeCompany.name || '').trim().charAt(0).toUpperCase() || '?'
+        : '?'
 
     const isTransparentVariant = variant === 'transparent' && !navHovered
     const navColor = isTransparentVariant ? 'transparent' : '#ffffff'
+    /** Same easing/duration as nav + agency strip so cinematic header surfaces stay in sync */
+    const cinematicSurfaceTransition = 'background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease'
     const logoFilter = activeBrand?.logo_filter || 'none'
     const textColor = isTransparentVariant ? '#ffffff' : '#000000'
     const computeLogoFilterStyle = (filter, primaryColor) => {
@@ -219,6 +236,8 @@ export default function AppNav({ brand, tenant, variant }) {
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')
+    /** Agency dashboard (etc.): hide brand workspace links — keep logo, agency strip, notifications, user menu */
+    const suppressWorkspaceChrome = Boolean(hideWorkspaceAppNav && isAppPage && !isCollectionOnlyNav)
     // Check if we're in admin area - never show plan limit banner in admin
     const isAdminPage = currentUrl.startsWith('/app/admin')
     
@@ -307,7 +326,7 @@ export default function AppNav({ brand, tenant, variant }) {
             return
         }
 
-        if (isAppPage && !isCollectionOnlyNav && !isAdminPage) {
+        if (isAppPage && !isCollectionOnlyNav && !isAdminPage && !hideWorkspaceAppNav) {
             document.body.classList.add('has-mobile-tabbar')
         } else {
             document.body.classList.remove('has-mobile-tabbar')
@@ -316,7 +335,7 @@ export default function AppNav({ brand, tenant, variant }) {
         return () => {
             document.body.classList.remove('has-mobile-tabbar')
         }
-    }, [isAppPage, isCollectionOnlyNav, isAdminPage])
+    }, [isAppPage, isCollectionOnlyNav, isAdminPage, hideWorkspaceAppNav])
 
     // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
@@ -422,16 +441,102 @@ export default function AppNav({ brand, tenant, variant }) {
                     </div>
                 </div>
             )}
-            
+
+            {/* Cinematic header group: shared hover + matched bg transition between agency strip and nav */}
+            <div
+                className={variant === 'transparent' ? 'relative z-[55] flex flex-col' : undefined}
+                onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
+                onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
+            >
+            {/* Agency strip — monogram + name + dashboard; agency primary color as left accent (light + cinematic) */}
+            {isAppPage && showAgencyQuickLink && agencyHomeCompany && !hideAgencyStrip && (
+                <div
+                    className={`flex items-center transition-colors duration-300 ${
+                        isTransparentVariant ? 'text-white/90' : 'text-slate-800'
+                    }`}
+                    style={{
+                        borderLeftWidth: 3,
+                        borderLeftStyle: 'solid',
+                        borderLeftColor: agencyBrandColor,
+                        ...(variant === 'transparent'
+                            ? {
+                                  backgroundColor: navHovered ? '#ffffff' : 'rgba(0, 0, 0, 0.35)',
+                                  borderBottomWidth: 1,
+                                  borderBottomStyle: 'solid',
+                                  borderBottomColor: navHovered ? 'rgb(226 232 240)' : 'rgba(255, 255, 255, 0.08)',
+                                  transition: cinematicSurfaceTransition,
+                                  backdropFilter: navHovered ? 'none' : 'blur(12px)',
+                                  WebkitBackdropFilter: navHovered ? 'none' : 'blur(12px)',
+                              }
+                            : {
+                                  backgroundColor: '#ffffff',
+                                  borderBottomWidth: 1,
+                                  borderBottomStyle: 'solid',
+                                  borderBottomColor: 'rgb(226 232 240)',
+                                  transition: cinematicSurfaceTransition,
+                              }),
+                    }}
+                    role="region"
+                    aria-label={`Agency workspace, ${agencyHomeCompany.name}`}
+                >
+                    <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2 sm:px-6 sm:py-2.5 lg:px-8">
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
+                            <span
+                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold leading-none ring-1 ring-inset ${
+                                    isTransparentVariant ? 'ring-white/15' : 'ring-black/[0.06]'
+                                }`}
+                                style={{
+                                    backgroundColor: isTransparentVariant
+                                        ? `color-mix(in srgb, ${agencyBrandColor} 38%, rgba(255,255,255,0.07))`
+                                        : `color-mix(in srgb, ${agencyBrandColor} 22%, white)`,
+                                    color: isTransparentVariant ? '#ffffff' : agencyBrandColor,
+                                }}
+                                aria-hidden
+                            >
+                                {agencyMonogramChar}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                                <p
+                                    className={`hidden text-[10px] font-semibold uppercase tracking-wider sm:block ${
+                                        isTransparentVariant ? 'text-white/45' : 'text-slate-500'
+                                    }`}
+                                >
+                                    Agency workspace
+                                </p>
+                                <p
+                                    className="truncate text-sm font-medium leading-tight sm:text-[15px]"
+                                    title={agencyHomeCompany.name}
+                                >
+                                    {agencyHomeCompany.name}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={goAgencyDashboardFromMenu}
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
+                                isTransparentVariant
+                                    ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
+                                    : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-indigo-500 focus-visible:ring-offset-white'
+                            }`}
+                            style={!isTransparentVariant ? { color: agencyBrandColor } : undefined}
+                            title="Agency dashboard"
+                        >
+                            <span className="hidden sm:inline">Agency dashboard</span>
+                            <span className="sm:hidden">Dashboard</span>
+                            <ChevronRightIcon className="h-4 w-4 opacity-80" aria-hidden />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <nav
                 className={`relative app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''} ${variant === 'transparent' && !navHovered ? '' : 'shadow-sm'}`}
                 style={{
                     backgroundColor: navColor,
-                    transition: 'background-color 0.3s ease, box-shadow 0.3s ease',
+                    transition: cinematicSurfaceTransition,
                     ...(isCollectionOnlyNav ? { '--collection-only-user': '1' } : {}),
                 }}
-                onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
-                onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
                 data-collection-only={isCollectionOnlyNav ? 'true' : undefined}
                 aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
             >
@@ -566,6 +671,8 @@ export default function AppNav({ brand, tenant, variant }) {
                                     Generative
                                 </span>
                             </div>
+                        ) : suppressWorkspaceChrome ? (
+                            <div className="hidden min-w-0 flex-1 sm:block" aria-hidden="true" />
                         ) : (
                             <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto">
                                 <Link
@@ -738,7 +845,7 @@ export default function AppNav({ brand, tenant, variant }) {
                             </Link>
                         )}
                         {/* Right-side nav: Brand Guidelines (only when published, or user can set up DNA), Downloads */}
-                        {isAppPage && showBrandGuidelinesNav && (
+                        {isAppPage && showBrandGuidelinesNav && !suppressWorkspaceChrome && (
                             <Link
                                 href="/app/brand-guidelines"
                                 className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
@@ -749,7 +856,7 @@ export default function AppNav({ brand, tenant, variant }) {
                                 <span>Brand Guidelines</span>
                             </Link>
                         )}
-                        {isAppPage && !isCollectionOnlyNav && (
+                        {isAppPage && !isCollectionOnlyNav && !suppressWorkspaceChrome && (
                             <>
                                 <Link
                                     href="/app/downloads"
@@ -828,7 +935,13 @@ export default function AppNav({ brand, tenant, variant }) {
                                         {/* Account Section */}
                                         <div className="px-4 py-2 border-b border-gray-200">
                                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account</p>
-                                            <div className="px-3 py-1 flex items-center gap-3">
+                                            <Link
+                                                href="/app/profile"
+                                                className="group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                                                onClick={() => setUserMenuOpen(false)}
+                                                aria-label="Profile and account settings"
+                                                title="Profile and account settings"
+                                            >
                                                 <Avatar
                                                     avatarUrl={auth.user?.avatar_url}
                                                     firstName={auth.user?.first_name}
@@ -837,64 +950,23 @@ export default function AppNav({ brand, tenant, variant }) {
                                                     size="sm"
                                                 />
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="text-xs text-gray-900 truncate">
+                                                    <p className="text-xs font-medium text-gray-900 truncate">
                                                         {auth.user?.first_name && auth.user?.last_name
                                                             ? `${auth.user.first_name} ${auth.user.last_name}`
                                                             : auth.user?.first_name || auth.user?.email}
                                                     </p>
                                                     <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
                                                 </div>
-                                            </div>
-                                            <Link
-                                                href="/app/profile"
-                                                className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                onClick={() => setUserMenuOpen(false)}
-                                            >
-                                                <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                                                </svg>
-                                                Profile
+                                                <Cog6ToothIcon
+                                                    className="h-4 w-4 shrink-0 text-gray-400 transition-colors group-hover:text-gray-600"
+                                                    aria-hidden
+                                                />
                                             </Link>
                                         </div>
 
                                         {/* Workspace: switch company, then contextual settings links */}
                                         {(hasAnyCompanyAccess || (activeBrand && hasAnyBrandAccess && !collectionOnly)) && (
                                         <div className="px-4 py-2 border-b border-gray-200">
-                                            {/* Agency first — tinted with that company’s default brand color */}
-                                            {showAgencyQuickLink && agencyHomeCompany && (
-                                                <div
-                                                    className="mb-3 rounded-xl border px-2.5 py-2.5 shadow-sm"
-                                                    style={{
-                                                        background: `color-mix(in srgb, ${agencyBrandColor} 17%, white)`,
-                                                        borderColor: `color-mix(in srgb, ${agencyBrandColor} 38%, white)`,
-                                                    }}
-                                                >
-                                                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-900">
-                                                        Agency (not the selected company)
-                                                    </p>
-                                                    <p className="mb-2 text-[10px] leading-snug text-gray-600">
-                                                        Opens your agency dashboard—a different org than the company you select below.
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={goAgencyDashboardFromMenu}
-                                                        className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200/90 bg-white px-2.5 py-2 text-left text-sm font-medium text-gray-900 shadow-sm ring-1 ring-black/[0.04] transition hover:border-gray-300 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-0"
-                                                        style={{ '--tw-ring-color': `${agencyBrandColor}99` }}
-                                                        title={agencyWorkspaceTitle}
-                                                    >
-                                                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                                                            <svg className="h-4 w-4 flex-shrink-0" style={{ color: agencyBrandColor }} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
-                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 .414-.336.75-.75.75h-4.5a.75.75 0 01-.75-.75v-4.25m0-4.15v4.15m0-4.15a2.25 2.25 0 00-2.25-2.25h-13.5a2.25 2.25 0 00-2.25 2.25v4.15m0 0v4.25c0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75v-4.25m0-4.15V9.75m0 0a2.25 2.25 0 012.25-2.25h13.5a2.25 2.25 0 012.25 2.25V9.75m0 0V14.25" />
-                                                            </svg>
-                                                            <span className="min-w-0 flex-1 truncate">{agencyWorkspaceTitle}</span>
-                                                        </span>
-                                                        <svg className="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" aria-hidden>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                                        </svg>
-                                                    </button>
-                                                </div>
-                                            )}
-
                                             {/* One card: label + company “select” + workspace links (shared accent) */}
                                             <div
                                                 className="overflow-hidden rounded-xl border border-gray-200/95 bg-white shadow-sm"
@@ -908,11 +980,11 @@ export default function AppNav({ brand, tenant, variant }) {
                                                     <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
                                                         Active workspace
                                                     </p>
-                                                    <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
-                                                        {hasMultipleCompanies
-                                                            ? 'Use the selector to change company. Links below match the selected company.'
-                                                            : 'Links below are for this company.'}
-                                                    </p>
+                                                    {hasMultipleCompanies && (
+                                                        <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                                                            Switch company below.
+                                                        </p>
+                                                    )}
                                                 </div>
 
                                                 {activeCompany && (
@@ -1166,7 +1238,7 @@ export default function AppNav({ brand, tenant, variant }) {
             )}
 
             {/* Mobile PWA bottom app navigation */}
-            {isAppPage && !isCollectionOnlyNav && !isAdminPage && (() => {
+            {isAppPage && !isCollectionOnlyNav && !isAdminPage && !hideWorkspaceAppNav && (() => {
                 const isOnOverview = currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
                 const isDarkNav = isOnOverview
                 return (
@@ -1201,6 +1273,7 @@ export default function AppNav({ brand, tenant, variant }) {
                 )
             })()}
             </nav>
+            </div>
         </div>
     )
 }

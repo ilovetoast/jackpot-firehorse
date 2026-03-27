@@ -2,6 +2,7 @@
 
 namespace App\Services\AI\Providers;
 
+use App\Exceptions\AIProviderException;
 use App\Services\AI\Contracts\AIProviderInterface;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -267,7 +268,14 @@ class AnthropicProvider implements AIProviderInterface
                     );
                 }
 
-                throw new \Exception("Anthropic API error: {$errorMessage}", $response->status());
+                [$publicMessage, $httpStatus] = $this->publicMessageAndStatusForAnthropicFailure(
+                    $response->status(),
+                    $errorMessage,
+                    $errorType
+                );
+                $internalMessage = "Anthropic API error: {$errorMessage}";
+
+                throw new AIProviderException($publicMessage, $internalMessage, $httpStatus);
             }
 
             $data = $response->json();
@@ -288,6 +296,14 @@ class AnthropicProvider implements AIProviderInterface
             ];
         } catch (\App\Exceptions\AIQuotaExceededException $e) {
             throw $e;
+        } catch (AIProviderException $e) {
+            Log::warning('[AnthropicProvider] API rejected request', [
+                'model' => $model,
+                'internal' => $e->getMessage(),
+                'public' => $e->getPublicMessage(),
+                'status' => $e->getStatusCode(),
+            ]);
+            throw $e;
         } catch (\Exception $e) {
             Log::error('[AnthropicProvider] API call failed', [
                 'model' => $model,
@@ -295,5 +311,44 @@ class AnthropicProvider implements AIProviderInterface
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * User-safe copy + HTTP status; internal detail stays in {@see AIProviderException::getMessage()}.
+     *
+     * @return array{0: string, 1: int} [publicMessage, httpStatus]
+     */
+    protected function publicMessageAndStatusForAnthropicFailure(int $status, string $errorMessage, ?string $errorType): array
+    {
+        $lower = strtolower($errorMessage);
+        $typeLower = $errorType !== null ? strtolower($errorType) : '';
+
+        if (str_contains($lower, 'overloaded')
+            || str_contains($typeLower, 'overloaded')
+            || $status === 529) {
+            return [
+                'The AI service is busy right now. Please try again in a moment.',
+                503,
+            ];
+        }
+
+        if ($status >= 500) {
+            return [
+                'The AI service is temporarily unavailable. Please try again shortly.',
+                503,
+            ];
+        }
+
+        if ($status >= 400) {
+            return [
+                'We couldn\'t complete this AI request. Please try again.',
+                502,
+            ];
+        }
+
+        return [
+            'Something went wrong with the AI service. Please try again.',
+            503,
+        ];
     }
 }

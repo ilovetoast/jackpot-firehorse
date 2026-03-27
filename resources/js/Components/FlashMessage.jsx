@@ -10,8 +10,16 @@ export default function FlashMessage() {
     useEffect(() => {
         // Validation errors always show (from form submission)
         if (errors && Object.keys(errors).length > 0) {
-            const firstError = Object.values(errors)[0]
-            setMessage(Array.isArray(firstError) ? firstError[0] : firstError)
+            const firstKey = Object.keys(errors)[0]
+            const raw = errors[firstKey]
+            const line = Array.isArray(raw) ? raw[0] : raw
+            setMessage(
+                line == null
+                    ? 'Something went wrong.'
+                    : typeof line === 'string'
+                      ? line
+                      : String(line)
+            )
             setType('error')
             setVisible(true)
             return
@@ -104,7 +112,7 @@ export default function FlashMessage() {
     }
 
     return (
-        <div className="fixed top-4 right-4 z-50 max-w-md w-full">
+        <div className="fixed top-4 right-4 z-[100] max-w-md w-full">
             <div className={`rounded-lg border p-4 shadow-lg ${getStyles()}`}>
                 <div className="flex items-start">
                     <div className="flex-shrink-0">

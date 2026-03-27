@@ -159,17 +159,26 @@
         50% { transform: translateY(-8px); }
     }
 
-    /* Overview slot-machine: subtle vertical drift */
+    /* Overview collage: very slow, subtle vertical drift (columns differ slightly; gated in AssetCollage when enough assets) */
     @keyframes slot-machine-drift {
-        0%, 100% { transform: translateY(0) translateZ(0) rotateX(1deg); }
-        50% { transform: translateY(-12px) translateZ(0) rotateX(1deg); }
+        0%, 100% { transform: translateY(0) translateZ(0); }
+        50% { transform: translateY(-8px) translateZ(0); }
     }
     .animate-slot-drift {
-        animation: slot-machine-drift 12s ease-in-out infinite;
+        animation: slot-machine-drift 72s ease-in-out infinite;
     }
-    .animate-slot-drift-1 { animation: slot-machine-drift 11s ease-in-out infinite 0s; }
-    .animate-slot-drift-2 { animation: slot-machine-drift 13s ease-in-out infinite 1.5s; }
-    .animate-slot-drift-3 { animation: slot-machine-drift 12s ease-in-out infinite 3s; }
+    .animate-slot-drift-1 { animation: slot-machine-drift 68s ease-in-out infinite 0s; }
+    .animate-slot-drift-2 { animation: slot-machine-drift 80s ease-in-out infinite 4s; }
+    .animate-slot-drift-3 { animation: slot-machine-drift 76s ease-in-out infinite 9s; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .animate-slot-drift,
+        .animate-slot-drift-1,
+        .animate-slot-drift-2,
+        .animate-slot-drift-3 {
+            animation: none !important;
+        }
+    }
 
     /* Download landing: fluid, abstract jackpot-inspired animation — morphing blobs + subtle shimmer */
     @keyframes download-blob-1 {

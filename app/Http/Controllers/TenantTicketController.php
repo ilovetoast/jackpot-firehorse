@@ -245,7 +245,7 @@ class TenantTicketController extends Controller
 
             DB::commit();
 
-            return redirect()->route('tickets.show', $ticket)
+            return redirect()->route('support.tickets.show', $ticket)
                 ->with('success', 'Ticket created successfully.');
         } catch (\Exception $e) {
             DB::rollBack();
@@ -397,7 +397,7 @@ class TenantTicketController extends Controller
 
             DB::commit();
 
-            return redirect()->route('tickets.show', $ticket)
+            return redirect()->route('support.tickets.show', $ticket)
                 ->with('success', 'Reply sent successfully.');
         } catch (\Exception $e) {
             DB::rollBack();
@@ -431,7 +431,7 @@ class TenantTicketController extends Controller
 
             DB::commit();
 
-            return redirect()->route('tickets.show', $ticket)
+            return redirect()->route('support.tickets.show', $ticket)
                 ->with('success', 'Ticket closed successfully.');
         } catch (\Exception $e) {
             DB::rollBack();

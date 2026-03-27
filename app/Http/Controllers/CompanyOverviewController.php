@@ -290,8 +290,6 @@ class CompanyOverviewController extends Controller
 
         $tenant->loadMissing('defaultBrand');
         $brandForPortal = $activeBrand ?? $tenant->defaultBrand;
-        $agencyPayload = DashboardLinks::agencyDashboardLinkForCompanyPortal($user, $tenant);
-
         return Inertia::render('Company/Overview', [
             'tenant' => $tenant,
             'activeBrand' => $activeBrand,
@@ -324,12 +322,8 @@ class CompanyOverviewController extends Controller
             'ai_usage' => $aiUsageData,
             'agency_managed_brands' => $agencyManagedBrands,
             'dashboard_links' => [
-                'company' => null,
-                'company_current' => true,
                 'brand' => DashboardLinks::brandPortalHref($user, $tenant, $brandForPortal),
-                'brand_current' => false,
-                'agency' => $agencyPayload['href'] ?? null,
-                'agency_switch_tenant_id' => $agencyPayload['switch_tenant_id'] ?? null,
+                'brand_label' => DashboardLinks::workspaceSettingsLabels($tenant->name, $brandForPortal?->name)['brand'],
             ],
         ]);
     }

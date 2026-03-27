@@ -864,20 +864,17 @@ class DashboardController extends Controller
             ];
         }
 
-        $agencyPayload = DashboardLinks::agencyDashboardLinkForCompanyPortal($user, $tenant);
-
-        // Brand cinematic overview: Company + optional Agency for agency partners only — no Brand row (you’re on brand overview).
+        // Brand cinematic overview: link to company settings only — you’re already on brand overview (no “here” crumb).
+        $settingsLabels = DashboardLinks::workspaceSettingsLabels($tenant->name, $brand->name);
         $dashboardLinks = [
             'company' => DashboardLinks::companyOverviewHref($user, $tenant),
-            'agency' => $agencyPayload['href'] ?? null,
-            'agency_switch_tenant_id' => $agencyPayload['switch_tenant_id'] ?? null,
+            'company_label' => $settingsLabels['company'],
         ];
 
         if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
             $dashboardLinks = [
                 'company' => null,
-                'agency' => null,
-                'agency_switch_tenant_id' => null,
+                'company_label' => $settingsLabels['company'],
             ];
         }
 
