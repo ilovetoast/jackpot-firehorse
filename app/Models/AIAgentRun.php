@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EventType;
 use App\Enums\AITaskType;
+use App\Services\ApplicationErrorEventService;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -385,5 +386,15 @@ class AIAgentRun extends Model
             'completed_at' => now(),
             'metadata' => $metadata ?? $this->metadata,
         ]);
+
+        try {
+            $this->refresh();
+            app(ApplicationErrorEventService::class)->recordFromAiAgentRun($this);
+        } catch (\Throwable $e) {
+            \Log::warning('[AIAgentRun] Failed to record application_error_events row', [
+                'ai_agent_run_id' => $this->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

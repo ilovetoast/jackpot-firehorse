@@ -132,4 +132,15 @@ return [
         'default_integrations' => env('SENTRY_TRACE_DEFAULT_INTEGRATIONS_ENABLED', true),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Application error messages (non-exception)
+    |--------------------------------------------------------------------------
+    |
+    | When true, selected AI/provider failures recorded in application_error_events
+    | also call Sentry::captureMessage (warning) so overload/rate-limit noise is visible.
+    |
+    */
+    'application_error_messages' => env('SENTRY_APPLICATION_ERROR_MESSAGES', true),
+
 ];
