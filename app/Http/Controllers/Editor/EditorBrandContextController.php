@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Editor;
 
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
+use App\Support\Typography\GoogleFontStylesheetHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -380,14 +381,10 @@ class EditorBrandContextController extends Controller
             if (! is_array($fontEntry)) {
                 continue;
             }
-            if (($fontEntry['source'] ?? '') !== 'google') {
-                continue;
+            $url = GoogleFontStylesheetHelper::stylesheetUrlForGoogleFontEntry($fontEntry);
+            if ($url !== null) {
+                $out[] = $url;
             }
-            $name = trim((string) ($fontEntry['name'] ?? ''));
-            if ($name === '') {
-                continue;
-            }
-            $out[] = 'https://fonts.googleapis.com/css2?family='.rawurlencode($name).':wght@300;400;500;600;700&display=swap';
         }
 
         return array_values(array_unique($out));

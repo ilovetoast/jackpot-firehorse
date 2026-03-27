@@ -215,6 +215,27 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'promotional', 'system_label' => 'Promotional'],
         ]);
 
+        // Font role (Fonts category) — headline vs body copy (synced from Brand Guidelines typography)
+        $fontRoleId = $this->getOrCreateField([
+            'key' => 'font_role',
+            'system_label' => 'Font role',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($fontRoleId, [
+            ['value' => 'headline', 'system_label' => 'Headline'],
+            ['value' => 'body_copy', 'system_label' => 'Body copy'],
+        ]);
+
         // Graphics — graphic_type
         $graphicTypeId = $this->getOrCreateField([
             'key' => 'graphic_type',

@@ -110,6 +110,8 @@ class AppServiceProvider extends ServiceProvider
         \App\Models\MetadataFieldVisibility::observe(\App\Observers\MetadataFieldVisibilityObserver::class);
         \App\Models\MetadataOptionVisibility::observe(\App\Observers\MetadataOptionVisibilityObserver::class);
 
+        \App\Models\BrandModelVersion::observe(\App\Observers\BrandModelVersionObserver::class);
+
         // Record last successful session login (web guard) for admin reporting
         Event::listen(Login::class, function (Login $event): void {
             if ($event->guard !== 'web') {

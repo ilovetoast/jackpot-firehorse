@@ -14,6 +14,7 @@ class CategoryTypeResolver
     public const SLUG_TO_TYPE_FIELD = [
         'photography' => 'photo_type',
         'logos' => 'logo_type',
+        'fonts' => 'font_role',
         'graphics' => 'graphic_type',
         'video' => 'video_type',
         'print' => 'print_type',
@@ -45,9 +46,14 @@ class CategoryTypeResolver
             return null;
         }
 
+        $label = match ($slug) {
+            'fonts' => 'Font role',
+            default => 'Type',
+        };
+
         return [
             'field_key' => self::SLUG_TO_TYPE_FIELD[$slug],
-            'label' => 'Type',
+            'label' => $label,
         ];
     }
 

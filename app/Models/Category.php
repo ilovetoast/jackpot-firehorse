@@ -186,6 +186,7 @@ class Category extends Model
             'logos',
             'photography',
             'graphics',
+            'fonts',
         ];
 
         if (in_array($slug, $disabled, true)) {

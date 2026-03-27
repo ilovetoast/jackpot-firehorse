@@ -75,7 +75,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
     // Clear polling when asset changes or drawer closes
     useEffect(() => {
-        if (!asset || !asset.id) {
+        if (!asset || !asset.id || asset.is_virtual_google_font) {
             // Drawer closed - stop polling
             if (timeoutIdRef.current) {
                 clearTimeout(timeoutIdRef.current)
@@ -99,7 +99,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
     // Perform single asset thumbnail status check
     const performPoll = async () => {
         const currentAsset = assetRef.current
-        if (!currentAsset || !currentAsset.id) {
+        if (!currentAsset || !currentAsset.id || currentAsset.is_virtual_google_font) {
             return
         }
 
@@ -218,7 +218,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
     // Start polling when drawer opens with an asset
     useEffect(() => {
         const currentAsset = assetRef.current
-        if (!currentAsset || !currentAsset.id) {
+        if (!currentAsset || !currentAsset.id || currentAsset.is_virtual_google_font) {
             return
         }
 

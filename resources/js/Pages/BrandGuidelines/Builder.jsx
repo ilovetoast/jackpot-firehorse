@@ -3333,6 +3333,35 @@ export default function BrandGuidelinesBuilder({
     const scoringRules = payload.scoring_rules || {}
     const visual = payload.visual || {}
 
+    const importBrandColorsIntoAllowedPalette = useCallback(() => {
+        const normalize = (raw) => {
+            if (!raw || typeof raw !== 'string') return null
+            const t = raw.trim()
+            if (!t) return null
+            let h = t.startsWith('#') ? t.slice(1) : t
+            if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+            if (h.length !== 6 || !/^[0-9a-fA-F]+$/.test(h)) return null
+            return (`#${h}`).toLowerCase()
+        }
+        const fromBrand = ['primary_color', 'secondary_color', 'accent_color']
+            .map((k) => normalize(brandColors[k]))
+            .filter(Boolean)
+        const existingRaw = unwrapValue(scoringRules.allowed_color_palette) || []
+        const existingHexes = existingRaw
+            .map((c) => normalize((typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')))
+            .filter(Boolean)
+        const seen = new Set(existingHexes.map((hex) => hex.toLowerCase()))
+        const merged = [...existingHexes]
+        for (const hex of fromBrand) {
+            const key = hex.toLowerCase()
+            if (!seen.has(key)) {
+                seen.add(key)
+                merged.push(hex)
+            }
+        }
+        updatePayload('scoring_rules', 'allowed_color_palette', merged.map((hex) => ({ hex, role: null })))
+    }, [brandColors, scoringRules.allowed_color_palette, updatePayload])
+
     return (
         <div className="h-screen flex flex-col bg-[#0B0B0D] relative overflow-hidden">
             {/* Cinematic background — matches Brand Overview glow (primary + secondary) */}
@@ -4488,52 +4517,6 @@ export default function BrandGuidelinesBuilder({
                                                     </div>
                                                 </div>
                                             </FieldCard>
-                                            <FieldCard title="Allowed Color Palette">
-                                                <p className="text-white/60 text-sm mb-3">Additional brand colors used for on-brand scoring. Pick visually or type a hex code.</p>
-                                                {isAiPopulated(scoringRules.allowed_color_palette) && <AiFieldBadge field={scoringRules.allowed_color_palette} className="mb-2" />}
-                                                <ColorPaletteChipInput
-                                                    value={(unwrapValue(scoringRules.allowed_color_palette) || []).map((c) => (typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')).filter(Boolean)}
-                                                    onChange={(v) => updatePayload('scoring_rules', 'allowed_color_palette', v.map((hex) => ({ hex, role: null })))}
-                                                    placeholder="#hex and press Enter"
-                                                />
-                                            </FieldCard>
-                                            <FieldCard title="Visual References">
-                                                <p className="text-white/60 text-sm mb-2">Images that represent your brand look. Used for scoring.</p>
-                                                <p className="text-white/50 text-xs mb-4">Select from assets you uploaded in Background (brand materials) or your Assets library.</p>
-                                                {(visualReferences?.length ?? 0) === 0 && (
-                                                    <p className="text-white/40 text-sm mb-3">No references yet — select or upload to add.</p>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setAssetSelectorOpen('visual_reference')}
-                                                    className="px-4 py-3 rounded-xl border border-white/20 text-white/90 hover:bg-white/10 text-sm"
-                                                >
-                                                    Select from Assets
-                                                </button>
-                                                {visualReferences?.length > 0 && (
-                                                    <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                        {visualReferences.map((a) => (
-                                                            <div key={a.id} className="rounded-xl border border-white/20 bg-white/5 p-2 flex flex-col">
-                                                                <div className="aspect-square rounded-lg bg-white/10 overflow-hidden mb-2">
-                                                                    {(a.thumbnail_url || a.signed_url) ? (
-                                                                        <img src={a.thumbnail_url || a.signed_url} alt="" className="w-full h-full object-cover" />
-                                                                    ) : (
-                                                                        <div className="w-full h-full flex items-center justify-center text-white/40 text-2xl">◇</div>
-                                                                    )}
-                                                                </div>
-                                                                <p className="text-xs text-white/80 truncate" title={a.original_filename}>{a.original_filename || a.title}</p>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleDetachVisualRef(a.id)}
-                                                                    className="mt-1 text-xs text-red-400 hover:text-red-300"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </FieldCard>
                                             <FieldCard title="Brand Colors">
                                                 <p className="text-white/60 text-sm mb-4">Define your brand&apos;s color palette. These colors will be used throughout the application.</p>
                                                 <BrandColorPickers brandColors={brandColors} setBrandColors={setBrandColors} />
@@ -4586,6 +4569,62 @@ export default function BrandGuidelinesBuilder({
                                                                 )
                                                             })}
                                                         </div>
+                                                    </div>
+                                                )}
+                                            </FieldCard>
+                                            <FieldCard title="Allowed Color Palette">
+                                                <p className="text-white/60 text-sm mb-3">Additional brand colors used for on-brand scoring. Pick visually or type a hex code.</p>
+                                                <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={importBrandColorsIntoAllowedPalette}
+                                                        disabled={!brandColors.primary_color && !brandColors.secondary_color && !brandColors.accent_color}
+                                                        className="px-3 py-2 rounded-lg border border-white/20 text-sm text-white/90 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        Import from brand colors
+                                                    </button>
+                                                </div>
+                                                {isAiPopulated(scoringRules.allowed_color_palette) && <AiFieldBadge field={scoringRules.allowed_color_palette} className="mb-2" />}
+                                                <ColorPaletteChipInput
+                                                    value={(unwrapValue(scoringRules.allowed_color_palette) || []).map((c) => (typeof c === 'object' && c?.hex) || (typeof c === 'string' ? c : '')).filter(Boolean)}
+                                                    onChange={(v) => updatePayload('scoring_rules', 'allowed_color_palette', v.map((hex) => ({ hex, role: null })))}
+                                                    placeholder="#hex and press Enter"
+                                                />
+                                            </FieldCard>
+                                            <FieldCard title="Visual References">
+                                                <p className="text-white/60 text-sm mb-2">Images that represent your brand look. Used for scoring.</p>
+                                                <p className="text-white/50 text-xs mb-4">Select from assets you uploaded in Background (brand materials) or your Assets library.</p>
+                                                {(visualReferences?.length ?? 0) === 0 && (
+                                                    <p className="text-white/40 text-sm mb-3">No references yet — select or upload to add.</p>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAssetSelectorOpen('visual_reference')}
+                                                    className="px-4 py-3 rounded-xl border border-white/20 text-white/90 hover:bg-white/10 text-sm"
+                                                >
+                                                    Select from Assets
+                                                </button>
+                                                {visualReferences?.length > 0 && (
+                                                    <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                        {visualReferences.map((a) => (
+                                                            <div key={a.id} className="rounded-xl border border-white/20 bg-white/5 p-2 flex flex-col">
+                                                                <div className="aspect-square rounded-lg bg-white/10 overflow-hidden mb-2">
+                                                                    {(a.thumbnail_url || a.signed_url) ? (
+                                                                        <img src={a.thumbnail_url || a.signed_url} alt="" className="w-full h-full object-cover" />
+                                                                    ) : (
+                                                                        <div className="w-full h-full flex items-center justify-center text-white/40 text-2xl">◇</div>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-white/80 truncate" title={a.original_filename}>{a.original_filename || a.title}</p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDetachVisualRef(a.id)}
+                                                                    className="mt-1 text-xs text-red-400 hover:text-red-300"
+                                                                >
+                                                                    Remove
+                                                                </button>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
                                             </FieldCard>

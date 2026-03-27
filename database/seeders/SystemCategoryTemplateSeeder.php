@@ -15,7 +15,7 @@ use Illuminate\Database\Seeder;
  * Each template has explicit version = 1.
  * Default enabled fields (collection, tags) are configured in metadata_category_defaults.
  *
- * ASSET: Logos, Photography, Graphics, Video
+ * ASSET: Logos, Photography, Graphics, Video, Fonts (hidden)
  * DELIVERABLE: Print, Digital, OOH, Events, Videos, Sales Collateral, PR, Packaging, Product Renders, Radio
  */
 class SystemCategoryTemplateSeeder extends Seeder
@@ -61,6 +61,15 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 3,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Fonts',
+                'slug' => 'fonts',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => true,
+                'sort_order' => 4,
                 'version' => 1,
             ],
             // Execution/Deliverable asset type system categories (exactly 10)

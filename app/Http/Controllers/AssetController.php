@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
@@ -14,6 +15,7 @@ use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
@@ -23,6 +25,7 @@ use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -106,9 +109,21 @@ class AssetController extends Controller
             ->ordered()
             ->with(['tenant', 'brand']);
 
+        $includeHiddenFontsNav = $this->shouldIncludeHiddenFontsCategory($tenant, $brand, $user, $request->get('category'));
+
         // If user does not have 'manage categories' permission, filter out hidden categories
+        // (except Fonts when it should appear: filter, manage, or font assets present).
         if (! $user || ! $user->can('manage categories')) {
-            $query->visible();
+            if ($includeHiddenFontsNav) {
+                $query->where(function ($q) {
+                    $q->where('is_hidden', false)
+                        ->orWhere(function ($q2) {
+                            $q2->where('slug', 'fonts')->where('is_hidden', true);
+                        });
+                });
+            } else {
+                $query->visible();
+            }
         }
 
         $categories = $query->get();
@@ -124,7 +139,16 @@ class AssetController extends Controller
 
         // Get only BASIC system category templates
         $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::ASSET)
-            ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
+            ->filter(function ($template) use ($user, $includeHiddenFontsNav) {
+                if (! $template->is_hidden) {
+                    return true;
+                }
+                if ($user && $user->can('manage categories')) {
+                    return true;
+                }
+
+                return $template->slug === 'fonts' && $includeHiddenFontsNav;
+            });
 
         // Create merged list of categories
         $allCategories = collect();
@@ -884,6 +908,18 @@ class AssetController extends Controller
             })
                 ->values()
                 ->all();
+
+            $mappedAssets = $this->prependGoogleFontVirtualAssetsIfNeeded(
+                $request,
+                $mappedAssets,
+                $brand,
+                $category,
+                $paginator,
+                $isStagedView,
+                $isReferenceMaterialsView,
+                $isTrashView,
+                $isLoadMore
+            );
 
             $t2 = microtime(true);
 
@@ -2501,6 +2537,84 @@ class AssetController extends Controller
     }
 
     /**
+     * Prepend Brand Guidelines Google Fonts (no DAM file) when viewing the Fonts category on page 1.
+     *
+     * @param  list<array<string, mixed>>  $mappedAssets
+     * @return list<array<string, mixed>>
+     */
+    private function prependGoogleFontVirtualAssetsIfNeeded(
+        Request $request,
+        array $mappedAssets,
+        Brand $brand,
+        ?Category $category,
+        LengthAwarePaginator $paginator,
+        bool $isStagedView,
+        bool $isReferenceMaterialsView,
+        bool $isTrashView,
+        bool $isLoadMore
+    ): array {
+        if ($isStagedView || $isReferenceMaterialsView || $isTrashView || $isLoadMore) {
+            return $mappedAssets;
+        }
+        if ($paginator->currentPage() !== 1) {
+            return $mappedAssets;
+        }
+        if (! $category || $category->slug !== 'fonts') {
+            return $mappedAssets;
+        }
+
+        // Same visibility as the grid: do not Gate::view here — hidden Fonts can appear for users who
+        // see the category via shouldIncludeHiddenFontsCategory (font assets / filter) without manage categories.
+
+        $virtual = app(GoogleFontLibraryEntriesService::class)->virtualAssetsForFontsCategory($brand, $category);
+
+        return $virtual === [] ? $mappedAssets : array_merge($virtual, $mappedAssets);
+    }
+
+    /**
+     * Hidden Fonts category is shown in the library (and bulk assign) when the user manages
+     * categories, filters to Fonts, or at least one asset is filed under Fonts.
+     */
+    private function shouldIncludeHiddenFontsCategory(
+        \App\Models\Tenant $tenant,
+        Brand $brand,
+        ?User $user,
+        ?string $categoryQuerySlug
+    ): bool {
+        if ($user && $user->can('manage categories')) {
+            return true;
+        }
+        if ($categoryQuerySlug !== null && strtolower($categoryQuerySlug) === 'fonts') {
+            return true;
+        }
+
+        $fontsCategory = Category::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::ASSET)
+            ->where('slug', 'fonts')
+            ->active()
+            ->first();
+
+        if (! $fontsCategory) {
+            return false;
+        }
+
+        return Asset::query()
+            ->normalIntakeOnly()
+            ->excludeBuilderStaged()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->whereNotNull('metadata')
+            ->whereRaw(
+                'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
+                [$fontsCategory->id]
+            )
+            ->exists();
+    }
+
+    /**
      * Category dropdown options per asset type for bulk "Assign Category" (library / execution / generative).
      *
      * @return array{asset: list<array{id: int, name: string, slug: string, asset_type: string}>, deliverable: list<array<string, mixed>>, ai_generated: list<array<string, mixed>>}
@@ -2513,6 +2627,8 @@ class AssetController extends Controller
             AssetType::AI_GENERATED->value => [],
         ];
 
+        $includeHiddenFontsNav = $this->shouldIncludeHiddenFontsCategory($tenant, $brand, $user, null);
+
         foreach ([AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED] as $type) {
             $query = Category::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
@@ -2521,7 +2637,16 @@ class AssetController extends Controller
                 ->ordered();
 
             if (! $user || ! $user->can('manage categories')) {
-                $query->visible();
+                if ($type === AssetType::ASSET && $includeHiddenFontsNav) {
+                    $query->where(function ($q) {
+                        $q->where('is_hidden', false)
+                            ->orWhere(function ($q2) {
+                                $q2->where('slug', 'fonts')->where('is_hidden', true);
+                            });
+                    });
+                } else {
+                    $query->visible();
+                }
             }
 
             $categories = $query->get()->filter(function ($category) use ($user) {

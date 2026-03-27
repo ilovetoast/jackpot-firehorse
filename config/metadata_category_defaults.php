@@ -45,6 +45,7 @@ return [
         'packaging',
         'product-renders',
         'radio',
+        'fonts',
     ],
 
     /*
@@ -129,6 +130,7 @@ return [
     'restrict_fields' => [
         'photo_type',
         'logo_type',
+        'font_role',
         'graphic_type',
         'video_type',
         'scene_classification',

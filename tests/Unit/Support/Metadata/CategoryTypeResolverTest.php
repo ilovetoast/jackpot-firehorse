@@ -26,6 +26,13 @@ class CategoryTypeResolverTest extends TestCase
         $this->assertSame('digital_type', $r['field_key']);
     }
 
+    public function test_resolves_fonts_to_font_role(): void
+    {
+        $r = CategoryTypeResolver::resolve('fonts');
+        $this->assertSame('font_role', $r['field_key']);
+        $this->assertSame('Font role', $r['label']);
+    }
+
     public function test_unknown_slug_returns_null(): void
     {
         $this->assertNull(CategoryTypeResolver::resolve('custom-category'));

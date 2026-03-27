@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
-import { usePage, router } from '@inertiajs/react'
+import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import AiTagSuggestionsInline from './AiTagSuggestionsInline'
@@ -100,6 +100,8 @@ export default function AssetDrawer({
     /** One-shot: grid double-click initial zoom per drawer mount */
     const initialZoomAppliedRef = useRef(false)
     const [showZoomModal, setShowZoomModal] = useState(false)
+    /** Google Fonts virtual row: stylesheet loaded for specimen preview in drawer/lightbox */
+    const [virtualGoogleFontReady, setVirtualGoogleFontReady] = useState(false)
     /** When true, lightbox shows AssetDetailPanel in the right column (or below on small screens) */
     const [showLightboxDetails, setShowLightboxDetails] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
@@ -259,7 +261,7 @@ export default function AssetDrawer({
     const trackedDrawerViewsRef = useRef(new Set())
     
     useEffect(() => {
-        if (asset?.id) {
+        if (asset?.id && !asset?.is_virtual_google_font) {
             // Check if we've already tracked this asset in this session
             const trackingKey = `${asset.id}_drawer`
             if (trackedDrawerViewsRef.current.has(trackingKey)) {
@@ -284,7 +286,7 @@ export default function AssetDrawer({
     const trackedLargeViewsRef = useRef(new Set())
     
     useEffect(() => {
-        if (showZoomModal && asset?.id) {
+        if (showZoomModal && asset?.id && !asset?.is_virtual_google_font) {
             // Check if we've already tracked this asset's large view
             const trackingKey = `${asset.id}_large_view`
             if (trackedLargeViewsRef.current.has(trackingKey)) {
@@ -293,7 +295,7 @@ export default function AssetDrawer({
 
             trackView(asset.id, 'large_view')
             trackedLargeViewsRef.current.add(trackingKey)
-        } else if (!showZoomModal && asset?.id) {
+        } else if (!showZoomModal && asset?.id && !asset?.is_virtual_google_font) {
             // Reset tracking for this asset when modal closes
             const trackingKey = `${asset.id}_large_view`
             trackedLargeViewsRef.current.delete(trackingKey)
@@ -302,7 +304,7 @@ export default function AssetDrawer({
 
     // Fetch analytics/metrics when asset changes
     useEffect(() => {
-        if (!asset?.id) {
+        if (!asset?.id || asset?.is_virtual_google_font) {
             setViewCount(null)
             setDownloadCount(null)
             return
@@ -342,7 +344,7 @@ export default function AssetDrawer({
 
     // Fetch activity events when asset is set
     useEffect(() => {
-        if (!asset || !asset.id) {
+        if (!asset || !asset.id || asset.is_virtual_google_font) {
             setActivityEvents([])
             setActivityLoading(false)
             return
@@ -368,7 +370,7 @@ export default function AssetDrawer({
     // C5: Fetch collections this asset is in (for "In X collections")
     // C9.1: Always fetch collections if asset exists (not dependent on collectionContext)
     useEffect(() => {
-        if (!asset?.id) {
+        if (!asset?.id || asset?.is_virtual_google_font) {
             setAssetCollections([])
             return
         }
@@ -393,7 +395,7 @@ export default function AssetDrawer({
     // C5: Fetch collections list for "Add to Collection" dropdown
     // C9.1: Always fetch collections list (not dependent on collectionContext) for inline modal
     useEffect(() => {
-        if (!asset?.id) {
+        if (!asset?.id || asset?.is_virtual_google_font) {
             setDropdownCollections([])
             return
         }
@@ -411,7 +413,7 @@ export default function AssetDrawer({
 
     // C9.2: Collection field visibility from edit schema (Quick View checkbox in Metadata Management)
     useEffect(() => {
-        if (!assetCategoryId) {
+        if (!assetCategoryId || asset?.is_virtual_google_font) {
             setCollectionFieldVisible(false)
             return
         }
@@ -452,7 +454,7 @@ export default function AssetDrawer({
 
     // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
     useEffect(() => {
-        if (!asset || !asset.id || !auth?.activeBrand || asset.approval_status !== 'rejected') {
+        if (!asset || !asset.id || asset.is_virtual_google_font || !auth?.activeBrand || asset.approval_status !== 'rejected') {
             setApprovalComments([])
             setCommentsLoading(false)
             return
@@ -540,6 +542,40 @@ export default function AssetDrawer({
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
 
+    const isVirtualGoogleFont = Boolean(displayAsset?.is_virtual_google_font)
+    const googleFontSpecimenUrl = useMemo(() => {
+        if (!displayAsset?.is_virtual_google_font) return null
+        return (
+            displayAsset.google_font_specimen_url
+            || (displayAsset.google_font_family
+                ? `https://fonts.google.com/specimen/${encodeURIComponent(displayAsset.google_font_family)}`
+                : null)
+        )
+    }, [displayAsset?.is_virtual_google_font, displayAsset?.google_font_specimen_url, displayAsset?.google_font_family])
+
+    useEffect(() => {
+        if (!isVirtualGoogleFont || !displayAsset?.google_font_stylesheet_url) {
+            setVirtualGoogleFontReady(false)
+            return undefined
+        }
+        const url = displayAsset.google_font_stylesheet_url
+        const elId = `asset-drawer-google-font-${String(displayAsset.id).replace(/[^a-z0-9_-]/gi, '-')}`
+        if (document.getElementById(elId)) {
+            setVirtualGoogleFontReady(true)
+            return undefined
+        }
+        const link = document.createElement('link')
+        link.id = elId
+        link.rel = 'stylesheet'
+        link.href = url
+        link.crossOrigin = 'anonymous'
+        const done = () => setVirtualGoogleFontReady(true)
+        link.onload = done
+        link.onerror = done
+        document.head.appendChild(link)
+        return undefined
+    }, [isVirtualGoogleFont, displayAsset?.id, displayAsset?.google_font_stylesheet_url])
+
     const drawerCategory = useMemo(() => {
         const cid = getAssetCategoryId(displayAsset)
         if (cid == null) {
@@ -565,7 +601,7 @@ export default function AssetDrawer({
 
     // Fetch unresolved incidents when display asset changes (Unified Operations)
     useEffect(() => {
-        if (!displayAsset?.id) {
+        if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
             setAssetIncidents([])
             return
         }
@@ -588,7 +624,7 @@ export default function AssetDrawer({
 
     // Fetch Reliability Timeline when section expanded (lazy load)
     useEffect(() => {
-        if (!reliabilityTimelineExpanded || !displayAsset?.id) return
+        if (!reliabilityTimelineExpanded || !displayAsset?.id || displayAsset.is_virtual_google_font) return
         setReliabilityTimelineLoading(true)
         window.axios.get(`/app/assets/${displayAsset.id}/incidents`, { params: { timeline: 1 } })
             .then(res => {
@@ -1023,11 +1059,18 @@ export default function AssetDrawer({
         || displayAsset.mime_type === 'application/pdf'
         || fileExtension.toUpperCase() === 'PDF'
 
+    const isFontFile = useMemo(() => {
+        if (!displayAsset || displayAsset.is_virtual_google_font) return false
+        const mime = (displayAsset.mime_type || '').toLowerCase()
+        const ext = (displayAsset.file_extension || displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
+        return mime.startsWith('font/') || ['woff2', 'woff', 'ttf', 'otf', 'eot'].includes(ext)
+    }, [displayAsset])
+
     // Grid double-click: jump straight to fullscreen zoom (same modal as "Click to zoom" in drawer)
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
-        if (!(hasThumbnailSupport || isVideo)) {
+        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont)) {
             initialZoomAppliedRef.current = true
             onInitialZoomConsumed?.()
             return
@@ -1040,7 +1083,7 @@ export default function AssetDrawer({
         setShowZoomModal(true)
         setShowLightboxDetails(false)
         onInitialZoomConsumed?.()
-    }, [initialZoomOpen, displayAsset?.id, hasThumbnailSupport, isVideo, imageAssets, onInitialZoomConsumed])
+    }, [initialZoomOpen, displayAsset?.id, hasThumbnailSupport, isVideo, isVirtualGoogleFont, imageAssets, onInitialZoomConsumed])
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
@@ -1880,7 +1923,53 @@ export default function AssetDrawer({
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >
-                            {isVideo && displayAsset.id ? (
+                            {isVirtualGoogleFont ? (
+                                <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-6 text-center">
+                                    <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
+                                        Google Fonts · hosted online
+                                    </span>
+                                    <p className="mt-3 max-w-sm text-xs text-slate-600">
+                                        This family is loaded from Google&apos;s CDN for previews. There is no font file stored in your library—download and install from Google if you need the files locally.
+                                    </p>
+                                    <span
+                                        className="mt-6 text-5xl font-semibold leading-none tracking-tight text-zinc-800"
+                                        style={{
+                                            fontFamily:
+                                                virtualGoogleFontReady && displayAsset.google_font_family
+                                                    ? `"${String(displayAsset.google_font_family).replace(/["\\\\]/g, '')}", ui-sans-serif, system-ui, sans-serif`
+                                                    : 'ui-sans-serif, system-ui, sans-serif',
+                                        }}
+                                    >
+                                        Aa
+                                    </span>
+                                    <p
+                                        className="mt-4 max-w-[95%] text-lg font-medium text-slate-700"
+                                        style={{
+                                            fontFamily:
+                                                virtualGoogleFontReady && displayAsset.google_font_family
+                                                    ? `"${String(displayAsset.google_font_family).replace(/["\\\\]/g, '')}", ui-sans-serif, system-ui, sans-serif`
+                                                    : 'ui-sans-serif, system-ui, sans-serif',
+                                        }}
+                                    >
+                                        {displayAsset.title || displayAsset.google_font_family || 'Font'}
+                                    </p>
+                                    {displayAsset.google_font_role_label && (
+                                        <p className="mt-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                                            {displayAsset.google_font_role_label}
+                                        </p>
+                                    )}
+                                    {googleFontSpecimenUrl && (
+                                        <a
+                                            href={googleFontSpecimenUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-5 inline-flex items-center rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
+                                        >
+                                            Open on Google Fonts
+                                        </a>
+                                    )}
+                                </div>
+                            ) : isVideo && displayAsset.id ? (
                                 // Phase V-1: Video thumbnail with hover preview (same as other assets)
                                 // Show thumbnail (icon > medium thumbnail) with hover video auto-play
                                 <div
@@ -2216,6 +2305,11 @@ export default function AssetDrawer({
 
                 {/* Analytics/Metrics & Action Buttons */}
                 <div className="border-t border-gray-200 pt-6 space-y-4">
+                    {isVirtualGoogleFont ? (
+                        <p className="text-sm text-gray-500">
+                            View and download counts apply to files stored in your library. This Google Font is referenced from Brand Guidelines and is not stored as an asset file.
+                        </p>
+                    ) : (
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                             <EyeIcon className="h-4 w-4 text-gray-400" />
@@ -2232,6 +2326,7 @@ export default function AssetDrawer({
                             <span className="text-gray-500">downloads</span>
                         </div>
                     </div>
+                    )}
                     
                     {/* Action Buttons */}
                     {displayAsset?.id && (
@@ -2262,6 +2357,48 @@ export default function AssetDrawer({
                             )}
                             {/* All lifecycle actions below hidden when asset is in trash */}
                             {!displayAsset.deleted_at && (
+                            <>
+                            {isVirtualGoogleFont ? (
+                                <div className="space-y-3 rounded-lg border border-sky-100 bg-sky-50/80 p-4">
+                                    <p className="text-sm text-slate-700">
+                                        This font is listed from your Brand Guidelines (Google Fonts). Typography roles and families are edited in the guidelines builder.
+                                    </p>
+                                    <div className="flex flex-col gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowZoomModal(true)
+                                                setShowLightboxDetails(true)
+                                            }}
+                                            className="inline-flex w-full items-center justify-center rounded-md bg-gray-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-gray-700"
+                                        >
+                                            <EyeIcon className="h-4 w-4 mr-2" />
+                                            Details
+                                        </button>
+                                        {googleFontSpecimenUrl && (
+                                            <a
+                                                href={googleFontSpecimenUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex w-full items-center justify-center rounded-md border border-sky-300 bg-white px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm hover:bg-sky-50"
+                                            >
+                                                Open on Google Fonts
+                                            </a>
+                                        )}
+                                        {auth?.activeBrand?.id && (
+                                            <Link
+                                                href={typeof route === 'function'
+                                                    ? route('brands.brand-guidelines.builder', { brand: auth.activeBrand.id, step: 'standards' })
+                                                    : `/app/brands/${auth.activeBrand.id}/brand-guidelines/builder?step=standards`}
+                                                className="inline-flex w-full items-center justify-center rounded-md px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                                                style={{ backgroundColor: brandPrimary }}
+                                            >
+                                                Edit typography in Brand Guidelines
+                                            </Link>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
                             <>
                             {/* Quick Review/Approve/Reject button - show FIRST for approvers viewing pending assets */}
                             {(() => {
@@ -2595,9 +2732,16 @@ export default function AssetDrawer({
                                         {singleAssetDisabledByPolicy && (
                                             <p className="text-xs text-slate-500">Your organization&apos;s policy does not permit downloading individual assets. Use &quot;Add to download&quot; to create a packaged download.</p>
                                         )}
+                                        {isFontFile && canSingleAssetDownload && (
+                                            <p className="text-xs text-slate-600">
+                                                By downloading, you confirm you have the right to use this font. {auth?.activeBrand?.name || 'This brand'} does not provide font licensing or redistribution; you are responsible for complying with the font license.
+                                            </p>
+                                        )}
                                     </div>
                                 )
                             })()}
+                            </>
+                            )}
                             </>
                             )}
                         </div>
@@ -2605,12 +2749,12 @@ export default function AssetDrawer({
                 </div>
 
                 {/* Phase B9: Metadata Candidate Review (moved up from bottom) */}
-                {displayAsset?.id && (
+                {displayAsset?.id && !isVirtualGoogleFont && (
                     <MetadataCandidateReview assetId={displayAsset.id} primaryColor={brandPrimary} />
                 )}
 
                 {/* Brand insight stack: AI suggested tags + reference promotion + Brand Intelligence (aligned, shared panel) */}
-                {displayAsset?.id &&
+                {displayAsset?.id && !isVirtualGoogleFont &&
                     (can('brand_settings.manage') ||
                         displayAsset.category?.ebi_enabled === true ||
                         can('metadata.suggestions.view')) && (
@@ -2695,8 +2839,38 @@ export default function AssetDrawer({
                     </div>
                 )}
 
+                {/* Tags and Metadata — virtual Google Fonts: read-only summary (no asset API id) */}
+                {displayAsset?.id && isVirtualGoogleFont && (
+                    <div className="border-t border-gray-200">
+                        <CollapsibleSection title="Metadata" defaultExpanded>
+                            <dl className="space-y-3 text-sm text-gray-700">
+                                <div>
+                                    <dt className="font-medium text-gray-900">Source</dt>
+                                    <dd className="mt-0.5 text-gray-600">Google Fonts (referenced from Brand Guidelines; not stored as a file)</dd>
+                                </div>
+                                {(displayAsset.metadata?.fields?.font_role || displayAsset.google_font_role_label) && (
+                                    <div>
+                                        <dt className="font-medium text-gray-900">Typographic role</dt>
+                                        <dd className="mt-0.5 text-gray-600">
+                                            {displayAsset.google_font_role_label
+                                                || (displayAsset.metadata?.fields?.font_role === 'body_copy'
+                                                    ? 'Body'
+                                                    : displayAsset.metadata?.fields?.font_role === 'headline'
+                                                        ? 'Headline'
+                                                        : displayAsset.metadata?.fields?.font_role)}
+                                        </dd>
+                                    </div>
+                                )}
+                            </dl>
+                            <p className="mt-4 text-xs text-gray-500">
+                                To edit font families and roles, use Brand Guidelines → Standards (typography).
+                            </p>
+                        </CollapsibleSection>
+                    </div>
+                )}
+
                 {/* Tags and Metadata */}
-                {displayAsset?.id && (
+                {displayAsset?.id && !isVirtualGoogleFont && (
                     <div className="border-t border-gray-200">
                         {!import.meta.env.PROD && (
                             <CollapsibleSection
@@ -3542,7 +3716,7 @@ export default function AssetDrawer({
             </div>
 
             {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) */}
-            {showZoomModal && (hasThumbnailSupport || isVideo) && currentCarouselAsset?.id && (
+            {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && (
                 <div
                     className="fixed inset-0 z-[60] flex flex-col bg-black/90 md:flex-row"
                     onClick={() => setShowZoomModal(false)}
@@ -3604,6 +3778,55 @@ export default function AssetDrawer({
                     >
                         {/* Phase V-1: Check if current asset is a video */}
                         {(() => {
+                            if (currentCarouselAsset?.is_virtual_google_font) {
+                                const fam = currentCarouselAsset.google_font_family || currentCarouselAsset.title
+                                const specimen = currentCarouselAsset.google_font_specimen_url
+                                    || (fam ? `https://fonts.google.com/specimen/${encodeURIComponent(fam)}` : null)
+                                return (
+                                    <div className="flex max-h-full w-full max-w-lg flex-col items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-8 text-center">
+                                        <span className="rounded-full bg-sky-500/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-200">
+                                            Google Fonts · hosted online
+                                        </span>
+                                        <span
+                                            className="mt-6 text-6xl font-semibold text-white"
+                                            style={{
+                                                fontFamily:
+                                                    virtualGoogleFontReady && fam
+                                                        ? `"${String(fam).replace(/["\\\\]/g, '')}", ui-sans-serif, system-ui, sans-serif`
+                                                        : 'ui-sans-serif, system-ui, sans-serif',
+                                            }}
+                                        >
+                                            Aa
+                                        </span>
+                                        <p
+                                            className="mt-4 text-xl font-medium text-white/90"
+                                            style={{
+                                                fontFamily:
+                                                    virtualGoogleFontReady && fam
+                                                        ? `"${String(fam).replace(/["\\\\]/g, '')}", ui-sans-serif, system-ui, sans-serif`
+                                                        : 'ui-sans-serif, system-ui, sans-serif',
+                                            }}
+                                        >
+                                            {currentCarouselAsset.title || fam}
+                                        </p>
+                                        {currentCarouselAsset.google_font_role_label && (
+                                            <p className="mt-2 text-xs font-medium uppercase tracking-wider text-white/50">
+                                                {currentCarouselAsset.google_font_role_label}
+                                            </p>
+                                        )}
+                                        {specimen && (
+                                            <a
+                                                href={specimen}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="mt-8 inline-flex items-center rounded-md bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-400"
+                                            >
+                                                Open on Google Fonts
+                                            </a>
+                                        )}
+                                    </div>
+                                )
+                            }
                             const currentMimeType = currentCarouselAsset.mime_type || ''
                             const currentFilename = currentCarouselAsset.original_filename || ''
                             const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
@@ -3693,6 +3916,46 @@ export default function AssetDrawer({
                             className="order-2 flex max-h-[min(50vh,520px)] w-full min-h-0 flex-col overflow-hidden bg-neutral-950 md:max-h-none md:h-full md:w-[min(500px,50vw)] md:flex-shrink-0"
                             onClick={(e) => e.stopPropagation()}
                         >
+                            {currentCarouselAsset.is_virtual_google_font ? (
+                                <div className="flex h-full flex-col gap-4 overflow-y-auto p-6 text-left text-white">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-white">About this font</h3>
+                                        <p className="mt-2 text-sm text-white/70">
+                                            This family is referenced from your Brand Guidelines (Google Fonts). It is loaded from Google&apos;s servers for previews; we do not store a font file in your asset library.
+                                        </p>
+                                    </div>
+                                    {currentCarouselAsset.google_font_role_label && (
+                                        <div>
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Role in guidelines</p>
+                                            <p className="mt-1 text-sm text-white/90">{currentCarouselAsset.google_font_role_label}</p>
+                                        </div>
+                                    )}
+                                    {googleFontSpecimenUrl && (
+                                        <a
+                                            href={googleFontSpecimenUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center justify-center rounded-md border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/15"
+                                        >
+                                            Download / license on Google Fonts
+                                        </a>
+                                    )}
+                                    {auth?.activeBrand?.id && (
+                                        <Link
+                                            href={typeof route === 'function'
+                                                ? route('brands.brand-guidelines.builder', { brand: auth.activeBrand.id, step: 'standards' })
+                                                : `/app/brands/${auth.activeBrand.id}/brand-guidelines/builder?step=standards`}
+                                            className="inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                                            style={{ backgroundColor: brandPrimary }}
+                                        >
+                                            Edit typography in Brand Guidelines
+                                        </Link>
+                                    )}
+                                    <p className="text-xs text-white/45">
+                                        To change roles (e.g. primary vs body) or swap families, use the typography step in Brand Guidelines.
+                                    </p>
+                                </div>
+                            ) : (
                             <AssetDetailPanel
                                 asset={currentCarouselAsset}
                                 isOpen
@@ -3711,6 +3974,7 @@ export default function AssetDrawer({
                                 }}
                                 primaryColor={brandPrimary}
                             />
+                            )}
                         </div>
                     )}
                 </div>

@@ -73,6 +73,7 @@ The result is a system that doesn't just store assets — it **protects brand in
   - photography style
 - Accessible to internal teams and external partners
 - Guidelines tied directly to assets
+- **Fonts library:** licensed font files and **Google Fonts** declared in Brand DNA can appear under the hidden **Fonts** category (uploaded files as assets; Google Fonts as non-download virtual tiles with live CSS preview). Details: [FONTS_LIBRARY.md](FONTS_LIBRARY.md).
 
 **Planned enhancements:**
 

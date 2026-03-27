@@ -16,6 +16,7 @@ return [
         'fields' => [
             'photo_type',
             'logo_type',
+            'font_role',
             'graphic_type',
             'video_type',
             'execution_video_type',

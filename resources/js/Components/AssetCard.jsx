@@ -40,8 +40,37 @@ export default function AssetCard({
     selectionAssetType = 'asset',
 }) {
     const { auth } = usePage().props
+    /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
+    const isVirtualGoogleFont = Boolean(asset?.is_virtual_google_font)
+    const [googleFontReady, setGoogleFontReady] = useState(false)
+
+    useEffect(() => {
+        if (!isVirtualGoogleFont || !asset?.google_font_stylesheet_url) {
+            return undefined
+        }
+        const url = asset.google_font_stylesheet_url
+        const elId = `google-font-sheet-${String(asset.id).replace(/[^a-z0-9_-]/gi, '-')}`
+        if (document.getElementById(elId)) {
+            setGoogleFontReady(true)
+            return undefined
+        }
+        const link = document.createElement('link')
+        link.id = elId
+        link.rel = 'stylesheet'
+        link.href = url
+        link.crossOrigin = 'anonymous'
+        const done = () => setGoogleFontReady(true)
+        link.onload = done
+        link.onerror = done
+        document.head.appendChild(link)
+        return undefined
+    }, [isVirtualGoogleFont, asset?.id, asset?.google_font_stylesheet_url])
+
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
+        if (isVirtualGoogleFont) {
+            return 'GOOGLE'
+        }
         // First try explicit file_extension field
         if (asset.file_extension && asset.file_extension.trim()) {
             return asset.file_extension.toUpperCase()
@@ -106,6 +135,9 @@ export default function AssetCard({
     // Phase V-1: Detect if asset is a video
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
+
+    const fontExtensions = ['woff2', 'woff', 'ttf', 'otf', 'eot']
+    const isFontMime = Boolean(asset?.mime_type?.startsWith('font/') || fontExtensions.includes(extLower))
     
     // Phase V-1: Hover preview state (desktop only)
     const [isHovering, setIsHovering] = useState(false)
@@ -144,14 +176,18 @@ export default function AssetCard({
     // Orange dot shows for both thumbnail processing and analysis in progress
     const analysisStatus = asset?.analysis_status ?? ''
     const analysisComplete = analysisStatus === 'complete'
-    const isProcessing = thumbnailState.state === 'PENDING' || (analysisStatus && !analysisComplete)
+    const isProcessing =
+        !isVirtualGoogleFont &&
+        (thumbnailState.state === 'PENDING' || (analysisStatus && !analysisComplete))
 
     // Phase 7: Thumbnail integrity — complete but no thumbnail path = hidden corruption
     const hasThumbnailPath = Boolean(asset?.final_thumbnail_url || asset?.thumbnail_url)
     const mimeType = asset?.mime_type || ''
-    const showThumbnailIntegrityBadge = supportsThumbnail(mimeType, extLower)
-        && analysisStatus === 'complete'
-        && !hasThumbnailPath
+    const showThumbnailIntegrityBadge =
+        !isVirtualGoogleFont &&
+        supportsThumbnail(mimeType, extLower) &&
+        analysisStatus === 'complete' &&
+        !hasThumbnailPath
     
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
@@ -342,6 +378,10 @@ export default function AssetCard({
     /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
     const slug = asset?.category?.slug
     const isLogoOrGraphicCategory = slug === 'logos' || slug === 'graphics'
+    const showFontSwatch =
+        isVirtualGoogleFont ||
+        slug === 'fonts' ||
+        (isFontMime && !isImage && !isVideo)
     const checkerboardThumbnailStyle =
         isLogoOrGraphicCategory && !isCinematic
             ? {
@@ -394,48 +434,72 @@ export default function AssetCard({
                         <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" title="Processing" />
                     </div>
                 )}
-                {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
-                {isVideo && isHovering && asset.video_preview_url && !isMobile && (
-                    <video
-                        ref={videoPreviewRef}
-                        src={asset.video_preview_url}
-                        className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
-                        autoPlay
-                        muted
-                        loop
-                        playsInline
-                        onLoadedData={() => setPreviewLoaded(true)}
-                        style={{ opacity: previewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
-                    />
-                )}
-                
-                {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}
-                {/* ThumbnailPreview handles route-based URLs (final_thumbnail_url) which work correctly */}
-                {/* The drawer uses ThumbnailPreview for videos, so we do the same in the grid */}
-                <ThumbnailPreview
-                    asset={asset}
-                    alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
-                    className={`w-full h-full ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
-                    retryCount={0}
-                    onRetry={null}
-                    size="lg"
-                    thumbnailVersion={thumbnailVersion}
-                    shouldAnimateThumbnail={shouldAnimateThumbnail}
-                />
-                
-                {/* Phase V-1: Play icon overlay for videos */}
-                {isVideo && (
-                    <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                        <div className="bg-black/40 backdrop-blur-sm rounded-full p-3">
-                            <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
-                        </div>
+                {showFontSwatch ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 text-zinc-800">
+                        <span
+                            className="text-[2.75rem] font-semibold leading-none tracking-tight"
+                            style={{
+                                fontFamily:
+                                    isVirtualGoogleFont && googleFontReady && asset.google_font_family
+                                        ? `"${String(asset.google_font_family).replace(/["\\\\]/g, '')}", ui-sans-serif, system-ui, sans-serif`
+                                        : 'ui-sans-serif, system-ui, sans-serif',
+                            }}
+                        >
+                            Aa
+                        </span>
+                        <p className="mt-3 max-w-[95%] px-3 text-center text-sm font-medium text-slate-600 line-clamp-2">
+                            {asset.title || asset.original_filename || 'Font'}
+                        </p>
+                        {isVirtualGoogleFont && asset.google_font_role_label && (
+                            <p className="mt-1 px-3 text-center text-[10px] uppercase tracking-wider text-slate-500">
+                                {asset.google_font_role_label}
+                            </p>
+                        )}
                     </div>
+                ) : (
+                    <>
+                        {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
+                        {isVideo && isHovering && asset.video_preview_url && !isMobile && (
+                            <video
+                                ref={videoPreviewRef}
+                                src={asset.video_preview_url}
+                                className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                                onLoadedData={() => setPreviewLoaded(true)}
+                                style={{ opacity: previewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
+                            />
+                        )}
+
+                        {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}
+                        <ThumbnailPreview
+                            asset={asset}
+                            alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
+                            className={`w-full h-full ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                            retryCount={0}
+                            onRetry={null}
+                            size="lg"
+                            thumbnailVersion={thumbnailVersion}
+                            shouldAnimateThumbnail={shouldAnimateThumbnail}
+                        />
+
+                        {/* Phase V-1: Play icon overlay for videos */}
+                        {isVideo && (
+                            <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                                <div className="bg-black/40 backdrop-blur-sm rounded-full p-3">
+                                    <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
                 
                 {/* Phase 2 – Step 7: Bulk selection checkbox */}
-                {onBulkSelect && (
+                {!isVirtualGoogleFont && onBulkSelect && (
                     <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isBulkSelected ? 'scale-105' : 'scale-100'}`}>
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
@@ -461,7 +525,7 @@ export default function AssetCard({
                 )}
 
                 {/* Phase D1/D3: Download bucket checkbox. SelectionContext is source of truth. Show when selection exists (or legacy onBucketToggle). */}
-                {!onBulkSelect && (selection || onBucketToggle) && (
+                {!isVirtualGoogleFont && !onBulkSelect && (selection || onBucketToggle) && (
                     <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (selection?.isSelected(asset.id) ?? isInBucket) ? 'opacity-100' : 'opacity-0'} ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'scale-105' : 'scale-100'}`}>
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
@@ -535,6 +599,14 @@ export default function AssetCard({
                         {!asset.deleted_at && asset.reference_promotion?.kind === 'guideline' && (
                             <span className="inline-flex items-center rounded-md bg-violet-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Brand guideline reference">
                                 Guideline
+                            </span>
+                        )}
+                        {isVirtualGoogleFont && (
+                            <span
+                                className="inline-flex items-center rounded-md bg-sky-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white"
+                                title="From Brand Guidelines (Google Fonts)"
+                            >
+                                Google Fonts
                             </span>
                         )}
                     </div>
