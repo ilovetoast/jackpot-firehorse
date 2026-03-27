@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Models\AIAgentRun;
+use App\Models\Tenant;
 use App\Http\Controllers\Controller;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -30,36 +31,58 @@ class AdminAIAgentHealthController extends Controller
     {
         $this->authorizeAdmin();
 
-        $lastRunPerAgent = AIAgentRun::select('agent_id')
-            ->selectRaw('MAX(agent_name) as agent_name')
-            ->selectRaw('MAX(started_at) as last_run_at')
+        // Latest row per agent_id via MAX(id) (avoids N+1 timeouts on large ai_agent_runs tables).
+        $latestRunIdsSub = AIAgentRun::query()
+            ->selectRaw('MAX(id) as id')
+            ->groupBy('agent_id');
+
+        $aggByAgent = AIAgentRun::query()
+            ->select('agent_id')
             ->selectRaw('MAX(CASE WHEN status = "success" THEN started_at END) as last_success_at')
             ->selectRaw('MAX(CASE WHEN status = "failed" THEN started_at END) as last_failed_at')
             ->groupBy('agent_id')
-            ->orderByDesc('last_run_at')
             ->get()
-            ->map(function ($r) {
-                $lastRun = AIAgentRun::where('agent_id', $r->agent_id)
-                    ->orderByDesc('started_at')
-                    ->first();
+            ->keyBy('agent_id');
+
+        $lastRunPerAgent = AIAgentRun::query()
+            ->joinSub($latestRunIdsSub, 'latest_agent_runs', 'ai_agent_runs.id', '=', 'latest_agent_runs.id')
+            ->orderByDesc('ai_agent_runs.started_at')
+            ->get([
+                'ai_agent_runs.agent_id',
+                'ai_agent_runs.agent_name',
+                'ai_agent_runs.started_at',
+                'ai_agent_runs.status',
+                'ai_agent_runs.severity',
+                'ai_agent_runs.summary',
+                'ai_agent_runs.error_message',
+            ])
+            ->map(function ($lastRun) use ($aggByAgent) {
+                $agg = $aggByAgent->get($lastRun->agent_id);
+
                 return [
-                    'agent_id' => $r->agent_id,
-                    'agent_name' => $r->agent_name ?? $r->agent_id,
-                    'last_run_at' => $r->last_run_at ? Carbon::parse($r->last_run_at)->toIso8601String() : null,
-                    'last_success_at' => $r->last_success_at ? Carbon::parse($r->last_success_at)->toIso8601String() : null,
-                    'last_failed_at' => $r->last_failed_at ? Carbon::parse($r->last_failed_at)->toIso8601String() : null,
-                    'last_status' => $lastRun?->status,
-                    'last_severity' => $lastRun?->severity,
-                    'last_summary' => $lastRun?->summary,
+                    'agent_id' => $lastRun->agent_id,
+                    'agent_name' => $lastRun->agent_name ?? $lastRun->agent_id,
+                    'last_run_at' => $lastRun->started_at?->toIso8601String(),
+                    'last_success_at' => $agg?->last_success_at ? Carbon::parse($agg->last_success_at)->toIso8601String() : null,
+                    'last_failed_at' => $agg?->last_failed_at ? Carbon::parse($agg->last_failed_at)->toIso8601String() : null,
+                    'last_status' => $lastRun->status,
+                    'last_severity' => $lastRun->severity,
+                    'last_summary' => $lastRun->summary,
+                    'last_error_message' => $lastRun->error_message,
                 ];
             })
             ->toArray();
 
-        $failuresLast24h = AIAgentRun::where('status', 'failed')
+        $failuresQuery = AIAgentRun::where('status', 'failed')
             ->where('started_at', '>=', now()->subDay())
             ->orderByDesc('started_at')
             ->limit(50)
-            ->get(['id', 'agent_id', 'agent_name', 'task_type', 'entity_type', 'entity_id', 'status', 'severity', 'summary', 'error_message', 'started_at'])
+            ->get(['id', 'agent_id', 'agent_name', 'task_type', 'entity_type', 'entity_id', 'tenant_id', 'status', 'severity', 'summary', 'error_message', 'started_at']);
+
+        $tenantNames = Tenant::whereIn('id', $failuresQuery->pluck('tenant_id')->filter()->unique()->all())
+            ->pluck('name', 'id');
+
+        $failuresLast24h = $failuresQuery
             ->map(fn ($r) => [
                 'id' => $r->id,
                 'agent_id' => $r->agent_id,
@@ -67,10 +90,12 @@ class AdminAIAgentHealthController extends Controller
                 'task_type' => $r->task_type,
                 'entity_type' => $r->entity_type,
                 'entity_id' => $r->entity_id,
+                'tenant_id' => $r->tenant_id,
+                'tenant_name' => $r->tenant_id ? ($tenantNames[$r->tenant_id] ?? null) : null,
                 'status' => $r->status,
                 'severity' => $r->severity,
                 'summary' => $r->summary,
-                'error_message' => $r->error_message ? substr($r->error_message, 0, 200) : null,
+                'error_message' => $r->error_message,
                 'started_at' => $r->started_at?->toIso8601String(),
             ])
             ->toArray();

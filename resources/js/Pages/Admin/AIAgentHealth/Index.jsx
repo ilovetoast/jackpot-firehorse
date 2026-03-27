@@ -102,6 +102,11 @@ export default function AIAgentHealthIndex({ auth, lastRunPerAgent, failuresLast
                                                             {a.last_summary}
                                                         </p>
                                                     )}
+                                                    {a.last_error_message && (
+                                                        <p className="text-sm text-red-700 mt-1 line-clamp-3" title={a.last_error_message}>
+                                                            {a.last_error_message}
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <div className="flex items-center gap-1 flex-shrink-0">
                                                     {a.last_status === 'success' ? (
@@ -143,10 +148,17 @@ export default function AIAgentHealthIndex({ auth, lastRunPerAgent, failuresLast
                                                     <p className="text-xs text-gray-500 mt-0.5">
                                                         {formatDate(f.started_at)}
                                                         {f.entity_type && ` • ${f.entity_type}`}
+                                                        {f.tenant_id != null && ` • tenant ${f.tenant_id}`}
+                                                        {f.tenant_name && ` (${f.tenant_name})`}
                                                     </p>
-                                                    {(f.summary || f.error_message) && (
+                                                    {f.error_message && (
+                                                        <p className="text-sm text-red-700 mt-1 whitespace-pre-wrap break-words">
+                                                            {f.error_message}
+                                                        </p>
+                                                    )}
+                                                    {f.summary && f.summary !== f.error_message && (
                                                         <p className="text-sm text-gray-600 mt-1 line-clamp-2">
-                                                            {f.summary || f.error_message}
+                                                            {f.summary}
                                                         </p>
                                                     )}
                                                 </div>
