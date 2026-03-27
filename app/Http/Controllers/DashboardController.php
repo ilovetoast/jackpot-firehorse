@@ -853,7 +853,8 @@ class DashboardController extends Controller
         $permissions = [
             'canManageBrand' => $user->hasPermissionForTenant($tenant, 'brand_settings.manage'),
             'canManageTeam' => $user->hasPermissionForTenant($tenant, 'team.manage'),
-            'canViewAnalytics' => $user->hasPermissionForTenant($tenant, 'activity_logs.view'),
+            // Insights routes (AnalyticsOverviewController, etc.) require brand_settings.manage — keep tile in sync
+            'canViewAnalytics' => $user->hasPermissionForTenant($tenant, 'brand_settings.manage'),
         ];
 
         if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {

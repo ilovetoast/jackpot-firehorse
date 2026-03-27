@@ -22,8 +22,9 @@ use Illuminate\Support\Str;
 
 /**
  * Generates logo_on_dark (white silhouette) and logo_on_light (primary wash) PNGs from the
- * primary raster logo when model_payload flags request it. Mirrors the Brand Guidelines Builder
- * client-side flows in resources/js/utils/imageUtils.js.
+ * primary logo when model_payload flags request it. Raster sources use the original file; SVG
+ * sources use the same generated large/medium thumbnail bytes as the asset grid (WebP/PNG).
+ * Mirrors the Brand Guidelines Builder client-side flows in resources/js/utils/imageUtils.js.
  */
 final class BrandLogoVariantAutomationService
 {
@@ -61,22 +62,12 @@ final class BrandLogoVariantAutomationService
         }
 
         $logoAsset->loadMissing('currentVersion');
-        $bytes = $this->downloadOriginalBytes($logoAsset);
+        $bytes = $this->resolveLogoSourceBytes($logoAsset);
         if ($bytes === null || $bytes === '') {
-            Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] Could not load logo bytes', [
+            Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] Could not load logo bytes (original or thumbnail)', [
                 'brand_id' => $brand->id,
                 'asset_id' => $logoAsset->id,
-            ]);
-
-            return;
-        }
-
-        $mime = strtolower((string) ($logoAsset->mime_type ?? ''));
-        if (str_contains($mime, 'svg') || ! $this->isRasterMime($mime)) {
-            Log::channel('pipeline')->info('[BrandLogoVariantAutomation] Skipping non-raster logo', [
-                'brand_id' => $brand->id,
-                'asset_id' => $logoAsset->id,
-                'mime_type' => $mime,
+                'mime_type' => $logoAsset->mime_type,
             ]);
 
             return;
@@ -161,16 +152,14 @@ final class BrandLogoVariantAutomationService
         }
 
         $logoAsset->loadMissing('currentVersion');
-        $bytes = $this->downloadOriginalBytes($logoAsset);
+        $bytes = $this->resolveLogoSourceBytes($logoAsset);
         if ($bytes === null || $bytes === '') {
-            $out['errors'][] = 'Could not load the primary logo file. Try re-uploading the logo.';
-
-            return $out;
-        }
-
-        $mime = strtolower((string) ($logoAsset->mime_type ?? ''));
-        if (str_contains($mime, 'svg') || ! $this->isRasterMime($mime)) {
-            $out['errors'][] = 'Auto-generation works with raster logos (PNG, JPEG, WebP). SVG logos must be exported or added manually.';
+            $mime = strtolower((string) ($logoAsset->mime_type ?? ''));
+            if (str_contains($mime, 'svg')) {
+                $out['errors'][] = 'Could not load a raster thumbnail for this SVG. Wait until processing finishes (thumbnail ready), then try again.';
+            } else {
+                $out['errors'][] = 'Could not load the primary logo file. Try re-uploading the logo.';
+            }
 
             return $out;
         }
@@ -265,6 +254,59 @@ final class BrandLogoVariantAutomationService
         }
 
         return Asset::withoutTrashed()->where('brand_id', $brand->id)->find($id);
+    }
+
+    /**
+     * Raster originals: S3 original. SVG (and other non-raster): large/medium/thumb derivative (same as grid).
+     */
+    private function resolveLogoSourceBytes(Asset $asset): ?string
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_contains($mime, 'svg')) {
+            return $this->downloadThumbnailBytesForLogoVariants($asset);
+        }
+        if ($this->isRasterMime($mime)) {
+            return $this->downloadOriginalBytes($asset);
+        }
+
+        return $this->downloadThumbnailBytesForLogoVariants($asset);
+    }
+
+    /**
+     * Generated thumbnails (WebP/PNG) stored under metadata['thumbnails'][style]['path'].
+     */
+    private function downloadThumbnailBytesForLogoVariants(Asset $asset): ?string
+    {
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            Log::channel('pipeline')->info('[BrandLogoVariantAutomation] Thumbnail not ready for variant source', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? $asset->thumbnail_status,
+            ]);
+
+            return null;
+        }
+
+        foreach (['large', 'medium', 'thumb'] as $style) {
+            $path = $asset->thumbnailPathForStyle($style);
+            if (! $path) {
+                continue;
+            }
+            try {
+                $bytes = Storage::disk('s3')->get($path);
+                if ($bytes !== null && $bytes !== '') {
+                    return $bytes;
+                }
+            } catch (\Throwable $e) {
+                Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] S3 get thumbnail failed', [
+                    'asset_id' => $asset->id,
+                    'style' => $style,
+                    'path' => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return null;
     }
 
     private function downloadOriginalBytes(Asset $asset): ?string

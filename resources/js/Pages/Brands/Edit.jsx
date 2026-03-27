@@ -2464,7 +2464,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
 
                                         <div className="mb-6 p-4 rounded-lg bg-slate-50 ring-1 ring-slate-200/80">
                                             <h5 className="text-sm font-semibold text-gray-900">Automated logo variants</h5>
-                                            <p className="text-xs text-gray-500 mt-0.5 mb-4">When enabled, the system generates missing raster variants from your primary logo after saves, uploads, or pipeline runs (white mark for dark backgrounds; primary-color wash for light). SVG logos are skipped.</p>
+                                            <p className="text-xs text-gray-500 mt-0.5 mb-4">When enabled, the system generates missing raster variants from your primary logo after saves, uploads, or pipeline runs (white mark for dark backgrounds; primary-color wash for light). SVG logos use the same generated thumbnail (WebP/PNG) as the asset grid.</p>
                                             <div className="space-y-3">
                                                 <label className="flex items-start gap-3 cursor-pointer">
                                                     <input
@@ -2988,7 +2988,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mt-6 rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-4">
                                     <h3 className="text-sm font-semibold text-gray-900">Generate raster variants</h3>
                                     <p className="mt-1 text-xs text-gray-600">
-                                        Creates PNGs from your <strong>primary</strong> logo (PNG / JPEG / WebP only — not SVG). On-dark updates <strong>Logo (dark background)</strong> below. Primary-color variant is stored for Brand DNA guidelines.
+                                        Creates PNGs from your <strong>primary</strong> logo: raster files use the original; <strong>SVG</strong> uses the processed thumbnail (same image as the grid). On-dark updates <strong>Logo (dark background)</strong> below. Primary-color variant is stored for Brand DNA guidelines.
                                     </p>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         <button

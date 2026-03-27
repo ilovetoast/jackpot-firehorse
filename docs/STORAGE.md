@@ -4,79 +4,77 @@ Buckets, upload strategy, limits, and storage call chain.
 
 ---
 
-
-This document defines the S3 bucket strategy for the DAM application across local, staging, and production environments.
+This document describes how the app resolves S3 buckets and object keys across environments. **Source of truth in code:** `TenantBucketService`, `CompanyStorageProvisioner`, and `Tenant::hasDedicatedInfrastructure()`.
 
 ---
 
-## Bucket Naming Conventions
+## Bucket strategy (actual implementation)
 
-**Approved structure:** `{app-prefix}-{environment}-{tenant-slug}`
+### Default: one shared bucket per environment + tenant-prefixed keys
 
-Examples: `jackpot-staging-acme`, `jackpot-staging-velvet-hammer`, `jackpot-staging-st-croix`
+For **local**, **staging**, and **production**, a normal tenant uses a **single shared bucket** whose name comes from **`AWS_BUCKET`** (also exposed as `config('storage.shared_bucket')`). **Tenant isolation is not by bucket name**; it is by **object key prefix**, primarily:
 
-This matches IAM resource patterns such as `arn:aws:s3:::jackpot-staging-*`.
+`tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/...`
 
-| Environment | Strategy | Naming Convention | Example |
-|-------------|----------|-------------------|---------|
-| **Local** | Shared | Single bucket via `AWS_BUCKET` | `dam-local-shared` |
-| **Staging** | Per-tenant (recommended) or Shared | Pattern: `jackpot-{env}-{company_slug}` or `AWS_BUCKET` | `jackpot-staging-acme`, `jackpot-staging-velvet-hammer` |
-| **Production** | Per-tenant | Pattern: `jackpot-{env}-{company_slug}` | `jackpot-production-velvethammerbranding` |
+See **Canonical Shared Bucket Structure** below. Staging and production are intended to follow the same pattern: **one AWS bucket per app environment** (e.g. staging bucket vs production bucket), **not** one bucket per customer, unless the tenant is on dedicated infrastructure.
+
+Each tenant still has a row in **`storage_buckets`** pointing at that shared bucket name (`name` = `AWS_BUCKET`) so uploads and assets resolve a bucket record per tenant without creating a new S3 bucket per company.
+
+### Exception: dedicated bucket (Enterprise path — started, not plan-gated yet)
+
+A tenant may use a **dedicated S3 bucket** when **`tenants.infrastructure_tier === 'dedicated'`** (`Tenant::hasDedicatedInfrastructure()`). In that case:
+
+- Expected bucket name is generated from **`STORAGE_BUCKET_NAME_PATTERN`** (default `jackpot-{env}-{company_slug}`).
+- **`TenantBucketService::getOrProvisionBucket()`** routes to **`getOrProvisionBucketDedicated()`** / **`provisionPerCompany()`** instead of the shared bucket.
+- **`local`** always behaves as shared for dedicated checks (`hasDedicatedInfrastructure()` is forced false on local).
+
+There is **no** Stripe/plan check in code yet tying “Enterprise” to `infrastructure_tier`; that is the intended direction. Until then, dedicated buckets are **manual / ops** (column set per tenant).
+
+The **`STORAGE_PROVISION_STRATEGY`** value in `config/storage.php` defaults to `shared` and is **not** the primary router for provisioning—**`infrastructure_tier` + `TenantBucketService`** are. It may still appear in admin/status UIs for visibility.
+
+---
+
+## Bucket naming (when dedicated)
+
+**Pattern (dedicated only):** `STORAGE_BUCKET_NAME_PATTERN`, default **`jackpot-{env}-{company_slug}`**
+
+Placeholders: `{env}`, `{company_id}`, `{company_slug}`. S3 rules: lowercase, 3–63 characters, alphanumeric and hyphens only.
+
+Examples: `jackpot-staging-acme`, `jackpot-production-velvet-hammer`
+
+This matches IAM resource patterns such as `arn:aws:s3:::jackpot-staging-*` **when** those buckets exist for dedicated tenants.
 
 ### Local
-- One shared bucket for all tenants.
-- Configured via `AWS_BUCKET` in `.env` (e.g., `dam-local-shared`).
-- Typically used with MinIO or localstack for development.
+- Shared bucket: **`AWS_BUCKET`** (e.g. `dam-local-shared`).
+- MinIO or LocalStack as needed.
 
-### Staging
-- **Per-tenant (recommended):** Set `STORAGE_PROVISION_STRATEGY=per_company` and `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` so bucket names match IAM `jackpot-staging-*`. One bucket per company; provisioned on first use.
-- **Shared:** Set `STORAGE_PROVISION_STRATEGY=shared` and `AWS_BUCKET` to a single bucket name.
-- Set `APP_URL` to your staging domain (e.g. `https://staging-jackpot.velvetysoft.com`). The app uses this to set S3 CORS allowed origins for browser uploads.
+### Staging and production (typical / default)
+- **`AWS_BUCKET`** = one shared bucket for that environment (e.g. staging app → one staging bucket).
+- **`APP_URL`** = app origin; included in CORS defaults (`config/storage.php` `cors_allowed_origins` also lists known hosts; override with **`STORAGE_CORS_ORIGINS`** comma-separated).
+- Optional: **`STORAGE_CORS_ORIGINS`** for extra browser upload origins.
 
-### Production
-- One dedicated bucket per company (tenant).
-- Bucket name from `STORAGE_BUCKET_NAME_PATTERN` (default: `jackpot-{env}-{company_slug}`).
-- Placeholders: `{env}`, `{company_id}`, `{company_slug}`.
-- S3 rules: lowercase, 3–63 characters, alphanumeric and hyphens only.
+### Dedicated (Enterprise-style)
+- Bucket name from pattern above; provisioned via **`CompanyStorageProvisioner::provisionPerCompany()`** (console/queue only in staging/production).
 
 ---
 
-## Shared vs Per-Tenant Buckets
+## Shared vs dedicated (quick reference)
 
-| Environment | Strategy | Shared or Per-Tenant | Env Variable |
-|-------------|----------|----------------------|--------------|
-| **Local** | `shared` | Shared (one bucket for all) | `STORAGE_PROVISION_STRATEGY=shared` |
-| **Staging** | `per_company` or `shared` | Per-tenant (recommended) or shared | `STORAGE_PROVISION_STRATEGY=per_company`, `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` |
-| **Production** | `per_company` | Per-tenant (one bucket per company) | `STORAGE_PROVISION_STRATEGY=per_company` |
-
-### Staging environment variables (per-tenant buckets)
-
-Use these in staging `.env` when using per-tenant buckets and IAM pattern `jackpot-staging-*`:
-
-- `APP_ENV=staging`
-- `APP_URL=https://your-staging-domain.com` (e.g. `https://staging-jackpot.velvetysoft.com`) — used for CORS allowed origin
-- `STORAGE_PROVISION_STRATEGY=per_company`
-- `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` (optional; this is the default)
-
-Optional: `STORAGE_CORS_ORIGINS` — comma-separated origins for S3 CORS. If unset, the app derives the origin from `APP_URL`.
+| Mode | Condition | Bucket name source | Object isolation |
+|------|-----------|--------------------|------------------|
+| **Shared** (default) | `infrastructure_tier` not `dedicated` (or local) | `AWS_BUCKET` / `storage.shared_bucket` | Key prefix `tenants/{tenant_uuid}/...` |
+| **Dedicated** | `infrastructure_tier === 'dedicated'` (non-local) | `STORAGE_BUCKET_NAME_PATTERN` → `TenantBucketService::generateBucketName()` | Same key layout; separate S3 bucket |
 
 ---
 
-## Versioning Rules Per Environment
+## Versioning and bucket configuration
 
-| Environment | Versioning | Notes |
-|-------------|------------|-------|
-| **Local** | Optional | Shared bucket is pre-created; versioning not applied by the app. |
-| **Staging** | Optional | Same as local; shared bucket is pre-created externally. |
-| **Production** | Enabled | Per-company buckets get versioning, encryption, and lifecycle rules from config. |
+| Case | Versioning / encryption / lifecycle / CORS |
+|------|------------------------------------------|
+| **Shared bucket** | The bucket is **assumed to exist** in AWS. **`CompanyStorageProvisioner::provisionShared()`** creates only the **`storage_buckets` row** (local/testing) or expects the row in staging/production. **S3 CreateBucket** for the shared bucket is an **ops** concern unless you run **`tenants:ensure-buckets`** / provision flows that call into provisioner helpers that touch S3. In practice, **CORS and lifecycle** for the shared bucket are applied when reconciliation/provisioner runs **`ensureBucketCors`** / **`provision`** paths—treat shared bucket policy as **environment-wide**. |
+| **Dedicated bucket** | **`provisionPerCompany()`** creates the bucket if missing and applies versioning, encryption, lifecycle, and CORS from **`config/storage.php`** (`bucket_config`). |
 
-For **per_company** strategy, the provisioner applies:
-- Versioning (if `storage.bucket_config.versioning` is true)
-- Encryption (AES256 or aws:kms)
-- Lifecycle rules (e.g., noncurrent version expiration, abort incomplete multipart uploads)
-- **CORS** — allowed origins default to the origin derived from `APP_URL` (scheme + host). Required for browser presigned uploads. The IAM role that creates/updates buckets must have `s3:PutBucketCORS`.
-
-For **shared** strategy, the bucket is assumed to exist; the provisioner does not create it or modify versioning/encryption/lifecycle/CORS.
+Defaults in **`storage.bucket_config`**: versioning on, AES256 encryption, lifecycle (noncurrent version expiration, abort incomplete multipart). **`ensureBucketExists()`** and dedicated provisioning use these when creating or updating buckets.
 
 ---
 
@@ -270,9 +268,11 @@ Use logs to detect CloudFront rejections (expired URL, invalid signature, or mis
 
 | Rule | Description |
 |------|-------------|
-| No auto-create on tenant creation | Buckets are provisioned lazily, not when tenants are created. |
-| Idempotent provisioning | Provisioning can be retried safely; existing buckets are reused. |
-| Tenants may lack buckets | Existing tenants may have no bucket; code must provision or handle missing buckets. |
+| Default bucket | **`AWS_BUCKET`** (shared): one bucket per app environment; isolation via **`tenants/{tenant_uuid}/...`** keys. |
+| Dedicated bucket | Only when **`infrastructure_tier = dedicated`** (Enterprise path; plan automation not wired yet). |
+| No auto-create on tenant creation | Tenant creation does not create S3 buckets; reconciliation/provision on demand or via **`tenants:ensure-buckets`**. |
+| Idempotent provisioning | Safe to retry; existing buckets and rows are reused. |
+| Tenants may lack bucket rows | Missing **`storage_buckets`** → `BucketNotProvisionedException`; run **`php artisan tenants:ensure-buckets`** on worker. |
 
 
 ---
@@ -665,12 +665,13 @@ Potential improvements:
        │
        ├── TenantBucketService::getOrProvisionBucket(tenant)  ◄── BUCKET SELECTION
        │         │
-       │         ├── Local/Testing: resolveActiveBucketOrFailIfExists() OR provisionBucket()
-       │         │         └── CompanyStorageProvisioner::provision() [SYNC in local]
+       │         ├── Shared tenant: resolveSharedBucketOrFail() → row for tenant + name = AWS_BUCKET
+       │         ├── Dedicated tenant: getOrProvisionBucketDedicated() → resolveActiveBucketOrFail() / provision (console)
        │         │
-       │         └── Staging/Production: resolveActiveBucketOrFail()
-       │                   └── StorageBucket::where(tenant_id, name, ACTIVE)->first()
-       │                   └── Bucket name from getExpectedBucketName(tenant)
+       │         ├── Local/Testing: may provision synchronously via CompanyStorageProvisioner::provision()
+       │         │
+       │         └── Staging/Production web: resolve only (no CreateBucket on web tier)
+       │                   └── Expected name from getExpectedBucketName() (shared or generated)
        │
        ├── UploadSession::create([storage_bucket_id => $bucket->id, ...])
        │
@@ -722,8 +723,8 @@ Potential improvements:
        │
        ├── Asset::create([storage_root_path => storagePath, storage_bucket_id => session->storage_bucket_id])
        │
-       ├── AssetVersionService::createVersion() with path "assets/{asset_id}/v1/original.{ext}"
-       │   └── copyTempToVersionedPath() → S3 copyObject  ◄── S3 WRITE (copy to versioned)
+       ├── AssetVersionService::createVersion() + pipeline copies/moves as implemented
+       │   └── Intermediate keys may exist until promotion
        │
        └── event(AssetUploaded) → ProcessAssetJob chain → FinalizeAssetJob → PromoteAssetJob
 
@@ -733,8 +734,8 @@ Potential improvements:
 
   PromoteAssetJob::handle()
        │
-       ├── sourcePath = asset->storage_root_path (temp/... or assets/{id}/v1/...)
-       ├── canonicalPath = "assets/{tenant_id}/{asset_id}/original.{ext}"  ◄── KEY WITH TENANT PREFIX
+       ├── sourcePath = asset->storage_root_path (temp/... or prior layout)
+       ├── canonicalPath = "tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}"  ◄── CANONICAL PREFIX
        │
        └── S3 copyObject + deleteObject  ◄── S3 WRITE (move to canonical)
 
@@ -762,18 +763,18 @@ Potential improvements:
 | Location | Service | Method |
 |----------|---------|--------|
 | **Primary** | `TenantBucketService` | `getExpectedBucketName()` / `getBucketName()` |
-| **Local** | Returns `config('storage.shared_bucket')` (AWS_BUCKET) |
-| **Staging/Prod** | Returns `generateBucketName(tenant)` → `jackpot-{env}-{company_slug}` |
-| **Provisioning** | `CompanyStorageProvisioner` | `provision()` → `provisionPerCompany()` or `provisionShared()` |
+| **Shared (default)** | Same | Returns **`config('storage.shared_bucket')`** (`AWS_BUCKET`) |
+| **Dedicated** | Same | Returns **`generateBucketName(tenant)`** from **`STORAGE_BUCKET_NAME_PATTERN`** |
+| **Provisioning** | `CompanyStorageProvisioner` | `provision()` → **`provisionShared()`** or **`provisionPerCompany()`** based on **`Tenant::hasDedicatedInfrastructure()`** |
 
 ### 2. Does key include tenant prefix?
 
-| Path Type | Format | Tenant Prefix? |
-|-----------|--------|----------------|
-| **Temp upload** | `temp/uploads/{upload_session_id}/original` | **No** |
-| **Versioned (new flow)** | `assets/{asset_id}/v{version}/original.{ext}` | **No** |
-| **Canonical (PromoteAssetJob)** | `assets/{tenant_id}/{asset_id}/original.{ext}` | **Yes** |
-| **Legacy permanent** | `assets/{tenant_id}/{brand_id}/{uuid}_{filename}` | **Yes** |
+| Path Type | Format | Tenant isolation |
+|-----------|--------|------------------|
+| **Temp upload** | `temp/uploads/{upload_session_id}/original` | Session-scoped (no tenant UUID in path) |
+| **Canonical (current)** | `tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}` | **UUID prefix** |
+| **Thumbnails** | `tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/...` | **UUID prefix** |
+| **Legacy** | Older `assets/{tenant_id}/...` or brand-prefixed layouts | **Deprecated** for new writes; may still exist for old assets |
 
 ### 3. Is bucket provisioning synchronous?
 
@@ -794,58 +795,35 @@ Cleanup iterates by `UploadSession`, not by tenant. No tenant→bucket resolutio
 
 ---
 
-## Shared Bucket Migration: Impact Summary
+## Enterprise dedicated buckets (roadmap vs code)
 
-**Goal:** Shared S3 bucket for all plans except Enterprise. Enterprise keeps per-tenant buckets (current staging behavior).
+**Implemented today**
 
-### Components That Must Change
+- **`tenants.infrastructure_tier`**: `shared` (default) vs `dedicated`.
+- **`Tenant::hasDedicatedInfrastructure()`**: non-local tenants with `dedicated` use **`generateBucketName()`** and **`provisionPerCompany()`**; others use **`AWS_BUCKET`** and **`provisionShared()`**.
+- **`tenants.storage_mode`**: updated to `shared` or `dedicated` when resolving buckets (`getOrProvisionBucket`).
 
-| Component | Current Behavior | Change Required |
-|-----------|------------------|-----------------|
-| **TenantBucketService** | `getExpectedBucketName()`: local=shared, staging/prod=per-tenant | Add plan check: Enterprise → per-tenant; else → shared |
-| **CompanyStorageProvisioner** | `provision()`: shared or per_company by config | Add plan-aware logic: Enterprise → provisionPerCompany; else → provisionShared |
-| **TenantsEnsureBucketsCommand** | Provisions per tenant | Enterprise tenants: per-tenant; others: ensure shared bucket record exists |
-| **Storage config** | `provision_strategy`, `shared_bucket` | May need plan-based override or new config keys |
-| **PlanService** | N/A | Add `isEnterprisePlan(tenant)` or equivalent |
+**Not implemented yet (intended)**
 
-### Components That Need Review (Likely OK)
+- Automatic promotion to **`infrastructure_tier = dedicated`** from Stripe plan / “Enterprise” product.
+- Plan-based branching in **`PlanService`** instead of manual DB column.
 
-| Component | Notes |
-|-----------|-------|
-| **UploadInitiationService** | Uses `getOrProvisionBucket(tenant)` — no change if TenantBucketService returns correct bucket |
-| **UploadCompletionService** | Uses session's bucket — no change |
-| **MultipartUploadService** | Uses session's bucket — no change |
-| **MultipartUploadUrlService** | Uses session's bucket — no change |
-| **UploadCleanupService** | Uses session's bucket — no change |
-| **PromoteAssetJob** | Uses asset's bucket — no change |
-| **TenantBucketService (read ops)** | getPresignedGetUrl, headObject, etc. — use bucket from Asset/context |
+**Operational**
 
-### Key Path Change for Shared Bucket
-
-**Current (per-tenant):** Isolation via bucket. Keys can be `assets/{tenant_id}/{asset_id}/...` or `assets/{asset_id}/v1/...`.
-
-**Shared bucket:** Isolation must be via **key prefix**. The canonical path `assets/{tenant_id}/{asset_id}/original.{ext}` already includes tenant_id — **no key format change needed**. Tenant isolation is preserved by the key prefix.
-
-### Migration Considerations
-
-1. **Existing per-tenant buckets:** Enterprise tenants keep them. Non-enterprise: migrate objects to shared bucket with same key structure, or keep per-tenant buckets for existing data and use shared for new uploads (dual-write during transition).
-2. **StorageBucket table:** Each tenant has a row. For shared: multiple tenants can share the same `name` (bucket name) with different `tenant_id` — `provisionShared()` already creates one row per tenant pointing to the same bucket name.
-3. **IAM:** Shared bucket needs policy allowing all tenants' access patterns. Per-tenant IAM can remain for Enterprise.
-4. **CORS:** Shared bucket CORS must allow all tenant app origins (APP_URL per tenant or wildcard).
-5. **Lifecycle rules:** Shared bucket gets one set of rules for all tenants; per-tenant rules stay for Enterprise.
+- **Staging and production** default deployments should use **one shared bucket per environment** + **`tenants:ensure-buckets`** so every tenant has an ACTIVE **`storage_buckets`** row for that bucket name.
+- **Dedicated** customers: set **`infrastructure_tier`** to **`dedicated`**, ensure IAM can create/manage `jackpot-{env}-{slug}` buckets, run provisioning from **console/queue** (not web).
 
 ---
 
-## Files to Modify for Shared-Bucket Migration
+## Legacy doc: “shared migration” checklist (historical)
 
-| File | Change |
+The following was written when the code still assumed per-environment per-tenant buckets. **Runtime behavior now matches shared-by-default + optional dedicated.** Remaining work is **plan gating** and any **data migration** for tenants that still have old bucket rows or legacy key layouts—not switching the whole app from shared to per-tenant.
+
+| Area | Status |
 |------|--------|
-| `app/Services/TenantBucketService.php` | Plan check in `getExpectedBucketName()` / `getBucketName()` |
-| `app/Services/CompanyStorageProvisioner.php` | Plan check in `provision()` |
-| `app/Console/Commands/TenantsEnsureBucketsCommand.php` | Enterprise vs non-enterprise provisioning logic |
-| `config/storage.php` | Optional: plan-based strategy config |
-| `app/Services/PlanService.php` | Add `isEnterprisePlan(Tenant)` if not present |
-| `docs/STORAGE.md` | Update with shared-bucket-by-plan behavior |
+| Shared bucket + tenant UUID prefix | **Canonical for new objects** |
+| `StorageBucket` row per tenant, same `name` for shared | **Supported** (`provisionShared`) |
+| Enterprise = automatic dedicated tier | **Pending** (use `infrastructure_tier` manually until then) |
 
 ---
 

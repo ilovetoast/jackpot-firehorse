@@ -287,7 +287,7 @@ export default function Overview({
                             />
                         )}
 
-                        {/* Primary action tiles — Brand Portal, Team, Analytics always */}
+                        {/* Primary action tiles — Brand Settings / Insights when user has permissions */}
                                 <PrimaryActions
                                     permissions={permissions}
                                     brand={activeBrand}

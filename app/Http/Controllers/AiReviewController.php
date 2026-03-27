@@ -74,10 +74,10 @@ class AiReviewController extends Controller
             return $this->getCategorySuggestions($tenant, $brand, $limitToUploader);
         }
         if ($type === 'values') {
-            return $this->getValueSuggestions($tenant, $brand);
+            return $this->getValueSuggestions($tenant, $brand, $request);
         }
         if ($type === 'fields') {
-            return $this->getFieldSuggestions($tenant, $brand);
+            return $this->getFieldSuggestions($tenant, $brand, $request);
         }
 
         return response()->json(['message' => 'Invalid type. Use tags, categories, values, or fields.'], 400);
@@ -214,9 +214,34 @@ class AiReviewController extends Controller
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage');
     }
 
-    protected function getValueSuggestions($tenant, $brand): JsonResponse
+    /**
+     * @return array{0: int, 1: int} per_page, page (clamped)
+     */
+    protected function reviewPaginationParams(Request $request, int $defaultPerPage = 50, int $maxPerPage = 100): array
     {
-        $max = (int) config('ai_metadata_field_suggestions.insight_review_max_items', 50);
+        $perPage = min(max((int) $request->query('per_page', $defaultPerPage), 1), $maxPerPage);
+        $page = max((int) $request->query('page', 1), 1);
+
+        return [$perPage, $page];
+    }
+
+    protected function paginationMeta(int $total, int $perPage, int $page): array
+    {
+        $lastPage = $total > 0 ? (int) ceil($total / $perPage) : 1;
+
+        return [
+            'total' => $total,
+            'current_page' => $page,
+            'last_page' => max(1, $lastPage),
+            'per_page' => $perPage,
+        ];
+    }
+
+    protected function getValueSuggestions($tenant, $brand, Request $request): JsonResponse
+    {
+        [$perPage, $page] = $this->reviewPaginationParams($request);
+        // Fetch enough rows for suppression filter + later pages (cap avoids unbounded memory).
+        $sqlLimit = min(20000, max($page * $perPage * 8, 1000));
 
         $rows = DB::table('ai_metadata_value_suggestions as amvs')
             ->where('amvs.tenant_id', $tenant->id)
@@ -234,7 +259,7 @@ class AiReviewController extends Controller
                 'amvs.consistency_score',
                 'amvs.source'
             )
-            ->limit($max * 2)
+            ->limit($sqlLimit)
             ->get();
 
         $suppressed = $this->suppressedNormalizedKeys($tenant->id, 'value');
@@ -242,7 +267,10 @@ class AiReviewController extends Controller
             $k = AiSuggestionSuppressionService::normalizeValueKey((string) $r->field_key, (string) $r->suggested_value);
 
             return ! isset($suppressed[$k]);
-        })->take($max);
+        })->values();
+
+        $total = $rows->count();
+        $rows = $rows->slice(($page - 1) * $perPage, $perPage)->values();
 
         $fieldKeys = $rows->pluck('field_key')->unique()->filter()->values()->all();
         $labels = [];
@@ -282,12 +310,16 @@ class AiReviewController extends Controller
             ];
         }
 
-        return response()->json(['items' => $items, 'total' => count($items)]);
+        return response()->json(array_merge(
+            ['items' => $items],
+            $this->paginationMeta($total, $perPage, $page)
+        ));
     }
 
-    protected function getFieldSuggestions($tenant, $brand): JsonResponse
+    protected function getFieldSuggestions($tenant, $brand, Request $request): JsonResponse
     {
-        $max = (int) config('ai_metadata_field_suggestions.insight_review_max_items', 50);
+        [$perPage, $page] = $this->reviewPaginationParams($request);
+        $sqlLimit = min(20000, max($page * $perPage * 8, 1000));
 
         $rows = DB::table('ai_metadata_field_suggestions as amfs')
             ->where('amfs.tenant_id', $tenant->id)
@@ -307,7 +339,7 @@ class AiReviewController extends Controller
                 'amfs.consistency_score',
                 'amfs.source_cluster'
             )
-            ->limit($max * 2)
+            ->limit($sqlLimit)
             ->get();
 
         $suppressed = $this->suppressedNormalizedKeys($tenant->id, 'field');
@@ -319,7 +351,10 @@ class AiReviewController extends Controller
             );
 
             return ! isset($suppressed[$k]);
-        })->take($max);
+        })->values();
+
+        $total = $rows->count();
+        $rows = $rows->slice(($page - 1) * $perPage, $perPage)->values();
 
         $countsBySlug = $this->countAssetsInCategoryBySlugForBrand($tenant->id, (int) $brand->id);
 
@@ -360,7 +395,10 @@ class AiReviewController extends Controller
             ];
         }
 
-        return response()->json(['items' => $items, 'total' => count($items)]);
+        return response()->json(array_merge(
+            ['items' => $items],
+            $this->paginationMeta($total, $perPage, $page)
+        ));
     }
 
     /**
@@ -430,12 +468,17 @@ class AiReviewController extends Controller
         if ($limitToUploader) {
             $q->where('assets.user_id', $limitToUploader->id);
         }
+
+        [$perPage, $page] = $this->reviewPaginationParams(request());
+        $total = (clone $q)->count();
         $candidates = $q
             ->orderByDesc('asset_tag_candidates.confidence')
             ->orderByDesc('asset_tag_candidates.created_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
             ->get();
 
-        return $this->formatTagResponse($candidates);
+        return $this->formatTagResponse($candidates, $this->paginationMeta($total, $perPage, $page));
     }
 
     protected function getCategorySuggestions($tenant, $brand, $limitToUploader = null): JsonResponse
@@ -466,9 +509,14 @@ class AiReviewController extends Controller
         if ($limitToUploader) {
             $q->where('assets.user_id', $limitToUploader->id);
         }
+
+        [$perPage, $page] = $this->reviewPaginationParams(request());
+        $total = (clone $q)->count();
         $candidates = $q
             ->orderByDesc('asset_metadata_candidates.confidence')
             ->orderByDesc('asset_metadata_candidates.created_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
             ->get();
 
         $fieldIds = $candidates->pluck('metadata_field_id')->unique();
@@ -487,10 +535,10 @@ class AiReviewController extends Controller
             }
         }
 
-        return $this->formatCategoryResponse($candidates, $optionsMap);
+        return $this->formatCategoryResponse($candidates, $optionsMap, $this->paginationMeta($total, $perPage, $page));
     }
 
-    protected function formatTagResponse($candidates): JsonResponse
+    protected function formatTagResponse($candidates, array $paginationMeta): JsonResponse
     {
         $assetIds = $candidates->pluck('asset_id')->unique()->all();
         $assets = Asset::whereIn('id', $assetIds)->get()->keyBy('id');
@@ -519,10 +567,13 @@ class AiReviewController extends Controller
             ];
         }
 
-        return response()->json(['items' => $items, 'total' => count($items)]);
+        return response()->json(array_merge(
+            ['items' => $items],
+            $paginationMeta
+        ));
     }
 
-    protected function formatCategoryResponse($candidates, array $optionsMap): JsonResponse
+    protected function formatCategoryResponse($candidates, array $optionsMap, array $paginationMeta): JsonResponse
     {
         $assetIds = $candidates->pluck('asset_id')->unique()->all();
         $assets = Asset::whereIn('id', $assetIds)->get()->keyBy('id');
@@ -575,7 +626,10 @@ class AiReviewController extends Controller
             ];
         }
 
-        return response()->json(['items' => $items, 'total' => count($items)]);
+        return response()->json(array_merge(
+            ['items' => $items],
+            $paginationMeta
+        ));
     }
 
     protected function getThumbnailUrls(?Asset $asset): array

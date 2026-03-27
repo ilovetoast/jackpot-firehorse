@@ -4232,7 +4232,7 @@ export default function BrandGuidelinesBuilder({
 
                                                     <div className="mb-5 space-y-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
                                                         <p className="text-[11px] font-medium uppercase tracking-wide text-white/45">Automated generation</p>
-                                                        <p className="text-[10px] text-white/40 -mt-1 mb-2">When enabled, background jobs create missing variants from your primary logo (raster only) after uploads, pipeline runs, or when you save these settings.</p>
+                                                        <p className="text-[10px] text-white/40 -mt-1 mb-2">When enabled, background jobs create missing variants from your primary logo after uploads, pipeline runs, or when you save these settings. SVGs use the generated thumbnail (same as the grid).</p>
                                                         <label className="flex items-start gap-3 cursor-pointer">
                                                             <input
                                                                 type="checkbox"

@@ -159,23 +159,32 @@
         50% { transform: translateY(-8px); }
     }
 
-    /* Overview collage: very slow, subtle vertical drift (columns differ slightly; gated in AssetCollage when enough assets) */
-    @keyframes slot-machine-drift {
-        0%, 100% { transform: translateY(0) translateZ(0); }
-        50% { transform: translateY(-8px) translateZ(0); }
+    /*
+     * Overview collage: slow upward “film strip” — duplicated column content, translateY(-50%) loops seamlessly.
+     * Linear timing = constant drift; durations differ per column (subtle parallax).
+     */
+    @keyframes collage-column-scroll {
+        from {
+            transform: translate3d(0, 0, 0);
+        }
+        to {
+            transform: translate3d(0, -50%, 0);
+        }
     }
-    .animate-slot-drift {
-        animation: slot-machine-drift 72s ease-in-out infinite;
+    .animate-collage-scroll-1 {
+        animation: collage-column-scroll 150s linear infinite;
     }
-    .animate-slot-drift-1 { animation: slot-machine-drift 68s ease-in-out infinite 0s; }
-    .animate-slot-drift-2 { animation: slot-machine-drift 80s ease-in-out infinite 4s; }
-    .animate-slot-drift-3 { animation: slot-machine-drift 76s ease-in-out infinite 9s; }
+    .animate-collage-scroll-2 {
+        animation: collage-column-scroll 115s linear infinite;
+    }
+    .animate-collage-scroll-3 {
+        animation: collage-column-scroll 132s linear infinite;
+    }
 
     @media (prefers-reduced-motion: reduce) {
-        .animate-slot-drift,
-        .animate-slot-drift-1,
-        .animate-slot-drift-2,
-        .animate-slot-drift-3 {
+        .animate-collage-scroll-1,
+        .animate-collage-scroll-2,
+        .animate-collage-scroll-3 {
             animation: none !important;
         }
     }

@@ -13,7 +13,7 @@ const ICON_MAP = {
 const ALL_ACTIONS = [
     {
         key: 'portal',
-        title: 'Brand Portal',
+        title: 'Brand Settings',
         description: 'All brand settings',
         // Scoped to the `brand` prop (workspace brand you’re viewing); same tenant — not the agency switch.
         hrefFn: (brand) => (brand?.id ? `/app/brands/${brand.id}/edit#brand-portal` : null),

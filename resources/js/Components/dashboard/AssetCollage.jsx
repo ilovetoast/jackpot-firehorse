@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 const NUM_COLUMNS = 3
-const MAX_ASSETS = 12
-/** Minimum thumbnails before columns get the slow vertical drift (needs enough visual mass per column). */
-const MIN_ASSETS_FOR_COLUMN_DRIFT = 6
+/** Cap thumbnails passed from overview (backend may send more). */
+const MAX_ASSETS = 24
+/** Film-strip scroll only when there is enough to fill columns (~5 per col); below this use classic bottom-aligned masonry. */
+const MIN_ASSETS_FOR_COLUMN_DRIFT = 15
 
 /** Vertical stagger between columns (slot-machine reel offset) */
 const COLUMN_BOTTOM_OFFSETS = ['-42%', '0%', '48%']
@@ -100,7 +101,9 @@ export default function AssetCollage({ assets = [] }) {
             }}
         >
             <div
-                className="absolute inset-0 grid grid-cols-3 gap-8 items-end justify-items-center px-6 pb-4"
+                className={`absolute inset-0 grid grid-cols-3 gap-8 justify-items-center px-6 pb-4 ${
+                    enableColumnDrift ? 'items-stretch' : 'items-end'
+                }`}
                 style={{
                     ...parallaxStyle,
                     transformStyle: 'preserve-3d',
@@ -108,12 +111,43 @@ export default function AssetCollage({ assets = [] }) {
             >
                 {displayColumns.map((imgs, ci) => {
                     const isEmpty = !imgs || imgs.length === 0
-                    const driftClass = enableColumnDrift ? `animate-slot-drift-${(ci % 3) + 1}` : ''
+                    const useFilmDrift = enableColumnDrift && !isEmpty
+                    const driftClass = useFilmDrift ? `animate-collage-scroll-${(ci % 3) + 1}` : ''
+
+                    const renderCards = (list, keySuffix = '') =>
+                        list.map((src, ii) => {
+                            const nudge = getCardNudge(ci, ii)
+                            return (
+                                <div
+                                    key={`${ii}${keySuffix}`}
+                                    className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
+                                    style={{
+                                        aspectRatio: isFew ? '3/4' : '4/5',
+                                        marginLeft: nudge !== 0 ? `${nudge}px` : undefined,
+                                        contain: 'layout paint',
+                                        transform: 'translateZ(0)',
+                                    }}
+                                >
+                                    <img
+                                        src={src}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                        loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
+                                        decoding="async"
+                                        fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
+                                    />
+                                </div>
+                            )
+                        })
 
                     return (
                         <div
                             key={ci}
-                            className="flex flex-col-reverse justify-end min-h-0 w-full max-w-full"
+                            className={
+                                useFilmDrift
+                                    ? 'relative flex min-h-0 h-full w-full max-w-full flex-col justify-end overflow-hidden'
+                                    : 'flex min-h-0 w-full max-w-full flex-col-reverse justify-end'
+                            }
                             style={{
                                 marginBottom: COLUMN_BOTTOM_OFFSETS[ci] ?? '0%',
                                 transition: `opacity 0.8s ease ${200 + ci * 120}ms`,
@@ -122,39 +156,27 @@ export default function AssetCollage({ assets = [] }) {
                                 backfaceVisibility: 'hidden',
                             }}
                         >
-                            <div className={`flex flex-col-reverse gap-3 justify-end min-h-0 w-full ${driftClass}`}>
                             {isEmpty ? (
                                 <div
                                     className="w-full rounded-2xl border border-dashed border-white/[0.06] flex-1 min-h-[80px]"
                                     aria-hidden
                                 />
+                            ) : useFilmDrift ? (
+                                <div
+                                    className={`flex w-full shrink-0 flex-col gap-3 ${driftClass}`}
+                                    style={{
+                                        willChange: 'transform',
+                                        backfaceVisibility: 'hidden',
+                                    }}
+                                >
+                                    {renderCards(imgs, '')}
+                                    {renderCards(imgs, '-loop')}
+                                </div>
                             ) : (
-                                imgs.map((src, ii) => {
-                                    const nudge = getCardNudge(ci, ii)
-                                    return (
-                                        <div
-                                            key={ii}
-                                            className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
-                                            style={{
-                                                aspectRatio: isFew ? '3/4' : '4/5',
-                                                marginLeft: nudge !== 0 ? `${nudge}px` : undefined,
-                                                contain: 'layout paint',
-                                                transform: 'translateZ(0)',
-                                            }}
-                                        >
-                                            <img
-                                                src={src}
-                                                alt=""
-                                                className="w-full h-full object-cover"
-                                                loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
-                                                decoding="async"
-                                                fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
-                                            />
-                                        </div>
-                                    )
-                                })
+                                <div className="flex min-h-0 w-full flex-col-reverse gap-3 justify-end">
+                                    {renderCards(imgs, '')}
+                                </div>
                             )}
-                            </div>
                         </div>
                     )
                 })}
