@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
@@ -12,17 +13,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('brands', function (Blueprint $table) {
-            if (Schema::hasColumn('brands', 'icon_id')) {
-                $table->dropColumn('icon_id');
-            }
-            if (Schema::hasColumn('brands', 'icon_path')) {
-                $table->dropColumn('icon_path');
-            }
-            if (Schema::hasColumn('brands', 'icon')) {
-                $table->dropColumn('icon');
-            }
-        });
+        $this->dropColumnIfExists('brands', 'icon_id');
+        $this->dropColumnIfExists('brands', 'icon_path');
+        $this->dropColumnIfExists('brands', 'icon');
     }
 
     public function down(): void
@@ -44,5 +37,31 @@ return new class extends Migration
                 }
             }
         });
+    }
+
+    /**
+     * Drop a column only when present, and tolerate concurrent migrators
+     * that may remove it between the hasColumn() check and ALTER TABLE.
+     */
+    private function dropColumnIfExists(string $tableName, string $column): void
+    {
+        if (! Schema::hasColumn($tableName, $column)) {
+            return;
+        }
+
+        try {
+            Schema::table($tableName, function (Blueprint $table) use ($column) {
+                $table->dropColumn($column);
+            });
+        } catch (QueryException $exception) {
+            $driverErrorCode = $exception->errorInfo[1] ?? null;
+
+            // MySQL/MariaDB "Can't DROP ... check that column/key exists"
+            if ((int) $driverErrorCode === 1091) {
+                return;
+            }
+
+            throw $exception;
+        }
     }
 };
