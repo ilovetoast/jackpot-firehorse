@@ -16,6 +16,7 @@ use App\Jobs\PromoteAssetJob;
 use App\Services\Assets\AssetStateReconciliationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Central recovery logic for system incidents.
@@ -117,13 +118,12 @@ class SystemIncidentRecoveryService
 
         try {
             $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severityValue, $creator, $tenantId) {
-                $ticket = Ticket::create([
+                $ticketData = [
                     'type' => TicketType::INTERNAL,
                     'status' => TicketStatus::OPEN,
                     'tenant_id' => $tenantId,
                     'created_by_user_id' => $creator->id,
                     'assigned_team' => \App\Enums\TicketTeam::ENGINEERING,
-                    'severity' => $severityValue,
                     'metadata' => [
                         'subject' => $subject,
                         'description' => $description,
@@ -135,7 +135,15 @@ class SystemIncidentRecoveryService
                         'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
                         'severity' => $severityValue->value,
                     ],
-                ]);
+                ];
+
+                // Defensive compatibility: some environments may still be missing
+                // engineering columns on tickets due historic migration ordering.
+                if (Schema::hasColumn('tickets', 'severity')) {
+                    $ticketData['severity'] = $severityValue;
+                }
+
+                $ticket = Ticket::create($ticketData);
 
                 if ($asset?->brand_id) {
                     $ticket->brands()->attach([$asset->brand_id]);
