@@ -46,6 +46,12 @@ export default function Overview({
     const managedAgencyClients = authFromPage?.managed_agency_clients ?? []
     const showManagedCompanies =
         Boolean(authFromPage?.activeCompany?.is_agency) && managedAgencyClients.length > 0
+    const hasAgencyQuickLink = Array.isArray(authFromPage?.companies)
+        ? authFromPage.companies.some((company) => company?.is_agency === true)
+        : false
+    const mobileTopPaddingClass = hasAgencyQuickLink
+        ? 'pt-[calc(8rem+env(safe-area-inset-top))]'
+        : 'pt-[calc(5.5rem+env(safe-area-inset-top))]'
 
     const isAgencyAccount = authFromPage?.activeCompany?.is_agency === true
     const dashLinksRaw = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
@@ -180,7 +186,7 @@ export default function Overview({
                              * ---------------------------------------------------------------------------
                              */}
                             <motion.div
-                                className="flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 pt-[5.5rem] sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16 lg:pt-12 xl:pt-16"
+                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 ${mobileTopPaddingClass} sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16 lg:pt-12 xl:pt-16`}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.4 }}
