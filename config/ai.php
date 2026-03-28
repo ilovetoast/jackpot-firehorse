@@ -102,7 +102,8 @@ return [
     'models' => [
         'gpt-4-turbo' => [
             'provider' => 'openai',
-            'model_name' => 'gpt-4-turbo-preview',
+            // Legacy key retained for compatibility; preview model was retired.
+            'model_name' => 'gpt-4o',
             'capabilities' => ['text', 'reasoning'],
             'recommended_use' => ['tagging', 'audit', 'reporting', 'creative'],
             'default_cost_per_token' => [

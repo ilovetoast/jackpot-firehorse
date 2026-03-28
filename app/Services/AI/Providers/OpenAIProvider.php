@@ -44,7 +44,6 @@ class OpenAIProvider implements AIProviderInterface
      */
     protected array $supportedModels = [
         'gpt-4-turbo',
-        'gpt-4-turbo-preview',
         'gpt-4',
         'gpt-3.5-turbo',
         'gpt-4o',
@@ -101,7 +100,8 @@ class OpenAIProvider implements AIProviderInterface
      */
     public function generateText(string $prompt, array $options = []): array
     {
-        $model = $options['model'] ?? 'gpt-3.5-turbo';
+        $requestedModel = (string) ($options['model'] ?? 'gpt-3.5-turbo');
+        $model = $this->resolveTextModelAlias($requestedModel);
         $maxTokens = $options['max_tokens'] ?? 1000;
         $temperature = $options['temperature'] ?? 0.7;
         $responseFormat = $options['response_format'] ?? null;
@@ -166,6 +166,7 @@ class OpenAIProvider implements AIProviderInterface
                 'tokens_out' => $tokensOut,
                 'model' => $actualModel,
                 'metadata' => [
+                    'requested_model' => $requestedModel,
                     'finish_reason' => $data['choices'][0]['finish_reason'] ?? null,
                     'response_id' => $data['id'] ?? null,
                 ],
@@ -497,15 +498,23 @@ class OpenAIProvider implements AIProviderInterface
      */
     public function isModelAvailable(string $model): bool
     {
+        $resolvedModel = $this->resolveTextModelAlias($model);
+
         // Check if model is in supported models list
-        if (in_array($model, $this->supportedModels, true)) {
+        if (in_array($resolvedModel, $this->supportedModels, true)) {
             return true;
         }
 
         // Check if model is defined in config
         $configModels = config('ai.models', []);
         foreach ($configModels as $key => $modelConfig) {
-            if ($key === $model || ($modelConfig['model_name'] ?? null) === $model) {
+            $configModelName = (string) ($modelConfig['model_name'] ?? '');
+            if (
+                $key === $model
+                || $configModelName === $model
+                || $key === $resolvedModel
+                || $configModelName === $resolvedModel
+            ) {
                 // Also check if model's provider matches this provider
                 return ($modelConfig['provider'] ?? null) === 'openai';
             }
@@ -532,6 +541,20 @@ class OpenAIProvider implements AIProviderInterface
     }
 
     /**
+     * Normalize legacy text model aliases to currently available OpenAI models.
+     * Keeps old config keys working after upstream model retirements.
+     */
+    protected function resolveTextModelAlias(string $model): string
+    {
+        $aliases = [
+            'gpt-4-turbo-preview' => 'gpt-4o',
+            'gpt-4-turbo' => 'gpt-4o',
+        ];
+
+        return $aliases[$model] ?? $model;
+    }
+
+    /**
      * Analyze an image with a prompt using OpenAI Vision API.
      *
      * Accepts image as base64 data URL (data:image/webp;base64,...).
@@ -553,7 +576,8 @@ class OpenAIProvider implements AIProviderInterface
      */
     public function analyzeImage(string $imageBase64DataUrl, string $prompt, array $options = []): array
     {
-        $model = $options['model'] ?? 'gpt-4o-mini';
+        $requestedModel = (string) ($options['model'] ?? 'gpt-4o-mini');
+        $model = $this->resolveTextModelAlias($requestedModel);
         $maxTokens = $options['max_tokens'] ?? 1000;
         $responseFormat = $options['response_format'] ?? ['type' => 'json_object'];
 
@@ -626,6 +650,7 @@ class OpenAIProvider implements AIProviderInterface
                 'tokens_out' => $tokensOut,
                 'model' => $actualModel,
                 'metadata' => [
+                    'requested_model' => $requestedModel,
                     'finish_reason' => $data['choices'][0]['finish_reason'] ?? null,
                     'response_id' => $data['id'] ?? null,
                 ],
