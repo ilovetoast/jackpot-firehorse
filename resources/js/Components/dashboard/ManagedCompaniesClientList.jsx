@@ -9,7 +9,7 @@ import { agencyNavigateToBrandPath } from '../../utils/agencyBrandNavigation'
 import { effortGlyph, resolveReadinessTaskPath } from '../../utils/readinessTasks'
 
 function BrandLogoBlock({ brand, isDark, name }) {
-    const src = isDark ? brand.logo_dark_url || brand.logo_url : brand.logo_url || brand.logo_dark_url
+    const src = isDark ? brand.logo_url || brand.logo_dark_url : brand.logo_url || brand.logo_dark_url
     const accent = brand.primary_color && /^#[0-9A-Fa-f]{6}$/.test(brand.primary_color) ? brand.primary_color : null
 
     if (src) {

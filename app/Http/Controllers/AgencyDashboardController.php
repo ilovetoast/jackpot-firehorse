@@ -268,12 +268,12 @@ class AgencyDashboardController extends Controller
             $brandForLinks = $defaultBrand;
         }
 
-        $settingsLabels = DashboardLinks::workspaceSettingsLabels($tenant->name, $brandForLinks?->name);
+        $dashLabels = DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brandForLinks?->name);
         $dashboardLinks = [
-            'company' => DashboardLinks::companyOverviewHref($user, $tenant),
-            'company_label' => $settingsLabels['company'],
-            'brand' => DashboardLinks::brandOverviewHref($user, $tenant, $brandForLinks),
-            'brand_label' => $settingsLabels['brand'],
+            'company' => DashboardLinks::companySettingsHref($user, $tenant),
+            'company_label' => $dashLabels['company'],
+            'brand' => DashboardLinks::brandEditHref($user, $tenant, $brandForLinks),
+            'brand_label' => $dashLabels['brand'],
         ];
 
         $managedAgency = [

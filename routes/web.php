@@ -420,6 +420,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // Phase A-1: AI Agent Health (observability, read-only)
     Route::get('/admin/ai-agents', [\App\Http\Controllers\Admin\AdminAIAgentHealthController::class, 'index'])->name('admin.ai-agent-health.index');
     Route::get('/admin/ai-error-monitoring', [\App\Http\Controllers\Admin\SentryAIController::class, 'index'])->name('admin.ai-error-monitoring.index');
+    Route::get('/admin/ai-error-monitoring/pull', [\App\Http\Controllers\Admin\SentryAIController::class, 'redirectPullGet'])->name('admin.ai-error-monitoring.pull.get');
     Route::post('/admin/ai-error-monitoring/pull', [\App\Http\Controllers\Admin\SentryAIController::class, 'pull'])->name('admin.ai-error-monitoring.pull');
     Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/toggle-heal', [\App\Http\Controllers\Admin\SentryAIController::class, 'toggleHeal'])->name('admin.ai-error-monitoring.toggle-heal');
     Route::post('/admin/ai-error-monitoring/sentry-issues/{issue}/dismiss', [\App\Http\Controllers\Admin\SentryAIController::class, 'dismiss'])->name('admin.ai-error-monitoring.dismiss');

@@ -97,6 +97,16 @@ class SentryAIController extends Controller
     }
 
     /**
+     * Browsers and prefetchers may GET this URL; the sync action is POST-only.
+     */
+    public function redirectPullGet(): \Illuminate\Http\RedirectResponse
+    {
+        $this->authorizeAdmin();
+
+        return redirect()->route('admin.ai-error-monitoring.index');
+    }
+
+    /**
      * Manual pull: fetch all Sentry issues and run AI analysis.
      * Same logic as PullSentryIssuesJob, runs synchronously.
      */

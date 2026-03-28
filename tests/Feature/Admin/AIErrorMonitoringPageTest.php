@@ -45,6 +45,24 @@ class AIErrorMonitoringPageTest extends TestCase
         );
     }
 
+    public function test_get_pull_url_redirects_to_index_for_admin(): void
+    {
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $user = User::create([
+            'email' => 'admin-pull-get@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Admin',
+            'last_name' => 'User',
+        ]);
+        $user->assignRole('site_admin');
+        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id])
+            ->get('/app/admin/ai-error-monitoring/pull')
+            ->assertRedirect(route('admin.ai-error-monitoring.index'));
+    }
+
     public function test_page_returns_403_for_non_admin(): void
     {
         $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);

@@ -6,8 +6,8 @@ import { ChevronRightIcon } from '@heroicons/react/24/outline'
  */
 export default function DashboardLinksRow({ links = {}, variant = 'dark', className = '' }) {
     const dashLinks = links && typeof links === 'object' ? links : {}
-    const companyLabel = dashLinks.company_label || 'Company settings'
-    const brandLabel = dashLinks.brand_label || 'Brand settings'
+    const companyLabel = dashLinks.company_label || 'Company'
+    const brandLabel = dashLinks.brand_label || 'Brand'
     const hasRow = Boolean(dashLinks.company || dashLinks.brand)
 
     const dashboardLinkClass =

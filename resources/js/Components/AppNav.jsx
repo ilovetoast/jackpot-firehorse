@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
-import useLogoBrightness from '../utils/useLogoBrightness'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
 import PermissionGate from './PermissionGate'
@@ -226,13 +225,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         return {}
     }
     const baseLogoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
-    const logoSrc = activeBrand?.logo_path || null
-    const logoIsDark = useLogoBrightness(variant === 'transparent' ? logoSrc : null)
-    const logoFilterStyle = isTransparentVariant
-        ? (logoIsDark
-            ? { filter: 'brightness(0) invert(1)', transition: 'filter 0.3s ease' }
-            : { filter: 'none', transition: 'filter 0.3s ease' })
-        : { ...baseLogoFilterStyle, transition: 'filter 0.3s ease' }
+    /** Cinematic (transparent) header: show primary logo as uploaded — no luminance auto-invert (brand supplies on-light mark). */
+    const logoFilterStyle = { ...baseLogoFilterStyle, transition: 'filter 0.3s ease' }
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')

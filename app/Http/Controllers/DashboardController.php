@@ -863,17 +863,17 @@ class DashboardController extends Controller
             ];
         }
 
-        // Brand cinematic overview: link to company settings only — you’re already on brand overview (no “here” crumb).
-        $settingsLabels = DashboardLinks::workspaceSettingsLabels($tenant->name, $brand->name);
+        // Brand cinematic overview: link to company overview (/app) — you’re already on brand overview (no “here” crumb).
+        $dashLabels = DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brand->name);
         $dashboardLinks = [
             'company' => DashboardLinks::companyOverviewHref($user, $tenant),
-            'company_label' => $settingsLabels['company'],
+            'company_label' => $dashLabels['company'],
         ];
 
         if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
             $dashboardLinks = [
                 'company' => null,
-                'company_label' => $settingsLabels['company'],
+                'company_label' => $dashLabels['company'],
             ];
         }
 

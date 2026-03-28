@@ -254,6 +254,12 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     })
     const isEnabled = brandModel?.is_enabled ?? false
     const showCallout = !isEnabled || !hasActiveVersion
+    const hasAgencyQuickLink = Array.isArray(auth?.companies)
+        ? auth.companies.some((company) => company?.is_agency === true)
+        : false
+    const belowAppNavTopClass = hasAgencyQuickLink
+        ? 'top-[calc(8rem+env(safe-area-inset-top,0px))]'
+        : 'top-[calc(5.5rem+env(safe-area-inset-top,0px))]'
 
     const u = (v) => unwrapValue(v)
     const rawIdentity = modelPayload?.identity ?? {}
@@ -466,8 +472,8 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                     href={typeof route === 'function' ? route('brands.brand-guidelines.builder', { brand: brand.id }) : `/app/brands/${brand.id}/brand-guidelines/builder`}
                     className={`fixed left-4 z-[60] rounded-md border px-2.5 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
                         showCallout || !scrolledPastHero
-                            ? 'top-20 border-white/25 bg-black/35 text-white hover:bg-black/50'
-                            : 'top-20 border-gray-200 bg-white/95 text-gray-800 hover:bg-white'
+                            ? `${belowAppNavTopClass} border-white/25 bg-black/35 text-white hover:bg-black/50`
+                            : `${belowAppNavTopClass} border-gray-200 bg-white/95 text-gray-800 hover:bg-white`
                     }`}
                     aria-label="Edit Brand DNA"
                 >
@@ -550,7 +556,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
 
                         <Link
                             href={typeof route === 'function' ? route('brands.edit', { brand: brand.id }) : `/app/brands/${brand.id}/edit`}
-                            className="absolute top-20 left-6 z-10 text-sm font-medium text-white/70 hover:text-white transition-colors"
+                            className={`absolute left-6 z-[60] text-sm font-medium text-white/70 hover:text-white transition-colors ${belowAppNavTopClass}`}
                         >
                             &larr; Back to Brand Portal
                         </Link>

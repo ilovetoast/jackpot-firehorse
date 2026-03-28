@@ -319,7 +319,7 @@ class CompanyOverviewController extends Controller
             'agency_managed_brands' => $agencyManagedBrands,
             'dashboard_links' => [
                 'brand' => DashboardLinks::brandPortalHref($user, $tenant, $brandForPortal),
-                'brand_label' => DashboardLinks::workspaceSettingsLabels($tenant->name, $brandForPortal?->name)['brand'],
+                'brand_label' => DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brandForPortal?->name)['brand'],
             ],
         ]);
     }

@@ -3529,13 +3529,13 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 }}
                                             >
                                                 {(() => {
-                                                    const darkLogoUrl = data.logo_dark_preview ?? brand.logo_dark_path
                                                     const lightLogoUrl = data.logo_preview ?? brand.logo_path
+                                                    const darkLogoUrl = data.logo_dark_preview ?? brand.logo_dark_path
+                                                    if (lightLogoUrl) {
+                                                        return <img src={lightLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
+                                                    }
                                                     if (darkLogoUrl) {
                                                         return <img src={darkLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
-                                                    }
-                                                    if (lightLogoUrl) {
-                                                        return <img src={lightLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" style={{ filter: 'brightness(0) invert(1)' }} />
                                                     }
                                                     return (
                                                         <span className="text-lg font-bold text-white/90">{(data.name || brand.name || 'B').charAt(0).toUpperCase()}</span>

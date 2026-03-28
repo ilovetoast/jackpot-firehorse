@@ -34,6 +34,55 @@ final class DashboardLinks
         ];
     }
 
+    /**
+     * Short labels for the “Dashboards” header row (no “settings” suffix).
+     *
+     * @return array{company: string, brand: string}
+     */
+    public static function workspaceDashboardShortLabels(?string $companyName, ?string $brandName): array
+    {
+        $c = $companyName !== null ? trim($companyName) : '';
+        $b = $brandName !== null ? trim($brandName) : '';
+        $same = $c !== '' && $b !== '' && strcasecmp($c, $b) === 0;
+
+        if ($same) {
+            return ['company' => 'Company', 'brand' => 'Brand'];
+        }
+
+        return [
+            'company' => $c !== '' ? $c : 'Company',
+            'brand' => $b !== '' ? $b : 'Brand',
+        ];
+    }
+
+    /**
+     * Company settings page (administrative), not company overview.
+     */
+    public static function companySettingsHref(User $user, Tenant $tenant): ?string
+    {
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            return null;
+        }
+
+        return '/app/companies/settings';
+    }
+
+    /**
+     * Brand Settings / Brand Portal editor (Identity tab by default).
+     */
+    public static function brandEditHref(User $user, Tenant $tenant, ?Brand $brand): ?string
+    {
+        if (! $brand) {
+            return null;
+        }
+
+        if (! $user->hasPermissionForBrand($brand, 'brand_settings.manage')) {
+            return null;
+        }
+
+        return '/app/brands/'.$brand->id.'/edit';
+    }
+
     public static function companyOverviewHref(User $user, Tenant $tenant): ?string
     {
         if (! $user->hasPermissionForTenant($tenant, 'company.view')) {
