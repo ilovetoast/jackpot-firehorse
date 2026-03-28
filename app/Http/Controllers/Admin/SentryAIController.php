@@ -10,6 +10,7 @@ use App\Services\SentryAI\SentryPullService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -118,17 +119,40 @@ class SentryAIController extends Controller
             return response()->json(['ok' => false, 'message' => 'Pull is disabled (SENTRY_PULL_ENABLED or SENTRY_EMERGENCY_DISABLE).'], 400);
         }
 
-        $result = $pullService->pull();
-        Cache::put('sentry_ai.last_sync_at', now()->toIso8601String(), now()->addDays(7));
+        try {
+            $result = $pullService->pull();
+        } catch (\Throwable $e) {
+            report($e);
+            Log::error('[SentryAIController] pull() failed', ['message' => $e->getMessage()]);
+
+            return response()->json([
+                'ok' => false,
+                'message' => config('app.debug') ? $e->getMessage() : 'Sentry pull failed. Check application logs.',
+            ], 500);
+        }
+
+        try {
+            Cache::put('sentry_ai.last_sync_at', now()->toIso8601String(), now()->addDays(7));
+        } catch (\Throwable $e) {
+            Log::warning('[SentryAIController] Could not cache last_sync_at', ['message' => $e->getMessage()]);
+        }
 
         $issues = $result['issues'] ?? [];
         $analyzed = 0;
         foreach ($issues as $issue) {
-            if ($issue->ai_summary !== null && trim((string) $issue->ai_summary) !== '') {
-                continue;
-            }
-            if ($analyzer->analyze($issue)) {
-                $analyzed++;
+            try {
+                if ($issue->ai_summary !== null && trim((string) $issue->ai_summary) !== '') {
+                    continue;
+                }
+                if ($analyzer->analyze($issue)) {
+                    $analyzed++;
+                }
+            } catch (\Throwable $e) {
+                report($e);
+                Log::error('[SentryAIController] AI analyze failed for issue', [
+                    'sentry_issue_id' => $issue->sentry_issue_id ?? null,
+                    'message' => $e->getMessage(),
+                ]);
             }
         }
 

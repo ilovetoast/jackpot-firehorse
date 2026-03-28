@@ -3,9 +3,10 @@
 namespace App\Services\SentryAI;
 
 use App\Models\SentryIssue;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 /**
  * Pulls unresolved issues from Sentry REST API and upserts into sentry_issues.
@@ -88,33 +89,44 @@ class SentryPullService
         $allowedLevels = ['error', 'warning'];
 
         foreach ($items as $item) {
-            $level = isset($item['level']) ? strtolower((string) $item['level']) : '';
-            if (! in_array($level, $allowedLevels, true)) {
+            if (! is_array($item)) {
                 continue;
             }
 
-            $count = $this->occurrenceCount($item);
-            if ($count < 2) {
-                continue;
-            }
+            try {
+                $level = isset($item['level']) ? strtolower((string) $item['level']) : '';
+                if (! in_array($level, $allowedLevels, true)) {
+                    continue;
+                }
 
-            $sentryId = isset($item['id']) ? (string) $item['id'] : null;
-            if ($sentryId === '') {
-                continue;
-            }
+                $count = $this->occurrenceCount($item);
+                if ($count < 2) {
+                    continue;
+                }
 
-            $stackTrace = $this->fetchStackTraceForIssue($apiUrl, $orgSlug, $authToken, $sentryId);
-            $attributes = $this->mapIssueToAttributes($item, $environment, $stackTrace);
-            $existing = SentryIssue::where('sentry_issue_id', $sentryId)->first();
+                $sentryId = isset($item['id']) ? (string) $item['id'] : null;
+                if ($sentryId === '') {
+                    continue;
+                }
 
-            if ($existing) {
-                $existing->update($attributes);
-                $updated++;
-                $touched[] = $existing->fresh();
-            } else {
-                $created = SentryIssue::create(array_merge($attributes, ['sentry_issue_id' => $sentryId]));
-                $new++;
-                $touched[] = $created;
+                $stackTrace = $this->fetchStackTraceForIssue($apiUrl, $orgSlug, $authToken, $sentryId);
+                $attributes = $this->mapIssueToAttributes($item, $environment, $stackTrace);
+                $existing = SentryIssue::where('sentry_issue_id', $sentryId)->first();
+
+                if ($existing) {
+                    $existing->update($attributes);
+                    $updated++;
+                    $touched[] = $existing->fresh();
+                } else {
+                    $created = SentryIssue::create(array_merge($attributes, ['sentry_issue_id' => $sentryId]));
+                    $new++;
+                    $touched[] = $created;
+                }
+            } catch (\Throwable $e) {
+                Log::error('[SentryPullService] Failed to upsert Sentry issue row', [
+                    'message' => $e->getMessage(),
+                    'sentry_item_id' => is_array($item) ? ($item['id'] ?? null) : null,
+                ]);
             }
         }
 
@@ -267,15 +279,65 @@ class SentryPullService
         $lastSeen = $item['lifetime']['lastSeen'] ?? $item['lastSeen'] ?? null;
 
         return [
-            'environment' => $environment,
+            'environment' => Str::limit($environment, 255, ''),
             'level' => isset($item['level']) ? strtolower((string) $item['level']) : 'error',
-            'title' => $item['title'] ?? $item['metadata']['title'] ?? 'Untitled',
-            'fingerprint' => $item['fingerprint'] ?? null,
+            'title' => $this->normalizeIssueTitle($item),
+            'fingerprint' => $this->normalizeFingerprint($item['fingerprint'] ?? null),
             'occurrence_count' => $this->occurrenceCount($item),
-            'first_seen' => $firstSeen ? Carbon::parse($firstSeen)->toDateTimeString() : null,
-            'last_seen' => $lastSeen ? Carbon::parse($lastSeen)->toDateTimeString() : null,
+            'first_seen' => $this->parseSentryTimestamp($firstSeen),
+            'last_seen' => $this->parseSentryTimestamp($lastSeen),
             'stack_trace' => $stackTrace,
             'status' => 'open',
         ];
+    }
+
+    /**
+     * Sentry issue titles must fit VARCHAR(255); API payloads can exceed that.
+     *
+     * @param  array<string, mixed>  $item
+     */
+    protected function normalizeIssueTitle(array $item): string
+    {
+        $meta = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+        $raw = $item['title'] ?? $meta['title'] ?? 'Untitled';
+        if (is_array($raw)) {
+            $raw = json_encode($raw, JSON_UNESCAPED_UNICODE);
+        }
+        $raw = trim((string) ($raw ?? 'Untitled'));
+
+        return Str::limit($raw === '' ? 'Untitled' : $raw, 255, '');
+    }
+
+    /**
+     * Sentry fingerprints are often string[]; DB column is a nullable string.
+     */
+    protected function normalizeFingerprint(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_array($value)) {
+            $json = json_encode($value, JSON_UNESCAPED_UNICODE);
+
+            return ($json === false || $json === '') ? null : Str::limit($json, 255, '');
+        }
+        $s = trim((string) $value);
+
+        return $s === '' ? null : Str::limit($s, 255, '');
+    }
+
+    protected function parseSentryTimestamp(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $str = is_string($value) ? $value : (string) $value;
+        try {
+            return Carbon::parse($str)->toDateTimeString();
+        } catch (\Throwable) {
+            Log::warning('[SentryPullService] Unparsable Sentry timestamp', ['value' => $str]);
+
+            return null;
+        }
     }
 }
