@@ -103,8 +103,6 @@ class BrandController extends Controller
                     'name' => $brand->name,
                     'slug' => $brand->slug,
                     'logo_path' => $brand->logo_path,
-                    'icon_path' => $brand->icon_path,
-                    'icon' => $brand->icon,
                     'icon_bg_color' => $brand->icon_bg_color,
                     'is_default' => $brand->is_default,
                     'show_in_selector' => $brand->show_in_selector ?? true,
@@ -284,11 +282,9 @@ class BrandController extends Controller
             'settings' => 'nullable|array',
         ]);
 
-        // Logos and icons are added via Edit after brand creation (must be assets)
+        // Logos are added via Edit after brand creation (must be assets)
         $validated['logo_path'] = null;
         $validated['logo_id'] = null;
-        $validated['icon_path'] = null;
-        $validated['icon_id'] = null;
 
         // Handle icon_bg_color
         if ($request->has('icon_bg_color')) {
@@ -365,7 +361,6 @@ class BrandController extends Controller
                 'name' => $brand->name,
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
-                'icon_path' => $brand->icon_path,
                 'is_default' => $brand->is_default,
             ],
         ]);
@@ -547,16 +542,12 @@ class BrandController extends Controller
                 'logo_path' => $brand->logo_path,
                 'logo_id' => $brand->logo_id,
                 'logo_thumbnail_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
-                'icon_path' => $brand->icon_path,
-                'icon_id' => $brand->icon_id,
-                'icon_thumbnail_url' => $brand->icon_id ? \App\Models\Asset::find($brand->icon_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
                 'logo_dark_path' => $brand->logo_dark_path,
                 'logo_dark_id' => $brand->logo_dark_id,
                 'logo_dark_thumbnail_url' => $brand->logo_dark_id ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
                 'logo_horizontal_path' => $brand->logo_horizontal_path,
                 'logo_horizontal_id' => $brand->logo_horizontal_id,
                 'logo_horizontal_thumbnail_url' => $brand->logo_horizontal_id ? \App\Models\Asset::find($brand->logo_horizontal_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
-                'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
                 'icon_style' => $brand->icon_style ?? 'subtle',
                 'is_default' => $brand->is_default,
@@ -682,10 +673,8 @@ class BrandController extends Controller
             'slug' => 'nullable|string|max:255',
             'logo_id' => 'nullable|uuid|exists:assets,id',
             'clear_logo' => 'nullable|boolean',
-            'icon_id' => 'nullable|uuid|exists:assets,id',
             'logo_dark_id' => 'nullable|uuid|exists:assets,id',
             'clear_logo_dark' => 'nullable|boolean',
-            'clear_icon' => 'nullable|boolean',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'icon_style' => 'nullable|string|in:subtle,gradient,solid',
             'show_in_selector' => 'nullable|boolean',
@@ -786,32 +775,6 @@ class BrandController extends Controller
         } else {
             $validated['logo_horizontal_path'] = $brand->logo_horizontal_path;
             $validated['logo_horizontal_id'] = $brand->logo_horizontal_id;
-        }
-
-        // Handle icon: explicit clear or asset_id (all icons must be assets, no direct file upload)
-        if ($request->boolean('clear_icon')) {
-            if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
-                $oldPath = str_replace('/storage/', '', $brand->icon_path);
-                Storage::disk('public')->delete($oldPath);
-            }
-            $validated['icon_path'] = null;
-            $validated['icon_id'] = null;
-            $validated['icon'] = null;
-        } elseif ($request->filled('icon_id')) {
-            $iconAsset = \App\Models\Asset::where('id', $request->input('icon_id'))
-                ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->first();
-            if (! $iconAsset) {
-                abort(403, 'Icon asset does not belong to this brand.');
-            }
-            $validated['icon_id'] = $request->input('icon_id');
-            $validated['icon_path'] = null;
-            $validated['icon'] = null;
-        } else {
-            $validated['icon_path'] = $brand->icon_path ?? null;
-            $validated['icon_id'] = $brand->icon_id;
-            $validated['icon'] = null;
         }
 
         // Handle icon_bg_color

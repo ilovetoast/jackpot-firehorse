@@ -8,20 +8,14 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     * Tile background color for letter / compact displays (uploadable brand icon removed later).
      */
     public function up(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            if (!Schema::hasColumn('brands', 'icon')) {
-                if (Schema::hasColumn('brands', 'icon_path')) {
-                    $table->string('icon')->nullable()->after('icon_path');
-                } else {
-                    $table->string('icon')->nullable();
-                }
-            }
-            if (!Schema::hasColumn('brands', 'icon_bg_color')) {
-                if (Schema::hasColumn('brands', 'icon')) {
-                    $table->string('icon_bg_color')->nullable()->after('icon');
+            if (! Schema::hasColumn('brands', 'icon_bg_color')) {
+                if (Schema::hasColumn('brands', 'accent_color')) {
+                    $table->string('icon_bg_color')->nullable()->after('accent_color');
                 } else {
                     $table->string('icon_bg_color')->nullable();
                 }
@@ -35,7 +29,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            $table->dropColumn(['icon', 'icon_bg_color']);
+            if (Schema::hasColumn('brands', 'icon_bg_color')) {
+                $table->dropColumn('icon_bg_color');
+            }
         });
     }
 };

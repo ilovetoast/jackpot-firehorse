@@ -309,9 +309,7 @@ class DevelopmentDataSeeder extends Seeder
                 'accent_color' => fake()->hexColor(),
                 'nav_color' => fake()->hexColor(),
                 'icon_bg_color' => fake()->hexColor(),
-                'icon' => fake()->randomElement(['🎨', '🚀', '💼', '🌟', '⚡', '🎯', '🔥', '💎']),
                 'logo_path' => 'dev-seeder/logos/' . Str::uuid() . '.png', // Placeholder path
-                'icon_path' => 'dev-seeder/icons/' . Str::uuid() . '.svg', // Placeholder path
                 'logo_filter' => fake()->randomElement(['brightness', 'contrast', 'saturate', 'none']),
             ]);
             

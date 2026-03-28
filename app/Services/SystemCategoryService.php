@@ -20,28 +20,14 @@ class SystemCategoryService
     /**
      * Get all system category templates (latest versions only).
      *
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return \Illuminate\Database\Eloquent\Collection<int, SystemCategory>
      */
     public function getAllTemplates()
     {
-        // Get latest version of each template (highest version per slug/asset_type)
-        // Get all unique slug/asset_type combinations
-        $uniqueTemplates = SystemCategory::select('slug', 'asset_type')
-            ->distinct()
-            ->get();
+        $latestIds = $this->latestTemplateIdsForQuery(null);
 
-        // For each combination, get the record with the highest version
-        $latestIds = [];
-        foreach ($uniqueTemplates as $template) {
-            $latest = SystemCategory::where('slug', $template->slug)
-                ->where('asset_type', $template->asset_type)
-                ->orderBy('version', 'desc')
-                ->orderBy('id', 'desc') // If same version, get the latest created
-                ->first();
-
-            if ($latest) {
-                $latestIds[] = $latest->id;
-            }
+        if ($latestIds === []) {
+            return SystemCategory::query()->whereRaw('0 = 1')->get();
         }
 
         return SystemCategory::whereIn('id', $latestIds)
@@ -53,35 +39,47 @@ class SystemCategoryService
     /**
      * Get templates by asset type (latest versions only).
      *
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return \Illuminate\Database\Eloquent\Collection<int, SystemCategory>
      */
     public function getTemplatesByAssetType(AssetType $assetType)
     {
-        // Get latest version of each template for this asset type
-        // First, find max version for each slug/asset_type combination for this asset type
-        $maxVersions = SystemCategory::where('asset_type', $assetType)
-            ->select('slug', 'asset_type', DB::raw('MAX(version) as max_version'))
-            ->groupBy('slug', 'asset_type')
-            ->get();
+        $latestIds = $this->latestTemplateIdsForQuery($assetType);
 
-        // Then get the actual records that match those max versions
-        $latestIds = [];
-        foreach ($maxVersions as $maxVersion) {
-            $latest = SystemCategory::where('slug', $maxVersion->slug)
-                ->where('asset_type', $assetType)
-                ->where('version', $maxVersion->max_version)
-                ->orderBy('id', 'desc') // If multiple records have same version, get the latest one
-                ->first();
-
-            if ($latest) {
-                $latestIds[] = $latest->id;
-            }
+        if ($latestIds === []) {
+            return SystemCategory::query()->whereRaw('0 = 1')->get();
         }
 
         return SystemCategory::whereIn('id', $latestIds)
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get();
+    }
+
+    /**
+     * Latest system_categories.id per (slug, asset_type): highest version, then highest id (tie-break).
+     * Two queries total (subquery + whereIn) — avoids N+1 from per-pair ->first() loops (e.g. brand edit).
+     * Uses ROW_NUMBER() (MySQL 8+, MariaDB 10.2+, SQLite 3.25+).
+     *
+     * @return list<int>
+     */
+    private function latestTemplateIdsForQuery(?AssetType $assetType): array
+    {
+        $base = DB::table('system_categories');
+        if ($assetType !== null) {
+            $base->where('asset_type', $assetType->value);
+        }
+
+        $ranked = $base->select('id')
+            ->selectRaw('ROW_NUMBER() OVER (PARTITION BY slug, asset_type ORDER BY version DESC, id DESC) as rn');
+
+        return DB::query()
+            ->fromSub($ranked, 'ranked')
+            ->where('rn', 1)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->values()
+            ->all();
     }
 
     /**

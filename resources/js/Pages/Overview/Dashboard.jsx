@@ -140,8 +140,6 @@ export default function Dashboard({
                         {activeBrand && (
                             <BrandAvatar
                                 logoPath={activeBrand.logo_path}
-                                iconPath={activeBrand.icon_path}
-                                icon={activeBrand.icon}
                                 iconBgColor={activeBrand.icon_bg_color}
                                 name={activeBrand.name}
                                 primaryColor={activeBrand.primary_color}

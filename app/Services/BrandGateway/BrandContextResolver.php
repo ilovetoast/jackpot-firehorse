@@ -246,7 +246,6 @@ class BrandContextResolver
             'slug' => $tenant->slug,
             'logo_url' => $logoUrl,
             'primary_color' => $defaultBrand?->primary_color,
-            'icon' => $defaultBrand?->icon,
             'icon_bg_color' => $defaultBrand?->icon_bg_color,
             'icon_style' => $defaultBrand?->icon_style ?? 'subtle',
         ];
@@ -260,8 +259,6 @@ class BrandContextResolver
             'slug' => $brand->slug,
             'logo_path' => $brand->logo_path,
             'logo_dark_path' => $brand->logo_dark_path,
-            'icon_path' => $brand->icon_path,
-            'icon' => $brand->icon,
             'icon_bg_color' => $brand->icon_bg_color,
             'icon_style' => $brand->icon_style ?? 'subtle',
             'primary_color' => $brand->primary_color,

@@ -1,28 +1,14 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
+/**
+ * Legacy: added icon_path for brand icon uploads. Superseded — column creation removed;
+ * use letter tile + logo variants instead. Kept as no-op so migration history stays ordered.
+ */
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
-    public function up(): void
-    {
-        Schema::table('brands', function (Blueprint $table) {
-            $table->string('icon_path')->nullable()->after('logo_path');
-        });
-    }
+    public function up(): void {}
 
-    /**
-     * Reverse the migrations.
-     */
-    public function down(): void
-    {
-        Schema::table('brands', function (Blueprint $table) {
-            $table->dropColumn('icon_path');
-        });
-    }
+    public function down(): void {}
 };

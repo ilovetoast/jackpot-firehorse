@@ -143,7 +143,7 @@ class DownloadController extends Controller
                 ->with(['assets' => function ($q) {
                     $q->select('assets.id', 'assets.type', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
                         ->orderBy('download_asset.is_primary', 'desc');
-                }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_path,icon'])
+                }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_bg_color,secondary_color,icon_style'])
                 ->paginate($perPage, ['*'], 'page', $page);
 
             $planService = app(PlanService::class);
@@ -194,16 +194,16 @@ class DownloadController extends Controller
                         ->whereNull('downloads.deleted_at');
                 })
                 ->orderBy('name')
-                ->get(['id', 'name', 'slug', 'logo_path', 'primary_color', 'icon', 'icon_path', 'icon_bg_color'])
+                ->get(['id', 'name', 'slug', 'logo_path', 'primary_color', 'secondary_color', 'icon_bg_color', 'icon_style'])
                 ->map(fn (Brand $b) => [
                     'id' => $b->id,
                     'name' => $b->name,
                     'slug' => $b->slug,
                     'logo_path' => $b->logo_path ?? null,
                     'primary_color' => $b->primary_color ?? null,
-                    'icon' => $b->icon ?? null,
-                    'icon_path' => $b->icon_path ?? null,
+                    'secondary_color' => $b->secondary_color ?? null,
                     'icon_bg_color' => $b->icon_bg_color ?? null,
+                    'icon_style' => $b->icon_style ?? 'subtle',
                 ])
                 ->values()
                 ->all();
@@ -278,9 +278,10 @@ class DownloadController extends Controller
                 'name' => $b->name,
                 'slug' => $b->slug,
                 'primary_color' => $b->primary_color ?? null,
+                'secondary_color' => $b->secondary_color ?? null,
                 'logo_path' => $b->logo_path ?? null,
-                'icon_path' => $b->icon_path ?? null,
-                'icon' => $b->icon ?? null,
+                'icon_bg_color' => $b->icon_bg_color ?? null,
+                'icon_style' => $b->icon_style ?? 'subtle',
             ];
         }
 

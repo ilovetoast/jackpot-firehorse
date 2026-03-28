@@ -10,7 +10,6 @@ import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
-import { getImageBackgroundStyle } from '../../utils/imageUtils'
 import { getContrastTextColor } from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandIconUnified from '../../Components/BrandIconUnified'
@@ -1351,7 +1350,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const isFreePlan = current_plan === 'free'
     const can = (p) => effectivePermissions.includes(p)
     const canAccessCategoriesAndFields = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
-    const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'alignment', 'references', 'presentation', 'research']
     const ALL_TABS = ['identity', 'workspace', 'public-site', ...DNA_TABS, 'members']
@@ -1420,15 +1418,12 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         logo_id: brand.logo_id ?? null,
         logo_preview: brand.logo_thumbnail_url || brand.logo_path || '',
         clear_logo: false,
-        clear_icon: false,
         logo_dark_id: brand.logo_dark_id ?? null,
         logo_dark_preview: brand.logo_dark_thumbnail_url || brand.logo_dark_path || '',
         clear_logo_dark: false,
         logo_horizontal_id: brand.logo_horizontal_id ?? null,
         logo_horizontal_preview: brand.logo_horizontal_thumbnail_url || brand.logo_horizontal_path || '',
         clear_logo_horizontal: false,
-        icon_id: brand.icon_id ?? null,
-        icon_preview: brand.icon_thumbnail_url || brand.icon_path || '',
         icon_bg_color: brand.icon_bg_color || brand.primary_color || '#6366f1',
         icon_style: brand.icon_style || 'subtle',
         show_in_selector: brand.show_in_selector !== undefined ? brand.show_in_selector : true,
@@ -1682,9 +1677,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                 if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
                     URL.revokeObjectURL(data.logo_preview)
                 }
-                if (data.icon_preview && data.icon_preview.startsWith('blob:')) {
-                    URL.revokeObjectURL(data.icon_preview)
-                }
             },
             onError: (errors) => {
                 console.error('[Brands/Edit] Form submission errors:', errors)
@@ -1698,29 +1690,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
                 URL.revokeObjectURL(data.logo_preview)
             }
-            if (data.icon_preview && data.icon_preview.startsWith('blob:')) {
-                URL.revokeObjectURL(data.icon_preview)
-            }
         }
-    }, [data.logo_preview, data.icon_preview])
-
-    
-
-    // Detect if icon is white and set background style
-    useEffect(() => {
-        if (data.icon_preview && !data.icon_preview.includes('svg')) {
-            getImageBackgroundStyle(data.icon_preview)
-                .then(style => {
-                    setIconBackgroundStyle(style)
-                })
-                .catch(error => {
-                    console.error('Error detecting icon color:', error)
-                    setIconBackgroundStyle({ background: 'transparent', isWhite: false })
-                })
-        } else {
-            setIconBackgroundStyle({ background: 'transparent', isWhite: false })
-        }
-    }, [data.icon_preview])
+    }, [data.logo_preview])
 
 
     return (
@@ -2394,12 +2365,11 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">Identity &rarr; Brand Images</button>.
                                     </p>
                                 </div>
-                                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                                     {[
                                         { label: 'Primary', preview: data.logo_preview || brand.logo_path, bg: 'bg-white', desc: 'Light backgrounds' },
                                         { label: 'On Dark', preview: data.logo_dark_preview || brand.logo_dark_path, bg: 'bg-gray-900', desc: 'Dark backgrounds' },
                                         { label: 'Horizontal', preview: data.logo_horizontal_preview || brand.logo_horizontal_path, bg: 'bg-white', desc: 'Wide placements' },
-                                        { label: 'Icon', preview: data.icon_preview || brand.icon_path, bg: 'bg-white', desc: 'Compact displays' },
                                     ].map(({ label, preview, bg, desc }) => (
                                         <div key={label} className="rounded-lg border border-gray-200 overflow-hidden">
                                             <div className={`${bg} flex items-center justify-center h-20 p-3`}>
@@ -2982,7 +2952,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Brand Images</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Upload your logo and icon, pick from the asset library or {DELIVERABLES_PAGE_LABEL_SINGULAR.toLowerCase()}s, or generate raster variants from your primary logo (same options as Brand DNA → Standards).
+                                        Upload your logos, pick from the asset library or {DELIVERABLES_PAGE_LABEL_SINGULAR.toLowerCase()}s, or generate raster variants from your primary logo (same options as Brand DNA → Standards).
                                     </p>
                                 </div>
                                 <div className="mt-6 rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-4">
@@ -3151,53 +3121,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                     />
                                                 </div>
                                             </div>
-                                            {/* Icon */}
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-900 mb-1">Icon</label>
-                                                <p className="text-xs text-gray-500 mb-2">Square (1:1) format. Used in the brand selector and compact displays.</p>
-                                                <div className="max-w-xs">
-                                                    <AssetImagePickerField
-                                                        value={{
-                                                            preview_url: data.icon_preview ?? (data.icon_id && data.icon_id === brand.icon_id ? (brand.icon_thumbnail_url ?? brand.icon_path) : null),
-                                                            asset_id: data.icon_id ?? null,
-                                                        }}
-                                                        onChange={(v) => {
-                                                            if (v == null) {
-                                                                setData('icon_id', null)
-                                                                setData('icon_preview', null)
-                                                                setData('clear_icon', true)
-                                                            } else if (v?.asset_id) {
-                                                                setData('icon_id', v.asset_id)
-                                                                setData('icon_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                                setData('icon', null)
-                                                                setData('clear_icon', false)
-                                                            } else if (v?.preview_url) {
-                                                                setData('icon_preview', v.preview_url)
-                                                            }
-                                                        }}
-                                                        fetchAssets={(opts) => {
-                                                            const params = new URLSearchParams({ format: 'json' })
-                                                            if (opts?.category) params.set('category', opts.category)
-                                                            return fetch(`/app/assets?${params}`, {
-                                                                credentials: 'same-origin',
-                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                            }).then((r) => r.json())
-                                                        }}
-                                                        fetchDeliverables={fetchDeliverablesForPicker}
-                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                        title="Select icon"
-                                                        defaultCategoryLabel="Logos"
-                                                        contextCategory="logos"
-                                                        aspectRatio={{ width: 1, height: 1 }}
-                                                        minWidth={64}
-                                                        minHeight={64}
-                                                        placeholder="Click to choose from library or upload"
-                                                        helperText="Square format recommended"
-                                                        brandId={brand.id}
-                                                    />
-                                                </div>
-                                                {errors.icon && <p className="mt-2 text-sm text-red-600">{errors.icon}</p>}
-                                            </div>
                                 </div>
                             </div>
                         </div>
@@ -3364,10 +3287,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 </div>
                             )}
 
-                                    {/* Icon Style */}
+                                    {/* Letter / tile style (when logo not shown in compact tile) */}
                                     <div className="mt-6 pt-6 border-t border-gray-200">
-                                        <label className="block text-sm font-medium leading-6 text-gray-900 mb-1">Icon Style</label>
-                                        <p className="text-sm text-gray-500 mb-3">Choose how the brand icon appears when no logo is uploaded.</p>
+                                        <label className="block text-sm font-medium leading-6 text-gray-900 mb-1">Tile style</label>
+                                        <p className="text-sm text-gray-500 mb-3">How the letter tile looks in the brand selector and other compact previews when the logo is not used there.</p>
                                         <div className="grid grid-cols-3 gap-3">
                                             {[
                                                 { value: 'subtle', label: 'Subtle', desc: 'Soft single-color gradient' },
@@ -3580,7 +3503,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 <BrandIconUnified
                                                     brand={{
                                                         ...brand,
-                                                        icon_path: data.icon_preview ?? brand.icon_path,
                                                         logo_path: data.logo_preview ?? brand.logo_path,
                                                         primary_color: data.primary_color || brand.primary_color,
                                                         secondary_color: data.secondary_color || brand.secondary_color,
@@ -3623,9 +3545,9 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             </div>
                                         </div>
 
-                                        {/* Icon sizes */}
+                                        {/* Tile sizes */}
                                         <div>
-                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Icon Sizes</p>
+                                            <p className="text-[9px] text-white/25 uppercase tracking-wider mb-1.5 px-1">Tile Sizes</p>
                                             <div className="rounded-lg bg-white/5 px-3 py-3">
                                                 <div className="flex items-end gap-2 flex-wrap">
                                                     {['xs', 'sm', 'md', 'lg', 'xl'].map((sz) => (
@@ -3633,7 +3555,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                             <BrandIconUnified
                                                                 brand={{
                                                                     ...brand,
-                                                                    icon_path: data.icon_preview ?? brand.icon_path,
                                                                     logo_path: data.logo_preview ?? brand.logo_path,
                                                                     primary_color: data.primary_color || brand.primary_color,
                                                                     secondary_color: data.secondary_color || brand.secondary_color,

@@ -14,6 +14,7 @@ use App\Models\BrandModelVersionAsset;
 use App\Models\User;
 use App\Services\AssetPathGenerator;
 use App\Services\AssetPublicationService;
+use App\Services\TenantBucketService;
 use App\Support\LogoVariantRasterProcessor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -398,24 +399,31 @@ final class BrandLogoVariantAutomationService
             ->where('builder_context', $context)
             ->delete();
 
-        $asset = Asset::create([
+        $pathGenerator = app(AssetPathGenerator::class);
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
+
+        $assetId = (string) Str::uuid();
+        $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, 'png');
+
+        $asset = Asset::forceCreate([
+            'id' => $assetId,
             'tenant_id' => $brand->tenant_id,
             'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
             'status' => AssetStatus::VISIBLE,
             'type' => AssetType::REFERENCE,
             'title' => $context === 'logo_on_dark' ? 'Logo (on dark)' : 'Logo (on light)',
             'original_filename' => $filename,
             'mime_type' => $mimeType,
             'size_bytes' => $size,
+            'storage_root_path' => $path,
             'thumbnail_status' => ThumbnailStatus::PENDING,
             'intake_state' => 'staged',
             'builder_staged' => true,
             'builder_context' => $context,
             'source' => 'logo_variant_automation',
         ]);
-
-        $pathGenerator = app(AssetPathGenerator::class);
-        $path = $pathGenerator->generateOriginalPath($tenant, $asset, 1, 'png');
 
         try {
             Storage::disk('s3')->put($path, $pngBinary, 'private');
@@ -439,8 +447,6 @@ final class BrandLogoVariantAutomationService
             'is_current' => true,
             'pipeline_status' => 'pending',
         ]);
-
-        $asset->update(['storage_root_path' => $path]);
 
         $asset->refresh();
         $asset->loadMissing('currentVersion');
@@ -470,12 +476,20 @@ final class BrandLogoVariantAutomationService
         $categorySlug = match ($context) {
             'logo_reference' => 'logos',
             'crawled_logo_variant' => 'logos',
+            'logo_on_dark' => 'logos',
+            'logo_on_light' => 'logos',
             'visual_reference' => 'photography',
             'guidelines_pdf' => 'reference_material',
             default => null,
         };
 
-        $promoteToAsset = in_array($context, ['logo_reference', 'crawled_logo_variant', 'visual_reference'], true);
+        $promoteToAsset = in_array($context, [
+            'logo_reference',
+            'crawled_logo_variant',
+            'visual_reference',
+            'logo_on_dark',
+            'logo_on_light',
+        ], true);
 
         DB::transaction(function () use ($asset, $brand, $categorySlug, $promoteToAsset) {
             if ($categorySlug) {

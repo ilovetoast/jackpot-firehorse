@@ -172,8 +172,6 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                 <BrandAvatar
                     name={activity.brand.name}
                     logoPath={activity.brand.logo_path}
-                    iconPath={activity.brand.icon_path}
-                    icon={activity.brand.icon}
                     iconBgColor={activity.brand.icon_bg_color}
                     primaryColor={activity.brand.primary_color}
                     size="sm"

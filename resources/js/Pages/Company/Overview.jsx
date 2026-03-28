@@ -276,8 +276,6 @@ export default function CompanyOverview({
                                         <div className="flex-shrink-0">
                                             <BrandAvatar
                                                 logoPath={brand.logo_path}
-                                                iconPath={brand.icon_path}
-                                                icon={brand.icon}
                                                 iconBgColor={brand.icon_bg_color}
                                                 name={brand.name}
                                                 primaryColor={brand.primary_color}
@@ -407,8 +405,6 @@ export default function CompanyOverview({
                                                 <div className="flex-shrink-0">
                                                     <BrandAvatar
                                                         logoPath={brand.logo_path}
-                                                        iconPath={brand.icon_path}
-                                                        icon={brand.icon}
                                                         iconBgColor={brand.icon_bg_color}
                                                         name={brand.name}
                                                         primaryColor={brand.primary_color}

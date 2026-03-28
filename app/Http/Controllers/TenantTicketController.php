@@ -50,7 +50,7 @@ class TenantTicketController extends Controller
         // Only show tenant tickets for this tenant
         $tickets = Ticket::where('type', TicketType::TENANT)
             ->where('tenant_id', $tenant->id)
-            ->with(['brands:id,name,logo_path,primary_color,icon,icon_bg_color,icon_path', 'createdBy:id,first_name,last_name,email,avatar_url'])
+            ->with(['brands:id,name,logo_path,primary_color,secondary_color,icon_bg_color,icon_style', 'createdBy:id,first_name,last_name,email,avatar_url'])
             ->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 20));
 
@@ -76,13 +76,13 @@ class TenantTicketController extends Controller
                     'avatar_url' => $ticket->createdBy->avatar_url,
                 ] : null,
                 'brands' => $ticket->brands->map(fn ($brand) => [
-                    'id' => $brand->id, 
+                    'id' => $brand->id,
                     'name' => $brand->name,
                     'logo_path' => $brand->logo_path,
                     'primary_color' => $brand->primary_color,
-                    'icon' => $brand->icon,
+                    'secondary_color' => $brand->secondary_color,
                     'icon_bg_color' => $brand->icon_bg_color,
-                    'icon_path' => $brand->icon_path,
+                    'icon_style' => $brand->icon_style ?? 'subtle',
                 ]),
                 'created_at' => $this->formatTimestamp($ticket->created_at, $tenant->timezone),
                 'updated_at' => $this->formatTimestamp($ticket->updated_at, $tenant->timezone),
@@ -268,7 +268,7 @@ class TenantTicketController extends Controller
 
         // Load ticket with relationships
         $ticket->load([
-            'brands:id,name,logo_path,primary_color,icon,icon_bg_color,icon_path',
+            'brands:id,name,logo_path,primary_color,secondary_color,icon_bg_color,icon_style',
             'createdBy:id,first_name,last_name,email,avatar_url',
             'messages' => function ($query) {
                 // Only load public messages (exclude internal notes)
@@ -294,13 +294,13 @@ class TenantTicketController extends Controller
             'category' => $category ? TicketCategory::tryFrom($category)?->label() : null,
             'category_value' => $category,
             'brands' => $ticket->brands->map(fn ($brand) => [
-                'id' => $brand->id, 
+                'id' => $brand->id,
                 'name' => $brand->name,
                 'logo_path' => $brand->logo_path,
                 'primary_color' => $brand->primary_color,
-                'icon' => $brand->icon,
+                'secondary_color' => $brand->secondary_color,
                 'icon_bg_color' => $brand->icon_bg_color,
-                'icon_path' => $brand->icon_path,
+                'icon_style' => $brand->icon_style ?? 'subtle',
             ]),
             'created_at' => $this->formatTimestamp($ticket->created_at, $tenant->timezone),
             'updated_at' => $this->formatTimestamp($ticket->updated_at, $tenant->timezone),

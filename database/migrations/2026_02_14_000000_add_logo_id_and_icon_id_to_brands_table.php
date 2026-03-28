@@ -7,14 +7,14 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Run the migrations.
-     * Logo/icon can reference an asset (logo_id/icon_id) or legacy path (logo_path/icon_path).
+     * Logo can reference an asset (logo_id) or legacy path (logo_path).
      */
     public function up(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            $table->uuid('logo_id')->nullable()->after('logo_path');
-            $table->uuid('icon_id')->nullable()->after('icon_path');
+            if (! Schema::hasColumn('brands', 'logo_id')) {
+                $table->uuid('logo_id')->nullable()->after('logo_path');
+            }
         });
     }
 
@@ -24,7 +24,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            $table->dropColumn(['logo_id', 'icon_id']);
+            if (Schema::hasColumn('brands', 'logo_id')) {
+                $table->dropColumn('logo_id');
+            }
         });
     }
 };

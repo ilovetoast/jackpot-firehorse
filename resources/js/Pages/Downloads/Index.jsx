@@ -442,12 +442,9 @@ export default function DownloadsIndex({
                               <>
                                 <BrandAvatar
                                   logoPath={selected.logo_path}
-                                  iconPath={selected.icon_path}
                                   name={selected.name}
                                   primaryColor={selected.primary_color || '#6366f1'}
-                                  icon={selected.icon}
                                   iconBgColor={selected.icon_bg_color}
-                                  showIcon={!!(selected.icon || selected.icon_path)}
                                   size="sm"
                                   className="bg-slate-200 text-slate-600 shrink-0"
                                 />
@@ -508,12 +505,9 @@ export default function DownloadsIndex({
                                 </span>
                                 <BrandAvatar
                                   logoPath={b.logo_path}
-                                  iconPath={b.icon_path}
                                   name={b.name}
                                   primaryColor={b.primary_color || '#6366f1'}
-                                  icon={b.icon}
                                   iconBgColor={b.icon_bg_color}
-                                  showIcon={!!(b.icon || b.icon_path)}
                                   size="sm"
                                   className="bg-slate-200 text-slate-600 shrink-0"
                                 />
@@ -818,12 +812,9 @@ export default function DownloadsIndex({
                                 <BrandAvatar
                                   key={b.id}
                                   logoPath={b.logo_path}
-                                  iconPath={b.icon_path}
                                   name={b.name}
                                   primaryColor={b.primary_color || '#6366f1'}
-                                  icon={b.icon}
                                   iconBgColor={b.icon_bg_color}
-                                  showIcon={!!(b.icon || b.icon_path)}
                                   size="sm"
                                   className="ring-2 ring-white shrink-0"
                                 />

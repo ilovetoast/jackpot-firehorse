@@ -152,12 +152,9 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                                             <div key={brand.id} className="flex items-center gap-1.5">
                                                 <BrandAvatar
                                                     logoPath={brand.logo_path}
-                                                    iconPath={brand.icon_path}
                                                     name={brand.name}
                                                     primaryColor={brand.primary_color}
-                                                    icon={brand.icon}
                                                     iconBgColor={brand.icon_bg_color}
-                                                    showIcon={true}
                                                     size="sm"
                                                 />
                                                 <span className="text-sm text-gray-700">{brand.name}</span>

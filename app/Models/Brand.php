@@ -36,9 +36,6 @@ class Brand extends Model
         'slug',
         'logo_path',
         'logo_id',
-        'icon_path',
-        'icon_id',
-        'icon',
         'icon_bg_color',
         'icon_style',
         'is_default',
@@ -129,39 +126,6 @@ class Brand extends Model
     }
 
     /**
-     * Uploaded icon image URL for gateway / cross-tenant contexts (signed URLs; no tenant CDN cookies).
-     * Mirrors {@see getIconPathAttribute} but uses GATEWAY delivery for asset-backed icons.
-     */
-    public function iconUrlForGuest(): ?string
-    {
-        $manual = $this->attributes['icon_path'] ?? null;
-        if ($manual !== null && $manual !== '') {
-            return $manual;
-        }
-        $iconId = $this->attributes['icon_id'] ?? null;
-        if (! $iconId) {
-            return null;
-        }
-        $asset = Asset::find($iconId);
-        if (! $asset) {
-            return null;
-        }
-
-        $isSvg = $asset->mime_type === 'image/svg+xml'
-            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
-
-        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-            ? $asset->thumbnail_status
-            : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
-
-        if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
-            return $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::GATEWAY) ?: null;
-        }
-
-        return $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::GATEWAY) ?: null;
-    }
-
-    /**
      * Resolve logo_path from logo_id when logo_path is null.
      * When logo references an asset (logo_id), returns the thumbnail URL so the logo displays
      * in nav, brand selector, etc. For SVG assets without thumbnails, serves the original
@@ -187,39 +151,6 @@ class Brand extends Model
         }
 
         return $this->deliveryUrlForLogoAssetId($this->attributes['logo_dark_id'] ?? null, DeliveryContext::AUTHENTICATED);
-    }
-
-    /**
-     * Resolve icon_path from icon_id when icon_path is null.
-     * When icon references an asset (icon_id), returns the thumbnail URL for display.
-     * For SVG assets without thumbnails, serves the original file directly.
-     */
-    public function getIconPathAttribute($value): ?string
-    {
-        if ($value !== null && $value !== '') {
-            return $value;
-        }
-        $iconId = $this->attributes['icon_id'] ?? null;
-        if ($iconId) {
-            $asset = Asset::find($iconId);
-            if (!$asset) {
-                return null;
-            }
-
-            $isSvg = $asset->mime_type === 'image/svg+xml'
-                || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
-
-            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                ? $asset->thumbnail_status
-                : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
-
-            if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
-                return $asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-            }
-
-            return $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
-        }
-        return null;
     }
 
     /**

@@ -23,12 +23,9 @@ function resolveBackground(style, primary, secondary) {
 }
 
 /**
- * Unified brand icon used across the app — brand selector, settings, overview, etc.
+ * Unified brand tile: logo (inverted on gradient) or first letter — used in brand selector, nav, overview.
  *
- * @param {object} brand - Brand object with icon_path, logo_path, primary_color, secondary_color, icon_style, name
- * @param {'xs'|'sm'|'md'|'lg'|'xl'|'2xl'} size - Size preset
- * @param {'gradient'|'circle'} variant - Visual style; gradient uses rounded-xl box, circle uses rounded-full
- * @param {string} className - Additional CSS classes
+ * @param {object} brand - primary_color, secondary_color, icon_style, name, logo_path
  */
 export default function BrandIconUnified({ brand, size = 'md', variant = 'gradient', className = '' }) {
     const [imgError, setImgError] = useState(false)
@@ -38,26 +35,12 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     const iconStyle = brand?.icon_style || 'subtle'
     const name = brand?.name || ''
     const firstLetter = name.charAt(0).toUpperCase() || 'B'
-    const iconPath = brand?.icon_path
     const logoPath = brand?.logo_path
 
     const s = SIZES[size] || SIZES.md
     const radius = variant === 'circle' ? 'rounded-full' : s.radius
     const base = `flex items-center justify-center flex-shrink-0 overflow-hidden ${s.container} ${radius} ${className}`
     const bg = resolveBackground(iconStyle, primary, secondary)
-
-    if (iconPath && !imgError) {
-        return (
-            <div className={base} style={{ background: bg }}>
-                <img
-                    src={iconPath}
-                    alt={name}
-                    className="h-full w-full object-cover"
-                    onError={() => setImgError(true)}
-                />
-            </div>
-        )
-    }
 
     if (logoPath && !imgError) {
         return (
@@ -74,10 +57,7 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     }
 
     return (
-        <div
-            className={base}
-            style={{ background: bg }}
-        >
+        <div className={base} style={{ background: bg }}>
             <span className={`font-bold text-white ${s.text}`}>{firstLetter}</span>
         </div>
     )

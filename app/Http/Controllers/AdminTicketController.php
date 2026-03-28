@@ -106,7 +106,7 @@ class AdminTicketController extends Controller
                 'tenant:id,name,slug',
                 'createdBy:id,first_name,last_name,email,avatar_url',
                 'assignedTo:id,first_name,last_name,email,avatar_url',
-                'brands:id,name,logo_path,primary_color,icon,icon_bg_color,icon_path',
+                'brands:id,name,logo_path,primary_color,secondary_color,icon_bg_color,icon_style',
                 'slaState:id,ticket_id,first_response_deadline,resolution_deadline,breached_first_response,breached_resolution',
             ])
             ->forStaff(); // Include all ticket types
@@ -252,7 +252,7 @@ class AdminTicketController extends Controller
             'tenant:id,name,slug',
             'createdBy:id,first_name,last_name,email,avatar_url',
             'assignedTo:id,first_name,last_name,email,avatar_url',
-            'brands:id,name,logo_path,primary_color,icon,icon_bg_color,icon_path',
+            'brands:id,name,logo_path,primary_color,secondary_color,icon_bg_color,icon_style',
             'slaState',
             'messages' => function ($query) {
                 $query->with('user:id,first_name,last_name,email,avatar_url')
@@ -843,9 +843,9 @@ class AdminTicketController extends Controller
                 'name' => $b->name,
                 'logo_path' => $b->logo_path,
                 'primary_color' => $b->primary_color,
-                'icon' => $b->icon,
+                'secondary_color' => $b->secondary_color,
                 'icon_bg_color' => $b->icon_bg_color,
-                'icon_path' => $b->icon_path,
+                'icon_style' => $b->icon_style ?? 'subtle',
             ]),
             'sla_state' => $ticket->slaState ? [
                 'breached_first_response' => $ticket->slaState->breached_first_response,

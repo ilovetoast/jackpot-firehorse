@@ -164,12 +164,9 @@ export default function TicketsIndex({ tickets, pagination }) {
                                                             <div key={brand?.id ?? idx} className="flex items-center" title={brand?.name}>
                                                                 <BrandAvatar
                                                                     logoPath={brand?.logo_path}
-                                                                    iconPath={brand?.icon_path}
                                                                     name={brand?.name}
                                                                     primaryColor={brand?.primary_color}
-                                                                    icon={brand?.icon}
                                                                     iconBgColor={brand?.icon_bg_color}
-                                                                    showIcon={true}
                                                                     size="sm"
                                                                 />
                                                             </div>

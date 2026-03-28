@@ -430,12 +430,9 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                                                                 <div className="flex items-center gap-2">
                                                                     <BrandAvatar
                                                                         logoPath={event.brand.logo_path}
-                                                                        iconPath={event.brand.icon_path}
                                                                         name={event.brand.name}
                                                                         primaryColor={event.brand.primary_color}
-                                                                        icon={event.brand.icon}
                                                                         iconBgColor={event.brand.icon_bg_color}
-                                                                        showIcon={!!(event.brand.icon || event.brand.icon_path)}
                                                                         size="sm"
                                                                     />
                                                                     <span className="truncate max-w-[120px]">{event.brand.name}</span>

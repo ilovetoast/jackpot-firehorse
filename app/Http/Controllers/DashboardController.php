@@ -746,8 +746,6 @@ class DashboardController extends Controller
                         'id' => $b->id,
                         'name' => $b->name,
                         'logo_path' => $b->logo_path,
-                        'icon_path' => $b->icon_path,
-                        'icon' => $b->icon,
                         'icon_bg_color' => $b->icon_bg_color,
                         'icon_style' => $b->icon_style ?? 'subtle',
                         'primary_color' => $b->primary_color ?? '#4f46e5',

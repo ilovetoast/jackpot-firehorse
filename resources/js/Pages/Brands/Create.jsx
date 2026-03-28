@@ -92,7 +92,7 @@ export default function BrandsCreate() {
                                 </div>
 
                                 <p className="text-sm text-gray-500">
-                                    Add your logo and icon after creating the brand via Brand Portal → Identity.
+                                    Add your logo after creating the brand via Brand Portal → Identity.
                                 </p>
                             </div>
                         </div>
