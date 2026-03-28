@@ -17,6 +17,7 @@ use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -148,5 +149,42 @@ class SystemAutoRecoverTest extends TestCase
         $this->artisan('system:auto-recover')->assertSuccessful();
 
         $this->assertSame(1, \App\Models\Ticket::where('metadata->asset_id', $asset->id)->where('metadata->source', 'operations_incident')->count());
+    }
+
+    public function test_auto_recover_creates_ticket_when_tickets_severity_column_is_missing(): void
+    {
+        // Simulate an environment where historical migrations left engineering fields absent.
+        if (Schema::hasColumn('tickets', 'severity')) {
+            Schema::table('tickets', function ($table) {
+                $table->dropColumn('severity');
+            });
+        }
+
+        $asset = $this->createAsset([
+            'analysis_status' => 'uploading',
+            'metadata' => ['processing_started' => true],
+        ]);
+
+        SystemIncident::create([
+            'id' => (string) Str::uuid(),
+            'source_type' => 'asset',
+            'source_id' => $asset->id,
+            'tenant_id' => $this->tenant->id,
+            'severity' => 'critical',
+            'title' => 'Asset stuck in uploading state',
+            'message' => 'Test',
+            'retryable' => true,
+            'resolved_at' => null,
+            'detected_at' => now(),
+        ]);
+
+        $this->artisan('system:auto-recover')->assertSuccessful();
+
+        $ticket = \App\Models\Ticket::where('metadata->asset_id', $asset->id)
+            ->where('metadata->source', 'operations_incident')
+            ->first();
+
+        $this->assertNotNull($ticket, 'Ticket should still be created when severity column is missing.');
+        $this->assertSame('P0', $ticket->metadata['severity'] ?? null);
     }
 }

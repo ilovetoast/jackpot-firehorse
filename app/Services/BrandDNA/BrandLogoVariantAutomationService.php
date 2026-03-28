@@ -444,6 +444,7 @@ final class BrandLogoVariantAutomationService
             'file_path' => $path,
             'file_size' => $size,
             'mime_type' => $mimeType,
+            'checksum' => hash('sha256', $pngBinary),
             'is_current' => true,
             'pipeline_status' => 'pending',
         ]);
