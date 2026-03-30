@@ -30,6 +30,36 @@ function csrfToken() {
 }
 
 /**
+ * Same token refresh as bootstrap.js axios interceptor — fetch-based callers must call this on 419.
+ */
+async function refreshCsrfTokenFromServer() {
+    const res = await fetch('/csrf-token', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+    })
+    if (!res.ok) {
+        throw new Error('Could not refresh security token')
+    }
+    const data = await res.json()
+    const newToken = data?.token
+    if (!newToken || typeof newToken !== 'string') {
+        throw new Error('Invalid CSRF refresh response')
+    }
+    const meta = document.head?.querySelector('meta[name="csrf-token"]')
+    if (meta) {
+        meta.setAttribute('content', newToken)
+    }
+    if (typeof window !== 'undefined' && window.axios?.defaults?.headers?.common) {
+        window.axios.defaults.headers.common['X-CSRF-TOKEN'] = newToken
+    }
+    return newToken
+}
+
+/**
  * Prefer Blade `onesignal-app-id` (from ONESIGNAL_APP_ID on the server) over Vite env.
  * `VITE_ONESIGNAL_APP_ID` is baked in at `npm run build`; if it pointed at an older OneSignal app
  * (e.g. Site URL still .co), the SDK would keep enforcing that origin even after dashboard + .env were fixed.
@@ -101,22 +131,61 @@ function allowLocalhostAsSecureOriginOption() {
     return false
 }
 
+function parseErrorBodyText(t) {
+    const raw = (t || '').trim()
+    if (!raw) {
+        return ''
+    }
+    if (raw.startsWith('{')) {
+        try {
+            const j = JSON.parse(raw)
+            if (j && typeof j.message === 'string') {
+                return j.message
+            }
+        } catch {
+            // ignore
+        }
+    }
+    return raw
+}
+
 async function postPushStatus(enabled) {
     log('postPushStatus', { enabled })
-    const res = await fetch('/app/api/user/push-status', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-            'X-Requested-With': 'XMLHttpRequest',
-        },
-        body: JSON.stringify({ enabled }),
-    })
+
+    const doFetch = () =>
+        fetch('/app/api/user/push-status', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ enabled }),
+        })
+
+    let res = await doFetch()
+
+    if (res.status === 419) {
+        try {
+            await refreshCsrfTokenFromServer()
+            res = await doFetch()
+        } catch (e) {
+            logError('postPushStatus: CSRF refresh failed', e)
+        }
+    }
+
     if (!res.ok) {
         const t = await res.text()
-        throw new Error(t || `push-status ${res.status}`)
+        const parsed = parseErrorBodyText(t)
+        const msg = parsed || t || `Request failed (${res.status})`
+        if (res.status === 419 || /csrf token mismatch|page expired/i.test(msg)) {
+            throw new Error(
+                'Your session expired or the security token is out of date. Refresh the page and try again.',
+            )
+        }
+        throw new Error(msg)
     }
     return res.json()
 }
@@ -205,7 +274,20 @@ async function safeOneSignalInit(OneSignal) {
  * Maps OneSignal / browser errors to short copy for modals and settings.
  */
 export function formatPushUserError(err) {
-    const msg = err?.message || String(err || '')
+    let msg = err?.message || String(err || '')
+    if (msg.trim().startsWith('{')) {
+        try {
+            const j = JSON.parse(msg.trim())
+            if (j && typeof j.message === 'string') {
+                msg = j.message
+            }
+        } catch {
+            // keep msg
+        }
+    }
+    if (/csrf token mismatch|page expired|^419\b/i.test(msg)) {
+        return 'Your session expired or the security token is out of date. Refresh the page and try again.'
+    }
     if (/Can only be used on:/i.test(msg)) {
         return (
             'The browser URL doesn’t match the Web origin OneSignal has for this App ID (SDK reads it from their servers — changing the REST API key does not change that origin). ' +
