@@ -14,4 +14,12 @@ Must Have
 -? Visual metadata integrity SLO enforcement?
 - Unified asset health scoring standardization - in needs work
 
+
+
 ai bg for ocr
+
+
+Next phase
+- shopify intergration for browseing asset,
+- taggin, alt tags in cms's shopify
+- hybrid integration of gdrive, box, shopify ( intelligence layer )

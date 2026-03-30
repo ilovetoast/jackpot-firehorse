@@ -142,8 +142,11 @@ class BrandGuidelinesController extends Controller
             }
         }
 
+        $canUpdate = Gate::forUser(request()->user())->allows('update', $brand);
+
         return Inertia::render('Brands/BrandGuidelines/Index', [
-            'can_edit_brand_dna' => Gate::forUser(request()->user())->allows('update', $brand),
+            'can_edit_brand_dna' => $canUpdate,
+            'canCustomize' => $canUpdate && app(\App\Services\FeatureGate::class)->guidelinesCustomization($tenant),
             'brand' => [
                 'id' => $brand->id,
                 'name' => $brand->name,

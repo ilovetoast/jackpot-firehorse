@@ -91,6 +91,11 @@ class BrandDnaPayloadNormalizer
                 'tone_weight' => 20,
                 'imagery_weight' => 50,
             ],
+            'presentation_overrides' => [
+                'global' => [],
+                'sections' => [],
+            ],
+            'presentation_content' => [],
         ];
     }
 

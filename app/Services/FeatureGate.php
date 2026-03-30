@@ -165,6 +165,18 @@ class FeatureGate
     }
 
     /**
+     * Brand Guidelines: Check if tenant can customize guidelines presentation (sidebar editor).
+     * Available on Pro+.
+     */
+    public function guidelinesCustomization(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+
+        return (bool) ($plan['brand_guidelines']['customization'] ?? false);
+    }
+
+    /**
      * Phase M-2: Check if metadata approval is enabled for company and brand.
      * 
      * Returns true ONLY if:

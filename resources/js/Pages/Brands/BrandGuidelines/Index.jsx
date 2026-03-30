@@ -5,6 +5,8 @@ import AppHead from '../../../Components/AppHead'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
 import useLogoWhiteBgPreview from '../../../utils/useLogoWhiteBgPreview'
 import HeadlineAppearanceShowcase from '../../../Components/BrandGuidelines/HeadlineAppearanceShowcase'
+import { SidebarEditorProvider, useSidebarEditor } from '../../../Components/BrandGuidelines/SidebarEditorContext'
+import SidebarEditor from '../../../Components/BrandGuidelines/SidebarEditor'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -230,7 +232,8 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
     )
 }
 
-export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null, canEditBrandDna = false }) {
+function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null, canEditBrandDna = false, canCustomize = false }) {
+    const sidebarCtx = useSidebarEditor()
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
 
     useEffect(() => {
@@ -267,7 +270,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
     const rawPersonality = modelPayload?.personality ?? {}
     const rawVisual = modelPayload?.visual ?? {}
     const rawScoringRules = modelPayload?.scoring_rules ?? {}
-    const presentationStyle = modelPayload?.presentation?.style || 'clean'
+    const presentationStyle = sidebarCtx?.draftPresentation?.style || modelPayload?.presentation?.style || 'clean'
     const isBold = presentationStyle === 'bold'
     const isTextured = presentationStyle === 'textured'
 
@@ -367,7 +370,29 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
         setTimeout(() => setCopiedHex(null), 1200)
     }
 
-    const NAV_SECTIONS = [
+    const sectionOverrides = sidebarCtx?.draftOverrides?.sections ?? {}
+    const isSectionVisible = (id) => sectionOverrides[id]?.visible !== false
+    const sectionBgOverride = (id) => sectionOverrides[id]?.background ?? null
+    const sectionContentToggle = (id, key, defaultVal = true) => sectionOverrides[id]?.content?.[key] ?? defaultVal
+
+    const resolveBgStyle = (id, defaultBg) => {
+        const bg = sectionBgOverride(id)
+        if (!bg || !bg.type || bg.type === 'default') return defaultBg
+        if (bg.type === 'solid') return { background: bg.color || '#000000' }
+        if (bg.type === 'gradient') return { background: `linear-gradient(180deg, ${bg.gradient_from || '#000000'} 0%, ${bg.gradient_to || '#333333'} 100%)` }
+        if (bg.type === 'transparent') return { background: 'transparent' }
+        if (bg.type === 'image') return defaultBg
+        return defaultBg
+    }
+
+    const presentationContent = sidebarCtx?.draftContent ?? modelPayload?.presentation_content ?? {}
+    const getContentOverride = (sectionId, field) => {
+        const val = presentationContent[sectionId]?.[field]
+        return val && val !== '<p></p>' ? val : null
+    }
+
+    /** Sections that exist for this brand’s data (Customize sidebar always lists these so visibility can be toggled back on). */
+    const GUIDELINE_SECTIONS = [
         { id: 'sec-hero', label: brand.name, parent: true },
         { id: 'sec-purpose', label: 'Purpose', parent: true, show: !!(identity.mission || identity.positioning) },
         { id: 'sec-values', label: 'Values & Beliefs', show: hasValues || hasBeliefs },
@@ -379,7 +404,10 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
         { id: 'sec-typography', label: 'Typography', show: hasTypographySection },
         { id: 'sec-logo', label: 'Brand Identity', parent: true, show: !!logoUrl },
         { id: 'sec-logo-standards', label: 'Logo Standards', show: hasLogoGuidelines },
-    ].filter(s => s.show !== false)
+    ].filter((s) => s.show !== false)
+
+    /** Floating nav only lists sections that are currently visible on the page. */
+    const NAV_SECTIONS = GUIDELINE_SECTIONS.filter((s) => isSectionVisible(s.id))
 
     const [activeSection, setActiveSection] = useState('sec-hero')
     const [sectionTheme, setSectionTheme] = useState('dark')
@@ -480,6 +508,34 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                     Edit
                 </Link>
             )}
+            {canCustomize && !showCallout && hasActiveVersion && (
+                <>
+                    <button
+                        type="button"
+                        onClick={() => sidebarCtx?.openEditor()}
+                        className={`fixed z-[60] rounded-md border px-2.5 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
+                            !scrolledPastHero
+                                ? `${belowAppNavTopClass} border-white/25 bg-black/35 text-white hover:bg-black/50`
+                                : `${belowAppNavTopClass} border-gray-200 bg-white/95 text-gray-800 hover:bg-white`
+                        }`}
+                        style={{ right: sidebarCtx?.isEditing ? '356px' : '16px' }}
+                    >
+                        <svg className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" /></svg>
+                        Customize
+                    </button>
+                    <SidebarEditor sections={GUIDELINE_SECTIONS} />
+                    <ConfirmDialog
+                        open={sidebarCtx?.showDnaConfirm}
+                        onClose={() => sidebarCtx?.cancelContentMode()}
+                        onConfirm={() => sidebarCtx?.confirmContentMode()}
+                        title="Edit Brand DNA"
+                        message="You're switching to Content Mode. Edits will update core Brand DNA fields, which may affect AI outputs and scoring. Proceed?"
+                        confirmText="Switch to Content Mode"
+                        cancelText="Cancel"
+                        variant="warning"
+                    />
+                </>
+            )}
             {showProcessingBanner && (
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">
                     <p className="text-sm text-indigo-800">
@@ -505,7 +561,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                     </div>
                 </div>
             )}
-            <main className={showCallout ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'}>
+            <main className={showCallout ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'} style={sidebarCtx?.isEditing ? { marginRight: 340, transition: 'margin-right 0.3s ease-out' } : { transition: 'margin-right 0.3s ease-out' }}>
                 {/* Floating Section Nav — desktop only */}
                 {!showCallout && (
                     <nav
@@ -636,7 +692,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                             )}
 
                             <div className="relative flex flex-col items-center justify-center px-6 lg:px-8" style={{ minHeight: '100vh' }}>
-                                {heroLogoUrl && (
+                                {heroLogoUrl && sectionContentToggle('sec-hero', 'show_logo') && (
                                     <div className="mb-10 flex w-full max-w-[min(92vw,28rem)] justify-center px-2 sm:px-4">
                                         <img
                                             src={heroLogoUrl}
@@ -660,28 +716,30 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                         Brand Guidelines
                                     </h1>
                                 )}
-                                {heroSubheading && (
+                                {heroSubheading && sectionContentToggle('sec-hero', 'show_tagline') && (
                                     <p className={`mt-8 text-lg md:text-xl text-white/80 max-w-xl text-center ${isTextured ? 'font-medium uppercase tracking-[0.25em]' : isBold ? 'font-semibold uppercase tracking-widest' : 'font-light tracking-wide'}`}
                                        style={isTextured ? { textShadow: '0 2px 12px rgba(0,0,0,0.4)' } : {}}
                                     >
                                         {heroSubheading}
                                     </p>
                                 )}
+                                {sectionContentToggle('sec-hero', 'show_color_dots') && (
                                 <div className={`mt-12 flex items-center ${isTextured ? 'gap-1' : isBold ? 'gap-0' : 'gap-3'}`}>
                                     <div className={isTextured ? 'w-10 h-[3px]' : isBold ? 'w-8 h-2' : 'w-3 h-3 rounded-full'} style={{ backgroundColor: primaryColor }} />
                                     <div className={isTextured ? 'w-10 h-[3px]' : isBold ? 'w-8 h-2' : 'w-3 h-3 rounded-full'} style={{ backgroundColor: secondaryColor }} />
                                     <div className={isTextured ? 'w-10 h-[3px]' : isBold ? 'w-8 h-2' : 'w-3 h-3 rounded-full'} style={{ backgroundColor: accentColor }} />
                                 </div>
+                                )}
                             </div>
                         </section>
 
                         {/* ═══ 2. PURPOSE & POSITIONING (Builder Step 3) ═══ */}
-                        {(identity.mission || identity.positioning) && (
-                            <section id="sec-purpose" className="py-28 md:py-36 relative overflow-hidden" style={{
+                        {(identity.mission || identity.positioning) && isSectionVisible('sec-purpose') && (
+                            <section id="sec-purpose" className="py-28 md:py-36 relative overflow-hidden" style={resolveBgStyle('sec-purpose', {
                                 background: isTextured
                                     ? primaryDeep
                                     : isBold ? `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.06)} 0%, white 100%)` : 'white'
-                            }}>
+                            })}>
                                 {isTextured && texBg(1) && (
                                     <>
                                         <img src={texBg(1)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'screen' }} />
@@ -692,28 +750,31 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
                                         <div className="lg:col-span-7">
                                             <SectionLabel color={isTextured ? hexToRgba(primaryColor, 0.8) : secondaryColor} bold={isBold} textured={isTextured}>Purpose</SectionLabel>
-                                            {identity.mission && (
-                                                isTextured ? (
+                                            {identity.mission && (() => {
+                                                const missionHtml = getContentOverride('sec-purpose', 'mission_html')
+                                                const missionText = identity.mission
+                                                return isTextured ? (
                                                     <blockquote className="text-3xl md:text-5xl font-bold leading-[1.15] uppercase" style={{ color: 'rgba(255,255,255,0.92)', letterSpacing: '0.04em', textShadow: '0 2px 20px rgba(0,0,0,0.3)' }}>
-                                                        &ldquo;{identity.mission}&rdquo;
+                                                        {missionHtml ? <span dangerouslySetInnerHTML={{ __html: `\u201C${missionHtml}\u201D` }} /> : <>&ldquo;{missionText}&rdquo;</>}
                                                     </blockquote>
                                                 ) : isBold ? (
                                                     <div className="border-l-4 pl-8" style={{ borderColor: primaryColor }}>
                                                         <blockquote className="text-3xl md:text-5xl font-black text-gray-900 leading-[1.15] tracking-tight uppercase">
-                                                            &ldquo;{identity.mission}&rdquo;
+                                                            {missionHtml ? <span dangerouslySetInnerHTML={{ __html: `\u201C${missionHtml}\u201D` }} /> : <>&ldquo;{missionText}&rdquo;</>}
                                                         </blockquote>
                                                     </div>
                                                 ) : (
                                                     <blockquote className="text-3xl md:text-5xl font-light text-gray-900 leading-[1.2] tracking-tight">
-                                                        &ldquo;{identity.mission}&rdquo;
+                                                        {missionHtml ? <span dangerouslySetInnerHTML={{ __html: `\u201C${missionHtml}\u201D` }} /> : <>&ldquo;{missionText}&rdquo;</>}
                                                     </blockquote>
                                                 )
-                                            )}
-                                            {identity.positioning && (
-                                                <p className={`mt-10 text-xl md:text-2xl leading-relaxed ${isTextured ? 'font-light text-white/70' : isBold ? 'font-medium' : 'font-light'}`} style={isTextured ? {} : { color: darkenHex(primaryColor, 0.1) }}>
-                                                    {identity.positioning}
+                                            })()}
+                                            {identity.positioning && (() => {
+                                                const posHtml = getContentOverride('sec-purpose', 'positioning_html')
+                                                return <p className={`mt-10 text-xl md:text-2xl leading-relaxed ${isTextured ? 'font-light text-white/70' : isBold ? 'font-medium' : 'font-light'}`} style={isTextured ? {} : { color: darkenHex(primaryColor, 0.1) }}>
+                                                    {posHtml ? <span dangerouslySetInnerHTML={{ __html: posHtml }} /> : identity.positioning}
                                                 </p>
-                                            )}
+                                            })()}
                                         </div>
                                         <div className="lg:col-span-5 flex flex-col justify-center space-y-8">
                                             {identity.industry && (
@@ -741,16 +802,16 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 4. VALUES & BELIEFS (Builder Step 3) ═══ */}
-                        {(hasValues || hasBeliefs) && (
+                        {(hasValues || hasBeliefs) && isSectionVisible('sec-values') && (
                             <section
                                 id="sec-values"
                                 className="py-28 md:py-36 relative overflow-hidden"
-                                style={{ background: isTextured
+                                style={resolveBgStyle('sec-values', { background: isTextured
                                     ? `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)`
                                     : isBold
                                         ? `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.08)} 0%, ${hexToRgba(primaryColor, 0.03)} 100%)`
                                         : `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.04)} 0%, white 100%)`
-                                }}
+                                })}
                             >
                                 {isTextured && texBg(2) && (
                                     <>
@@ -828,13 +889,13 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 5. BRAND VOICE (Builder Step 4: Expression) ═══ */}
-                        {(personality.voice_description || hasToneKeywords) && (
-                            <section id="sec-voice" className="py-28 md:py-36 relative overflow-hidden" style={{ background: isTextured
+                        {(personality.voice_description || hasToneKeywords) && isSectionVisible('sec-voice') && (
+                            <section id="sec-voice" className="py-28 md:py-36 relative overflow-hidden" style={resolveBgStyle('sec-voice', { background: isTextured
                                 ? secondaryDark
                                 : isBold
                                     ? `linear-gradient(180deg, white 0%, ${hexToRgba(secondaryColor, 0.06)} 100%)`
                                     : `linear-gradient(180deg, ${hexToRgba(secondaryColor, 0.04)} 0%, ${hexToRgba(primaryColor, 0.02)} 100%)`
-                            }}>
+                            })}>
                                 {isTextured && texBg(3) && (
                                     <>
                                         <img src={texBg(3)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'multiply' }} />
@@ -845,11 +906,12 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
                                         <div className="lg:col-span-7">
                                             <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Brand Voice</SectionLabel>
-                                            {personality.voice_description && (
-                                                <p className={`text-xl md:text-2xl leading-relaxed whitespace-pre-wrap ${isTextured ? 'text-white/85 font-light' : isBold ? 'text-gray-800 font-medium' : 'text-gray-800 font-light'}`}>
-                                                    {personality.voice_description}
+                                            {personality.voice_description && (() => {
+                                                const voiceHtml = getContentOverride('sec-voice', 'voice_html')
+                                                return <p className={`text-xl md:text-2xl leading-relaxed whitespace-pre-wrap ${isTextured ? 'text-white/85 font-light' : isBold ? 'text-gray-800 font-medium' : 'text-gray-800 font-light'}`}>
+                                                    {voiceHtml ? <span dangerouslySetInnerHTML={{ __html: voiceHtml }} /> : personality.voice_description}
                                                 </p>
-                                            )}
+                                            })()}
                                         </div>
                                         {hasToneKeywords && (
                                             <div className="lg:col-span-5 flex flex-col justify-center">
@@ -896,12 +958,12 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 5b. ARCHETYPE & PERSONALITY ═══ */}
-                        <section
+                        {isSectionVisible('sec-archetype') && <section
                             id="sec-archetype"
                             className="relative py-32 md:py-40 overflow-hidden text-white"
-                            style={{
+                            style={resolveBgStyle('sec-archetype', {
                                 background: `linear-gradient(135deg, ${primaryDeep} 0%, ${primaryDark} 50%, ${darkenHex(primaryColor, 0.5)} 100%)`,
-                            }}
+                            })}
                         >
                             {isTextured && texBg(4) && (
                                 <img src={texBg(4)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" style={{ mixBlendMode: 'screen', filter: 'saturate(0.4)' }} />
@@ -944,12 +1006,12 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     <p className="text-white/50 italic">No personality configured.</p>
                                 )}
                             </div>
-                        </section>
+                        </section>}
 
                         {/* ═══ 6. VISUAL STYLE (Builder Step 4: Expression) ═══ */}
-                        {(visual.photography_style || visual.visual_style || visual.composition_style || scoringRules.photography_attributes.length > 0) && (
+                        {(visual.photography_style || visual.visual_style || visual.composition_style || scoringRules.photography_attributes.length > 0) && isSectionVisible('sec-visual') && (
                             <section id="sec-visual" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
-                                style={isTextured ? { background: `linear-gradient(180deg, ${darkenHex(primaryColor, 0.55)} 0%, ${primaryDeep} 100%)` } : {}}
+                                style={resolveBgStyle('sec-visual', isTextured ? { background: `linear-gradient(180deg, ${darkenHex(primaryColor, 0.55)} 0%, ${primaryDeep} 100%)` } : {})}
                             >
                                 {isTextured && texBg(5) && (
                                     <>
@@ -1006,12 +1068,12 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 6b. VISUAL REFERENCES — Photography, Textures, Patterns ═══ */}
-                        {hasVisualRefs && (
-                            <section id="sec-photography" className="py-28 md:py-36 relative overflow-hidden" style={{
+                        {hasVisualRefs && isSectionVisible('sec-photography') && (
+                            <section id="sec-photography" className="py-28 md:py-36 relative overflow-hidden" style={resolveBgStyle('sec-photography', {
                                 background: isTextured
                                     ? `linear-gradient(180deg, ${primaryDeep} 0%, ${darkenHex(secondaryColor, 0.6)} 100%)`
                                     : `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.03)} 0%, white 40%, ${hexToRgba(secondaryColor, 0.03)} 100%)`
-                            }}>
+                            })}>
                                 {isTextured && (
                                     <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                 )}
@@ -1073,8 +1135,8 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 7. COLOR SYSTEM (Builder Step 6: Standards) ═══ */}
-                        <section id="sec-colors" className={`py-24 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
-                            style={isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {}}
+                        {isSectionVisible('sec-colors') && <section id="sec-colors" className={`py-24 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
+                            style={resolveBgStyle('sec-colors', isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {})}
                         >
                             {isTextured && (
                                 <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -1132,16 +1194,16 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                                     </div>
                                 )}
                             </div>
-                        </section>
+                        </section>}
 
                         {/* ═══ 8. TYPOGRAPHY (Builder Step 6: Standards) ═══ */}
-                        {hasTypographySection && (
-                            <section id="sec-typography" className="py-24 md:py-32 relative overflow-hidden" style={{ background: isTextured
+                        {hasTypographySection && isSectionVisible('sec-typography') && (
+                            <section id="sec-typography" className="py-24 md:py-32 relative overflow-hidden" style={resolveBgStyle('sec-typography', { background: isTextured
                                 ? `linear-gradient(180deg, ${darkenHex(secondaryColor, 0.55)} 0%, ${primaryDeep} 100%)`
                                 : isBold
                                     ? `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.07)} 0%, white 100%)`
                                     : `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.04)} 0%, white 100%)`
-                            }}>
+                            })}>
                                 {isTextured && texBg(6) && (
                                     <>
                                         <img src={texBg(6)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)' }} />
@@ -1251,9 +1313,9 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 9. BRAND IDENTITY / LOGO (Builder Step 6: Standards) ═══ */}
-                        {logoUrl && (
+                        {logoUrl && isSectionVisible('sec-logo') && (
                             <section id="sec-logo" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
-                                style={isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {}}
+                                style={resolveBgStyle('sec-logo', isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {})}
                             >
                                 {isTextured && texBg(7) && (
                                     <>
@@ -1344,7 +1406,7 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
                         )}
 
                         {/* ═══ 10. LOGO STANDARDS (Builder Step 6: Standards) ═══ */}
-                        {hasLogoGuidelines && (() => {
+                        {hasLogoGuidelines && isSectionVisible('sec-logo-standards') && (() => {
                             const showVisual = visual.show_logo_visual_treatment && logoUrl
                             const brandColors = { primary: primaryColor, secondary: secondaryColor }
                             const isTransparent = logoIsTransparent
@@ -1495,4 +1557,15 @@ export default function BrandGuidelinesIndex({ brand, brandModel, modelPayload, 
             </main>
         </div>
     )
+}
+
+export default function BrandGuidelinesIndex(props) {
+    if (props.canCustomize) {
+        return (
+            <SidebarEditorProvider modelPayload={props.modelPayload} brand={props.brand} canCustomize={true}>
+                <BrandGuidelinesIndexInner {...props} />
+            </SidebarEditorProvider>
+        )
+    }
+    return <BrandGuidelinesIndexInner {...props} />
 }

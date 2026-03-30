@@ -217,6 +217,31 @@ class BrandVersionService
     }
 
     /**
+     * Patch the active (published) version payload. Deep merge restricted to allowed paths.
+     * Used by the guidelines customization sidebar — only touches presentation keys.
+     */
+    public function patchActivePayload(Brand $brand, array $patch, array $allowedPaths): ?BrandModelVersion
+    {
+        $brandModel = $brand->brandModel;
+        $active = $brandModel?->activeVersion;
+        if (! $active) {
+            return null;
+        }
+
+        $current = $active->model_payload ?? [];
+        if (! is_array($current)) {
+            $current = [];
+        }
+
+        $merged = $this->deepMergeRestricted($current, $patch, $allowedPaths);
+        $normalized = $this->normalizer->normalize($merged);
+
+        $active->update(['model_payload' => $normalized]);
+
+        return $active->fresh();
+    }
+
+    /**
      * Patch from builder step. Updates the draft version only.
      */
     public function patchFromStep(Brand $brand, string $stepKey, array $payload): BrandModelVersion

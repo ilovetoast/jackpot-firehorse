@@ -13,7 +13,7 @@ const ICON_MAP = {
 const ALL_ACTIONS = [
     {
         key: 'portal',
-        title: 'Brand Settings',
+        getTitle: (b) => `${brandDisplayName(b)} Management`,
         description: 'All brand settings',
         // Scoped to the `brand` prop (workspace brand you’re viewing); same tenant — not the agency switch.
         hrefFn: (brand) => (brand?.id ? `/app/brands/${brand.id}/edit#brand-portal` : null),
@@ -21,12 +21,17 @@ const ALL_ACTIONS = [
     },
     {
         key: 'insights',
-        title: 'Insights',
+        getTitle: (b) => `${brandDisplayName(b)} Insights`,
         description: 'Track usage and engagement',
         href: '/app/insights/overview',
         permission: 'canViewAnalytics',
     },
 ]
+
+function brandDisplayName(brand) {
+    const n = brand?.name
+    return typeof n === 'string' && n.trim() !== '' ? n.trim() : 'Brand'
+}
 
 export default function PrimaryActions({ permissions = {}, brand = null, brandColor = '#6366f1' }) {
     const actions = ALL_ACTIONS.filter((action) => {
@@ -36,6 +41,7 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
     }).map((action) => ({
         ...action,
         href: action.hrefFn ? action.hrefFn(brand) : action.href,
+        title: action.getTitle(brand),
     })).filter((action) => action.href)
 
     if (actions.length === 0) {

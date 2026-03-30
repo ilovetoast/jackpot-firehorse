@@ -48,6 +48,9 @@ return [
             'sharing' => false,
             'agency_templates' => false,
         ],
+        'brand_guidelines' => [
+            'customization' => false,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
@@ -113,6 +116,9 @@ return [
             'public_access' => false,
             'sharing' => false,
             'agency_templates' => false,
+        ],
+        'brand_guidelines' => [
+            'customization' => false,
         ],
         'download_features' => [
             'download_links_limited' => true,
@@ -188,6 +194,9 @@ return [
             'sharing' => false,
             'agency_templates' => false,
         ],
+        'brand_guidelines' => [
+            'customization' => true,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 1000,
@@ -261,6 +270,9 @@ return [
             'public_access' => true,
             'sharing' => true,
             'agency_templates' => false,
+        ],
+        'brand_guidelines' => [
+            'customization' => true,
         ],
         'download_features' => [
             'download_links_limited' => false,
@@ -343,6 +355,9 @@ return [
             'public_access' => true,
             'sharing' => true,
             'agency_templates' => true,
+        ],
+        'brand_guidelines' => [
+            'customization' => true,
         ],
         'download_features' => [
             'download_links_limited' => false,

@@ -13,6 +13,10 @@ export default function Home() {
 
     const buttonProps = getButtonProps()
 
+    const heroCta = auth?.user
+        ? { text: 'Go to overview', href: '/app/overview' }
+        : { text: 'Get started', href: '/gateway?mode=register' }
+
     return (
         <div className="bg-[#0a0a0f] text-white min-h-screen relative overflow-hidden">
             {/* Cinematic ambient gradients */}
@@ -84,10 +88,10 @@ export default function Home() {
                         </p>
                         <div className="mt-10 flex items-center justify-center gap-x-6">
                             <Link
-                                href="/gateway?mode=register"
+                                href={heroCta.href}
                                 className="rounded-md bg-white px-5 py-2.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-100 transition-colors"
                             >
-                                Get started
+                                {heroCta.text}
                             </Link>
                             <a href="#features" className="text-sm font-semibold leading-6 text-white/70 hover:text-white transition-colors">
                                 Learn more <span aria-hidden="true">&rarr;</span>

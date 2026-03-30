@@ -91,4 +91,48 @@ class BrandDnaPayloadNormalizerTest extends TestCase
 
         $this->assertSame(['canonical'], $result['scoring_rules']['tone_keywords'], 'scoring_rules.tone_keywords is canonical and wins when both present');
     }
+
+    public function test_normalizer_adds_presentation_overrides_defaults(): void
+    {
+        $normalizer = new BrandDnaPayloadNormalizer;
+
+        $result = $normalizer->normalize([]);
+
+        $this->assertArrayHasKey('presentation_overrides', $result);
+        $this->assertSame([], $result['presentation_overrides']['global']);
+        $this->assertSame([], $result['presentation_overrides']['sections']);
+    }
+
+    public function test_normalizer_adds_presentation_content_defaults(): void
+    {
+        $normalizer = new BrandDnaPayloadNormalizer;
+
+        $result = $normalizer->normalize([]);
+
+        $this->assertArrayHasKey('presentation_content', $result);
+        $this->assertSame([], $result['presentation_content']);
+    }
+
+    public function test_normalizer_preserves_existing_presentation_overrides(): void
+    {
+        $normalizer = new BrandDnaPayloadNormalizer;
+
+        $payload = [
+            'presentation_overrides' => [
+                'global' => ['spacing' => 'generous'],
+                'sections' => [
+                    'sec-hero' => ['visible' => false],
+                ],
+            ],
+            'presentation_content' => [
+                'sec-purpose' => ['mission_html' => '<p>Custom mission</p>'],
+            ],
+        ];
+
+        $result = $normalizer->normalize($payload);
+
+        $this->assertSame('generous', $result['presentation_overrides']['global']['spacing']);
+        $this->assertFalse($result['presentation_overrides']['sections']['sec-hero']['visible']);
+        $this->assertSame('<p>Custom mission</p>', $result['presentation_content']['sec-purpose']['mission_html']);
+    }
 }

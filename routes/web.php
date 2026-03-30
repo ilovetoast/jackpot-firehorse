@@ -765,6 +765,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Brand DNA (internal settings)
             Route::get('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'index'])->name('brands.dna.index');
             Route::get('/brands/{brand}/guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'index'])->name('brands.guidelines.index');
+            Route::post('/brands/{brand}/guidelines/customize', [\App\Http\Controllers\BrandGuidelinesCustomizeController::class, 'patch'])->name('brands.guidelines.customize');
             Route::post('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'store'])->name('brands.dna.store');
             Route::get('/brands/{brand}/dna/versions/{version}', [\App\Http\Controllers\BrandDNAController::class, 'showVersion'])->name('brands.dna.versions.show');
             Route::post('/brands/{brand}/dna/versions', [\App\Http\Controllers\BrandDNAController::class, 'createVersion'])->name('brands.dna.versions.store');
