@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\CollectionUser;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
@@ -533,9 +534,8 @@ class TeamController extends Controller
 
         // Generate invite token
         $inviteToken = Str::random(64);
-        $inviteUrl = route('invite.accept', [
+        $inviteUrl = route('gateway.invite', [
             'token' => $inviteToken,
-            'tenant' => $tenant->id,
         ]);
 
         // Determine tenant role (use provided role or default to 'member')
@@ -632,96 +632,29 @@ class TeamController extends Controller
     }
 
     /**
-     * Accept an invitation.
+     * Legacy URL: /invite/accept/{token}/{tenant} — forwards to the branded gateway invite flow.
      */
     public function acceptInvite(Request $request, string $token, Tenant $tenant)
     {
-        // Find the invitation by token
-        $invitation = TenantInvitation::where('token', $token)
+        $tenantInv = TenantInvitation::where('token', $token)
             ->where('tenant_id', $tenant->id)
             ->whereNull('accepted_at')
             ->first();
 
-        if (! $invitation) {
-            return redirect()->route('login')->withErrors([
-                'invitation' => 'Invalid or expired invitation link.',
-            ]);
+        $brandInv = BrandInvitation::where('token', $token)
+            ->whereNull('accepted_at')
+            ->with('brand')
+            ->first();
+
+        $validBrandInvite = $brandInv
+            && $brandInv->brand
+            && (int) $brandInv->brand->tenant_id === (int) $tenant->id;
+
+        if (! $tenantInv && ! $validBrandInvite) {
+            return redirect()->route('gateway')->with('error', 'Invalid or expired invitation.');
         }
 
-        // Check if user is already authenticated
-        if (Auth::check()) {
-            $user = Auth::user();
-            // Verify the authenticated user matches the invitation email
-            if ($user->email !== $invitation->email) {
-                Auth::logout();
-
-                return redirect()->route('login')->withErrors([
-                    'invitation' => 'This invitation is for a different email address. Please log in with the correct account.',
-                ]);
-            }
-            // User is logged in and matches - mark invitation as accepted
-            $invitation->update(['accepted_at' => now()]);
-            // Set tenant and brand in session
-            $defaultBrand = $tenant->defaultBrand ?? $tenant->brands()->first();
-            if ($defaultBrand) {
-                session([
-                    'tenant_id' => $tenant->id,
-                    'brand_id' => $defaultBrand->id,
-                ]);
-            }
-
-            return redirect()->route('dashboard');
-        }
-
-        // Check if user exists
-        $user = User::where('email', $invitation->email)->first();
-
-        if (! $user) {
-            // User doesn't exist yet (shouldn't happen based on current flow, but handle it)
-            return redirect()->route('login')->withErrors([
-                'invitation' => 'No account found for this invitation. Please contact support.',
-            ]);
-        }
-
-        // Check if user needs to complete registration
-        // If first_name/last_name are empty or password hasn't been set properly
-        $needsRegistration = empty($user->first_name) || empty($user->last_name);
-
-        if ($needsRegistration) {
-            // Get brand information for display
-            $brands = collect($invitation->brand_assignments ?? [])->map(function ($assignment) use ($tenant) {
-                $brand = $tenant->brands()->find($assignment['brand_id'] ?? null);
-                if (! $brand) {
-                    return null;
-                }
-
-                return [
-                    'id' => $brand->id,
-                    'name' => $brand->name,
-                    'role' => $assignment['role'] ?? 'member',
-                ];
-            })->filter()->values();
-
-            // Show registration form
-            return Inertia::render('Auth/InviteRegistration', [
-                'invitation' => [
-                    'token' => $token,
-                    'tenant' => [
-                        'id' => $tenant->id,
-                        'name' => $tenant->name,
-                    ],
-                    'email' => $invitation->email,
-                    'brands' => $brands,
-                    'inviter' => $invitation->inviter ? [
-                        'name' => $invitation->inviter->name,
-                        'email' => $invitation->inviter->email,
-                    ] : null,
-                ],
-            ]);
-        }
-
-        // User exists and has completed registration - redirect to login
-        return redirect()->route('login')->with('info', 'You have been invited to join '.$tenant->name.'. Please log in to access your account.');
+        return redirect()->route('gateway.invite', ['token' => $token]);
     }
 
     /**
@@ -768,7 +701,7 @@ class TeamController extends Controller
 
             // Redirect back to the invite acceptance page with errors and old input
             // Inertia will automatically pick up errors and old input from the session
-            return redirect()->route('invite.accept', ['token' => $token, 'tenant' => $tenant->id])
+            return redirect()->route('gateway.invite', ['token' => $token])
                 ->withErrors($e->errors())
                 ->withInput($inputToPreserve);
         }

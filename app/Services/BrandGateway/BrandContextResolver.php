@@ -3,6 +3,7 @@
 namespace App\Services\BrandGateway;
 
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
 use Illuminate\Http\Request;
@@ -26,7 +27,6 @@ class BrandContextResolver
         $user = Auth::user();
         $tenant = null;
         $brand = null;
-        $invitation = null;
 
         // 1. Subdomain resolution
         if (! $tenant) {
@@ -47,9 +47,13 @@ class BrandContextResolver
             }
         }
 
-        // 3. Invite token resolution
+        // 3. Invite token resolution (tenant invite or brand invite — brand wins theme for single-brand flows)
+        $invitationModel = null;
         if (! $tenant && $inviteToken) {
-            [$tenant, $invitation] = $this->resolveFromInviteToken($inviteToken);
+            [$tenant, $brandFromInvite, $invitationModel] = $this->resolveFromInviteToken($inviteToken);
+            if ($brandFromInvite) {
+                $brand = $brandFromInvite;
+            }
         }
 
         // 4. Session resolution (tenant + brand)
@@ -85,7 +89,7 @@ class BrandContextResolver
         return [
             'tenant' => $tenant ? $this->serializeTenant($tenant) : null,
             'brand' => $brand ? $this->serializeBrand($brand) : null,
-            'invitation' => $invitation ? $this->serializeInvitation($invitation) : null,
+            'invitation' => $invitationModel ? $this->serializeInvitationModel($invitationModel) : null,
             'available_companies' => $availableCompanies,
             'available_brands' => $availableBrands,
             'is_multi_company' => count($availableCompanies) > 1,
@@ -141,18 +145,30 @@ class BrandContextResolver
         return $query->first();
     }
 
+    /**
+     * @return array{0: ?Tenant, 1: ?Brand, 2: TenantInvitation|BrandInvitation|null}
+     */
     protected function resolveFromInviteToken(string $token): array
     {
-        $invitation = TenantInvitation::where('token', $token)
+        $tenantInv = TenantInvitation::where('token', $token)
             ->whereNull('accepted_at')
-            ->with('tenant')
+            ->with(['tenant', 'inviter'])
             ->first();
 
-        if (! $invitation) {
-            return [null, null];
+        if ($tenantInv) {
+            return [$tenantInv->tenant, null, $tenantInv];
         }
 
-        return [$invitation->tenant, $invitation];
+        $brandInv = BrandInvitation::where('token', $token)
+            ->whereNull('accepted_at')
+            ->with(['brand.tenant', 'inviter'])
+            ->first();
+
+        if (! $brandInv || ! $brandInv->brand) {
+            return [null, null, null];
+        }
+
+        return [$brandInv->brand->tenant, $brandInv->brand, $brandInv];
     }
 
     protected function resolveFromSession(): ?Tenant
@@ -269,15 +285,40 @@ class BrandContextResolver
         ];
     }
 
-    protected function serializeInvitation(TenantInvitation $invitation): array
+    protected function serializeInvitationModel(TenantInvitation|BrandInvitation $invitation): array
+    {
+        return $invitation instanceof BrandInvitation
+            ? $this->serializeBrandInvitation($invitation)
+            : $this->serializeTenantInvitation($invitation);
+    }
+
+    protected function serializeTenantInvitation(TenantInvitation $invitation): array
     {
         return [
+            'kind' => 'tenant',
             'token' => $invitation->token,
             'email' => $invitation->email,
             'role' => $invitation->role,
             'tenant_name' => $invitation->tenant?->name,
             'inviter_name' => $invitation->inviter?->name,
             'brand_assignments' => $invitation->brand_assignments,
+        ];
+    }
+
+    protected function serializeBrandInvitation(BrandInvitation $invitation): array
+    {
+        $tenant = $invitation->brand?->tenant;
+
+        return [
+            'kind' => 'brand',
+            'token' => $invitation->token,
+            'email' => $invitation->email,
+            'role' => $invitation->role,
+            'tenant_name' => $tenant?->name,
+            'brand_id' => $invitation->brand_id,
+            'brand_name' => $invitation->brand?->name,
+            'inviter_name' => $invitation->inviter?->name,
+            'brand_assignments' => [],
         ];
     }
 }

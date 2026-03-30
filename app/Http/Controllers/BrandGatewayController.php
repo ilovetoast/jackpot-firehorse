@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventType;
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
 use App\Models\User;
@@ -22,8 +23,7 @@ class BrandGatewayController extends Controller
     public function __construct(
         protected BrandContextResolver $contextResolver,
         protected BrandThemeBuilder $themeBuilder
-    ) {
-    }
+    ) {}
 
     /**
      * Main gateway entry point.
@@ -72,7 +72,16 @@ class BrandGatewayController extends Controller
             ]);
         }
 
-        $mode = Auth::check() ? 'invite_accept' : 'invite_register';
+        $email = $context['invitation']['email'] ?? null;
+        $userExists = $email && User::where('email', $email)->exists();
+
+        if (Auth::check()) {
+            $mode = 'invite_accept';
+        } elseif ($userExists) {
+            $mode = 'invite_login';
+        } else {
+            $mode = 'invite_register';
+        }
 
         return Inertia::render('Gateway/Index', [
             'context' => $context,
@@ -90,9 +99,13 @@ class BrandGatewayController extends Controller
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],
+            'invite_token' => ['nullable', 'string', 'max:128'],
         ]);
 
-        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+        if (! Auth::attempt(
+            ['email' => $credentials['email'], 'password' => $credentials['password']],
+            $request->boolean('remember')
+        )) {
             throw ValidationException::withMessages([
                 'email' => 'The provided credentials do not match our records.',
             ]);
@@ -101,6 +114,24 @@ class BrandGatewayController extends Controller
         $request->session()->regenerate();
 
         $user = Auth::user();
+
+        if (! empty($credentials['invite_token'])) {
+            $invitation = $this->findPendingInvitation($credentials['invite_token']);
+            if (! $invitation) {
+                Auth::logout();
+                throw ValidationException::withMessages([
+                    'email' => 'This invitation link is invalid or has already been used.',
+                ]);
+            }
+            if ($user->email !== $invitation->email) {
+                Auth::logout();
+                throw ValidationException::withMessages([
+                    'email' => 'This invitation is for a different email address.',
+                ]);
+            }
+
+            return redirect()->route('gateway.invite', ['token' => $credentials['invite_token']]);
+        }
 
         if ($user->isSuspended()) {
             Auth::logout();
@@ -171,7 +202,7 @@ class BrandGatewayController extends Controller
         $originalSlug = $slug;
         $counter = 1;
         while (Tenant::where('slug', $slug)->exists()) {
-            $slug = $originalSlug . '-' . $counter++;
+            $slug = $originalSlug.'-'.$counter++;
         }
 
         $tenant = Tenant::create([
@@ -211,10 +242,7 @@ class BrandGatewayController extends Controller
      */
     public function acceptInvite(Request $request, string $token)
     {
-        $invitation = TenantInvitation::where('token', $token)
-            ->whereNull('accepted_at')
-            ->with('tenant')
-            ->first();
+        $invitation = $this->findPendingInvitation($token);
 
         if (! $invitation) {
             return redirect()->route('gateway')->with('error', 'Invalid or expired invitation.');
@@ -226,6 +254,58 @@ class BrandGatewayController extends Controller
             return redirect()->route('gateway')->with('error', 'This invitation is for a different email address.');
         }
 
+        if ($invitation instanceof TenantInvitation) {
+            return $this->acceptTenantInvitation($invitation, $user, $token);
+        }
+
+        return $this->acceptBrandInvitation($invitation, $user, $token);
+    }
+
+    /**
+     * Complete invite registration (new user) via the gateway.
+     */
+    public function completeInviteRegistration(Request $request, string $token)
+    {
+        $invitation = $this->findPendingInvitation($token);
+
+        if (! $invitation) {
+            throw ValidationException::withMessages([
+                'invitation' => 'Invalid or expired invitation link.',
+            ]);
+        }
+
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'password' => ['required', 'confirmed', PasswordRule::defaults()],
+        ]);
+
+        if ($invitation instanceof TenantInvitation) {
+            return $this->completeTenantInviteRegistration($invitation, $validated);
+        }
+
+        return $this->completeBrandInviteRegistration($invitation, $validated);
+    }
+
+    protected function findPendingInvitation(string $token): TenantInvitation|BrandInvitation|null
+    {
+        $tenantInv = TenantInvitation::where('token', $token)
+            ->whereNull('accepted_at')
+            ->with(['tenant', 'inviter'])
+            ->first();
+
+        if ($tenantInv) {
+            return $tenantInv;
+        }
+
+        return BrandInvitation::where('token', $token)
+            ->whereNull('accepted_at')
+            ->with(['brand.tenant', 'inviter'])
+            ->first();
+    }
+
+    protected function acceptTenantInvitation(TenantInvitation $invitation, User $user, string $token): \Illuminate\Http\RedirectResponse
+    {
         $tenant = $invitation->tenant;
         $invitation->update(['accepted_at' => now()]);
 
@@ -253,33 +333,46 @@ class BrandGatewayController extends Controller
             'tenant' => ['id' => $tenant->id],
             'brand' => ['id' => $defaultBrand?->id],
             'is_authenticated' => true,
-        ], ['invite_token' => substr($token, 0, 8) . '...']);
+        ], ['invite_token' => substr($token, 0, 8).'...']);
 
         return redirect()->route('overview')->with('success', "Welcome to {$tenant->name}!");
     }
 
-    /**
-     * Complete invite registration (new user) via the gateway.
-     */
-    public function completeInviteRegistration(Request $request, string $token)
+    protected function acceptBrandInvitation(BrandInvitation $invitation, User $user, string $token): \Illuminate\Http\RedirectResponse
     {
-        $invitation = TenantInvitation::where('token', $token)
-            ->whereNull('accepted_at')
-            ->with('tenant')
-            ->first();
-
-        if (! $invitation) {
-            throw ValidationException::withMessages([
-                'invitation' => 'Invalid or expired invitation link.',
-            ]);
+        $brand = $invitation->brand;
+        if (! $brand) {
+            return redirect()->route('gateway')->with('error', 'Invalid or expired invitation.');
         }
 
-        $validated = $request->validate([
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'password' => ['required', 'confirmed', PasswordRule::defaults()],
+        $tenant = $brand->tenant;
+        $invitation->update(['accepted_at' => now()]);
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        }
+
+        $this->applyBrandInviteRole($user, $brand, $invitation->role ?? 'viewer');
+
+        session([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
         ]);
 
+        $this->trackGatewayEvent(EventType::GATEWAY_INVITE_ACCEPTED, [
+            'tenant' => ['id' => $tenant->id],
+            'brand' => ['id' => $brand->id],
+            'is_authenticated' => true,
+        ], ['invite_token' => substr($token, 0, 8).'...']);
+
+        return redirect()->route('overview')->with('success', "Welcome to {$brand->name}!");
+    }
+
+    /**
+     * @param  array{first_name: string, last_name: string, password: string}  $validated
+     */
+    protected function completeTenantInviteRegistration(TenantInvitation $invitation, array $validated): \Illuminate\Http\RedirectResponse
+    {
         $user = User::where('email', $invitation->email)->first();
 
         if (! $user) {
@@ -323,6 +416,64 @@ class BrandGatewayController extends Controller
         ]);
 
         return redirect()->route('overview')->with('success', "Welcome to {$tenant->name}!");
+    }
+
+    /**
+     * @param  array{first_name: string, last_name: string, password: string}  $validated
+     */
+    protected function completeBrandInviteRegistration(BrandInvitation $invitation, array $validated): \Illuminate\Http\RedirectResponse
+    {
+        $brand = $invitation->brand;
+        if (! $brand) {
+            throw ValidationException::withMessages([
+                'invitation' => 'Invalid or expired invitation link.',
+            ]);
+        }
+
+        $tenant = $brand->tenant;
+
+        $user = User::where('email', $invitation->email)->first();
+
+        if (! $user) {
+            $user = User::create([
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $invitation->email,
+                'password' => bcrypt($validated['password']),
+            ]);
+        } else {
+            $user->update([
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'password' => bcrypt($validated['password']),
+            ]);
+        }
+
+        $invitation->update(['accepted_at' => now()]);
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        }
+
+        $this->applyBrandInviteRole($user, $brand, $invitation->role ?? 'viewer');
+
+        Auth::login($user);
+
+        session([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+        ]);
+
+        return redirect()->route('overview')->with('success', "Welcome to {$brand->name}!");
+    }
+
+    protected function applyBrandInviteRole(User $user, Brand $brand, string $role): void
+    {
+        try {
+            $user->setRoleForBrand($brand, $role);
+        } catch (\InvalidArgumentException) {
+            $user->setRoleForBrand($brand, 'viewer');
+        }
     }
 
     /**

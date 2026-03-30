@@ -601,11 +601,20 @@ function RecommendedUserCard({ user, brandId }) {
 
 // Pending Invitation Card Component
 function PendingInvitationCard({ invitation, brandId }) {
-    const { post, processing } = useForm()
+    const { post, processing: resending } = useForm()
+    const { delete: destroy, processing: revoking } = useForm()
+    const [showRevokeConfirm, setShowRevokeConfirm] = useState(false)
 
     const handleResend = () => {
         post(`/app/brands/${brandId}/invitations/${invitation.id}/resend`, {
             preserveScroll: true,
+        })
+    }
+
+    const confirmRevoke = () => {
+        destroy(`/app/brands/${brandId}/invitations/${invitation.id}`, {
+            preserveScroll: true,
+            onSuccess: () => setShowRevokeConfirm(false),
         })
     }
 
@@ -616,33 +625,54 @@ function PendingInvitationCard({ invitation, brandId }) {
     }
 
     return (
-        <div className="p-3 flex items-center justify-between">
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
-                    {invitation.role && (
-                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
-                            {invitation.role}
-                        </span>
-                    )}
+        <>
+            <div className="p-3 flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                        {invitation.role && (
+                            <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                                {invitation.role}
+                            </span>
+                        )}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                        {invitation.sent_at ? (
+                            <>Sent: {formatDate(invitation.sent_at)}</>
+                        ) : (
+                            <>Created: {formatDate(invitation.created_at)}</>
+                        )}
+                    </div>
                 </div>
-                <div className="mt-1 text-xs text-gray-500">
-                    {invitation.sent_at ? (
-                        <>Sent: {formatDate(invitation.sent_at)}</>
-                    ) : (
-                        <>Created: {formatDate(invitation.created_at)}</>
-                    )}
+                <div className="flex items-center gap-3 flex-shrink-0">
+                    <button
+                        type="button"
+                        onClick={handleResend}
+                        disabled={resending || revoking}
+                        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                    >
+                        {resending ? 'Resending...' : 'Resend'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setShowRevokeConfirm(true)}
+                        disabled={resending || revoking}
+                        className="text-sm font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                    >
+                        Revoke
+                    </button>
                 </div>
             </div>
-            <button
-                type="button"
-                onClick={handleResend}
-                disabled={processing}
-                className="ml-4 text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
-            >
-                {processing ? 'Resending...' : 'Resend'}
-            </button>
-        </div>
+            <ConfirmDialog
+                open={showRevokeConfirm}
+                onClose={() => setShowRevokeConfirm(false)}
+                onConfirm={confirmRevoke}
+                title="Revoke invitation"
+                message={`Revoke the invitation sent to ${invitation.email}? They will no longer be able to accept it.`}
+                variant="warning"
+                confirmText="Revoke"
+            />
+        </>
     )
 }
 

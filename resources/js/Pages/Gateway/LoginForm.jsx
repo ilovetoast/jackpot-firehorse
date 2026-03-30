@@ -2,13 +2,14 @@ import { useForm, usePage } from '@inertiajs/react'
 import { useMemo, useState } from 'react'
 import { firstError } from '../../utils/inertiaErrors'
 
-export default function LoginForm({ context, onToggleRegister }) {
+export default function LoginForm({ context, onToggleRegister, inviteToken = null }) {
     const { theme, errors: sharedErrors = {} } = usePage().props
 
     const { data, setData, post, processing, errors: formErrors } = useForm({
-        email: '',
+        email: context?.invitation?.email || '',
         password: '',
         remember: false,
+        invite_token: inviteToken || '',
     })
 
     const errors = useMemo(
@@ -59,7 +60,11 @@ export default function LoginForm({ context, onToggleRegister }) {
                     <p className="text-sm text-white/50 mb-2">{theme.tagline}</p>
                 )}
                 <p className="text-sm text-white/60 mt-2 max-w-md">
-                    {context?.tenant ? `Sign in to ${context.tenant.name}` : 'Sign in to continue'}
+                    {inviteToken
+                        ? 'Sign in with the invited email to accept your invitation.'
+                        : context?.tenant
+                          ? `Sign in to ${context.tenant.name}`
+                          : 'Sign in to continue'}
                 </p>
             </div>
 
@@ -73,7 +78,8 @@ export default function LoginForm({ context, onToggleRegister }) {
                         onBlur={() => setFocusedField(null)}
                         placeholder="Email"
                         autoComplete="email"
-                        className="w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500"
+                        readOnly={Boolean(inviteToken)}
+                        className="w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500 disabled:opacity-90"
                         style={{ borderColor: inputBorder('email') }}
                         aria-label="Email"
                         aria-invalid={emailError ? 'true' : 'false'}
@@ -138,18 +144,20 @@ export default function LoginForm({ context, onToggleRegister }) {
                 </button>
             </form>
 
-            <div className="mt-8 text-center">
-                <p className="text-sm text-white/50">
-                    Don&apos;t have an account?{' '}
-                    <button
-                        type="button"
-                        onClick={onToggleRegister}
-                        className="text-white/70 hover:text-white transition-colors duration-300 underline underline-offset-4 decoration-white/20 hover:decoration-white/50"
-                    >
-                        Create one
-                    </button>
-                </p>
-            </div>
+            {!inviteToken && (
+                <div className="mt-8 text-center">
+                    <p className="text-sm text-white/50">
+                        Don&apos;t have an account?{' '}
+                        <button
+                            type="button"
+                            onClick={onToggleRegister}
+                            className="text-white/70 hover:text-white transition-colors duration-300 underline underline-offset-4 decoration-white/20 hover:decoration-white/50"
+                        >
+                            Create one
+                        </button>
+                    </p>
+                </div>
+            )}
         </div>
     )
 }

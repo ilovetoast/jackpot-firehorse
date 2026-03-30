@@ -44,11 +44,14 @@ function AuthenticatedAccept({ invitation, token, primary, portalInvite }) {
                     </p>
                 )}
                 <p className="text-xl font-medium text-white/90 mt-2">
-                    {invitation?.tenant_name}
+                    {invitation?.kind === 'brand' ? invitation?.brand_name : invitation?.tenant_name}
                 </p>
+                {invitation?.kind === 'brand' && invitation?.tenant_name ? (
+                    <p className="text-sm text-white/40 mt-1">{invitation.tenant_name}</p>
+                ) : null}
             </div>
 
-            {invitation?.brand_assignments?.length > 0 && (
+            {invitation?.kind === 'tenant' && invitation?.brand_assignments?.length > 0 && (
                 <div className="mb-8 text-left">
                     <p className="text-xs uppercase tracking-widest text-white/30 mb-3">Brand Access</p>
                     <div className="space-y-2">
@@ -117,8 +120,11 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                     </p>
                 )}
                 <p className="text-lg font-medium text-white/80">
-                    {invitation?.tenant_name}
+                    {invitation?.kind === 'brand' ? invitation?.brand_name : invitation?.tenant_name}
                 </p>
+                {invitation?.kind === 'brand' && invitation?.tenant_name ? (
+                    <p className="text-xs text-white/40 mt-1">{invitation.tenant_name}</p>
+                ) : null}
                 <p className="text-sm text-white/50 mt-2">
                     {invitation?.email}
                 </p>

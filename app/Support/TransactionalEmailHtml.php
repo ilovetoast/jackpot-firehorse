@@ -9,7 +9,7 @@ namespace App\Support;
 final class TransactionalEmailHtml
 {
     /**
-     * System emails: dark cinematic accent + Jackpot logo (matches marketing / gateway feel).
+     * System emails: light header + Jackpot logo + gradient accent stripe (readable in all clients).
      *
      * @param  string  $cardInnerHtml  Body HTML inside the white card (headings, copy, CTA)
      */
@@ -23,7 +23,7 @@ final class TransactionalEmailHtml
     <td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1px solid #e8e8e8;">
         <tr>
-          <td style="background:linear-gradient(180deg,#0a0a0f 0%,#13131a 100%);padding:0;">
+          <td style="background:#ffffff;padding:0;border-bottom:1px solid #e8e8e8;">
             <div style="height:3px;background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%);"></div>
             <div style="padding:24px 28px 20px;">
               <img src="{{app_url}}/jp-logo.svg" alt="Jackpot" width="132" height="32" style="display:block;height:32px;width:auto;max-width:100%;border:0;outline:none;" />
@@ -51,7 +51,7 @@ HTML;
     }
 
     /**
-     * Tenant-scoped emails (invite): Jackpot + optional tenant logo cells from {@see tenantLogoBlockFromBrand()}.
+     * Tenant-scoped emails (invite): white header + Jackpot + optional tenant logo cells from {@see tenantLogoBlockFromBrand()}.
      *
      * @param  string  $cardInnerHtml  Body below the dual-logo row
      */
@@ -65,7 +65,7 @@ HTML;
     <td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1px solid #e8e8e8;">
         <tr>
-          <td style="background:linear-gradient(180deg,#0a0a0f 0%,#13131a 100%);padding:0;">
+          <td style="background:#ffffff;padding:0;border-bottom:1px solid #e8e8e8;">
             <div style="height:3px;background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%);"></div>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
               <tr>
@@ -78,7 +78,7 @@ HTML;
                       {{tenant_logo_block}}
                     </tr>
                   </table>
-                  <p style="margin:12px 0 0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#9ca3af;">Invitation · {{tenant_name}}</p>
+                  <p style="margin:12px 0 0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Invitation · {{tenant_name}}</p>
                 </td>
               </tr>
             </table>
@@ -120,9 +120,9 @@ HTML;
         }
 
         $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
-        $img = '<img src="'.$safe.'" alt="" width="140" height="40" style="display:inline-block;max-height:40px;max-width:160px;width:auto;height:auto;vertical-align:middle;border-radius:6px;border:1px solid rgba(255,255,255,0.12);" />';
+        $img = '<img src="'.$safe.'" alt="" width="140" height="40" style="display:inline-block;max-height:40px;max-width:160px;width:auto;height:auto;vertical-align:middle;border-radius:6px;border:1px solid rgba(15,23,42,0.1);" />';
 
-        return '<td style="width:1px;background:#ffffff22;font-size:0;line-height:0;">&nbsp;</td>'
+        return '<td style="width:1px;background:#e5e7eb;font-size:0;line-height:0;">&nbsp;</td>'
             .'<td style="vertical-align:middle;padding-left:16px;">'.$img.'</td>';
     }
 }

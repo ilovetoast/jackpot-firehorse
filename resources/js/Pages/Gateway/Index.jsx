@@ -17,6 +17,7 @@ const MODES = {
     ENTER: 'enter',
     INVITE_ACCEPT: 'invite_accept',
     INVITE_REGISTER: 'invite_register',
+    INVITE_LOGIN: 'invite_login',
 }
 
 export default function GatewayIndex({ context, mode: initialMode, invite_token, flash_error, auto_enter }) {
@@ -49,10 +50,12 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
     const renderContent = () => {
         switch (mode) {
             case MODES.LOGIN:
+            case MODES.INVITE_LOGIN:
                 return (
                     <LoginForm
                         context={context}
                         onToggleRegister={() => handleToggleMode(MODES.REGISTER)}
+                        inviteToken={mode === MODES.INVITE_LOGIN ? invite_token : null}
                     />
                 )
 

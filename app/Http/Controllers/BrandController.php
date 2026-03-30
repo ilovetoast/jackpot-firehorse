@@ -10,12 +10,12 @@ use App\Models\Category;
 use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\BrandDNA\BrandLogoVariantAutomationService;
+use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
-use App\Services\BrandDNA\BrandLogoVariantAutomationService;
-use App\Services\BrandDNA\BrandVersionService;
 use App\Services\SystemCategoryService;
 use App\Support\Roles\PermissionMap;
 use App\Support\Roles\RoleRegistry;
@@ -1056,10 +1056,8 @@ class BrandController extends Controller
             'sent_at' => now(),
         ]);
 
-        // Generate invite URL (for now, redirect to login - can be enhanced later)
-        $inviteUrl = route('invite.accept', [
+        $inviteUrl = route('gateway.invite', [
             'token' => $token,
-            'tenant' => $tenant->id,
         ]);
 
         // Send invitation email (using tenant invite for now - can create brand-specific later)
@@ -1322,16 +1320,46 @@ class BrandController extends Controller
         // Update sent_at
         $invitation->update(['sent_at' => now()]);
 
-        // Generate invite URL
-        $inviteUrl = route('invite.accept', [
+        $inviteUrl = route('gateway.invite', [
             'token' => $invitation->token,
-            'tenant' => $tenant->id,
         ]);
 
         // Resend email
         Mail::to($invitation->email)->send(new InviteMember($tenant, $authUser, $inviteUrl));
 
         return back()->with('success', 'Invitation resent successfully.');
+    }
+
+    /**
+     * Revoke a pending brand invitation (deletes the record; the invite link stops working).
+     */
+    public function revokeInvitation(Brand $brand, BrandInvitation $invitation)
+    {
+        $tenant = app('tenant');
+        $authUser = Auth::user();
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        if ($invitation->brand_id !== $brand->id) {
+            abort(403, 'Invitation does not belong to this brand.');
+        }
+
+        if (! $authUser->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to revoke invitations.');
+        }
+
+        if ($invitation->accepted_at) {
+            return back()->withErrors([
+                'invitation' => 'This invitation has already been accepted.',
+            ]);
+        }
+
+        $email = $invitation->email;
+        $invitation->delete();
+
+        return back()->with('success', "Invitation to {$email} has been revoked.");
     }
 
     /**
