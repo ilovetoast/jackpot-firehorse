@@ -2605,8 +2605,9 @@ class SiteAdminController extends Controller
             });
         }
 
-        // Order by most recent first
-        $query->orderBy('created_at', 'desc');
+        // Order by primary key — avoids full-table sort on `created_at` (Out of sort memory on large tables).
+        // Rows are append-only; id desc matches recency for display.
+        $query->orderByDesc('id');
 
         // Paginate results
         $perPage = (int) $request->get('per_page', 50);

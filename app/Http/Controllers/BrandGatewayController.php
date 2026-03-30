@@ -278,6 +278,11 @@ class BrandGatewayController extends Controller
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'password' => ['required', 'confirmed', PasswordRule::defaults()],
+        ], [
+            'first_name.required' => 'Please enter your first name.',
+            'last_name.required' => 'Please enter your last name.',
+            'password.required' => 'Please enter a password.',
+            'password.confirmed' => 'The password confirmation does not match.',
         ]);
 
         if ($invitation instanceof TenantInvitation) {

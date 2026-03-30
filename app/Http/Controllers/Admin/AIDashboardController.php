@@ -4,17 +4,14 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AIAgentRun;
-use App\Models\Ticket;
 use App\Models\AlertCandidate;
-use App\Models\AlertSummary;
-use App\Models\SupportTicket;
 use App\Models\DetectionRule;
+use App\Models\Ticket;
+use App\Services\AIBudgetService;
 use App\Services\AIConfigService;
 use App\Services\AICostReportingService;
-use App\Services\AIBudgetService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -41,8 +38,7 @@ class AIDashboardController extends Controller
         protected AIConfigService $configService,
         protected AICostReportingService $reportingService,
         protected AIBudgetService $budgetService
-    ) {
-    }
+    ) {}
 
     /**
      * Eager loads for paginated admin AI run lists (avoids N+1 on ticket_links per run).
@@ -75,7 +71,7 @@ class AIDashboardController extends Controller
      */
     public function index(): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -102,7 +98,7 @@ class AIDashboardController extends Controller
         if ($systemBudget) {
             $budgetStatus = $this->budgetService->getBudgetStatus($systemBudget, $environment);
             $budgetRemaining = $systemBudget->getRemaining($environment);
-            
+
             // Get current month cost
             $currentMonthStart = now()->startOfMonth();
             $currentMonthEnd = now()->endOfMonth();
@@ -111,7 +107,7 @@ class AIDashboardController extends Controller
 
             // Get cost trends (last 7 days)
             $costTrends = $this->reportingService->getCostTrends('day', 7);
-            
+
             // Detect cost spikes
             $costSpikes = $this->reportingService->detectCostSpikes(50);
         }
@@ -121,13 +117,13 @@ class AIDashboardController extends Controller
 
         // Load tab-specific data
         $tabContent = [];
-        
+
         if ($activeTab === 'activity') {
             // Load activity data (first page only for initial load)
             $query = AIAgentRun::query()
                 ->forAdminActivityList()
                 ->with($this->eagerLoadsForAdminAiRunList())
-                ->orderBy('started_at', 'desc');
+                ->orderByDesc('id');
 
             // Apply filters from request
             $request = request();
@@ -135,7 +131,7 @@ class AIDashboardController extends Controller
                 $query->where('agent_id', $request->agent_id);
             }
             if ($request->filled('model_used')) {
-                $query->where('model_used', 'like', '%' . $request->model_used . '%');
+                $query->where('model_used', 'like', '%'.$request->model_used.'%');
             }
             if ($request->filled('task_type')) {
                 $query->where('task_type', $request->task_type);
@@ -150,9 +146,9 @@ class AIDashboardController extends Controller
                 $query->where('started_at', '>=', $request->date_from);
             }
             if ($request->filled('date_to')) {
-                $query->where('started_at', '<=', $request->date_to . ' 23:59:59');
+                $query->where('started_at', '<=', $request->date_to.' 23:59:59');
             }
-            
+
             $runs = $query->paginate(50)->through(function ($run) {
                 $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
@@ -200,20 +196,20 @@ class AIDashboardController extends Controller
                 ->map(function ($job) {
                     $payload = json_decode($job->payload, true);
                     $displayName = $payload['displayName'] ?? 'Unknown Job';
-                    
+
                     // Only show automation jobs
-                    if (!str_contains($displayName, 'App\\Jobs\\Automation\\')) {
+                    if (! str_contains($displayName, 'App\\Jobs\\Automation\\')) {
                         return null;
                     }
-                    
+
                     // Extract job class name
                     $jobClass = str_replace('App\\Jobs\\Automation\\', '', $displayName);
-                    
+
                     // Extract exception message (first line)
                     $exception = $job->exception;
                     $exceptionLines = explode("\n", $exception);
                     $errorMessage = $exceptionLines[0] ?? 'Unknown error';
-                    
+
                     // Try to extract ticket ID or other context from payload
                     $command = $payload['data']['command'] ?? null;
                     $ticketId = null;
@@ -223,7 +219,7 @@ class AIDashboardController extends Controller
                             $ticketId = $unserialized->ticketId;
                         }
                     }
-                    
+
                     return [
                         'id' => $job->id,
                         'uuid' => $job->uuid,
@@ -289,20 +285,20 @@ class AIDashboardController extends Controller
                 'environment',
                 'group_by',
             ]);
-            
+
             // Remove null/empty values
-            $filters = array_filter($filters, fn($value) => $value !== null && $value !== '');
-            
+            $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
+
             // Default to last 30 days if no date range specified
-            if (!isset($filters['start_date'])) {
+            if (! isset($filters['start_date'])) {
                 $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
             }
-            if (!isset($filters['end_date'])) {
+            if (! isset($filters['end_date'])) {
                 $filters['end_date'] = now()->format('Y-m-d');
             }
 
             $report = $this->reportingService->generateReport($filters);
-            
+
             $tabContent['reports'] = [
                 'report' => $report,
                 'filters' => $filters,
@@ -325,7 +321,7 @@ class AIDashboardController extends Controller
             $query = AlertCandidate::with(['rule', 'summary', 'supportTicket', 'tenant']);
 
             // Default: open alerts only, sorted by severity + last_detected_at
-            if (!$request->filled('status')) {
+            if (! $request->filled('status')) {
                 $query->where('status', 'open');
             }
 
@@ -436,8 +432,8 @@ class AIDashboardController extends Controller
                         ['value' => 'asset', 'label' => 'Asset'],
                         ['value' => 'download', 'label' => 'Download'],
                     ],
-                    'rules' => $detectionRules->map(fn($rule) => ['value' => $rule->id, 'label' => $rule->name])->toArray(),
-                    'tenants' => $tenants->map(fn($tenant) => ['value' => $tenant->id, 'label' => $tenant->name])->toArray(),
+                    'rules' => $detectionRules->map(fn ($rule) => ['value' => $rule->id, 'label' => $rule->name])->toArray(),
+                    'tenants' => $tenants->map(fn ($tenant) => ['value' => $tenant->id, 'label' => $tenant->name])->toArray(),
                 ],
             ];
         } elseif ($activeTab === 'budgets' && Auth::user()->can('ai.budgets.view')) {
@@ -480,14 +476,14 @@ class AIDashboardController extends Controller
      */
     public function activity(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
         $query = AIAgentRun::query()
             ->forAdminActivityList()
             ->with($this->eagerLoadsForAdminAiRunList())
-            ->orderBy('started_at', 'desc');
+            ->orderByDesc('id');
 
         // Apply filters
         if ($request->filled('agent_id')) {
@@ -495,7 +491,7 @@ class AIDashboardController extends Controller
         }
 
         if ($request->filled('model_used')) {
-            $query->where('model_used', 'like', '%' . $request->model_used . '%');
+            $query->where('model_used', 'like', '%'.$request->model_used.'%');
         }
 
         if ($request->filled('task_type')) {
@@ -515,7 +511,7 @@ class AIDashboardController extends Controller
         }
 
         if ($request->filled('date_to')) {
-            $query->where('started_at', '<=', $request->date_to . ' 23:59:59');
+            $query->where('started_at', '<=', $request->date_to.' 23:59:59');
         }
 
         $runs = $query->paginate(50)->through(function ($run) {
@@ -575,7 +571,7 @@ class AIDashboardController extends Controller
      */
     public function editorImageAudit(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -585,7 +581,7 @@ class AIDashboardController extends Controller
             ->forAdminActivityList()
             ->whereIn('task_type', $editorTaskTypes)
             ->with($this->eagerLoadsForAdminAiRunList())
-            ->orderBy('started_at', 'desc');
+            ->orderByDesc('id');
 
         if ($request->filled('agent_id')) {
             $aid = (string) $request->agent_id;
@@ -707,7 +703,7 @@ class AIDashboardController extends Controller
      */
     public function models(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -726,7 +722,7 @@ class AIDashboardController extends Controller
      */
     public function agents(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -748,7 +744,7 @@ class AIDashboardController extends Controller
      */
     public function automations(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -783,7 +779,7 @@ class AIDashboardController extends Controller
      */
     public function updateModelOverride(Request $request, string $modelKey)
     {
-        if (!Auth::user()->can('ai.dashboard.manage')) {
+        if (! Auth::user()->can('ai.dashboard.manage')) {
             abort(403);
         }
 
@@ -808,7 +804,7 @@ class AIDashboardController extends Controller
      */
     public function updateAgentOverride(Request $request, string $agentId)
     {
-        if (!Auth::user()->can('ai.dashboard.manage')) {
+        if (! Auth::user()->can('ai.dashboard.manage')) {
             abort(403);
         }
 
@@ -836,7 +832,7 @@ class AIDashboardController extends Controller
      */
     public function updateAutomationOverride(Request $request, string $triggerKey)
     {
-        if (!Auth::user()->can('ai.dashboard.manage')) {
+        if (! Auth::user()->can('ai.dashboard.manage')) {
             abort(403);
         }
 
@@ -861,6 +857,7 @@ class AIDashboardController extends Controller
     protected function getAgentName(string $agentId): string
     {
         $config = config("ai.agents.{$agentId}");
+
         return $config['name'] ?? $agentId;
     }
 
@@ -870,6 +867,7 @@ class AIDashboardController extends Controller
     protected function getAgentOptions(): array
     {
         $agents = config('ai.agents', []);
+
         return collect($agents)->map(function ($config, $id) {
             return [
                 'value' => $id,
@@ -964,7 +962,7 @@ class AIDashboardController extends Controller
      */
     public function reports(Request $request): Response
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 
@@ -980,10 +978,10 @@ class AIDashboardController extends Controller
         ]);
 
         // Default to last 30 days if no date range specified
-        if (!isset($filters['start_date'])) {
+        if (! isset($filters['start_date'])) {
             $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
         }
-        if (!isset($filters['end_date'])) {
+        if (! isset($filters['end_date'])) {
             $filters['end_date'] = now()->format('Y-m-d');
         }
 
@@ -1015,7 +1013,7 @@ class AIDashboardController extends Controller
      */
     public function budgets(Request $request): Response
     {
-        if (!Auth::user()->can('ai.budgets.view')) {
+        if (! Auth::user()->can('ai.budgets.view')) {
             abort(403);
         }
 
@@ -1049,7 +1047,7 @@ class AIDashboardController extends Controller
      */
     public function updateBudgetOverride(Request $request, string $budgetId): \Illuminate\Http\RedirectResponse
     {
-        if (!Auth::user()->can('ai.budgets.manage')) {
+        if (! Auth::user()->can('ai.budgets.manage')) {
             abort(403);
         }
 
@@ -1079,16 +1077,16 @@ class AIDashboardController extends Controller
      */
     public function retryFailedJob(string $uuid): \Illuminate\Http\RedirectResponse
     {
-        if (!Auth::user()->can('ai.dashboard.manage')) {
+        if (! Auth::user()->can('ai.dashboard.manage')) {
             abort(403);
         }
 
         try {
             \Illuminate\Support\Facades\Artisan::call('queue:retry', ['id' => $uuid]);
-            
+
             return redirect()->back()->with('success', 'Failed job has been queued for retry.');
         } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Failed to retry job: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to retry job: '.$e->getMessage());
         }
     }
 
@@ -1097,7 +1095,7 @@ class AIDashboardController extends Controller
      */
     public function showRun(string $id): \Illuminate\Http\JsonResponse
     {
-        if (!Auth::user()->can('ai.dashboard.view')) {
+        if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
         }
 

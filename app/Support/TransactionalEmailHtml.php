@@ -106,7 +106,7 @@ HTML;
     }
 
     /**
-     * Extra table cells after Jackpot logo: thin divider + tenant logo (or empty string).
+     * Extra table cells after Jackpot logo: thin divider + brand logo image, or brand name as text if no logo.
      */
     public static function tenantLogoBlockFromBrand(?\App\Models\Brand $brand): string
     {
@@ -114,15 +114,24 @@ HTML;
             return '';
         }
 
-        $url = $brand->logoUrlForGuest(false);
-        if ($url === null || $url === '') {
+        $url = $brand->logoUrlForTransactionalEmail();
+        if ($url !== null && $url !== '') {
+            $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+            $img = '<img src="'.$safe.'" alt="'.htmlspecialchars($brand->name, ENT_QUOTES, 'UTF-8').'" width="140" height="40" style="display:inline-block;max-height:40px;max-width:160px;width:auto;height:auto;vertical-align:middle;" />';
+
+            return '<td style="width:1px;background:#e5e7eb;font-size:0;line-height:0;">&nbsp;</td>'
+                .'<td style="vertical-align:middle;padding-left:16px;">'.$img.'</td>';
+        }
+
+        $name = trim((string) $brand->name);
+        if ($name === '') {
             return '';
         }
 
-        $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
-        $img = '<img src="'.$safe.'" alt="" width="140" height="40" style="display:inline-block;max-height:40px;max-width:160px;width:auto;height:auto;vertical-align:middle;border-radius:6px;border:1px solid rgba(15,23,42,0.1);" />';
+        $safeName = htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
+        $wordmark = '<span style="font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.2;">'.$safeName.'</span>';
 
         return '<td style="width:1px;background:#e5e7eb;font-size:0;line-height:0;">&nbsp;</td>'
-            .'<td style="vertical-align:middle;padding-left:16px;">'.$img.'</td>';
+            .'<td style="vertical-align:middle;padding-left:16px;">'.$wordmark.'</td>';
     }
 }

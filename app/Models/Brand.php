@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+
 class Brand extends Model
 {
     use RecordsActivity;
@@ -24,6 +25,7 @@ class Brand extends Model
         'updated' => EventType::BRAND_UPDATED,
         'deleted' => EventType::BRAND_DELETED,
     ];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -66,15 +68,15 @@ class Brand extends Model
     protected function casts(): array
     {
         return [
-        'is_default' => 'boolean',
-        'show_in_selector' => 'boolean',
-        'primary_color_user_defined' => 'boolean',
-        'secondary_color_user_defined' => 'boolean',
-        'accent_color_user_defined' => 'boolean',
-        'settings' => 'array',
-        'download_landing_settings' => 'array', // R3.2
-        'portal_settings' => 'array',
-    ];
+            'is_default' => 'boolean',
+            'show_in_selector' => 'boolean',
+            'primary_color_user_defined' => 'boolean',
+            'secondary_color_user_defined' => 'boolean',
+            'accent_color_user_defined' => 'boolean',
+            'settings' => 'array',
+            'download_landing_settings' => 'array', // R3.2
+            'portal_settings' => 'array',
+        ];
     }
 
     /**
@@ -123,6 +125,37 @@ class Brand extends Model
         $logoId = $dark ? ($this->attributes['logo_dark_id'] ?? null) : ($this->attributes['logo_id'] ?? null);
 
         return $this->deliveryUrlForLogoAssetId($logoId, DeliveryContext::GATEWAY);
+    }
+
+    /**
+     * Logo URL for light-background transactional email (invites, etc.).
+     * Prefer the original asset file over medium thumbnails — those may be composited on a dark canvas for in-app contrast.
+     */
+    public function logoUrlForTransactionalEmail(): ?string
+    {
+        $manual = $this->attributes['logo_path'] ?? null;
+        if ($manual !== null && $manual !== '') {
+            return $manual;
+        }
+
+        $logoId = $this->attributes['logo_id'] ?? null;
+        if ($logoId === null || $logoId === '') {
+            return null;
+        }
+
+        $asset = Asset::find($logoId);
+        if (! $asset) {
+            return null;
+        }
+
+        $original = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::GATEWAY);
+        if ($original !== '') {
+            return $original;
+        }
+
+        $fallback = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::GATEWAY);
+
+        return $fallback !== '' ? $fallback : null;
     }
 
     /**
@@ -225,7 +258,7 @@ class Brand extends Model
 
     /**
      * Get the owning tenant for this brand (for future brand transfers).
-     * 
+     *
      * Phase AG-2 — Incubation State & Tracking
      */
     public function owningTenant(): BelongsTo
@@ -275,7 +308,7 @@ class Brand extends Model
 
     /**
      * Get the users that belong to this brand.
-     * 
+     *
      * Phase MI-1: This relationship includes all pivots (active and removed).
      * Filter by removed_at IS NULL for active memberships only.
      */
@@ -315,15 +348,16 @@ class Brand extends Model
 
     /**
      * Check if contributor uploads require approval for this brand.
-     * 
+     *
      * Phase J: Brand-level setting for contributor upload approval.
      * When enabled, contributor uploads create assets with approval_status = pending.
-     * 
+     *
      * @return bool True if contributor uploads require approval
      */
     public function requiresContributorApproval(): bool
     {
         $settings = $this->settings ?? [];
+
         return (bool) ($settings['contributor_upload_requires_approval'] ?? false);
     }
 }

@@ -1,5 +1,6 @@
 import { useForm, usePage } from '@inertiajs/react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { firstError } from '../../utils/inertiaErrors'
 
 export default function InviteAccept({ invitation, isAuthenticated, token }) {
     const { theme } = usePage().props
@@ -18,7 +19,11 @@ function AuthenticatedAccept({ invitation, token, primary, portalInvite }) {
     const { post, processing } = useForm()
 
     const handleAccept = () => {
-        post(`/gateway/invite/${token}/accept`)
+        post(`/gateway/invite/${token}/accept`, {
+            preserveScroll: true,
+            preserveState: true,
+            withAllErrors: true,
+        })
     }
 
     const headline = portalInvite.headline || "You're Invited"
@@ -81,16 +86,48 @@ function AuthenticatedAccept({ invitation, token, primary, portalInvite }) {
 }
 
 function GuestRegistration({ invitation, token, primary, portalInvite, focusedField, setFocusedField }) {
-    const { data, setData, post, processing, errors } = useForm({
-        first_name: '',
-        last_name: '',
-        password: '',
-        password_confirmation: '',
-    })
+    const { errors: sharedErrors = {}, old } = usePage().props
+
+    // Match InviteRegistration / session flash: Laravel flashes old input on validation errors;
+    // useForm initial state only applies on first mount, so we merge `old` here and sync below.
+    const initialFormData = useMemo(
+        () => ({
+            first_name: old?.first_name ?? '',
+            last_name: old?.last_name ?? '',
+            password: '',
+            password_confirmation: '',
+        }),
+        [old],
+    )
+
+    const { data, setData, post, processing, errors: formErrors } = useForm(initialFormData)
+
+    const oldSyncKey = useMemo(() => (old ? JSON.stringify(old) : ''), [old])
+
+    useEffect(() => {
+        if (!old || Object.keys(old).length === 0) {
+            return
+        }
+        if (old.first_name !== undefined && old.first_name !== null) {
+            setData('first_name', old.first_name)
+        }
+        if (old.last_name !== undefined && old.last_name !== null) {
+            setData('last_name', old.last_name)
+        }
+        // Intentionally do not restore password fields (same as InviteRegistration).
+    }, [oldSyncKey, old, setData])
+
+    const errors = useMemo(
+        () => ({ ...sharedErrors, ...formErrors }),
+        [sharedErrors, formErrors],
+    )
 
     const handleSubmit = (e) => {
         e.preventDefault()
-        post(`/gateway/invite/${token}/complete`)
+        post(`/gateway/invite/${token}/complete`, {
+            preserveScroll: true,
+            withAllErrors: true,
+        })
     }
 
     const inputClass = 'w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500'
@@ -98,13 +135,17 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
     const inputBorder = (field) =>
         focusedField === field
             ? `${primary}88`
-            : errors[field]
+            : firstError(errors[field])
                 ? '#ef444488'
                 : 'rgba(255,255,255,0.08)'
 
     const headline = portalInvite.headline || 'Complete Your Account'
     const subtext = portalInvite.subtext || null
     const ctaLabel = portalInvite.cta_label || 'Create Account & Join'
+
+    const hasValidationError = ['invitation', 'password', 'password_confirmation', 'first_name', 'last_name'].some(
+        (key) => firstError(errors[key]),
+    )
 
     return (
         <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>
@@ -130,7 +171,20 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                 </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                {hasValidationError && (
+                    <div
+                        role="alert"
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200/95"
+                    >
+                        {firstError(errors.invitation) ? (
+                            <p className="font-medium">{firstError(errors.invitation)}</p>
+                        ) : (
+                            <p className="text-red-100/90">Please check the fields below and try again.</p>
+                        )}
+                    </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <input
@@ -143,8 +197,11 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                             autoComplete="given-name"
                             className={inputClass}
                             style={{ borderColor: inputBorder('first_name') }}
+                            aria-invalid={firstError(errors.first_name) ? 'true' : 'false'}
                         />
-                        {errors.first_name && <p className="mt-1 text-xs text-red-400/90">{errors.first_name}</p>}
+                        {firstError(errors.first_name) && (
+                            <p className="mt-1 text-xs text-red-400/90">{firstError(errors.first_name)}</p>
+                        )}
                     </div>
                     <div>
                         <input
@@ -157,12 +214,18 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                             autoComplete="family-name"
                             className={inputClass}
                             style={{ borderColor: inputBorder('last_name') }}
+                            aria-invalid={firstError(errors.last_name) ? 'true' : 'false'}
                         />
-                        {errors.last_name && <p className="mt-1 text-xs text-red-400/90">{errors.last_name}</p>}
+                        {firstError(errors.last_name) && (
+                            <p className="mt-1 text-xs text-red-400/90">{firstError(errors.last_name)}</p>
+                        )}
                     </div>
                 </div>
 
                 <div>
+                    <p className="mb-2 text-xs text-white/40">
+                        Use a strong password (length, mixed case, numbers, and symbols as required by your account policy).
+                    </p>
                     <input
                         type="password"
                         value={data.password}
@@ -173,8 +236,19 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                         autoComplete="new-password"
                         className={inputClass}
                         style={{ borderColor: inputBorder('password') }}
+                        aria-invalid={firstError(errors.password) ? 'true' : 'false'}
                     />
-                    {errors.password && <p className="mt-1 text-xs text-red-400/90">{errors.password}</p>}
+                    {errors.password != null && errors.password !== '' && (
+                        <div className="mt-1 text-xs text-red-400/90 space-y-1">
+                            {Array.isArray(errors.password) ? (
+                                errors.password.map((msg, i) => (
+                                    <p key={i}>{msg}</p>
+                                ))
+                            ) : (
+                                <p>{errors.password}</p>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div>
@@ -188,12 +262,12 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
                         autoComplete="new-password"
                         className={inputClass}
                         style={{ borderColor: inputBorder('password_confirmation') }}
+                        aria-invalid={firstError(errors.password_confirmation) ? 'true' : 'false'}
                     />
+                    {firstError(errors.password_confirmation) && (
+                        <p className="mt-1 text-xs text-red-400/90">{firstError(errors.password_confirmation)}</p>
+                    )}
                 </div>
-
-                {errors.invitation && (
-                    <p className="text-xs text-red-400/90 text-center">{errors.invitation}</p>
-                )}
 
                 <button
                     type="submit"
