@@ -1,80 +1,52 @@
+@props([
+    'title' => config('app.name', 'Jackpot'),
+    'headerText' => null,
+    'footerText' => null,
+])
+@php
+    $appUrl = rtrim((string) config('app.url'), '/');
+    $year = date('Y');
+    $footerLine = $footerText ?? "© {$year} ".config('app.name').'. All rights reserved.';
+@endphp
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $title }}</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 0;
-        }
-        .email-container {
-            background-color: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .email-header {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            color: #ffffff;
-            padding: 24px;
-            text-align: center;
-        }
-        .email-header h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-        }
-        .email-body {
-            padding: 32px 24px;
-        }
-        .email-footer {
-            background-color: #f9fafb;
-            padding: 24px;
-            text-align: center;
-            border-top: 1px solid #e5e7eb;
-            font-size: 12px;
-            color: #6b7280;
-        }
-        .button {
-            display: inline-block;
-            padding: 12px 24px;
-            background-color: #6366f1;
-            color: #ffffff;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 500;
-            margin: 16px 0;
-        }
-        .button:hover {
-            background-color: #4f46e5;
-        }
-    </style>
 </head>
-<body>
-    <div class="email-container">
-        <!-- Header -->
-        <div class="email-header">
-            <h1>{{ $headerText }}</h1>
-        </div>
-
-        <!-- Body -->
-        <div class="email-body">
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f5f7;margin:0;padding:24px 12px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1px solid #e8e8e8;">
+        <tr>
+          <td style="background:linear-gradient(180deg,#0a0a0f 0%,#13131a 100%);padding:0;">
+            <div style="height:3px;background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%);"></div>
+            <div style="padding:24px 28px 20px;">
+              <img src="{{ $appUrl }}/jp-logo.svg" alt="{{ config('app.name') }}" width="132" height="32" style="display:block;height:32px;width:auto;max-width:100%;border:0;" />
+              @if($headerText)
+                <p style="margin:12px 0 0;font-size:13px;color:#cbd5e1;">{{ $headerText }}</p>
+              @endif
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 32px 36px;color:#425466;font-size:15px;line-height:1.6;">
             {{ $slot }}
-        </div>
-
-        <!-- Footer -->
-        <div class="email-footer">
-            <p>{{ $footerText }}</p>
-            <p style="margin-top: 8px;">
-                <a href="{{ config('app.url') }}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
-            </p>
-        </div>
-    </div>
+          </td>
+        </tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;">
+        <tr>
+          <td style="padding:20px 8px 8px;font-size:12px;line-height:1.5;color:#8898aa;text-align:center;">
+            <p style="margin:0 0 8px;">{{ $footerLine }}</p>
+            <p style="margin:0;"><a href="{{ $appUrl }}" style="color:#556cd6;text-decoration:none;">{{ config('app.name') }}</a></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
 </body>
 </html>

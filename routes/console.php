@@ -9,6 +9,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+Artisan::command('email:templates:refresh', function () {
+    $this->call('db:seed', ['--class' => \Database\Seeders\NotificationTemplateSeeder::class]);
+})->purpose('Update notification_templates rows from NotificationTemplateSeeder (transactional HTML / branding)');
+
 // When scheduler runs only on worker (staging/production), set SCHEDULER_ENABLED=false on web to avoid
 // running schedule:run there; worker must have SCHEDULER_ENABLED=true or unset (default true).
 // When false in staging, no scheduled tasks are registered (heartbeat and all jobs are skipped).

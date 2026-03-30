@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\Category;
 use App\Models\CollectionUser;
 use App\Models\User;

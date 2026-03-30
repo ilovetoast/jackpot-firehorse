@@ -85,6 +85,25 @@ Configured in `config/mail.php` as `mail.automations_enabled` (boolean).
 - Email audit log (who/when/template id)
 - Provider webhooks (bounces, complaints)
 
+## Notification templates (database)
+
+Transactional HTML for password reset, invites, billing, etc. lives in `notification_templates` and is seeded by `NotificationTemplateSeeder`. Layouts use:
+
+- **System** — `App\Support\TransactionalEmailHtml::systemShell()` — dark cinematic header strip, `{{app_url}}/jp-logo.svg`, Stripe-like card on `#f4f5f7`, footer outside the card.
+- **Tenant invite** — `tenantShell()` — same aesthetic plus optional `{{tenant_logo_block}}` (divider + default brand logo via `Brand::logoUrlForGuest()`).
+
+After updating the seeder, refresh existing environments:
+
+```bash
+php artisan email:templates:refresh
+```
+
+Equivalent:
+
+```bash
+php artisan db:seed --class=Database\\Seeders\\NotificationTemplateSeeder
+```
+
 ## Examples
 
 **User-initiated (share link):**

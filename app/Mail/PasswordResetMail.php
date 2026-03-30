@@ -40,7 +40,7 @@ class PasswordResetMail extends BaseMailable
                 'user_email' => $this->user->email,
                 'reset_url' => $resetUrl,
                 'app_name' => config('app.name', 'Jackpot'),
-                'app_url' => config('app.url', url('/')),
+                'app_url' => rtrim((string) config('app.url', url('/')), '/'),
             ];
 
             $rendered = $template->render($variables);
@@ -73,7 +73,7 @@ class PasswordResetMail extends BaseMailable
                 'user_email' => $this->user->email,
                 'reset_url' => $resetUrl,
                 'app_name' => config('app.name', 'Jackpot'),
-                'app_url' => config('app.url', url('/')),
+                'app_url' => rtrim((string) config('app.url', url('/')), '/'),
             ];
 
             $rendered = $template->render($variables);

@@ -672,7 +672,18 @@ class DashboardController extends Controller
                 ->with(['brand', 'subject'])
                 ->get();
 
-            $recentActivity = $activityEvents->map(function ($event) use ($tenant) {
+            // One query for all user actors (getActorModel() otherwise runs User::find per row — N+1).
+            $actorUserIds = $activityEvents
+                ->filter(fn (ActivityEvent $e) => $e->actor_type === 'user' && $e->actor_id)
+                ->pluck('actor_id')
+                ->unique()
+                ->values()
+                ->all();
+            $actorsById = $actorUserIds === []
+                ? collect()
+                : User::whereIn('id', $actorUserIds)->get()->keyBy('id');
+
+            $recentActivity = $activityEvents->map(function ($event) use ($tenant, $actorsById) {
                 // Format event type display name
                 $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
 
@@ -683,7 +694,7 @@ class DashboardController extends Controller
                 $actorLastName = null;
                 $actorEmail = null;
                 $companyName = null;
-                $actor = $event->getActorModel();
+                $actor = $event->getActorModel($actorsById);
                 if ($actor) {
                     $actorName = $actor->name;
                     $actorAvatarUrl = $actor->avatar_url ?? null;

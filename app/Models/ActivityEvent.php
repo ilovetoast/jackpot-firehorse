@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Collection;
 
 /**
  * ActivityEvent Model
@@ -183,23 +184,32 @@ class ActivityEvent extends Model
     /**
      * Get actor model safely, handling string types.
      * Use this instead of accessing $event->actor directly to avoid errors.
+     *
+     * Pass optional $actorsById (keyed by user id) from a single {@see User::whereIn} query
+     * when serializing many events (e.g. dashboard) to avoid N+1 {@see User::find} calls.
      */
-    public function getActorModel()
+    public function getActorModel(?Collection $actorsById = null): ?User
     {
         // String types (system, api, guest) don't have models
         if ($this->isStringActorType()) {
             return null;
         }
-        
+
         // Only try to load if it's a 'user' type
         if ($this->actor_type === 'user' && $this->actor_id) {
             try {
+                if ($actorsById !== null) {
+                    $u = $actorsById->get($this->actor_id);
+
+                    return $u instanceof User ? $u : null;
+                }
+
                 return \App\Models\User::find($this->actor_id);
             } catch (\Exception $e) {
                 return null;
             }
         }
-        
+
         return null;
     }
 

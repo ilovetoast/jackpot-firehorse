@@ -3,8 +3,10 @@
 namespace App\Mail;
 
 use App\Mail\Concerns\AppliesTenantMailBranding;
+use App\Models\Brand;
 use App\Models\NotificationTemplate;
 use App\Models\Tenant;
+use App\Support\TransactionalEmailHtml;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use App\Mail\BaseMailable;
@@ -60,12 +62,17 @@ class InviteMember extends BaseMailable
     public function content(): Content
     {
         if ($this->template) {
+            $defaultBrand = Brand::where('tenant_id', $this->tenant->id)
+                ->orderByDesc('is_default')
+                ->first();
+
             $rendered = $this->template->render([
                 'tenant_name' => $this->tenant->name,
                 'inviter_name' => $this->inviter->name,
                 'invite_url' => $this->inviteUrl,
                 'app_name' => config('app.name'),
-                'app_url' => config('app.url'),
+                'app_url' => rtrim((string) config('app.url'), '/'),
+                'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($defaultBrand),
             ]);
 
             // If template uses Blade component syntax, we need to render it
