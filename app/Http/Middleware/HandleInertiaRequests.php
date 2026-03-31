@@ -433,6 +433,8 @@ class HandleInertiaRequests extends Middleware
                     'slug' => $tenant->slug,
                     'is_active' => $tenant->id == $currentTenantId,
                     'is_agency' => (bool) $tenant->is_agency,
+                    /** Agency-provisioned client access — hidden from user-menu company switcher (use agency strip / brand switcher). */
+                    'is_agency_managed' => (bool) ($tenant->pivot->is_agency_managed ?? false),
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
                     'primary_color' => $defaultBrandPrimaryByTenantId[$tenant->id] ?? null,
                 ]) : [],

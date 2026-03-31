@@ -126,6 +126,25 @@ export default function AgencyDashboard({
         })
     }
 
+    /** Human copy for incubation window deadline (advisory). */
+    const incubationDeadlineLine = (client) => {
+        if (!client.incubation_expires_at) {
+            return client.incubation_locked ? 'Support window ended' : null
+        }
+        const d = client.days_remaining
+        const dateStr = formatDate(client.incubation_expires_at)
+        if (client.incubation_locked || (typeof d === 'number' && d < 0)) {
+            return `Window ended ${dateStr}`
+        }
+        if (typeof d === 'number' && d === 0) {
+            return `Last day of window · ${dateStr}`
+        }
+        if (typeof d === 'number' && d > 0) {
+            return `${d} day${d === 1 ? '' : 's'} left · ends ${dateStr}`
+        }
+        return `Ends ${dateStr}`
+    }
+
     const hasExpiringSoon = incubated.some((client) => client.expiring_soon)
 
     useEffect(() => {
@@ -658,12 +677,14 @@ export default function AgencyDashboard({
                                                 Incubated ({incubated.length})
                                             </h4>
                                             <div className="space-y-4">
-                                                {incubated.map((client) => (
+                                                {incubated.map((client) => {
+                                                    const deadlineText = incubationDeadlineLine(client)
+                                                    return (
                                                     <div
                                                         key={client.id}
                                                         className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
                                                     >
-                                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                                        <div className="min-w-0">
                                                             <div className="flex flex-wrap items-center gap-2">
                                                                 <p className="text-sm font-medium text-white">{client.name}</p>
                                                                 <span className="inline-flex items-center rounded-md bg-white/[0.08] px-2 py-0.5 text-xs font-medium text-white/70 ring-1 ring-white/10">
@@ -682,22 +703,25 @@ export default function AgencyDashboard({
                                                                     </span>
                                                                 )}
                                                             </div>
-                                                            <div className="text-right text-xs text-white/40">
-                                                                {client.incubation_expires_at && (
-                                                                    <p>
-                                                                        Deadline: {formatDate(client.incubation_expires_at)}
-                                                                    </p>
-                                                                )}
-                                                                {client.incubation_extension_requested_at && (
-                                                                    <p className="mt-1 text-amber-200/80">
-                                                                        Extension requested{' '}
-                                                                        {formatDate(client.incubation_extension_requested_at)}
-                                                                    </p>
-                                                                )}
-                                                            </div>
+                                                            {(deadlineText || client.incubation_extension_requested_at) && (
+                                                                <div className="mt-2 flex flex-col gap-1.5 text-xs text-white/50">
+                                                                    {deadlineText && (
+                                                                        <p className="inline-flex flex-wrap items-center gap-1.5">
+                                                                            <ClockIcon className="h-3.5 w-3.5 shrink-0 text-white/35" aria-hidden />
+                                                                            <span className="text-white/65">{deadlineText}</span>
+                                                                        </p>
+                                                                    )}
+                                                                    {client.incubation_extension_requested_at && (
+                                                                        <p className="text-amber-200/85">
+                                                                            Extension requested{' '}
+                                                                            {formatDate(client.incubation_extension_requested_at)}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-                                                            <div className="min-w-0 flex-1">
+                                                        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:items-end">
+                                                            <div className="min-w-0">
                                                                 <label
                                                                     className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35"
                                                                     htmlFor={`target-plan-${client.id}`}
@@ -710,7 +734,7 @@ export default function AgencyDashboard({
                                                                     onChange={(e) =>
                                                                         changeTargetPlan(client.id, e.target.value)
                                                                     }
-                                                                    className="w-full max-w-xs rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                                                    className="w-full rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
                                                                 >
                                                                     {incubationPlanOptions.map((opt) => (
                                                                         <option key={opt.key} value={opt.key} className="bg-[#1a1a1f]">
@@ -719,14 +743,14 @@ export default function AgencyDashboard({
                                                                     ))}
                                                                 </select>
                                                             </div>
-                                                            <div className="min-w-0 flex-1">
+                                                            <div className="min-w-0">
                                                                 <label
                                                                     className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35"
                                                                     htmlFor={`ext-note-${client.id}`}
                                                                 >
                                                                     Request deadline extension (support)
                                                                 </label>
-                                                                <div className="flex flex-wrap gap-2">
+                                                                <div className="flex gap-2">
                                                                     <input
                                                                         id={`ext-note-${client.id}`}
                                                                         type="text"
@@ -737,7 +761,7 @@ export default function AgencyDashboard({
                                                                                 [client.id]: e.target.value,
                                                                             }))
                                                                         }
-                                                                        placeholder="Optional note"
+                                                                        placeholder="Optional note for support"
                                                                         className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-sm text-white placeholder:text-white/35"
                                                                     />
                                                                     <button
@@ -751,7 +775,8 @@ export default function AgencyDashboard({
                                                             </div>
                                                         </div>
                                                     </div>
-                                                ))}
+                                                    );
+                                                })}
                                                 <p className={`ml-6 mt-2 ${bodySmall}`}>
                                                     Prepared by your agency — transfer to activate ownership
                                                 </p>

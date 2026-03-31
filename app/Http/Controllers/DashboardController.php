@@ -669,20 +669,22 @@ class DashboardController extends Controller
                     $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
                 });
             }
+            // Do not use MorphTo eager load here: it can issue one assets query per row (N+1) with soft-delete scope.
+            // Batch-load subjects by type instead (one query per type, Assets use withTrashed for audit rows).
             $activityEvents = $activityQuery->orderBy('created_at', 'desc')
                 ->limit(5)
                 ->with(['brand'])
                 ->get();
 
-            // Batch-load polymorphic subjects (with(['subject']) can still hit per-row Asset queries for
-            // soft-deleted subjects or morph edge cases). Audit events may reference trashed assets.
-            $activityEvents->loadMorph('subject', [
-                Asset::class => fn ($q) => $q->withTrashed(),
-                User::class => [],
-                Tenant::class => [],
-                Brand::class => [],
-                Category::class => [],
-            ]);
+            $this->batchLoadActivityEventSubjects($activityEvents);
+
+            // Belt-and-suspenders: if any row's morph type failed to resolve, mark subject as loaded (null) so
+            // map() does not trigger LazyLoadingViolation when accessing $event->subject.
+            $activityEvents->each(function (ActivityEvent $event) {
+                if (! $event->relationLoaded('subject')) {
+                    $event->setRelation('subject', null);
+                }
+            });
 
             // One query for all user actors (getActorModel() otherwise runs User::find per row — N+1).
             $actorUserIds = $activityEvents
@@ -1060,6 +1062,50 @@ class DashboardController extends Controller
             'momentum_data' => $momentumData,
             'ai_insights' => $aiInsights,
         ];
+    }
+
+    /**
+     * Batch-resolve ActivityEvent polymorphic subjects (avoids MorphTo N+1 on /overview).
+     *
+     * @param  \Illuminate\Support\Collection<int, ActivityEvent>|\Illuminate\Database\Eloquent\Collection<int, ActivityEvent>  $events
+     */
+    protected function batchLoadActivityEventSubjects($events): void
+    {
+        if ($events->isEmpty()) {
+            return;
+        }
+
+        foreach ($events->groupBy('subject_type') as $subjectType => $rows) {
+            if ($subjectType === null || $subjectType === '') {
+                foreach ($rows as $event) {
+                    $event->setRelation('subject', null);
+                }
+
+                continue;
+            }
+
+            $ids = $rows->pluck('subject_id')->filter()->unique()->values()->all();
+            if ($ids === []) {
+                foreach ($rows as $event) {
+                    $event->setRelation('subject', null);
+                }
+
+                continue;
+            }
+
+            $models = match ($subjectType) {
+                Asset::class => Asset::withTrashed()->whereIn('id', $ids)->get()->keyBy('id'),
+                User::class => User::whereIn('id', $ids)->get()->keyBy('id'),
+                Tenant::class => Tenant::whereIn('id', $ids)->get()->keyBy('id'),
+                Brand::class => Brand::whereIn('id', $ids)->get()->keyBy('id'),
+                Category::class => Category::whereIn('id', $ids)->get()->keyBy('id'),
+                default => collect(),
+            };
+
+            foreach ($rows as $event) {
+                $event->setRelation('subject', $models->get($event->subject_id));
+            }
+        }
     }
 
     /**

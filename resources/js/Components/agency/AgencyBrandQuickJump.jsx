@@ -2,6 +2,10 @@ import { Link, router } from '@inertiajs/react'
 import { BuildingOffice2Icon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
+function normalizeName(s) {
+    return (s ?? '').trim().toLowerCase()
+}
+
 /**
  * Minimal company → brand list to open a client workspace (Overview).
  * Intentionally light vs Readiness / Clients tabs.
@@ -56,6 +60,41 @@ export default function AgencyBrandQuickJump({ clients = [], brandColor = '#6366
                 <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {list.map((company) => {
                         const brands = Array.isArray(company.brands) ? company.brands : []
+                        const singleBrand = brands.length === 1 ? brands[0] : null
+                        const singleSameName =
+                            singleBrand &&
+                            normalizeName(company.name) === normalizeName(singleBrand.name)
+
+                        if (singleSameName) {
+                            return (
+                                <li
+                                    key={company.id}
+                                    className="rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-4 ring-1 ring-white/[0.06] backdrop-blur-sm"
+                                    style={{ borderLeftWidth: 3, borderLeftColor: brandColor }}
+                                >
+                                    <div className="flex items-start gap-2.5">
+                                        <BuildingOffice2Icon className="mt-0.5 h-4 w-4 shrink-0 text-white/35" aria-hidden />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-[10px] font-medium uppercase tracking-wider text-white/40">
+                                                Client workspace
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => openBrand(company.id, singleBrand.id)}
+                                                className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-0 py-1 text-left text-sm font-semibold text-white transition hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 sm:px-1"
+                                            >
+                                                <span className="min-w-0 truncate">{company.name}</span>
+                                                <ArrowTopRightOnSquareIcon
+                                                    className="h-4 w-4 shrink-0 text-white/35 opacity-70 transition group-hover:opacity-100"
+                                                    aria-hidden
+                                                />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </li>
+                            )
+                        }
+
                         return (
                             <li
                                 key={company.id}
@@ -69,29 +108,31 @@ export default function AgencyBrandQuickJump({ clients = [], brandColor = '#6366
                                             Company
                                         </p>
                                         <p className="truncate text-sm font-semibold text-white">{company.name}</p>
-                                        {brands.length === 0 ? (
-                                            <p className="mt-2 text-xs text-white/35">No brands available for your role.</p>
-                                        ) : (
-                                            <ul className="mt-3 space-y-1 border-t border-white/10 pt-3">
-                                                {brands.map((b) => (
-                                                    <li key={b.id}>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => openBrand(company.id, b.id)}
-                                                            className="group flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-white/85 transition hover:bg-white/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-                                                        >
-                                                            <span className="min-w-0 truncate font-medium">{b.name}</span>
-                                                            <ArrowTopRightOnSquareIcon
-                                                                className="h-4 w-4 shrink-0 text-white/25 opacity-0 transition group-hover:opacity-100"
-                                                                aria-hidden
-                                                            />
-                                                        </button>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
                                     </div>
                                 </div>
+                                {brands.length === 0 ? (
+                                    <p className="mt-3 border-t border-white/10 pt-3 text-xs text-white/35">
+                                        No brands available for your role.
+                                    </p>
+                                ) : (
+                                    <ul className="mt-3 space-y-1 border-t border-white/10 pt-3">
+                                        {brands.map((b) => (
+                                            <li key={b.id}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openBrand(company.id, b.id)}
+                                                    className="group flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-white/85 transition hover:bg-white/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                                                >
+                                                    <span className="min-w-0 truncate font-medium">{b.name}</span>
+                                                    <ArrowTopRightOnSquareIcon
+                                                        className="h-4 w-4 shrink-0 text-white/25 opacity-0 transition group-hover:opacity-100"
+                                                        aria-hidden
+                                                    />
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
                             </li>
                         )
                     })}

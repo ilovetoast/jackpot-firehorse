@@ -105,6 +105,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     }
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
+    /** Direct tenant membership (not agency-provisioned). Agency client workspaces use the agency strip / brand switcher. */
+    const directWorkspaceCompanies = Array.isArray(auth.companies)
+        ? auth.companies.filter((c) => !c.is_agency_managed)
+        : []
+    const hasMultipleDirectCompanyWorkspaces = directWorkspaceCompanies.length > 1
     const managedAgencyClients = Array.isArray(auth.managed_agency_clients) ? auth.managed_agency_clients : []
     const agencyFlatBrands = Array.isArray(auth.agency_flat_brands) ? auth.agency_flat_brands : []
     const managedClientIdSet = new Set(managedAgencyClients.map((c) => c.id))
@@ -164,6 +169,10 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const hasTeamManageAccess = can('team.manage')
     const hasActivityLogsAccess = can('activity_logs.view')
     const hasMultipleCompanies = auth.companies && auth.companies.length > 1
+    const onlyAgencyLinkedExtraWorkspaces =
+        hasMultipleCompanies && directWorkspaceCompanies.length === 0
+    const oneDirectAmongAgencyWorkspaces =
+        hasMultipleCompanies && directWorkspaceCompanies.length === 1
     // Only show Company section if user has at least one company AND has access to at least one menu item
     const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess)
 
@@ -985,7 +994,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                                     <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
                                                         Active workspace
                                                     </p>
-                                                    {hasMultipleCompanies && (
+                                                    {hasMultipleDirectCompanyWorkspaces && (
                                                         <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
                                                             Switch company below.
                                                         </p>
@@ -994,7 +1003,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
 
                                                 {activeCompany && (
                                                     <div className="border-t border-gray-100">
-                                                        {hasMultipleCompanies ? (
+                                                        {hasMultipleDirectCompanyWorkspaces ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
@@ -1028,13 +1037,19 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                                                 </svg>
                                                                 <div className="min-w-0 flex-1">
                                                                     <p className="truncate text-sm font-semibold text-gray-900">{activeCompany.name}</p>
-                                                                    <p className="text-[10px] text-gray-500">Your only workspace right now</p>
+                                                                    <p className="text-[10px] text-gray-500">
+                                                                        {onlyAgencyLinkedExtraWorkspaces
+                                                                            ? 'Client workspaces: use the agency workspace bar above.'
+                                                                            : oneDirectAmongAgencyWorkspaces
+                                                                              ? 'Other client workspaces: use the agency bar above.'
+                                                                              : 'Your only workspace right now'}
+                                                                    </p>
                                                                 </div>
                                                             </div>
                                                         )}
-                                                        {hasMultipleCompanies && companyDropdownOpen && (
+                                                        {hasMultipleDirectCompanyWorkspaces && companyDropdownOpen && (
                                                             <div className="max-h-[280px] overflow-y-auto border-t border-gray-200 bg-white py-1">
-                                                                {auth.companies.map((company) => (
+                                                                {directWorkspaceCompanies.map((company) => (
                                                                     <button
                                                                         key={company.id}
                                                                         type="button"
