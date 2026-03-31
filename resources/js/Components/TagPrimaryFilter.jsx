@@ -256,7 +256,7 @@ export default function TagPrimaryFilter({
                     {loadingSuggestions && suggestions.length === 0 ? (
                         <div className="px-3 py-2 text-sm text-gray-500">Loading tags...</div>
                     ) : suggestions.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">No tags in use yet</div>
+                        <div className="px-3 py-2 text-sm text-gray-500">No tags on assets yet — this list only shows tags already saved on an asset.</div>
                     ) : (
                         suggestions.map((suggestion, index) => (
                         <button

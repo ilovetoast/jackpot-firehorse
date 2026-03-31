@@ -177,33 +177,35 @@ class FeatureGate
     }
 
     /**
-     * Phase M-2: Check if metadata approval is enabled for company and brand.
-     * 
-     * Returns true ONLY if:
-     * - company.settings.enable_metadata_approval === true
-     * - brand.settings.metadata_approval_enabled === true
-     * 
+     * Phase M-2: Whether user-entered metadata edits go through an approval queue.
+     *
+     * Primary switch: Company Settings → “Require metadata approval” (`enable_metadata_approval`).
+     * When that is on, all brands use the workflow unless a brand explicitly opts out.
+     *
+     * Optional per-brand opt-out: `brand.settings.metadata_approval_enabled === false` (must be explicitly false).
+     * Missing key = follow company (workflow on when company enabled).
+     *
      * @param Tenant $company
      * @param Brand $brand
      * @return bool
      */
     public function metadataApprovalEnabled(Tenant $company, Brand $brand): bool
     {
-        // Check company setting
         $companySettings = $company->settings ?? [];
         $companyEnabled = $companySettings['enable_metadata_approval'] ?? false;
-        
-        // Handle both boolean true and truthy values (including string "1")
-        if (!$companyEnabled || ($companyEnabled !== true && $companyEnabled !== '1' && $companyEnabled !== 1)) {
+
+        if (! $companyEnabled || ($companyEnabled !== true && $companyEnabled !== '1' && $companyEnabled !== 1)) {
             return false;
         }
-        
-        // Check brand setting
+
         $brandSettings = $brand->settings ?? [];
-        $brandEnabled = $brandSettings['metadata_approval_enabled'] ?? false;
-        
-        // Handle both boolean true and truthy values (including string "1")
-        // This prevents issues where settings are stored as strings from JSON/forms
-        return $brandEnabled === true || $brandEnabled === '1' || $brandEnabled === 1;
+        if (array_key_exists('metadata_approval_enabled', $brandSettings)) {
+            $be = $brandSettings['metadata_approval_enabled'];
+            if ($be === false || $be === '0' || $be === 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

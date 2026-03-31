@@ -30,6 +30,10 @@ use Illuminate\Support\Facades\Log;
  * - No silent data mutation
  * - No inference of defaults
  *
+ * Tags (`tags` field): canonical values live in `asset_metadata`. Grid search, filters, and autocomplete read
+ * `asset_tags` (denormalized). {@see syncApprovedTagBatchValues} mirrors user tag edits into `asset_tags`;
+ * user-entered tags skip the metadata-approval queue so discovery stays consistent.
+ *
  * @see docs/PHASE_1_5_METADATA_SCHEMA.md
  */
 class MetadataPersistenceService
@@ -145,6 +149,11 @@ class MetadataPersistenceService
                     $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
                 }
 
+                // User tags: always approve immediately so asset_tags + search/drawer stay aligned (governance still applies to other fields).
+                if ($fieldKey === 'tags') {
+                    $requiresApproval = false;
+                }
+
                 // Persist each value (one row per value for multi-value fields)
                 foreach ($normalizedValues as $normalizedValue) {
                     // Insert asset_metadata row
@@ -217,24 +226,56 @@ class MetadataPersistenceService
                 // Tags field: asset grid, drawer, and search read from `asset_tags` (see AssetTagController, AssetSearchService).
                 // Metadata persistence only wrote `asset_metadata`; sync here when values are approved immediately.
                 if ($fieldKey === 'tags' && ! $requiresApproval && $tenant && $normalizedValues !== []) {
-                    $this->syncApprovedMetadataTagsToAssetTags($asset, $normalizedValues, $tenant);
+                    $this->syncApprovedTagBatchValues($asset, $tenant, $normalizedValues);
                 }
             }
         });
     }
 
     /**
+     * Flatten tags field payloads (single tag, array of tags, or nested from JSON) to string list for asset_tags sync.
+     *
+     * @param  mixed  $decoded  Typically json_decode of asset_metadata.value_json for field `tags`
+     * @return list<string>
+     */
+    public static function flattenDecodedTagsForSync(mixed $decoded): array
+    {
+        if ($decoded === null || $decoded === '') {
+            return [];
+        }
+        if (is_string($decoded) || is_numeric($decoded)) {
+            $s = trim((string) $decoded);
+
+            return $s === '' ? [] : [$s];
+        }
+        if (! is_array($decoded)) {
+            return [];
+        }
+        $out = [];
+        foreach ($decoded as $item) {
+            $out = array_merge($out, self::flattenDecodedTagsForSync($item));
+        }
+
+        return $out;
+    }
+
+    /**
      * Public hook for approval flows (e.g. AssetMetadataController::approveMetadata) — same storage as persistMetadata.
      *
-     * @param  list<mixed>  $normalizedTagValues
+     * @param  list<mixed>  $normalizedTagValues  Tag strings, or nested arrays (legacy / malformed batches)
      */
     public function syncApprovedTagBatchValues(Asset $asset, Tenant $tenant, array $normalizedTagValues): void
     {
-        if ($normalizedTagValues === []) {
+        $flat = [];
+        foreach ($normalizedTagValues as $item) {
+            $flat = array_merge($flat, self::flattenDecodedTagsForSync($item));
+        }
+        $flat = array_values(array_unique(array_filter($flat, fn ($s) => $s !== '')));
+        if ($flat === []) {
             return;
         }
 
-        $this->syncApprovedMetadataTagsToAssetTags($asset, $normalizedTagValues, $tenant);
+        $this->syncApprovedMetadataTagsToAssetTags($asset, $flat, $tenant);
     }
 
     /**

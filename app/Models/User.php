@@ -393,7 +393,17 @@ class User extends Authenticatable
         }
 
         if ($this->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            $this->tenants()->updateExistingPivot($tenant->id, ['role' => $role]);
+            $pivotData = ['role' => $role];
+            $existing = DB::table('tenant_user')
+                ->where('user_id', $this->id)
+                ->where('tenant_id', $tenant->id)
+                ->first();
+            if ($existing !== null) {
+                // Preserve agency-provisioning flags when changing role (e.g. incubator → owner on client tenant).
+                $pivotData['is_agency_managed'] = $existing->is_agency_managed;
+                $pivotData['agency_tenant_id'] = $existing->agency_tenant_id;
+            }
+            $this->tenants()->updateExistingPivot($tenant->id, $pivotData);
         } else {
             $this->tenants()->attach($tenant->id, ['role' => $role]);
         }

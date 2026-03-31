@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\Category;
+use App\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -23,7 +24,9 @@ class BulkMetadataService
 {
     public function __construct(
         protected MetadataSchemaResolver $metadataSchemaResolver,
-        protected MetadataPermissionResolver $permissionResolver
+        protected MetadataPermissionResolver $permissionResolver,
+        protected MetadataApprovalResolver $approvalResolver,
+        protected MetadataPersistenceService $metadataPersistenceService,
     ) {
     }
 
@@ -438,15 +441,17 @@ class BulkMetadataService
             // Normalize value
             $normalizedValues = $this->normalizeValue($fieldDef, $newValue);
 
+            $tenant = Tenant::find($asset->tenant_id);
+            $brand = \App\Models\Brand::find($asset->brand_id);
+            $user = $userId ? \App\Models\User::find($userId) : null;
+            $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
+
+            if ($fieldKey === 'tags') {
+                $requiresApproval = false;
+            }
+
             // Persist each value
             foreach ($normalizedValues as $value) {
-                // Check if approval is required (unless user has bypass_approval permission)
-                // Phase M-2: Pass brand for company + brand level gating
-                $tenant = \App\Models\Tenant::find($asset->tenant_id);
-                $brand = \App\Models\Brand::find($asset->brand_id);
-                $user = $userId ? \App\Models\User::find($userId) : null;
-                $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
-
                 // Create new asset_metadata row
                 // Phase B7: Bulk user edits have confidence = 1.0 and producer = 'user'
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
@@ -471,6 +476,11 @@ class BulkMetadataService
                     'changed_by' => $userId,
                     'created_at' => now(),
                 ]);
+            }
+
+            // Tags: grid, drawer, filters, and autocomplete read from `asset_tags`; mirror when approved immediately.
+            if ($fieldKey === 'tags' && ! $requiresApproval && $tenant && $normalizedValues !== []) {
+                $this->metadataPersistenceService->syncApprovedTagBatchValues($asset, $tenant, $normalizedValues);
             }
         }
     }

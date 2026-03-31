@@ -191,10 +191,10 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const companyAndBrandSameName =
         Boolean(companyNm && brandNm && workspaceNameKey(companyNm) === workspaceNameKey(brandNm))
     const companySettingsLabel = companyAndBrandSameName
-        ? 'Company settings'
+        ? 'Company overview'
         : companyNm
-          ? `${companyNm} settings`
-          : 'Company settings'
+          ? `${companyNm} overview`
+          : 'Company overview'
     const brandSettingsLabel = companyAndBrandSameName
         ? 'Brand settings'
         : brandNm

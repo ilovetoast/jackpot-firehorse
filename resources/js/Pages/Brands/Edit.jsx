@@ -1437,7 +1437,13 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             // Preserve any other settings that might exist first
             ...(brand.settings || {}),
             // Then explicitly set boolean values (convert string '0'/'1' to boolean)
-            metadata_approval_enabled: brand.settings?.metadata_approval_enabled === true || brand.settings?.metadata_approval_enabled === '1' || brand.settings?.metadata_approval_enabled === 1, // Phase M-2
+            // Missing key = follow company workflow when company enables approval; only explicit false opts out.
+            metadata_approval_enabled: (() => {
+                const v = brand.settings?.metadata_approval_enabled
+                if (v === false || v === '0' || v === 0) return false
+                if (v === true || v === '1' || v === 1) return true
+                return true
+            })(),
             contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
             asset_grid_style: brand.settings?.asset_grid_style || 'clean', // clean | impact
             nav_display_mode: brand.settings?.nav_display_mode || 'logo', // logo | text
@@ -3358,10 +3364,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex-1">
                                                         <label htmlFor="metadata_approval_enabled" className="block text-sm font-medium leading-6 text-gray-900">
-                                                            Enable metadata approval for this brand
+                                                            Use company metadata approval for this brand
                                                         </label>
                                                         <p className="mt-1 text-sm text-gray-500">
-                                                            Metadata approval is available for this plan and can be enabled per brand. When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                                                            When company approval is on, this brand participates by default. Turn off to opt this brand out (edits apply immediately). User tags still sync to search when company approval is on.
                                                         </p>
                                                     </div>
                                                     <div className="ml-4">

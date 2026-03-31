@@ -25,11 +25,11 @@ final class DashboardLinks
         $same = $c !== '' && $b !== '' && strcasecmp($c, $b) === 0;
 
         if ($same) {
-            return ['company' => 'Company settings', 'brand' => 'Brand settings'];
+            return ['company' => 'Company overview', 'brand' => 'Brand settings'];
         }
 
         return [
-            'company' => $c !== '' ? $c.' settings' : 'Company settings',
+            'company' => $c !== '' ? $c.' overview' : 'Company overview',
             'brand' => $b !== '' ? $b.' settings' : 'Brand settings',
         ];
     }

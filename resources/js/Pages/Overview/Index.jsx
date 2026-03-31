@@ -21,6 +21,9 @@ function formatStorage(mb) {
 /** Dedupe concurrent /overview/insights fetches (e.g. React Strict Mode double-mount). */
 const brandOverviewInsightsInflight = new Map()
 
+/** Dedupe concurrent /overview/assets fetches (collage + top lists; deferred after first paint). */
+const brandOverviewAssetsInflight = new Map()
+
 export default function Overview({
     auth,
     tenant,
@@ -40,6 +43,7 @@ export default function Overview({
     momentum_data = {},
     ai_insights = [],
     insights_deferred = false,
+    overview_assets_deferred = false,
     dashboard_links = {},
 }) {
     const page = usePage()
@@ -65,12 +69,16 @@ export default function Overview({
     }
     const hasDashboardLinks = Boolean(dashLinks.company)
 
+    const mergedCollage = deferredAssetPayload?.collage_assets ?? collage_assets
+    const mergedMostViewed = deferredAssetPayload?.most_viewed_assets ?? most_viewed_assets
+    const mergedTrending = deferredAssetPayload?.most_trending_assets ?? most_trending_assets
+
     // Prefer dedicated collage assets (sorted by quality), fall back to most viewed
-    const collageAssets = collage_assets?.length
-        ? collage_assets
-        : most_viewed_assets?.length
-            ? most_viewed_assets
-            : most_trending_assets || []
+    const collageAssets = mergedCollage?.length
+        ? mergedCollage
+        : mergedMostViewed?.length
+            ? mergedMostViewed
+            : mergedTrending || []
 
     const totalAssets = stats?.total_assets?.value ?? 0
     const storageMB = stats?.storage_mb?.value ?? 0
@@ -83,6 +91,7 @@ export default function Overview({
     const [momentumDataState, setMomentumDataState] = useState(momentum_data)
     const [aiInsightsState, setAiInsightsState] = useState(ai_insights)
     const [insightsLoading, setInsightsLoading] = useState(Boolean(insights_deferred))
+    const [deferredAssetPayload, setDeferredAssetPayload] = useState(null)
 
     useEffect(() => {
         setBrandSignalsState(brand_signals)
@@ -136,6 +145,45 @@ export default function Overview({
             cancelled = true
         }
     }, [insights_deferred, brand?.id])
+
+    useEffect(() => {
+        if (!overview_assets_deferred) {
+            return
+        }
+        const brandId = brand?.id
+        if (brandId === undefined || brandId === null) {
+            return
+        }
+        let cancelled = false
+
+        let inflight = brandOverviewAssetsInflight.get(brandId)
+        if (!inflight) {
+            inflight = fetch('/app/overview/assets', {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            })
+                .then((r) => (r.ok ? r.json() : null))
+                .finally(() => {
+                    brandOverviewAssetsInflight.delete(brandId)
+                })
+            brandOverviewAssetsInflight.set(brandId, inflight)
+        }
+
+        inflight
+            .then((data) => {
+                if (cancelled || !data) return
+                setDeferredAssetPayload(data)
+            })
+            .catch(() => {
+                /* keep empty; overview still usable */
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [overview_assets_deferred, brand?.id])
 
     // Everyone sees assets + executions
     // Managers/admins see the full set

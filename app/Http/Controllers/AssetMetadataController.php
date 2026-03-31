@@ -2349,6 +2349,10 @@ class AssetMetadataController extends Controller
         // Phase M-2: Pass brand for company + brand level gating
         $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
+        if ($fieldKey === 'tags') {
+            $requiresApproval = false;
+        }
+
         // Phase B5: Determine source based on override intent for hybrid fields
         $isHybrid = $populationMode === 'hybrid';
         $hasOverrideIntent = $validated['override_intent'] ?? false;
@@ -2389,6 +2393,10 @@ class AssetMetadataController extends Controller
         // Sync sort-relevant fields to assets.metadata so grid sort sees them (display uses asset_metadata)
         if (! $requiresApproval && in_array($fieldKey, ['starred', 'quality_rating'], true) && ! empty($normalizedValues)) {
             $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
+        }
+
+        if ($fieldKey === 'tags' && ! $requiresApproval && ! empty($normalizedValues)) {
+            app(\App\Services\MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $normalizedValues);
         }
 
         Log::info('[AssetMetadataController] Metadata edited', [
@@ -3151,7 +3159,8 @@ class AssetMetadataController extends Controller
         // Tags: grid/drawer/search use asset_tags; pending rows only had asset_metadata until approval.
         if ($fieldKey === 'tags') {
             $decoded = json_decode($metadata->value_json, true);
-            app(MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, [$decoded]);
+            $flat = MetadataPersistenceService::flattenDecodedTagsForSync($decoded);
+            app(MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $flat);
         }
 
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
@@ -3861,6 +3870,12 @@ class AssetMetadataController extends Controller
         // When applying AI suggestion, it becomes a user edit, so source is 'user'
         $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
+        // Non-AI tag suggestions: apply immediately so asset_tags + search stay in sync (AI tag suggestions still queue).
+        $suggestionSource = $suggestion['source'] ?? 'ai';
+        if ($fieldKey === 'tags' && $suggestionSource !== 'ai') {
+            $requiresApproval = false;
+        }
+
         // Write to asset_metadata
         DB::transaction(function () use ($asset, $field, $suggestion, $user, $requiresApproval) {
             // Get old value for history
@@ -3910,6 +3925,13 @@ class AssetMetadataController extends Controller
                 'created_at' => now(),
             ]);
         });
+
+        if ($fieldKey === 'tags' && ! $requiresApproval) {
+            $flat = \App\Services\MetadataPersistenceService::flattenDecodedTagsForSync($suggestion['value'] ?? null);
+            if ($flat !== []) {
+                app(\App\Services\MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $flat);
+            }
+        }
 
         // Remove suggestion from asset.metadata['_ai_suggestions']
         $allSuggestions = $suggestions;

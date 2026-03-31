@@ -18,10 +18,10 @@ use App\Services\PlanService;
  * Rules:
  * - Deterministic and side-effect free
  * - Never mutates data
- * - Plan-gated (Pro plans or feature flag)
+ * - User edits: gated by {@see FeatureGate::metadataApprovalEnabled()} (company setting; optional per-brand opt-out)
  * - Permission-based (checks metadata.bypass_approval permission)
  * - Computed/system metadata NEVER requires approval
- * - Phase M-2: Company + brand settings must both be enabled
+ * - AI proposals always require review (source = ai)
  */
 class MetadataApprovalResolver
 {
@@ -85,28 +85,21 @@ class MetadataApprovalResolver
             return true;
         }
 
-        // Phase M-2: For user edits, check company + brand settings
+        // Phase M-2: For user edits, use company (and optional brand opt-out) via FeatureGate
         if ($source === 'user') {
-            // If brand is provided, use Phase M-2 gating
-            if ($brand) {
-                // Check if metadata approval is enabled for company + brand
-                if (!$this->featureGate->metadataApprovalEnabled($tenant, $brand)) {
-                    // Feature disabled - edits apply immediately (respecting permissions)
-                    return false;
-                }
-            } else {
-                // Fallback to old behavior if brand not provided (backward compatibility)
-                if (!$this->isApprovalEnabled($tenant)) {
-                    return false;
-                }
+            // Never infer approval from plan when brand is missing (avoids Pro tenants getting pending metadata unexpectedly).
+            if (! $brand) {
+                return false;
             }
 
-            // If user has bypass_approval permission, no approval required
+            if (! $this->featureGate->metadataApprovalEnabled($tenant, $brand)) {
+                return false;
+            }
+
             if ($user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval')) {
                 return false;
             }
 
-            // User edits require approval when feature is enabled
             return true;
         }
 

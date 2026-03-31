@@ -1195,16 +1195,15 @@ class CompanyController extends Controller
         // Owner, or incubating agency steward (pre-transfer), via CompanyPolicy + PermissionMap
         $this->authorize('delete', $tenant);
 
-        // Prevent deletion if there are other non-agency members (incubated clients may keep agency team on the tenant)
+        // Prevent deletion if there are other non-agency members (incubated clients may keep agency team on the tenant).
+        // Agency staff rows: is_agency_managed = 1 and agency_tenant_id = incubating agency — do not count as blockers.
         $otherUsersQuery = $tenant->users()->where('users.id', '!=', $user->id);
         if ($tenant->incubated_by_agency_id) {
             $incubatingId = (int) $tenant->incubated_by_agency_id;
-            $otherUsersQuery->where(function ($q) use ($incubatingId) {
-                $q->whereNull('tenant_user.is_agency_managed')
-                    ->orWhere('tenant_user.is_agency_managed', false)
-                    ->orWhere('tenant_user.agency_tenant_id', '!=', $incubatingId)
-                    ->orWhereNull('tenant_user.agency_tenant_id');
-            });
+            $otherUsersQuery->whereRaw(
+                'NOT (COALESCE(tenant_user.is_agency_managed, 0) = 1 AND tenant_user.agency_tenant_id = ?)',
+                [$incubatingId]
+            );
         }
         $otherUsersCount = $otherUsersQuery->count();
         if ($otherUsersCount > 0) {

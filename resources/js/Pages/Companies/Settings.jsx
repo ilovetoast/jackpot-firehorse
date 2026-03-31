@@ -669,7 +669,7 @@ export default function CompanySettings({
                                                     Enable metadata approval workflows
                                                 </label>
                                                 <p className="mt-1 text-sm text-gray-500">
-                                                    When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                                                    When enabled, most metadata edits from contributors and viewers require approval. User-entered tags still apply immediately so search and filters stay in sync. You can opt out individual brands in each brand’s settings.
                                                 </p>
                                             </div>
                                             <div className="ml-4">
