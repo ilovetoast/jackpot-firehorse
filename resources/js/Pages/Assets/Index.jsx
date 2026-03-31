@@ -523,19 +523,51 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     const mobileCategoryTabs = useMemo(() => {
         const tabs = []
         if (show_all_button) {
-            tabs.push({ key: 'all', label: 'All', count: total_asset_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false })
+            tabs.push({
+                key: 'all',
+                label: 'All',
+                count: total_asset_count > 0 ? total_asset_count : null,
+                category: null,
+                categoryId: null,
+                isTrash: false,
+                isReferenceMaterials: false,
+            })
         }
         visibleMobileCategories.forEach((cat) => {
-            tabs.push({ key: String(cat.id), label: cat.name, count: typeof cat.asset_count === 'number' ? cat.asset_count : null, category: cat, categoryId: cat.id, isTrash: false, isReferenceMaterials: false })
+            tabs.push({
+                key: String(cat.id),
+                label: cat.name,
+                count: typeof cat.asset_count === 'number' && cat.asset_count > 0 ? cat.asset_count : null,
+                category: cat,
+                categoryId: cat.id,
+                isTrash: false,
+                isReferenceMaterials: false,
+            })
         })
         // Always show References tab so users can open builder reference materials (type=REFERENCE)
-        tabs.push({ key: 'reference_materials', label: 'References', count: reference_materials_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: true })
+        tabs.push({
+            key: 'reference_materials',
+            label: 'References',
+            count: reference_materials_count > 0 ? reference_materials_count : null,
+            category: null,
+            categoryId: null,
+            isTrash: false,
+            isReferenceMaterials: true,
+        })
         // Staged: assets without category, shown when count > 0
         if (staged_count > 0) {
             tabs.push({ key: 'staged', label: 'Staged', count: staged_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false, isStaged: true })
         }
         if (can_view_trash && (trash_count > 0 || lifecycle === 'deleted')) {
-            tabs.push({ key: 'trash', label: 'Trash', count: trash_count, category: null, categoryId: null, isTrash: true, isReferenceMaterials: false })
+            tabs.push({
+                key: 'trash',
+                label: 'Trash',
+                count: trash_count > 0 ? trash_count : null,
+                category: null,
+                categoryId: null,
+                isTrash: true,
+                isReferenceMaterials: false,
+            })
         }
         return tabs
     }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle, reference_materials_count, source, staged_count])
@@ -868,7 +900,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                             >
                                                 <TagIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId == null ? activeTextColor : textColor }} />
                                                 <span className="flex-1">All</span>
-                                                <span className="text-xs opacity-80">{total_asset_count}</span>
+                                                {total_asset_count > 0 && (
+                                                    <span className="text-xs opacity-80">{total_asset_count}</span>
+                                                )}
                                             </button>
                                         )}
                                         {filterActiveCategories(categories).map((category) => {
@@ -882,7 +916,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                                 >
                                                     <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-80" style={{ color: isSelected ? activeTextColor : textColor }} />
                                                     <span className="flex-1">{category.name}</span>
-                                                    {typeof category.asset_count === 'number' && <span className="text-xs opacity-80">{category.asset_count}</span>}
+                                                    {typeof category.asset_count === 'number' && category.asset_count > 0 && (
+                                                        <span className="text-xs opacity-80">{category.asset_count}</span>
+                                                    )}
                                                 </button>
                                             )
                                         })}

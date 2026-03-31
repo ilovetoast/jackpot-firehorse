@@ -111,6 +111,8 @@ class AiMetadataGenerationServiceTest extends TestCase
         $results = $this->service->generateMetadata($asset);
 
         $this->assertEquals(0, $results['candidates_created']);
+        $this->assertEquals(0, $results['tags_created']);
+        $this->assertFalse($results['tag_inference_attempted']);
         $this->assertEquals(0.0, $results['cost']);
         $this->assertEmpty($results['fields_processed']);
     }
@@ -149,6 +151,7 @@ class AiMetadataGenerationServiceTest extends TestCase
 
         $this->assertEquals(0, $results['candidates_created']);
         $this->assertGreaterThanOrEqual(1, $results['tags_created']);
+        $this->assertTrue($results['tag_inference_attempted']);
         $this->assertEmpty($results['fields_processed']);
 
         $row = DB::table('asset_tag_candidates')
@@ -157,6 +160,54 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->first();
         $this->assertNotNull($row);
         $this->assertEquals('vibrant', $row->tag);
+    }
+
+    /**
+     * Upload-time _skip_ai_tagging must not persist tag candidates; structured field candidates still run.
+     */
+    public function test_skip_ai_tagging_upload_suppresses_tag_candidates_when_structured_fields_run(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'photo_type' => [
+                        'value' => 'landscape',
+                        'confidence' => 0.95,
+                    ],
+                    'tags' => [
+                        ['value' => 'should-not-persist', 'confidence' => 0.99],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $meta = $asset->metadata ?? [];
+        $meta['_skip_ai_tagging'] = true;
+        $asset->update(['metadata' => $meta]);
+
+        $field = $this->createAiEligibleField('photo_type', $asset->tenant_id);
+        $this->createFieldOption($field->id, 'landscape');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset->fresh());
+
+        $this->assertEquals(1, $results['candidates_created']);
+        $this->assertEquals(0, $results['tags_created']);
+        $this->assertFalse($results['tag_inference_attempted']);
+
+        $this->assertEquals(0, DB::table('asset_tag_candidates')->where('asset_id', $asset->id)->count());
     }
 
     /**
@@ -169,6 +220,8 @@ class AiMetadataGenerationServiceTest extends TestCase
         $results = $this->service->generateMetadata($asset);
 
         $this->assertEquals(0, $results['candidates_created']);
+        $this->assertEquals(0, $results['tags_created']);
+        $this->assertFalse($results['tag_inference_attempted']);
     }
 
     /**

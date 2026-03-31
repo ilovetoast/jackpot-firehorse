@@ -2,17 +2,17 @@
 
 namespace App\Jobs;
 
-use App\Exceptions\PlanLimitExceededException;
-use App\Exceptions\AIQuotaExceededException;
-use App\Models\Asset;
-use App\Support\AiErrorSanitizer;
-use App\Models\Tenant;
-use App\Models\AIAgentRun;
 use App\Enums\AITaskType;
+use App\Enums\EventType;
+use App\Exceptions\AIQuotaExceededException;
+use App\Exceptions\PlanLimitExceededException;
+use App\Models\AIAgentRun;
+use App\Models\Asset;
+use App\Models\Tenant;
+use App\Services\ActivityRecorder;
 use App\Services\AiMetadataGenerationService;
 use App\Services\AiUsageService;
-use App\Services\ActivityRecorder;
-use App\Enums\EventType;
+use App\Support\AiErrorSanitizer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -46,10 +46,10 @@ class AiMetadataGenerationJob implements ShouldQueue
      * The number of seconds to wait before retrying the job.
      */
     public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
-    
+
     /**
      * Determine if the job should be retried when it fails.
-     * 
+     *
      * Quota errors should not be retried - they won't succeed until quota is resolved.
      */
     public function shouldRetry(\Throwable $exception): bool
@@ -58,12 +58,12 @@ class AiMetadataGenerationJob implements ShouldQueue
         if ($exception instanceof AIQuotaExceededException) {
             return false;
         }
-        
+
         // Don't retry plan limit errors - they require plan upgrade
         if ($exception instanceof PlanLimitExceededException) {
             return false;
         }
-        
+
         // Retry other errors (network issues, temporary API problems, etc.)
         return true;
     }
@@ -98,26 +98,28 @@ class AiMetadataGenerationJob implements ShouldQueue
         $metadata = $asset->metadata ?? [];
         $alreadyGenerated = isset($metadata['_ai_metadata_generated_at']);
 
-        if ($alreadyGenerated && !$this->isManualRerun) {
+        if ($alreadyGenerated && ! $this->isManualRerun) {
             Log::info('[AiMetadataGenerationJob] AI Metadata Generation skipped - already generated', [
                 'asset_id' => $asset->id,
                 'generated_at' => $metadata['_ai_metadata_generated_at'],
             ]);
             // Ensure status is set even if already generated
-            if (!isset($metadata['_ai_metadata_status'])) {
+            if (! isset($metadata['_ai_metadata_status'])) {
                 $metadata['_ai_metadata_status'] = 'completed';
                 $asset->update(['metadata' => $metadata]);
             }
+
             return;
         }
 
         // 2. Check plan limits (hard stop)
         $tenant = Tenant::find($asset->tenant_id);
-        if (!$tenant) {
+        if (! $tenant) {
             Log::warning('[AiMetadataGenerationJob] Tenant not found', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $asset->tenant_id,
             ]);
+
             return;
         }
 
@@ -130,21 +132,24 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'tenant_id' => $tenant->id,
             ]);
             $this->markAsSkipped($asset, 'plan_limit_exceeded');
+
             return;
         }
 
         // 3. Verify prerequisites - wait for thumbnail path (used internally by service via S3/IAM)
-        if (!$this->waitForThumbnail($asset)) {
+        if (! $this->waitForThumbnail($asset)) {
             // waitForThumbnail already logged the failure
             $this->markAsSkipped($asset, 'thumbnail_unavailable');
+
             return;
         }
 
-        if (!isset($asset->metadata['category_id'])) {
+        if (! isset($asset->metadata['category_id'])) {
             Log::info('[AiMetadataGenerationJob] AI Metadata Generation skipped - no category', [
                 'asset_id' => $asset->id,
             ]);
             $this->markAsSkipped($asset, 'no_category');
+
             return;
         }
 
@@ -181,6 +186,16 @@ class AiMetadataGenerationJob implements ShouldQueue
             // Clear any previous skip/failed states
             unset($metadata['_ai_metadata_skipped'], $metadata['_ai_metadata_skip_reason'], $metadata['_ai_metadata_skipped_at']);
             unset($metadata['_ai_metadata_failed'], $metadata['_ai_metadata_error'], $metadata['_ai_metadata_failed_at']);
+
+            // Observability: tag candidate rows created (0 = ran but model returned none, when tag inference was attempted)
+            $tagsCreated = (int) ($results['tags_created'] ?? 0);
+            $metadata['ai_tag_candidates_created'] = $tagsCreated;
+            if (($results['tag_inference_attempted'] ?? false) === true) {
+                $metadata['ai_tagging_zero_recommendations'] = $tagsCreated === 0;
+            } else {
+                unset($metadata['ai_tagging_zero_recommendations']);
+            }
+
             $asset->update(['metadata' => $metadata]);
 
             // 7. Update AI agent run with success
@@ -190,6 +205,8 @@ class AiMetadataGenerationJob implements ShouldQueue
                 $results['cost'] ?? 0.0,
                 array_merge($agentRun->metadata ?? [], [
                     'candidates_created' => $results['candidates_created'],
+                    'tags_created' => $results['tags_created'] ?? 0,
+                    'tag_inference_attempted' => $results['tag_inference_attempted'] ?? false,
                     'fields_processed' => $results['fields_processed'],
                 ])
             );
@@ -230,6 +247,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 $agentRun->markAsFailed($e->getMessage());
             }
             $this->markAsSkipped($asset, 'plan_limit_exceeded');
+
             return;
         } catch (AIQuotaExceededException $e) {
             // Quota exceeded - don't retry, mark as skipped with specific reason
@@ -245,7 +263,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'note' => 'OpenAI API quota exceeded - check API billing and quota limits. Job will not retry.',
             ]);
             $this->markAsSkipped($asset, 'api_quota_exceeded');
-            
+
             // Log failure event for timeline display
             ActivityRecorder::logAsset($asset, EventType::ASSET_AI_METADATA_FAILED, [
                 'error' => $e->getMessage(),
@@ -253,10 +271,11 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'agent_run_id' => $agentRun->id ?? null,
                 'agent_id' => 'metadata_generator',
             ]);
-            
+
             // Don't retry quota errors - they won't succeed until quota is resolved
             // Mark job as failed to prevent retries
             $this->fail($e);
+
             return;
         } catch (\Throwable $e) {
             // AI failures must not affect upload success
@@ -282,7 +301,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'agent_run_id' => $agentRun->id ?? null,
                 'agent_id' => 'metadata_generator',
             ]);
-            
+
             // Don't throw - allow job to complete
         }
     }
@@ -292,9 +311,7 @@ class AiMetadataGenerationJob implements ShouldQueue
      *
      * Sets explicit status for debugging: _ai_metadata_status = "skipped:{reason}"
      *
-     * @param Asset $asset
-     * @param string $reason Skip reason (e.g., 'thumbnail_unavailable', 'no_category', 'plan_limit_exceeded')
-     * @return void
+     * @param  string  $reason  Skip reason (e.g., 'thumbnail_unavailable', 'no_category', 'plan_limit_exceeded')
      */
     protected function markAsSkipped(Asset $asset, string $reason): void
     {
@@ -310,10 +327,6 @@ class AiMetadataGenerationJob implements ShouldQueue
      * Mark asset as failed.
      *
      * Sets explicit status for debugging: _ai_metadata_status = "failed"
-     *
-     * @param Asset $asset
-     * @param string $error
-     * @return void
      */
     protected function markAsFailed(Asset $asset, string $error): void
     {
@@ -336,7 +349,6 @@ class AiMetadataGenerationJob implements ShouldQueue
      * - Retry with exponential backoff (2s, 4s, 8s, 16s)
      * - Maximum wait time: 30 seconds
      *
-     * @param Asset $asset
      * @return bool True if thumbnail path is available, false if timeout
      */
     protected function waitForThumbnail(Asset $asset): bool
@@ -361,6 +373,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                     'attempt' => $attempt + 1,
                     'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
                 ]);
+
                 return true;
             }
 
@@ -371,7 +384,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 \App\Enums\ThumbnailStatus::PROCESSING,
             ], true);
 
-            if (!$isProcessing && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+            if (! $isProcessing && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
                 // Thumbnail generation failed or was skipped - no point waiting
                 Log::warning('[AiMetadataGenerationJob] Thumbnail not processing, skipping wait', [
                     'asset_id' => $asset->id,
@@ -384,7 +397,7 @@ class AiMetadataGenerationJob implements ShouldQueue
             if ($attempt < $maxRetries - 1) {
                 $delay = $retryDelays[$attempt] ?? 16;
                 if ($delay > 0) {
-                    Log::debug('[AiMetadataGenerationJob] Waiting for thumbnail, retry in ' . $delay . 's', [
+                    Log::debug('[AiMetadataGenerationJob] Waiting for thumbnail, retry in '.$delay.'s', [
                         'asset_id' => $asset->id,
                         'attempt' => $attempt + 1,
                         'delay_seconds' => $delay,
@@ -418,6 +431,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 if (str_starts_with($path, 'temp/uploads/') && $asset->thumbnail_status !== \App\Enums\ThumbnailStatus::COMPLETED) {
                     return null;
                 }
+
                 return $path;
             }
         }

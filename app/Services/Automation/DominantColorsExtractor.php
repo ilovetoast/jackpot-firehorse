@@ -37,20 +37,28 @@ class DominantColorsExtractor
     protected const MAX_COLORS = 3;
 
     /**
+     * Hue cluster keys that usually correspond to studio backgrounds / paper.
+     * When assigning dominant_hue_group for filtering, prefer the first dominant color whose
+     * cluster is not in this set so subject colors (e.g. blue clothing) are not masked by gray/white.
+     */
+    protected const ACHROMATIC_DOMINANT_HUE_SKIP_KEYS = [
+        'white',
+        'gray',
+        'neutral',
+    ];
+
+    /**
      * Extract and persist dominant colors for an asset.
-     *
-     * @param Asset $asset
-     * @return void
      */
     public function extractAndPersist(Asset $asset): void
     {
-        if (!$asset->visualMetadataReady()) {
+        if (! $asset->visualMetadataReady()) {
             return;
         }
 
         // Extract dominant colors from cluster data
         $dominantColors = $this->extractDominantColors($asset);
-        
+
         if ($dominantColors === null) {
             // No cluster data available or extraction failed
             return;
@@ -66,38 +74,40 @@ class DominantColorsExtractor
     /**
      * Extract dominant colors from color analysis cluster data.
      *
-     * @param Asset $asset
      * @return array|null Array of color objects or null if extraction fails
      */
     protected function extractDominantColors(Asset $asset): ?array
     {
         $metadata = $asset->metadata ?? [];
-        
+
         // Check if color analysis data exists
-        if (!isset($metadata['_color_analysis']['clusters']) || !is_array($metadata['_color_analysis']['clusters'])) {
+        if (! isset($metadata['_color_analysis']['clusters']) || ! is_array($metadata['_color_analysis']['clusters'])) {
             Log::debug('[DominantColorsExtractor] No color analysis cluster data found', [
                 'asset_id' => $asset->id,
             ]);
+
             return null;
         }
 
         $clusters = $metadata['_color_analysis']['clusters'];
-        
+
         if (empty($clusters)) {
             Log::debug('[DominantColorsExtractor] Empty cluster data', [
                 'asset_id' => $asset->id,
             ]);
+
             return null;
         }
 
         // Filter clusters by coverage threshold and take top 3
         $dominantClusters = $this->filterAndSelectTopClusters($clusters);
-        
+
         if (empty($dominantClusters)) {
             Log::debug('[DominantColorsExtractor] No clusters meet coverage threshold', [
                 'asset_id' => $asset->id,
                 'threshold' => self::COVERAGE_THRESHOLD,
             ]);
+
             return null;
         }
 
@@ -116,7 +126,7 @@ class DominantColorsExtractor
     /**
      * Filter clusters by coverage threshold and select top N by coverage.
      *
-     * @param array $clusters Array of cluster data
+     * @param  array  $clusters  Array of cluster data
      * @return array Filtered and sorted clusters
      */
     protected function filterAndSelectTopClusters(array $clusters): array
@@ -124,6 +134,7 @@ class DominantColorsExtractor
         // Filter by coverage threshold
         $filtered = array_filter($clusters, function ($cluster) {
             $coverage = $cluster['coverage'] ?? 0.0;
+
             return is_numeric($coverage) && $coverage >= self::COVERAGE_THRESHOLD;
         });
 
@@ -131,6 +142,7 @@ class DominantColorsExtractor
         usort($filtered, function ($a, $b) {
             $coverageA = $a['coverage'] ?? 0.0;
             $coverageB = $b['coverage'] ?? 0.0;
+
             return $coverageB <=> $coverageA;
         });
 
@@ -141,25 +153,27 @@ class DominantColorsExtractor
     /**
      * Convert a cluster to a color object with hex and RGB.
      *
-     * @param array $cluster Cluster data with 'rgb' and 'coverage' keys
+     * @param  array  $cluster  Cluster data with 'rgb' and 'coverage' keys
      * @return array|null Color object or null if conversion fails
      */
     protected function clusterToColorObject(array $cluster): ?array
     {
-        if (!isset($cluster['rgb']) || !is_array($cluster['rgb'])) {
+        if (! isset($cluster['rgb']) || ! is_array($cluster['rgb'])) {
             Log::warning('[DominantColorsExtractor] Cluster missing RGB data', [
                 'cluster_keys' => array_keys($cluster),
             ]);
+
             return null;
         }
 
         $rgb = $cluster['rgb'];
-        
+
         // Validate and normalize RGB values
         if (count($rgb) < 3) {
             Log::warning('[DominantColorsExtractor] Invalid RGB array length', [
                 'rgb_count' => count($rgb),
             ]);
+
             return null;
         }
 
@@ -173,7 +187,7 @@ class DominantColorsExtractor
 
         // Get coverage (preserve as float)
         $coverage = $cluster['coverage'] ?? 0.0;
-        if (!is_numeric($coverage)) {
+        if (! is_numeric($coverage)) {
             $coverage = 0.0;
         }
 
@@ -187,21 +201,21 @@ class DominantColorsExtractor
     /**
      * Clamp color value to 0-255 range.
      *
-     * @param mixed $value
-     * @return int
+     * @param  mixed  $value
      */
     protected function clampColorValue($value): int
     {
         $intValue = (int) round((float) $value);
+
         return max(0, min(255, $intValue));
     }
 
     /**
      * Convert RGB values to uppercase hex format.
      *
-     * @param int $r Red (0-255)
-     * @param int $g Green (0-255)
-     * @param int $b Blue (0-255)
+     * @param  int  $r  Red (0-255)
+     * @param  int  $g  Green (0-255)
+     * @param  int  $b  Blue (0-255)
      * @return string Hex color in format #RRGGBB
      */
     protected function rgbToHex(int $r, int $g, int $b): string
@@ -222,9 +236,7 @@ class DominantColorsExtractor
      * - assets.metadata['dominant_colors'] (legacy, preserved)
      * - asset_metadata table via metadata field key dominant_colors (canonical for filters/UI)
      *
-     * @param Asset $asset
-     * @param array $colors Array of color objects with hex, rgb, coverage
-     * @return void
+     * @param  array  $colors  Array of color objects with hex, rgb, coverage
      */
     protected function persistDominantColors(Asset $asset, array $colors): void
     {
@@ -306,12 +318,11 @@ class DominantColorsExtractor
     }
 
     /**
-     * Assign and persist dominant_hue_group from highest-weight dominant color.
-     * Uses HueClusterService for perceptual cluster assignment.
+     * Assign and persist dominant_hue_group from dominant colors (coverage order).
+     * Uses HueClusterService; prefers the first chromatic cluster (skips white/gray/neutral when a later
+     * swatch maps to a subject hue) so filter hue matches sidebar swatches better than top-swatch-only.
      *
-     * @param Asset $asset
-     * @param array $dominantColors Array of color objects (from extractDominantColors), sorted by coverage desc
-     * @return void
+     * @param  array  $dominantColors  Array of color objects (from extractDominantColors), sorted by coverage desc
      */
     protected function persistDominantHueGroup(Asset $asset, array $dominantColors): void
     {
@@ -319,20 +330,14 @@ class DominantColorsExtractor
             return;
         }
 
-        $topColor = $dominantColors[0];
-        $hex = $topColor['hex'] ?? null;
-        if (!$hex || !is_string($hex)) {
-            return;
-        }
-
         $hueClusterService = app(HueClusterService::class);
-        $clusterKey = $hueClusterService->assignClusterFromHex($hex);
+        $clusterKey = $this->resolveDominantHueClusterKey($hueClusterService, $dominantColors);
 
         if ($clusterKey === null) {
-            Log::debug('[DominantColorsExtractor] No hue cluster found for dominant color', [
+            Log::debug('[DominantColorsExtractor] No hue cluster found for dominant colors', [
                 'asset_id' => $asset->id,
-                'hex' => $hex,
             ]);
+
             return;
         }
 
@@ -410,4 +415,39 @@ class DominantColorsExtractor
         ]);
     }
 
+    /**
+     * Pick one cluster key for dominant_hue_group from up to three dominant colors.
+     *
+     * @param  array<int, array{hex?: string, rgb?: array, coverage?: float}>  $dominantColors
+     */
+    protected function resolveDominantHueClusterKey(HueClusterService $hueClusterService, array $dominantColors): ?string
+    {
+        $assigned = [];
+        foreach ($dominantColors as $color) {
+            $hex = $color['hex'] ?? null;
+            if (! $hex || ! is_string($hex)) {
+                $assigned[] = null;
+
+                continue;
+            }
+            $assigned[] = $hueClusterService->assignClusterFromHex($hex);
+        }
+
+        foreach ($assigned as $clusterKey) {
+            if ($clusterKey === null) {
+                continue;
+            }
+            if (! in_array($clusterKey, self::ACHROMATIC_DOMINANT_HUE_SKIP_KEYS, true)) {
+                return $clusterKey;
+            }
+        }
+
+        foreach ($assigned as $clusterKey) {
+            if ($clusterKey !== null) {
+                return $clusterKey;
+            }
+        }
+
+        return null;
+    }
 }

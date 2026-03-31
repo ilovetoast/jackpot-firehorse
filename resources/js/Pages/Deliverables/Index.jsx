@@ -352,7 +352,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: 'all',
                 label: 'All',
-                count: total_asset_count,
+                count: total_asset_count > 0 ? total_asset_count : null,
                 category: null,
                 categoryId: null,
             })
@@ -362,7 +362,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: String(category.id ?? `template-${category.slug}-${category.asset_type}`),
                 label: category.name,
-                count: typeof category.asset_count === 'number' ? category.asset_count : null,
+                count: typeof category.asset_count === 'number' && category.asset_count > 0 ? category.asset_count : null,
                 category,
                 categoryId: category.id ?? null,
             })
@@ -478,17 +478,23 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         // Force page remount by incrementing remount key
         setRemountKey(prev => prev + 1)
         
-        // Reload assets to show newly uploaded assets
-        // Match Assets/Index: preserveState: false prevents dialog reopening, but drawer state (activeAssetId) is preserved in component state
-        router.reload({ 
-            only: ['assets'], 
+        // Reload grid and sidebar category counts (same contract as Assets/Index after finalize).
+        router.reload({
+            only: [
+                'assets',
+                'next_page_url',
+                'categories',
+                'show_all_button',
+                'total_asset_count',
+                'trash_count',
+            ],
             preserveScroll: true,
             preserveState: false, // Prevent state preservation to avoid dialog reopening
             onSuccess: () => {
                 setIsUploadDialogOpen(false)
                 // Reset auto-closing flag after reload completes
                 setIsAutoClosing(false)
-            }
+            },
         })
     }, [])
     

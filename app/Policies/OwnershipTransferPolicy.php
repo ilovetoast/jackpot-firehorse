@@ -5,11 +5,10 @@ namespace App\Policies;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Auth\Access\Response;
 
 /**
  * OwnershipTransferPolicy
- * 
+ *
  * Enforces strict authorization rules for ownership transfers.
  * Site admins CANNOT bypass these rules.
  */
@@ -17,7 +16,7 @@ class OwnershipTransferPolicy
 {
     /**
      * Determine whether the user can initiate a transfer.
-     * 
+     *
      * ONLY the current tenant owner can initiate.
      * Site admins are explicitly denied.
      */
@@ -28,17 +27,12 @@ class OwnershipTransferPolicy
             return false;
         }
 
-        if ($tenant->isOwner($user)) {
-            return true;
-        }
-
-        // Incubating agency owner/admin may initiate transfer to the client before completion
-        return $user->canActAsIncubatingAgencyStewardForClient($tenant);
+        return $tenant->isOwner($user);
     }
 
     /**
      * Determine whether the user can confirm a transfer.
-     * 
+     *
      * ONLY the from_user (current owner) can confirm.
      */
     public function confirm(User $user, OwnershipTransfer $transfer): bool
@@ -54,7 +48,7 @@ class OwnershipTransferPolicy
 
     /**
      * Determine whether the user can accept a transfer.
-     * 
+     *
      * ONLY the to_user (new owner) can accept.
      */
     public function accept(User $user, OwnershipTransfer $transfer): bool
@@ -70,7 +64,7 @@ class OwnershipTransferPolicy
 
     /**
      * Determine whether the user can cancel a transfer.
-     * 
+     *
      * ONLY the from_user or to_user can cancel.
      */
     public function cancel(User $user, OwnershipTransfer $transfer): bool
@@ -86,7 +80,7 @@ class OwnershipTransferPolicy
 
     /**
      * Determine whether the user can force a transfer (break-glass).
-     * 
+     *
      * ONLY the platform super-owner (user ID 1) can force transfers.
      */
     public function forceTransfer(User $user): bool
@@ -109,7 +103,7 @@ class OwnershipTransferPolicy
     public function view(User $user, OwnershipTransfer $ownershipTransfer): bool
     {
         // Users can only view transfers they're involved in
-        return $ownershipTransfer->from_user_id === $user->id 
+        return $ownershipTransfer->from_user_id === $user->id
             || $ownershipTransfer->to_user_id === $user->id
             || $ownershipTransfer->initiated_by_user_id === $user->id;
     }

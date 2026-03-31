@@ -53,7 +53,7 @@ class AiMetadataGenerationService
     /**
      * Generate AI metadata candidates for an asset.
      *
-     * @return array Results: ['candidates_created' => int, 'cost' => float, 'fields_processed' => array, 'tokens_in' => int, 'tokens_out' => int]
+     * @return array Results: candidates_created, tags_created, tag_inference_attempted, cost, fields_processed, tokens_in, tokens_out, model
      *
      * @throws \Exception If API call fails (caller should handle gracefully)
      */
@@ -65,7 +65,10 @@ class AiMetadataGenerationService
         // Tags are free-form (asset_tag_candidates). Run inference when the Tags field is AI-enabled
         // for this category even if no structured fields qualify — otherwise executions/deliverables often
         // skip the vision call entirely and never get AI tags.
-        $tagsInference = $this->shouldRunTagInference($asset);
+        // Upload-time "Apply AI Tagging" sets _skip_ai_tagging — must not create tag candidates (same vision call can still fill structured fields).
+        $tagInferenceDesired = $this->tagInferenceDesired($asset);
+        $skipAiTaggingUpload = (bool) (($asset->metadata ?? [])['_skip_ai_tagging'] ?? false);
+        $tagsInference = $tagInferenceDesired && ! $skipAiTaggingUpload;
 
         if (empty($fields) && ! $tagsInference) {
             Log::info('[AiMetadataGenerationService] No eligible fields and tag inference off', [
@@ -74,6 +77,8 @@ class AiMetadataGenerationService
 
             return [
                 'candidates_created' => 0,
+                'tags_created' => 0,
+                'tag_inference_attempted' => false,
                 'cost' => 0.0,
                 'fields_processed' => [],
                 'tokens_in' => 0,
@@ -111,8 +116,8 @@ class AiMetadataGenerationService
         // Create candidates in database
         $candidatesCreated = $this->createCandidates($asset, $candidates);
 
-        // Create tags in database
-        $tagsCreated = $this->createTags($asset, $tags);
+        // Create tag candidates only when upload did not opt out of AI tagging (see ProcessAssetJob / _skip_ai_tagging).
+        $tagsCreated = $skipAiTaggingUpload ? 0 : $this->createTags($asset, $tags);
 
         // Calculate cost using provider's cost calculation
         $cost = $this->provider->calculateCost(
@@ -131,9 +136,12 @@ class AiMetadataGenerationService
             'tokens_out' => $response['tokens_out'] ?? 0,
         ]);
 
+        $tagInferenceAttempted = $tagsInference;
+
         return [
             'candidates_created' => $candidatesCreated,
             'tags_created' => $tagsCreated,
+            'tag_inference_attempted' => $tagInferenceAttempted,
             'cost' => $cost,
             'fields_processed' => array_keys($candidates),
             'tokens_in' => $response['tokens_in'] ?? 0,
@@ -282,10 +290,9 @@ class AiMetadataGenerationService
     }
 
     /**
-     * Whether to run vision for free-form tags only (asset_tag_candidates).
-     * True when the Tags field is AI-eligible and enabled for the category, with no approved value yet.
+     * Whether the Tags field would qualify for AI tag inference (ignores upload-time _skip_ai_tagging).
      */
-    protected function shouldRunTagInference(Asset $asset): bool
+    protected function tagInferenceDesired(Asset $asset): bool
     {
         $categoryId = $asset->metadata['category_id'] ?? null;
         if (! $categoryId) {
@@ -320,6 +327,20 @@ class AiMetadataGenerationService
             ->exists();
 
         return ! $hasApprovedValue;
+    }
+
+    /**
+     * Whether to run vision for free-form tags only (asset_tag_candidates).
+     * True when the Tags field is AI-eligible and enabled for the category, with no approved value yet,
+     * and the uploader did not opt out via _skip_ai_tagging.
+     */
+    protected function shouldRunTagInference(Asset $asset): bool
+    {
+        if (! empty(($asset->metadata ?? [])['_skip_ai_tagging'])) {
+            return false;
+        }
+
+        return $this->tagInferenceDesired($asset);
     }
 
     /**

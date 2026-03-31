@@ -5,14 +5,14 @@ namespace App\Http\Controllers;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
+use App\Exceptions\PlanLimitExceededException;
+use App\Jobs\AiMetadataGenerationJob;
+use App\Jobs\AITaggingJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\User;
-use App\Exceptions\PlanLimitExceededException;
-use App\Jobs\AiMetadataGenerationJob;
-use App\Jobs\AITaggingJob;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
@@ -21,8 +21,8 @@ use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
-use App\Services\BrandLibraryCategoryCountService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
+use App\Services\BrandLibraryCategoryCountService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
@@ -1315,6 +1315,15 @@ class AssetController extends Controller
                         $availableValues[$fieldKey] = array_values(array_unique(array_merge($existing, $optionValues)));
                         sort($availableValues[$fieldKey]);
                     }
+                }
+
+                // Dominant hue: options must include every hue present in the full filtered scope (hueClusterCounts),
+                // not only on the first page. Otherwise hues missing from page 1 never appear in the swatch row.
+                if (isset($filterableFieldKeys['dominant_hue_group']) && ! empty($hueClusterCounts)) {
+                    $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
+                        $availableValues['dominant_hue_group'] ?? [],
+                        array_keys($hueClusterCounts)
+                    )));
                 }
 
                 // Remove empty arrays (filters with no values should not appear)

@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\AIProviderException;
+use App\Models\Asset;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -75,6 +76,37 @@ return Application::configure(basePath: dirname(__DIR__))
                 'unlock_url' => '',
                 'cdn_domain' => config('cloudfront.domain'),
             ], $branding))->toResponse($request)->setStatusCode(404);
+        });
+
+        // App: bookmarked /assets/{id}/… for a missing or soft-deleted asset — redirect to the grid instead of an HTML error page.
+        $exceptions->render(function (ModelNotFoundException $e, Request $request) {
+            if ($e->getModel() !== Asset::class || ! $request->is('app/*')) {
+                return null;
+            }
+            if ($request->header('X-Inertia')) {
+                return null;
+            }
+            if (! app()->bound('tenant')) {
+                return null;
+            }
+
+            $ids = $e->getIds();
+            $assetId = $ids[0] ?? null;
+            $message = 'This asset could not be found or is no longer available.';
+            if ($assetId) {
+                if (Asset::onlyTrashed()
+                    ->where('tenant_id', app('tenant')->id)
+                    ->where('id', $assetId)
+                    ->exists()) {
+                    $message = 'This asset has been deleted.';
+                }
+            }
+
+            if ($request->is('app/admin/*')) {
+                return redirect()->route('admin.assets.index')->with('warning', $message);
+            }
+
+            return redirect()->route('assets.index')->with('warning', $message);
         });
 
         // Inertia app: avoid full-page 403 — send users to the asset grid with a toast instead of "Access denied".

@@ -431,7 +431,7 @@ export default function AssetCard({
             {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
                 className={`${
-                    isMasonry ? 'w-full min-h-[120px]' : aspectRatio
+                    isMasonry ? 'w-full min-h-[120px] flex flex-col' : aspectRatio
                 } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
                     ...(isMasonry ? { maxHeight: masonryMaxHeightPx } : {}),

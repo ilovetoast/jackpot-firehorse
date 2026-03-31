@@ -249,7 +249,9 @@ export default function AssetSidebar({
                                                 style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
                                             />
                                             <span className="flex-1">{category.name}</span>
-                                            {category.id != null && typeof category.asset_count === 'number' && (
+                                            {category.id != null &&
+                                                typeof category.asset_count === 'number' &&
+                                                category.asset_count > 0 && (
                                                 <span
                                                     className="text-xs font-normal opacity-80 ml-2"
                                                     style={{ color: isSelected ? activeTextColor : unselectedCountColor }}

@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Jobs\RunMetadataInsightsJob;
 use App\Models\Brand;
 use App\Models\Tenant;
-use App\Models\TenantAgency;
 use App\Models\User;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
@@ -1503,12 +1502,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
-            // Check if user is owner or admin (tenant-based, not site-based)
-            $currentOwner = $tenant->owner();
-            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
-            $tenantRole = $user->getRoleForTenant($tenant);
-
-            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
                 return response()->json(['error' => 'You do not have permission to view AI settings.'], 403);
             }
 
@@ -1546,12 +1540,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
-            // Check if user is owner or admin (tenant-based, not site-based)
-            $currentOwner = $tenant->owner();
-            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
-            $tenantRole = $user->getRoleForTenant($tenant);
-
-            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
                 return response()->json(['error' => 'You do not have permission to update AI settings.'], 403);
             }
 
@@ -1619,11 +1608,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
-            $currentOwner = $tenant->owner();
-            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
-            $tenantRole = $user->getRoleForTenant($tenant);
-
-            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
                 return response()->json(['error' => 'You do not have permission to run insights.'], 403);
             }
 
@@ -1692,12 +1677,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
-            // Check if user is owner or admin (tenant-based)
-            $currentOwner = $tenant->owner();
-            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
-            $tenantRole = $user->getRoleForTenant($tenant);
-
-            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.view_tag_quality')) {
                 return response()->json(['error' => 'You do not have permission to view tag quality metrics.'], 403);
             }
 
@@ -1748,12 +1728,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'Tenant context not found'], 400);
             }
 
-            // Check if user is owner or admin (tenant-based)
-            $currentOwner = $tenant->owner();
-            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
-            $tenantRole = $user->getRoleForTenant($tenant);
-
-            if (! $isCurrentUserOwner && ! in_array($tenantRole, ['owner', 'admin'])) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.view_tag_quality')) {
                 return response()->json(['error' => 'You do not have permission to export tag quality metrics.'], 403);
             }
 

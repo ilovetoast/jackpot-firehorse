@@ -4,8 +4,8 @@
  * Phase O: Full-height slide-out panel (80% width) with structured sections,
  * permission-aware visibility, and section-based metadata editing.
  *
- * - Sticky header: preview, title, filename, badges, star, actions
- * - Section 1: Overview (read-only)
+ * - Sticky header: preview, filename (slide-out), badges, star, actions (asset name lives in Overview)
+ * - Section 1: Overview (asset name editable, dates, lifecycle)
  * - Section 2: Metadata (grouped; form-based edit per section if metadata.edit_post_upload)
  * - Section 3: File Information (read-only except filename if allowed)
  * - Section 4: Activity (collapsed by default)
@@ -592,6 +592,100 @@ export default function AssetDetailPanel({
 
     const versionThumbnailSrc = (v) => (v?.thumbnail_url ? String(v.thumbnail_url) : null)
 
+    const titleField = metadata?.fields?.find((f) => (f.key || f.field_key) === 'title')
+    const canEditAssetTitle = Boolean(canEditMetadata && titleField)
+
+    const saveAssetTitle = async () => {
+        const tf = metadata?.fields?.find((f) => (f.key || f.field_key) === 'title')
+        if (!tf || !asset?.id) {
+            setEditingTitle(false)
+
+            return
+        }
+        const fid = tf.metadata_field_id ?? tf.field_id
+        const val = titleEditValue.trim()
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+        try {
+            await fetch(`/app/assets/${asset.id}/metadata/edit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf || '' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    metadata_field_id: fid,
+                    value: val || (asset?.original_filename ? asset.original_filename.replace(/\.[^.]+$/, '') : ''),
+                }),
+            })
+            router.reload({ preserveState: true, preserveScroll: true })
+        } catch (e) {
+            console.error('Failed to save title', e)
+        }
+        setEditingTitle(false)
+    }
+
+    const renderAssetNameOverview = (isLightbox) => {
+        const showEdit = canEditAssetTitle && metadata
+        const labelClass = isLightbox ? 'sr-only' : dtClass
+        const nameDdClass = isLightbox ? `${ddClass} sm:col-span-2` : `${ddClass} min-w-0 sm:col-span-2`
+        const nameTextClass = isLightbox
+            ? 'text-sm font-semibold text-neutral-100 break-words'
+            : 'font-medium text-gray-900 break-words'
+        const editBtnClass = isLightbox
+            ? 'inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-300 shrink-0'
+            : 'inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 shrink-0'
+        const inputClass = isLightbox
+            ? 'text-sm font-medium border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-offset-1 border-neutral-600 bg-neutral-900 text-neutral-100 focus:border-neutral-500'
+            : 'text-sm font-medium border rounded px-2 py-1.5 w-full max-w-full focus:ring-2 focus:ring-offset-1 border-gray-300 text-gray-900 focus:border-gray-400'
+
+        return (
+            <>
+                <dt className={labelClass}>Asset name</dt>
+                <dd className={nameDdClass}>
+                    {editingTitle && showEdit ? (
+                        <input
+                            ref={titleInputRef}
+                            type="text"
+                            value={titleEditValue}
+                            onChange={(e) => setTitleEditValue(e.target.value)}
+                            onBlur={saveAssetTitle}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.currentTarget.blur()
+                                }
+                            }}
+                            className={inputClass}
+                            id="asset-detail-panel-title"
+                            aria-label="Edit asset name"
+                        />
+                    ) : (
+                        <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                            <span
+                                id="asset-detail-panel-title"
+                                className={nameTextClass}
+                            >
+                                {asset?.title || asset?.original_filename || 'Asset'}
+                            </span>
+                            {showEdit && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setTitleEditValue(asset?.title || asset?.original_filename || '')
+                                        setEditingTitle(true)
+                                        setTimeout(() => titleInputRef.current?.focus(), 0)
+                                    }}
+                                    className={editBtnClass}
+                                    aria-label="Edit asset name"
+                                >
+                                    <PencilIcon className="h-3.5 w-3.5" />
+                                    Edit
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </dd>
+            </>
+        )
+    }
+
     return (
         <>
             {!fullPage && !embeddedInLightbox && (
@@ -616,116 +710,52 @@ export default function AssetDetailPanel({
                     onClick={lb ? (e) => e.stopPropagation() : undefined}
                 >
                     <div className={lb ? 'space-y-4 px-5 py-4' : 'space-y-3 p-4'}>
-                        {/* Row: Title + Actions + Close */}
+                        {/* Row: star, actions, close — asset name is in Overview */}
                         <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0 flex items-start gap-2">
-                                {editingTitle && canEditMetadata && (() => {
-                                    const titleField = metadata?.fields?.find((f) => (f.key || f.field_key) === 'title')
-                                    if (!titleField) return null
-                                    const fid = titleField.metadata_field_id ?? titleField.field_id
-                                    const saveTitle = async () => {
-                                        const val = titleEditValue.trim()
+                            <div className="flex-1 min-w-0" aria-hidden="true" />
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                {metadata?.fields && (() => {
+                                    const starredField = metadata.fields.find((f) => (f.key || f.field_key) === 'starred')
+                                    const canToggleStar = starredField && canEditMetadata && !starredField.readonly
+                                    const isStarred = asset?.starred === true
+                                    const toggleStar = async () => {
+                                        if (!canToggleStar || !asset?.id || !starredField) return
+                                        const fid = starredField.metadata_field_id ?? starredField.field_id
                                         const csrf = document.querySelector('meta[name="csrf-token"]')?.content
                                         try {
                                             await fetch(`/app/assets/${asset.id}/metadata/edit`, {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf || '' },
                                                 credentials: 'same-origin',
-                                                body: JSON.stringify({ metadata_field_id: fid, value: val || (asset?.original_filename ? asset.original_filename.replace(/\.[^.]+$/, '') : '') }),
+                                                body: JSON.stringify({ metadata_field_id: fid, value: !isStarred }),
                                             })
                                             router.reload({ preserveState: true, preserveScroll: true })
                                         } catch (e) {
-                                            console.error('Failed to save title', e)
+                                            console.error('Failed to toggle star', e)
                                         }
-                                        setEditingTitle(false)
                                     }
-                                    return (
-                                        <div className="flex-1 min-w-0 flex items-center gap-2">
-                                            <input
-                                                ref={titleInputRef}
-                                                type="text"
-                                                value={titleEditValue}
-                                                onChange={(e) => setTitleEditValue(e.target.value)}
-                                                onBlur={saveTitle}
-                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); saveTitle(); } }}
-                                                className={`text-lg font-semibold border rounded px-2 py-1 w-full max-w-md focus:ring-2 focus:ring-offset-1 ${
-                                                    lb
-                                                        ? 'border-neutral-600 bg-neutral-900 text-neutral-100 focus:border-neutral-500'
-                                                        : 'border-gray-300 text-gray-900 focus:border-gray-400'
-                                                }`}
-                                                aria-label="Edit title"
-                                            />
-                                        </div>
-                                    )
+                                    return canToggleStar ? (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                e.preventDefault()
+                                                toggleStar()
+                                            }}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className={`p-1.5 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 ${lb ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
+                                            aria-label={isStarred ? 'Unstar' : 'Star'}
+                                        >
+                                            {isStarred ? (
+                                                <StarIconSolid className="h-5 w-5 text-amber-500" />
+                                            ) : (
+                                                <StarIconOutline className={`h-5 w-5 hover:text-amber-500 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
+                                            )}
+                                        </button>
+                                    ) : isStarred ? (
+                                        <StarIconSolid className="h-5 w-5 text-amber-500" aria-hidden />
+                                    ) : null
                                 })()}
-                                {(!editingTitle || !canEditMetadata) && (
-                                    <div className="flex-1 min-w-0">
-                                        <h2 id="asset-detail-panel-title" className={`text-lg font-semibold truncate ${lb ? 'text-white' : 'text-gray-900'}`}>
-                                            {asset?.title || asset?.original_filename || 'Asset'}
-                                        </h2>
-                                        {canEditMetadata && metadata?.fields?.some((f) => (f.key || f.field_key) === 'title') && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setTitleEditValue(asset?.title || asset?.original_filename || '')
-                                                    setEditingTitle(true)
-                                                    setTimeout(() => titleInputRef.current?.focus(), 0)
-                                                }}
-                                                className={`mt-0.5 inline-flex items-center gap-1 text-xs ${lb ? 'text-neutral-500 hover:text-neutral-300' : 'text-gray-500 hover:text-gray-700'}`}
-                                                aria-label="Edit title"
-                                            >
-                                                <PencilIcon className="h-3.5 w-3.5" />
-                                                Edit
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                    {metadata?.fields && (() => {
-                                        const starredField = metadata.fields.find((f) => (f.key || f.field_key) === 'starred')
-                                        const canToggleStar = starredField && canEditMetadata && !starredField.readonly
-                                        const isStarred = asset?.starred === true
-                                        const toggleStar = async () => {
-                                            if (!canToggleStar || !asset?.id || !starredField) return
-                                            const fid = starredField.metadata_field_id ?? starredField.field_id
-                                            const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-                                            try {
-                                                await fetch(`/app/assets/${asset.id}/metadata/edit`, {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf || '' },
-                                                    credentials: 'same-origin',
-                                                    body: JSON.stringify({ metadata_field_id: fid, value: !isStarred }),
-                                                })
-                                                router.reload({ preserveState: true, preserveScroll: true })
-                                            } catch (e) {
-                                                console.error('Failed to toggle star', e)
-                                            }
-                                        }
-                                        return canToggleStar ? (
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    e.preventDefault()
-                                                    toggleStar()
-                                                }}
-                                                onMouseDown={(e) => e.stopPropagation()}
-                                                className={`p-1.5 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 ${lb ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
-                                                aria-label={isStarred ? 'Unstar' : 'Star'}
-                                            >
-                                                {isStarred ? (
-                                                    <StarIconSolid className="h-5 w-5 text-amber-500" />
-                                                ) : (
-                                                    <StarIconOutline className={`h-5 w-5 hover:text-amber-500 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
-                                                )}
-                                            </button>
-                                        ) : isStarred ? (
-                                            <StarIconSolid className="h-5 w-5 text-amber-500 ml-1" aria-hidden />
-                                        ) : null
-                                    })()}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
                                 {lifecycleError && (
                                     <p className="text-sm text-red-400 max-w-[10rem] truncate" title={lifecycleError}>
                                         {lifecycleError}
@@ -1073,6 +1103,7 @@ export default function AssetDetailPanel({
                             >
                                 {lb ? (
                                     <dl className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 sm:gap-x-4">
+                                        {renderAssetNameOverview(true)}
                                         {asset?.created_at && (
                                             <>
                                                 <dt className="sr-only">Created at</dt>
@@ -1123,6 +1154,7 @@ export default function AssetDetailPanel({
                                 ) : (
                                     <div className={cardClass}>
                                         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                                            {renderAssetNameOverview(false)}
                                             {asset?.created_at && (
                                                 <>
                                                     <dt className={dtClass}>Created at</dt>

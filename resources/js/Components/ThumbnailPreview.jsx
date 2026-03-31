@@ -212,7 +212,11 @@ export default function ThumbnailPreview({
         ? 'w-full h-auto max-h-full object-contain object-center'
         : `w-full h-full ${objectFitClass}`
     const masonryWrapperStyle = isMasonryHeight
-        ? { maxHeight: Number(masonryMaxHeight), minHeight: 96 }
+        ? { maxHeight: Number(masonryMaxHeight), minHeight: 120 }
+        : undefined
+    /** Masonry: icon/placeholder branches must fill the tile (match AssetCard min-h), not collapse to icon size. */
+    const masonryPlaceholderStyle = isMasonryHeight
+        ? { maxHeight: Number(masonryMaxHeight), minHeight: 120, width: '100%' }
         : undefined
 
     // Check thumbnail status - if FAILED, show icon immediately
@@ -300,7 +304,14 @@ export default function ThumbnailPreview({
     ------------------------------------------------------------ */
     if ((isFailed || hasThumbnailError) && !effectiveFinalUrl && !lqipUrl) {
         return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+            <div
+                className={
+                    isMasonryHeight
+                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
+                        : `flex items-center justify-center bg-gray-50 ${className}`
+                }
+                style={masonryPlaceholderStyle}
+            >
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
@@ -320,7 +331,14 @@ export default function ThumbnailPreview({
         // If image failed to load AND status is FAILED, show icon
         if (imageError && (isFailed || hasThumbnailError)) {
             return (
-                <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+                <div
+                    className={
+                        isMasonryHeight
+                            ? `relative flex w-full min-h-[120px] items-center justify-center bg-gray-50 ${contrastBackdropClass}`
+                            : `flex items-center justify-center bg-gray-50 ${className} ${contrastBackdropClass}`
+                    }
+                    style={masonryPlaceholderStyle}
+                >
                     <AssetPlaceholder
                         asset={asset}
                         primaryColor={brandPrimaryColor}
@@ -557,7 +575,14 @@ export default function ThumbnailPreview({
     // URL known failed (404, etc.) - show placeholder without retrying
     if (lockedUrl && urlKnownFailed) {
         return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+            <div
+                className={
+                    isMasonryHeight
+                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
+                        : `flex items-center justify-center bg-gray-50 ${className}`
+                }
+                style={masonryPlaceholderStyle}
+            >
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
@@ -578,7 +603,14 @@ export default function ThumbnailPreview({
     // SVG fallback: render original SVG inline when thumbnails were skipped/failed
     if (isSvg && svgOriginalFallback && (state === 'SKIPPED' || state === 'FAILED' || state === 'PENDING')) {
         return (
-            <div className={`flex items-center justify-center bg-white ${className}`}>
+            <div
+                className={
+                    isMasonryHeight
+                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-white'
+                        : `flex items-center justify-center bg-white ${className}`
+                }
+                style={masonryPlaceholderStyle}
+            >
                 <img
                     src={svgOriginalFallback}
                     alt={alt}
@@ -591,7 +623,14 @@ export default function ThumbnailPreview({
 
     if (state === 'NOT_SUPPORTED' || state === 'FAILED' || state === 'SKIPPED') {
         return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+            <div
+                className={
+                    isMasonryHeight
+                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
+                        : `flex items-center justify-center bg-gray-50 ${className}`
+                }
+                style={masonryPlaceholderStyle}
+            >
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
@@ -605,7 +644,14 @@ export default function ThumbnailPreview({
     // HARD STABILIZATION: Check locked URL, not live URL
     if (state === 'PENDING' && !lockedUrl) {
         return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+            <div
+                className={
+                    isMasonryHeight
+                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
+                        : `flex items-center justify-center bg-gray-50 ${className}`
+                }
+                style={masonryPlaceholderStyle}
+            >
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
@@ -617,7 +663,14 @@ export default function ThumbnailPreview({
 
     // Fallback: Should not reach here, but show icon if we do
     return (
-        <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+        <div
+            className={
+                isMasonryHeight
+                    ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
+                    : `flex items-center justify-center bg-gray-50 ${className}`
+            }
+            style={masonryPlaceholderStyle}
+        >
             <AssetPlaceholder
                 asset={asset}
                 primaryColor={brandPrimaryColor}

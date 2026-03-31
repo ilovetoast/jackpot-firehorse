@@ -495,7 +495,7 @@ class DeliverableController extends Controller
 
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $mappedAssets = $assetModels
-            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset, $publishedByUsers, $categoriesById, $uploadedByUsersMap) {
+            ->map(function ($asset) use ($incidentSeverityByAsset, $publishedByUsers, $categoriesById, $uploadedByUsersMap) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -928,6 +928,15 @@ class DeliverableController extends Controller
                         )));
                         sort($availableValues[$fieldKey]);
                     }
+                }
+
+                // Dominant hue: options must include every hue present in the full filtered scope (hueClusterCounts),
+                // not only on the first page.
+                if (isset($filterableFieldKeys['dominant_hue_group']) && ! empty($hueClusterCounts)) {
+                    $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
+                        $availableValues['dominant_hue_group'] ?? [],
+                        array_keys($hueClusterCounts)
+                    )));
                 }
 
                 // Remove empty arrays (filters with no values should not appear)

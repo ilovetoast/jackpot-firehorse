@@ -28,6 +28,7 @@ use App\Services\DownloadZipEstimateService;
 use App\Services\EnterpriseDownloadPolicy;
 use App\Services\PlanService;
 use App\Services\StreamingZipService;
+use App\Services\TenantBucketService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,6 +41,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * 🔒 Phase 3.1 — Downloader System (LOCKED)
@@ -485,10 +487,11 @@ class DownloadController extends Controller
         $download->assets()->attach($asset->id, ['is_primary' => true]);
 
         if (request()->expectsJson()) {
+            // stream=1: deliver through Laravel with Content-Disposition: attachment (images/PDFs save instead of opening in-tab)
             return response()->json([
                 'download_id' => $download->id,
                 'public_url' => route('downloads.public', ['download' => $download->id]),
-                'file_url' => route('downloads.public.file', ['download' => $download->id]),
+                'file_url' => route('downloads.public.file', ['download' => $download->id, 'stream' => 1]),
                 'expires_at' => $expiresAt?->toIso8601String(),
             ]);
         }
@@ -1346,7 +1349,7 @@ class DownloadController extends Controller
      * Deliver file (GET /d/{download}/file). Runs same access checks as download(), then redirects to S3 or streams.
      * Used by the Download button on the share page. Does NOT render the share page.
      */
-    public function deliverFile(Download $download): Response|RedirectResponse|\Symfony\Component\HttpFoundation\Response
+    public function deliverFile(Download $download): Response|RedirectResponse|StreamedResponse|\Symfony\Component\HttpFoundation\Response
     {
         if ($download->trashed()) {
             return redirect()->route('downloads.public', ['download' => $download->id]);
@@ -1380,7 +1383,12 @@ class DownloadController extends Controller
 
         // UX-R2: Single-asset download — redirect to CloudFront signed URL with Content-Disposition: attachment
         // so browsers save the file instead of opening images/PDFs in a new tab.
+        // stream=1: stream through the app so attachment always applies (CDN may not forward response-content-disposition).
         if (! empty($download->direct_asset_path)) {
+            if (request()->boolean('stream')) {
+                return $this->streamSingleAssetDirectResponse($download);
+            }
+
             $download->increment('access_count');
             app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
             $primaryAsset = $download->assets()->first();
@@ -1526,6 +1534,92 @@ class DownloadController extends Controller
             'Content-Type' => 'application/zip',
             'Content-Disposition' => 'attachment; filename="'.addcslashes($filename, '"\\').'"',
         ]);
+    }
+
+    /**
+     * Stream single-asset file through the app with Content-Disposition: attachment.
+     * Used when ?stream=1 so browsers download instead of navigating to CDN URLs that may inline images.
+     */
+    protected function streamSingleAssetDirectResponse(Download $download): StreamedResponse|RedirectResponse
+    {
+        $download->loadMissing(['tenant', 'assets.storageBucket']);
+        $tenant = $download->tenant;
+        if (! $tenant) {
+            Log::error('[DownloadController] streamSingleAssetDirectResponse: missing tenant', [
+                'download_id' => $download->id,
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $bucketService = app(TenantBucketService::class);
+        $primaryAsset = $download->assets->first();
+
+        try {
+            $bucket = $primaryAsset?->storageBucket
+                ?? $bucketService->resolveActiveBucketOrFail($tenant);
+        } catch (\Throwable $e) {
+            Log::error('[DownloadController] streamSingleAssetDirectResponse: bucket resolution failed', [
+                'download_id' => $download->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $key = ltrim((string) $download->direct_asset_path, '/');
+        $filename = $primaryAsset?->original_filename;
+        if (! is_string($filename) || trim($filename) === '') {
+            $filename = basename($key);
+        }
+        $safeFilename = preg_replace('/[\r\n"\\\\]/', '', $filename);
+        $safeFilename = ($safeFilename !== null && $safeFilename !== '') ? $safeFilename : 'download';
+
+        $s3Client = $bucketService->getS3Client();
+
+        try {
+            $head = $s3Client->headObject([
+                'Bucket' => $bucket->name,
+                'Key' => $key,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[DownloadController] streamSingleAssetDirectResponse: headObject failed', [
+                'download_id' => $download->id,
+                'bucket' => $bucket->name,
+                'key' => $key,
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $contentType = $head['ContentType'] ?? 'application/octet-stream';
+        $headers = ['Content-Type' => $contentType];
+        if (isset($head['ContentLength'])) {
+            $headers['Content-Length'] = (string) $head['ContentLength'];
+        }
+
+        $download->increment('access_count');
+        app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
+        DownloadEventEmitter::emitDownloadZipRequested($download);
+        DownloadEventEmitter::emitDownloadZipCompleted($download);
+
+        $bucketName = $bucket->name;
+
+        return response()->streamDownload(function () use ($s3Client, $bucketName, $key) {
+            $result = $s3Client->getObject([
+                'Bucket' => $bucketName,
+                'Key' => $key,
+            ]);
+            $body = $result['Body'];
+            if ($body instanceof \Psr\Http\Message\StreamInterface) {
+                while (! $body->eof()) {
+                    echo $body->read(1024 * 1024);
+                }
+            } else {
+                echo (string) $body;
+            }
+        }, $safeFilename, $headers);
     }
 
     /**

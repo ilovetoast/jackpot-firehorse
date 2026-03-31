@@ -3,9 +3,9 @@
 namespace Tests\Unit\Services\Automation;
 
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
-use App\Models\Brand;
 use App\Models\UploadSession;
 use App\Services\Automation\DominantColorsExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,8 +15,9 @@ use Tests\TestCase;
  * Dominant Colors Extractor Test
  *
  * Tests extraction and persistence of top 3 dominant colors from color cluster data.
- * 
+ *
  * @runInSeparateProcess
+ *
  * @preserveGlobalState disabled
  */
 class DominantColorsExtractorTest extends TestCase
@@ -28,7 +29,7 @@ class DominantColorsExtractorTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->extractor = new DominantColorsExtractor();
+        $this->extractor = new DominantColorsExtractor;
     }
 
     protected function tearDown(): void
@@ -117,6 +118,22 @@ class DominantColorsExtractorTest extends TestCase
 
         $colors = $asset->metadata['dominant_colors'] ?? [];
         $this->assertCount(3, $colors); // Max 3
+    }
+
+    /**
+     * Test: dominant_hue_group prefers chromatic color over gray/white background when background has highest coverage
+     */
+    public function test_dominant_hue_group_prefers_chromatic_over_light_background(): void
+    {
+        $asset = $this->createAssetWithClusters([
+            ['rgb' => [230, 230, 230], 'coverage' => 0.50],
+            ['rgb' => [31, 58, 138], 'coverage' => 0.35],
+        ]);
+
+        $this->extractor->extractAndPersist($asset);
+        $asset->refresh();
+
+        $this->assertSame('blue', $asset->dominant_hue_group);
     }
 
     /**
@@ -282,9 +299,6 @@ class DominantColorsExtractorTest extends TestCase
 
     /**
      * Helper: Create asset with color clusters in metadata.
-     *
-     * @param array $clusters
-     * @return Asset
      */
     protected function createAssetWithClusters(array $clusters): Asset
     {
@@ -299,10 +313,6 @@ class DominantColorsExtractorTest extends TestCase
     /**
      * Helper: Create asset with metadata.
      * Forces clean metadata at create (no cross-test contamination).
-     *
-     * @param array $metadata
-     * @param string $mimeType
-     * @return Asset
      */
     protected function createAssetWithMetadata(array $metadata, string $mimeType = 'image/jpeg'): Asset
     {
@@ -311,18 +321,18 @@ class DominantColorsExtractorTest extends TestCase
             'name' => 'Test Tenant',
             'slug' => 'test-tenant',
         ]);
-        
+
         $brand = Brand::firstOrCreate(['id' => 1, 'tenant_id' => 1], [
             'name' => 'Test Brand',
             'slug' => 'test-brand',
         ]);
-        
+
         $storageBucket = StorageBucket::firstOrCreate(['id' => 1, 'tenant_id' => 1], [
             'name' => 'test-bucket',
             'status' => \App\Enums\StorageBucketStatus::ACTIVE,
             'region' => 'us-east-1',
         ]);
-        
+
         $uploadSession = UploadSession::create([
             'id' => \Illuminate\Support\Str::uuid()->toString(),
             'tenant_id' => $tenant->id,
@@ -333,7 +343,7 @@ class DominantColorsExtractorTest extends TestCase
             'expected_size' => 1024,
             'uploaded_size' => 1024,
         ]);
-        
+
         $asset = Asset::create([
             'tenant_id' => $tenant->id,
             'brand_id' => $brand->id,
@@ -347,11 +357,11 @@ class DominantColorsExtractorTest extends TestCase
             'status' => \App\Enums\AssetStatus::VISIBLE,
             'type' => \App\Enums\AssetType::ASSET,
         ]);
-        
+
         // Force clean metadata at test start (guarantees no cross-test contamination)
         $asset->update(['metadata' => $metadata]);
         $asset->refresh();
-        
+
         return $asset;
     }
 }

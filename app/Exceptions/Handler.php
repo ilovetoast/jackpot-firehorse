@@ -2,14 +2,15 @@
 
 namespace App\Exceptions;
 
+use App\Models\Asset;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use InvalidArgumentException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
@@ -54,6 +55,17 @@ class Handler
             return null;
         }
 
+        // Missing or soft-deleted asset: never leak model/UUID details to the browser (even when APP_DEBUG is true).
+        if ($e instanceof ModelNotFoundException && $request->is('app/*')) {
+            $modelClass = $e->getModel();
+            if ($modelClass === Asset::class) {
+                return new JsonResponse([
+                    'message' => self::friendlyAssetMissingMessage($request, $e),
+                    'code' => 404,
+                ], 404);
+            }
+        }
+
         $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
 
         $message = 'Something went wrong.';
@@ -76,5 +88,25 @@ class Handler
         }
 
         return new JsonResponse(['message' => $message, 'code' => $status], $status);
+    }
+
+    /**
+     * User-facing copy when route model binding cannot resolve an asset (missing id or soft-deleted).
+     */
+    protected static function friendlyAssetMissingMessage(Request $request, ModelNotFoundException $e): string
+    {
+        $ids = $e->getIds();
+        $assetId = $ids[0] ?? null;
+        if ($assetId && app()->bound('tenant')) {
+            $tenant = app('tenant');
+            if (Asset::onlyTrashed()
+                ->where('tenant_id', $tenant->id)
+                ->where('id', $assetId)
+                ->exists()) {
+                return 'This asset has been deleted.';
+            }
+        }
+
+        return 'This asset could not be found or is no longer available.';
     }
 }

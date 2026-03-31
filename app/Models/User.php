@@ -235,6 +235,13 @@ class User extends Authenticatable
     protected array $incubatingAgencyStewardForClientCache = [];
 
     /**
+     * Per-request memo for {@see canAccessCompanySettingsAsIncubatingAgencyAdmin()}.
+     *
+     * @var array<string, bool>
+     */
+    protected array $incubatingAgencyAdminSettingsCache = [];
+
+    /**
      * Pre-fill {@see $tenantRoleForTenantCache} from the loaded tenants pivot so permission checks and
      * agency brand lists do not issue one tenant_user query per tenant.
      */
@@ -652,18 +659,24 @@ class User extends Authenticatable
      */
     public function hasPermissionForTenant(Tenant $tenant, string $permission): bool
     {
-        // Incubating agency stewards (owner/admin on agency workspace) get owner-only surfaces
-        // until the client completes an ownership transfer.
-        if (in_array($permission, ['company_settings.delete_company', 'company_settings.ownership_transfer'], true)) {
-            if ($this->canActAsIncubatingAgencyStewardForClient($tenant)) {
-                return true;
-            }
-        }
-
         // Platform site staff may permanently delete a company when they belong to that tenant (break-glass).
         if ($permission === 'company_settings.delete_company'
             && $this->tenants()->where('tenants.id', $tenant->id)->exists()
             && ($this->hasRole('site_owner') || $this->hasRole('site_admin') || $this->hasRole('site_support'))) {
+            return true;
+        }
+
+        // Incubated client (pre–ownership transfer): agency owner/admin/agency_admin may manage company
+        // settings (AI, tag quality, general company info) while the client is still in the incubation
+        // partnership. After a completed ownership transfer, only normal tenant roles apply.
+        $incubationAgencyCompanySettingsPermissions = [
+            'company_settings.view',
+            'company_settings.edit',
+            'company_settings.manage_ai_settings',
+            'company_settings.view_tag_quality',
+        ];
+        if (in_array($permission, $incubationAgencyCompanySettingsPermissions, true)
+            && $this->canAccessCompanySettingsAsIncubatingAgencyAdmin($tenant)) {
             return true;
         }
 
@@ -785,6 +798,49 @@ class User extends Authenticatable
         $this->incubatingAgencyStewardForClientCache[$cacheKey] = true;
 
         return true;
+    }
+
+    /**
+     * True when the user is owner, admin, or agency_admin on the incubating agency and is a member of
+     * the client tenant, while that client has not completed an ownership transfer. Used to allow agency
+     * staff to configure AI/tag quality/company info during incubation without a tenant admin role on
+     * the client. Revoked after transfer completes (client-owned going forward).
+     */
+    public function canAccessCompanySettingsAsIncubatingAgencyAdmin(Tenant $clientTenant): bool
+    {
+        $cacheKey = (string) $clientTenant->id;
+        if (array_key_exists($cacheKey, $this->incubatingAgencyAdminSettingsCache)) {
+            return $this->incubatingAgencyAdminSettingsCache[$cacheKey];
+        }
+
+        if ($clientTenant->hasCompletedOwnershipTransfer()) {
+            $this->incubatingAgencyAdminSettingsCache[$cacheKey] = false;
+
+            return false;
+        }
+        if (! $clientTenant->incubated_by_agency_id) {
+            $this->incubatingAgencyAdminSettingsCache[$cacheKey] = false;
+
+            return false;
+        }
+        if (! $this->belongsToTenant($clientTenant->id)) {
+            $this->incubatingAgencyAdminSettingsCache[$cacheKey] = false;
+
+            return false;
+        }
+
+        $agencyTenant = Tenant::find((int) $clientTenant->incubated_by_agency_id);
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            $this->incubatingAgencyAdminSettingsCache[$cacheKey] = false;
+
+            return false;
+        }
+
+        $roleOnAgency = $this->getRoleForTenant($agencyTenant);
+        $ok = in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true);
+        $this->incubatingAgencyAdminSettingsCache[$cacheKey] = $ok;
+
+        return $ok;
     }
 
     /**
