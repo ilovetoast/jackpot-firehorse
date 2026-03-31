@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { usePage, Link, router } from '@inertiajs/react'
+import { usePage, Link, router, useForm } from '@inertiajs/react'
 import {
     TrophyIcon,
     BuildingOfficeIcon,
@@ -40,14 +40,26 @@ export default function AgencyDashboard({
     readiness_summary = null,
     managed_agency = null,
     dashboard_links = {},
+    can_create_incubated_client = false,
 }) {
     const [dashTab, setDashTab] = useState('overview')
     const [readinessToast, setReadinessToast] = useState(null)
     const [readinessAnimateKey, setReadinessAnimateKey] = useState(0)
     const page = usePage()
-    const { auth: authFromPage } = page.props
+    const { auth: authFromPage, flash = {} } = page.props
     const brandColor = authFromPage?.activeBrand?.primary_color || '#6366f1'
     const activeBrand = authFromPage?.activeBrand
+
+    const incubateForm = useForm({
+        company_name: '',
+    })
+
+    const submitIncubatedClient = (e) => {
+        e.preventDefault()
+        incubateForm.post('/app/agency/incubated-clients', {
+            preserveScroll: true,
+        })
+    }
 
     const openAgencyDefaultOverview = () => {
         const db = managed_agency?.default_brand
@@ -212,6 +224,15 @@ export default function AgencyDashboard({
                             </div>
                         </header>
 
+                        {flash.success && (
+                            <div
+                                className="mb-6 rounded-lg border border-emerald-500/30 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100/95"
+                                role="status"
+                            >
+                                {flash.success}
+                            </div>
+                        )}
+
                         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
                             <nav
                                 className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-48 lg:flex-col"
@@ -373,6 +394,41 @@ export default function AgencyDashboard({
                                         Managed companies
                                     </span>
                                 </div>
+                                {can_create_incubated_client && (
+                                    <div className={`${glassPanel} mb-6 p-6 sm:p-8`}>
+                                        <h3 className="text-lg font-semibold text-white">Start incubating a company</h3>
+                                        <p className={`mt-1 ${bodyMuted}`}>
+                                            Creates a new client workspace linked to your agency. You can transfer ownership later from
+                                            company settings.
+                                        </p>
+                                        <form onSubmit={submitIncubatedClient} className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
+                                            <div className="min-w-0 flex-1">
+                                                <label htmlFor="incubate-company-name" className="sr-only">
+                                                    Company name
+                                                </label>
+                                                <input
+                                                    id="incubate-company-name"
+                                                    type="text"
+                                                    value={incubateForm.data.company_name}
+                                                    onChange={(e) => incubateForm.setData('company_name', e.target.value)}
+                                                    placeholder="Client company name"
+                                                    className="w-full rounded-lg border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                                    autoComplete="organization"
+                                                />
+                                                {incubateForm.errors.company_name && (
+                                                    <p className="mt-2 text-xs text-rose-300/90">{incubateForm.errors.company_name}</p>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="submit"
+                                                disabled={incubateForm.processing}
+                                                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {incubateForm.processing ? 'Creating…' : 'Create incubated company'}
+                                            </button>
+                                        </form>
+                                    </div>
+                                )}
                                 <div className={`${glassPanel} p-6 sm:p-8`}>
                                     <p className="text-sm text-white/60">
                                         Client workspaces linked to{' '}

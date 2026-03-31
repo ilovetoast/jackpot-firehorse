@@ -185,8 +185,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
         Route::get('/companies/managed', [\App\Http\Controllers\CompanyController::class, 'managedCompanies'])->name('companies.managed');
 
-        // Phase AG-7: Agency Partner Dashboard (read-only)
+        // Phase AG-7: Agency Partner Dashboard
         Route::get('/agency/dashboard', [\App\Http\Controllers\AgencyDashboardController::class, 'index'])->name('agency.dashboard');
+        Route::post('/agency/incubated-clients', [\App\Http\Controllers\AgencyDashboardController::class, 'storeIncubatedClient'])
+            ->name('agency.incubated-clients.store');
 
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');

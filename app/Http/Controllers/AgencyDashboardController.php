@@ -9,9 +9,14 @@ use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Services\Agency\BrandReadinessService;
+use App\Services\TenantAgencyService;
 use App\Support\DashboardLinks;
+use App\Models\User;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -22,7 +27,7 @@ use Inertia\Response;
  * Phase AG-8 — UX Polish & Transfer Nudges (Non-Blocking)
  * Phase AG-10 — Partner Marketing & Referral Attribution (Foundational)
  *
- * Provides read-only visibility into agency partner program status.
+ * Provides visibility into agency partner program status.
  * Only accessible to tenants with is_agency = true.
  *
  * AG-8: Added computed flags for UI nudges (informational only, no enforcement).
@@ -30,10 +35,12 @@ use Inertia\Response;
  */
 class AgencyDashboardController extends Controller
 {
+    public function __construct(
+        protected TenantAgencyService $tenantAgencyService
+    ) {}
+
     /**
      * Display the agency dashboard.
-     *
-     * READ-ONLY: No mutation actions allowed.
      */
     public function index(Request $request): Response
     {
@@ -48,6 +55,8 @@ class AgencyDashboardController extends Controller
         if (! $tenant->is_agency) {
             abort(403, 'This page is only available to agency partners.');
         }
+
+        $canCreateIncubatedClient = $this->userCanStartIncubation($user, $tenant);
 
         // Get agency tier info
         $agencyTier = $tenant->agencyTier;
@@ -323,6 +332,87 @@ class AgencyDashboardController extends Controller
             'readiness_summary' => $readinessSummary,
             'managed_agency' => $managedAgency,
             'dashboard_links' => $dashboardLinks,
+            'can_create_incubated_client' => $canCreateIncubatedClient,
         ]);
+    }
+
+    /**
+     * Create a new client company incubated by the current agency tenant and link the agency for access.
+     */
+    public function storeIncubatedClient(Request $request): RedirectResponse
+    {
+        $agencyTenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            abort(403, 'This action is only available to agency partners.');
+        }
+
+        if (! $user || ! $this->userCanStartIncubation($user, $agencyTenant)) {
+            abort(403, 'You do not have permission to start an incubated client company.');
+        }
+
+        $validated = $request->validate([
+            'company_name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $baseSlug = Str::slug($validated['company_name']);
+        $slug = $baseSlug;
+        $counter = 1;
+        while (Tenant::where('slug', $slug)->exists()) {
+            $slug = $baseSlug.'-'.$counter;
+            $counter++;
+        }
+
+        $agencyTier = $agencyTenant->agencyTier;
+        $incubationExpiresAt = null;
+        if ($agencyTier?->incubation_window_days) {
+            $incubationExpiresAt = now()->addDays($agencyTier->incubation_window_days);
+        }
+
+        $clientTenant = DB::transaction(function () use ($validated, $slug, $agencyTenant, $user, $incubationExpiresAt) {
+            $clientTenant = Tenant::create([
+                'name' => $validated['company_name'],
+                'slug' => $slug,
+                'incubated_at' => now(),
+                'incubation_expires_at' => $incubationExpiresAt,
+                'incubated_by_agency_id' => $agencyTenant->id,
+            ]);
+
+            $defaultBrand = $clientTenant->defaultBrand;
+            if (! $defaultBrand) {
+                throw new \RuntimeException('Default brand was not created for the new company.');
+            }
+
+            $this->tenantAgencyService->attach(
+                $clientTenant,
+                $agencyTenant,
+                'agency_admin',
+                [['brand_id' => $defaultBrand->id, 'role' => 'admin']],
+                $user
+            );
+
+            $user->setRoleForTenant($clientTenant, 'owner', true);
+
+            return $clientTenant;
+        });
+
+        return redirect()
+            ->route('agency.dashboard')
+            ->with('success', "Company “{$clientTenant->name}” is now incubated. Switch to it from your managed clients when you are ready.");
+    }
+
+    protected function userCanStartIncubation(?User $user, Tenant $tenant): bool
+    {
+        if (! $user || ! $tenant->is_agency) {
+            return false;
+        }
+
+        $role = $user->getRoleForTenant($tenant);
+        if (in_array($role, ['owner', 'admin'], true)) {
+            return true;
+        }
+
+        return $user->hasPermissionForTenant($tenant, 'company_settings.edit');
     }
 }
