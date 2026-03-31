@@ -12,6 +12,7 @@ use App\Services\AICostReportingService;
 use App\Services\AiUsageService;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
+use App\Services\IncubationWorkspaceService;
 use App\Services\PlanService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -46,6 +47,7 @@ class CompanyViewController extends Controller
         }
 
         $planService = app(PlanService::class);
+        $incubationWorkspaceService = app(IncubationWorkspaceService::class);
         $costService = app(CompanyCostService::class);
         $aiUsageService = app(AiUsageService::class);
         $aiCostReportingService = app(AICostReportingService::class);
@@ -283,6 +285,16 @@ class CompanyViewController extends Controller
         $incubationInfo = null;
         if ($tenant->incubated_by_agency_id) {
             $incubatingAgency = Tenant::find($tenant->incubated_by_agency_id);
+            $agencyTier = $incubatingAgency?->agencyTier;
+            $maxExtend = $agencyTier?->max_support_extension_days;
+            if ($maxExtend === null && $agencyTier) {
+                $maxExtend = match ($agencyTier->name) {
+                    'Silver' => 14,
+                    'Gold' => 30,
+                    'Platinum' => 180,
+                    default => 14,
+                };
+            }
             $incubationInfo = [
                 'incubated_by' => $incubatingAgency ? [
                     'id' => $incubatingAgency->id,
@@ -290,6 +302,9 @@ class CompanyViewController extends Controller
                 ] : null,
                 'incubated_at' => $tenant->incubated_at?->toIso8601String(),
                 'incubation_expires_at' => $tenant->incubation_expires_at?->toIso8601String(),
+                'incubation_target_plan_key' => $tenant->incubation_target_plan_key,
+                'incubation_locked' => $incubationWorkspaceService->isWorkspaceLocked($tenant),
+                'max_support_extension_days' => $maxExtend,
             ];
         }
 

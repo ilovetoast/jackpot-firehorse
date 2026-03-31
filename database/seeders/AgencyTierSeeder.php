@@ -22,7 +22,8 @@ class AgencyTierSeeder extends Seeder
                 'reward_percentage' => null, // Not used yet
                 'max_incubated_companies' => null, // Not enforced yet
                 'max_incubated_brands' => null, // Not enforced yet
-                'incubation_window_days' => null, // Not enforced yet
+                'incubation_window_days' => 30,
+                'max_support_extension_days' => 14,
             ],
             [
                 'name' => 'Gold',
@@ -31,17 +32,18 @@ class AgencyTierSeeder extends Seeder
                 'reward_percentage' => null,
                 'max_incubated_companies' => null,
                 'max_incubated_brands' => null,
-                'incubation_window_days' => null,
+                'incubation_window_days' => 60,
+                'max_support_extension_days' => 30,
             ],
             [
                 'name' => 'Platinum',
                 'tier_order' => 3,
                 'activation_threshold' => 15,
                 'reward_percentage' => null,
-                // null = no advisory cap; incubation expiry is not enforced in app code (see AgencyPartnerProgramTest)
                 'max_incubated_companies' => null,
                 'max_incubated_brands' => null,
-                'incubation_window_days' => null,
+                'incubation_window_days' => 180,
+                'max_support_extension_days' => 180,
             ],
         ];
 

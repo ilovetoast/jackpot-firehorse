@@ -278,3 +278,4 @@ It helps teams move faster **without losing control**.
 | [BRAND_INTELLIGENCE.md](BRAND_INTELLIGENCE.md) | Execution-based brand intelligence (EBI) |
 | [environments/SERVER_REQUIREMENTS.md](environments/SERVER_REQUIREMENTS.md) | OS packages by role (web, worker) |
 | [DEV_TOOLING.md](DEV_TOOLING.md) | Local-only dev commands and utilities |
+| [AGENCY_INCUBATION_ROADMAP.md](AGENCY_INCUBATION_ROADMAP.md) | Agency partner incubation: storage, windows, hard lock, support extensions |

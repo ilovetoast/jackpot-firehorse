@@ -189,6 +189,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/agency/dashboard', [\App\Http\Controllers\AgencyDashboardController::class, 'index'])->name('agency.dashboard');
         Route::post('/agency/incubated-clients', [\App\Http\Controllers\AgencyDashboardController::class, 'storeIncubatedClient'])
             ->name('agency.incubated-clients.store');
+        Route::patch('/agency/incubated-clients/{incubatedClient}', [\App\Http\Controllers\AgencyDashboardController::class, 'updateIncubatedClientTargetPlan'])
+            ->name('agency.incubated-clients.update-plan');
+        Route::post('/agency/incubated-clients/{incubatedClient}/extension-request', [\App\Http\Controllers\AgencyDashboardController::class, 'requestIncubationExtension'])
+            ->name('agency.incubated-clients.extension-request');
 
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
@@ -378,6 +382,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/users/{user}/unsuspend', [\App\Http\Controllers\SiteAdminController::class, 'unsuspendAccount'])->name('admin.users.unsuspend');
     Route::put('/admin/companies/{tenant}/plan', [\App\Http\Controllers\SiteAdminController::class, 'updatePlan'])->name('admin.companies.update-plan');
     Route::put('/admin/companies/{tenant}/infrastructure-tier', [\App\Http\Controllers\SiteAdminController::class, 'updateInfrastructureTier'])->name('admin.companies.update-infrastructure-tier');
+    Route::post('/admin/api/companies/{tenant}/incubation/extend', [\App\Http\Controllers\Admin\AdminIncubationController::class, 'extendDeadline'])
+        ->name('admin.api.companies.incubation.extend');
 
     // Phase AG-11: Admin Agency Management
     Route::get('/admin/agencies', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'index'])->name('admin.agencies.index');
@@ -651,20 +657,23 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/metadata/candidates/{candidateId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveCandidate'])->name('metadata.candidates.approve');
             Route::post('/metadata/candidates/{candidateId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectCandidate'])->name('metadata.candidates.reject');
             Route::post('/metadata/candidates/{candidateId}/defer', [\App\Http\Controllers\AssetMetadataController::class, 'deferCandidate'])->name('metadata.candidates.defer');
-            // Asset download endpoint with metric tracking (GET = direct signed URL, no record)
-            Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
-            // UX-R2: Single-asset tracked download (POST = create Download record + redirect to file)
-            Route::post('/assets/{asset}/download', [\App\Http\Controllers\DownloadController::class, 'downloadSingleAsset'])->name('assets.download.single');
 
-            // Download group endpoints (Phase 3.1 Step 4)
-            Route::get('/downloads/{download}/download', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.download');
-            // Phase D1: Download bucket and create download
-            Route::get('/download-bucket/items', [\App\Http\Controllers\DownloadBucketController::class, 'items'])->name('download-bucket.items');
-            Route::post('/download-bucket/add', [\App\Http\Controllers\DownloadBucketController::class, 'add'])->name('download-bucket.add');
-            Route::post('/download-bucket/add-batch', [\App\Http\Controllers\DownloadBucketController::class, 'addBatch'])->name('download-bucket.add_batch');
-            Route::delete('/download-bucket/remove/{asset}', [\App\Http\Controllers\DownloadBucketController::class, 'remove'])->name('download-bucket.remove');
-            Route::post('/download-bucket/clear', [\App\Http\Controllers\DownloadBucketController::class, 'clear'])->name('download-bucket.clear');
-            Route::post('/downloads', [\App\Http\Controllers\DownloadController::class, 'store'])->name('downloads.store');
+            Route::middleware('incubation.not_locked')->group(function () {
+                // Asset download endpoint with metric tracking (GET = direct signed URL, no record)
+                Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
+                // UX-R2: Single-asset tracked download (POST = create Download record + redirect to file)
+                Route::post('/assets/{asset}/download', [\App\Http\Controllers\DownloadController::class, 'downloadSingleAsset'])->name('assets.download.single');
+
+                // Download group endpoints (Phase 3.1 Step 4)
+                Route::get('/downloads/{download}/download', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.download');
+                // Phase D1: Download bucket and create download
+                Route::get('/download-bucket/items', [\App\Http\Controllers\DownloadBucketController::class, 'items'])->name('download-bucket.items');
+                Route::post('/download-bucket/add', [\App\Http\Controllers\DownloadBucketController::class, 'add'])->name('download-bucket.add');
+                Route::post('/download-bucket/add-batch', [\App\Http\Controllers\DownloadBucketController::class, 'addBatch'])->name('download-bucket.add_batch');
+                Route::delete('/download-bucket/remove/{asset}', [\App\Http\Controllers\DownloadBucketController::class, 'remove'])->name('download-bucket.remove');
+                Route::post('/download-bucket/clear', [\App\Http\Controllers\DownloadBucketController::class, 'clear'])->name('download-bucket.clear');
+                Route::post('/downloads', [\App\Http\Controllers\DownloadController::class, 'store'])->name('downloads.store');
+            });
             Route::get('/downloads/company-users', [\App\Http\Controllers\DownloadController::class, 'companyUsers'])->name('downloads.company-users');
 
             // Metric endpoints
@@ -734,33 +743,37 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 ]);
             })->name('downloads.limits');
 
-            // Upload routes (tenant-scoped)
-            Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
-            Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
-            Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
-            Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
-            Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');
-            Route::post('/uploads/diagnostics', [\App\Http\Controllers\UploadController::class, 'diagnostics'])->name('uploads.diagnostics');
-            Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
-            Route::post('/uploads/{uploadSession}/multipart-part-url', [\App\Http\Controllers\UploadController::class, 'getMultipartPartUrl'])->name('uploads.multipart-part-url');
-            // Multipart upload endpoints (Phase 2.4)
-            Route::post('/uploads/{uploadSession}/multipart/init', [\App\Http\Controllers\UploadController::class, 'initMultipart'])->name('uploads.multipart.init');
-            Route::post('/uploads/{uploadSession}/multipart/sign-part', [\App\Http\Controllers\UploadController::class, 'signMultipartPart'])->name('uploads.multipart.sign-part');
-            Route::post('/uploads/{uploadSession}/multipart/complete', [\App\Http\Controllers\UploadController::class, 'completeMultipart'])->name('uploads.multipart.complete');
-            Route::post('/uploads/{uploadSession}/multipart/abort', [\App\Http\Controllers\UploadController::class, 'abortMultipart'])->name('uploads.multipart.abort');
-            Route::put('/uploads/{uploadSession}/activity', [\App\Http\Controllers\UploadController::class, 'updateActivity'])->name('uploads.update-activity');
-            Route::put('/uploads/{uploadSession}/start', [\App\Http\Controllers\UploadController::class, 'markAsUploading'])->name('uploads.start');
-            Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');
-            Route::post('/assets/upload/complete', [\App\Http\Controllers\UploadController::class, 'complete'])->name('assets.upload.complete');
-            Route::post('/assets/upload/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('assets.upload.finalize');
-            // Phase J.3.1: Alias route for finalize (used by replace file modal)
-            Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('uploads.finalize');
+            // Upload routes (tenant-scoped) — blocked when incubation window expired (hard lock)
+            Route::middleware('incubation.not_locked')->group(function () {
+                Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
+                Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
+                Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
+                Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
+                Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');
+                Route::post('/uploads/diagnostics', [\App\Http\Controllers\UploadController::class, 'diagnostics'])->name('uploads.diagnostics');
+                Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
+                Route::post('/uploads/{uploadSession}/multipart-part-url', [\App\Http\Controllers\UploadController::class, 'getMultipartPartUrl'])->name('uploads.multipart-part-url');
+                // Multipart upload endpoints (Phase 2.4)
+                Route::post('/uploads/{uploadSession}/multipart/init', [\App\Http\Controllers\UploadController::class, 'initMultipart'])->name('uploads.multipart.init');
+                Route::post('/uploads/{uploadSession}/multipart/sign-part', [\App\Http\Controllers\UploadController::class, 'signMultipartPart'])->name('uploads.multipart.sign-part');
+                Route::post('/uploads/{uploadSession}/multipart/complete', [\App\Http\Controllers\UploadController::class, 'completeMultipart'])->name('uploads.multipart.complete');
+                Route::post('/uploads/{uploadSession}/multipart/abort', [\App\Http\Controllers\UploadController::class, 'abortMultipart'])->name('uploads.multipart.abort');
+                Route::put('/uploads/{uploadSession}/activity', [\App\Http\Controllers\UploadController::class, 'updateActivity'])->name('uploads.update-activity');
+                Route::put('/uploads/{uploadSession}/start', [\App\Http\Controllers\UploadController::class, 'markAsUploading'])->name('uploads.start');
+                Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');
+                Route::post('/assets/upload/complete', [\App\Http\Controllers\UploadController::class, 'complete'])->name('assets.upload.complete');
+                Route::post('/assets/upload/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('assets.upload.finalize');
+                // Phase J.3.1: Alias route for finalize (used by replace file modal)
+                Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('uploads.finalize');
+            });
 
             // Brand routes (tenant-scoped)
             Route::get('/brands', fn () => redirect()->route('app'))->name('brands.index');
             Route::resource('brands', \App\Http\Controllers\BrandController::class)->except(['index']);
-            Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
-            Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
+            Route::middleware('incubation.not_locked')->group(function () {
+                Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
+                Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
+            });
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
             Route::post('/brands/{brand}/logo-variants/generate', [\App\Http\Controllers\BrandController::class, 'generateLogoVariants'])->name('brands.logo-variants.generate');
 

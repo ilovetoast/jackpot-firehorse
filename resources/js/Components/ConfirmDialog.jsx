@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ExclamationTriangleIcon, ExclamationCircleIcon, InformationCircleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 export default function ConfirmDialog({
@@ -12,7 +12,19 @@ export default function ConfirmDialog({
     variant = 'info',
     loading = false,
     error = null,
+    /** When set, user must type this exact string (after trim) to enable Confirm */
+    confirmInputMustMatch = null,
+    confirmInputHint = null,
 }) {
+    const [typedMatch, setTypedMatch] = useState('')
+
+    useEffect(() => {
+        if (!open) {
+            setTypedMatch('')
+        }
+    }, [open])
+
+    const inputMatches = !confirmInputMustMatch || typedMatch.trim() === String(confirmInputMustMatch).trim()
     // Handle ESC key
     useEffect(() => {
         if (!open) return
@@ -123,6 +135,26 @@ export default function ConfirmDialog({
                                     {message}
                                 </p>
                             </div>
+                            {confirmInputMustMatch !== null && confirmInputMustMatch !== undefined && (
+                                <div className="mt-4">
+                                    {confirmInputHint && (
+                                        <p className="text-sm text-gray-600 mb-2">{confirmInputHint}</p>
+                                    )}
+                                    <label htmlFor="confirm-dialog-type-match" className="sr-only">
+                                        Type to confirm
+                                    </label>
+                                    <input
+                                        id="confirm-dialog-type-match"
+                                        type="text"
+                                        value={typedMatch}
+                                        onChange={(e) => setTypedMatch(e.target.value)}
+                                        placeholder={String(confirmInputMustMatch)}
+                                        autoComplete="off"
+                                        autoFocus
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -131,7 +163,7 @@ export default function ConfirmDialog({
                         <button
                             type="button"
                             onClick={onConfirm}
-                            disabled={loading}
+                            disabled={loading || !inputMatches}
                             className={`inline-flex w-full justify-center rounded-md ${config.buttonBg} px-3 py-2 text-sm font-semibold text-white shadow-sm ${config.buttonHover} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${config.buttonFocus} sm:ml-3 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             {loading ? 'Processing...' : confirmText}

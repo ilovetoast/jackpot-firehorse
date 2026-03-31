@@ -39,6 +39,10 @@ class Tenant extends Model
         'incubated_at', // Phase AG-2: Incubation start timestamp
         'incubation_expires_at', // Phase AG-2: Incubation expiration timestamp
         'incubated_by_agency_id', // Phase AG-2: Agency that incubated this tenant
+        'incubation_target_plan_key', // Commercial plan limits during incubation (pre-transfer)
+        'incubation_extension_requested_at',
+        'incubation_extension_request_note',
+        'incubation_locked_at', // Set when hard lock engaged (audit; lock also derived from expiry)
         'activated_client_count', // Phase AG-4: Tier progress tracking
         'referred_by_agency_id', // Phase AG-10: Referral attribution
         'referral_source', // Phase AG-10: Referral source tracking
@@ -68,6 +72,8 @@ class Tenant extends Model
             'agency_approved_at' => 'datetime', // Phase AG-1: Agency approval timestamp
             'incubated_at' => 'datetime', // Phase AG-2: Incubation start timestamp
             'incubation_expires_at' => 'datetime', // Phase AG-2: Incubation expiration timestamp
+            'incubation_extension_requested_at' => 'datetime',
+            'incubation_locked_at' => 'datetime',
         ];
     }
 

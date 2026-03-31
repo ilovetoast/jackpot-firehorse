@@ -37,6 +37,7 @@ class AgencyIncubatedClientCreationTest extends TestCase
             ->withSession(['tenant_id' => $agency->id])
             ->post(route('agency.incubated-clients.store'), [
                 'company_name' => 'New Client Inc',
+                'incubation_target_plan_key' => 'pro',
             ]);
 
         $response->assertRedirect(route('agency.dashboard'));
@@ -58,6 +59,7 @@ class AgencyIncubatedClientCreationTest extends TestCase
             'owner',
             $user->fresh()->getRoleForTenant($client)
         );
+        $this->assertSame('pro', $client->incubation_target_plan_key);
     }
 
     public function test_agency_member_without_permission_cannot_create_incubated_client(): void

@@ -622,6 +622,13 @@ class User extends Authenticatable
             }
         }
 
+        // Platform site staff may permanently delete a company when they belong to that tenant (break-glass).
+        if ($permission === 'company_settings.delete_company'
+            && $this->tenants()->where('tenants.id', $tenant->id)->exists()
+            && ($this->hasRole('site_owner') || $this->hasRole('site_admin') || $this->hasRole('site_support'))) {
+            return true;
+        }
+
         // CRITICAL: Check PermissionMap FIRST (owner/admin have all permissions)
         // This prevents the bug where owner/admin permissions were missed
         $tenantRole = $this->getRoleForTenant($tenant);
@@ -668,7 +675,7 @@ class User extends Authenticatable
 
     /**
      * True when this user is an agency steward for an incubated client: managed on the client
-     * tenant by the incubating agency, owner or admin on that agency workspace, and no completed
+     * tenant by the incubating agency, owner/admin/agency_admin on that agency workspace, and no completed
      * ownership transfer yet.
      */
     public function canActAsIncubatingAgencyStewardForClient(Tenant $clientTenant): bool
@@ -700,7 +707,7 @@ class User extends Authenticatable
 
         $roleOnAgency = $this->getRoleForTenant($agencyTenant);
 
-        return in_array($roleOnAgency, ['owner', 'admin'], true);
+        return in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true);
     }
 
     /**

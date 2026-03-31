@@ -19,7 +19,8 @@ class AgencyTier extends Model
         'reward_percentage', // Phase AG-6: Admin-configurable (not enforced yet)
         'max_incubated_companies', // Phase AG-6: Admin-configurable (not enforced yet)
         'max_incubated_brands', // Phase AG-6: Admin-configurable (not enforced yet)
-        'incubation_window_days', // Phase AG-6: Admin-configurable (not enforced yet)
+        'incubation_window_days', // Phase AG-6: Default transfer deadline window (days)
+        'max_support_extension_days', // Max days support may add per extension (tier cap)
     ];
 
     /**
@@ -35,6 +36,7 @@ class AgencyTier extends Model
             'max_incubated_companies' => 'integer',
             'max_incubated_brands' => 'integer',
             'incubation_window_days' => 'integer',
+            'max_support_extension_days' => 'integer',
         ];
     }
 

@@ -31,7 +31,7 @@ const DASH_TABS = [
 export default function AgencyDashboard({
     auth,
     tenant,
-    agency,
+    agency = {},
     rewards = [],
     clients = {},
     referrals = {},
@@ -57,15 +57,33 @@ export default function AgencyDashboard({
     const brandColor = authFromPage?.activeBrand?.primary_color || '#6366f1'
     const activeBrand = authFromPage?.activeBrand
 
+    const incubationPlanOptions = agency.incubation_plan_options || []
+
     const incubateForm = useForm({
         company_name: '',
+        incubation_target_plan_key:
+            incubationPlanOptions.find((o) => o.key === 'pro')?.key || incubationPlanOptions[0]?.key || 'pro',
     })
+
+    const [extensionNoteByClient, setExtensionNoteByClient] = useState({})
 
     const submitIncubatedClient = (e) => {
         e.preventDefault()
         incubateForm.post('/app/agency/incubated-clients', {
             preserveScroll: true,
         })
+    }
+
+    const submitExtensionRequest = (clientId) => {
+        router.post(
+            `/app/agency/incubated-clients/${clientId}/extension-request`,
+            { note: extensionNoteByClient[clientId] || '' },
+            { preserveScroll: true }
+        )
+    }
+
+    const changeTargetPlan = (clientId, planKey) => {
+        router.patch(`/app/agency/incubated-clients/${clientId}`, { incubation_target_plan_key: planKey }, { preserveScroll: true })
     }
 
     const openAgencyDefaultOverview = () => {
@@ -408,7 +426,8 @@ export default function AgencyDashboard({
                                             Creates a new client workspace linked to your agency. You can transfer ownership later from
                                             company settings.
                                         </p>
-                                        <form onSubmit={submitIncubatedClient} className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
+                                        <form onSubmit={submitIncubatedClient} className="mt-5 flex flex-col gap-4">
+                                            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
                                             <div className="min-w-0 flex-1">
                                                 <label htmlFor="incubate-company-name" className="sr-only">
                                                     Company name
@@ -425,6 +444,31 @@ export default function AgencyDashboard({
                                                 {incubateForm.errors.company_name && (
                                                     <p className="mt-2 text-xs text-rose-300/90">{incubateForm.errors.company_name}</p>
                                                 )}
+                                            </div>
+                                            <div className="w-full sm:w-56">
+                                                <label htmlFor="incubate-target-plan" className="mb-1 block text-xs text-white/45">
+                                                    Target plan (limits during incubation)
+                                                </label>
+                                                <select
+                                                    id="incubate-target-plan"
+                                                    value={incubateForm.data.incubation_target_plan_key}
+                                                    onChange={(e) =>
+                                                        incubateForm.setData('incubation_target_plan_key', e.target.value)
+                                                    }
+                                                    className="w-full rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2.5 text-sm text-white focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                                >
+                                                    {incubationPlanOptions.map((opt) => (
+                                                        <option key={opt.key} value={opt.key} className="bg-[#1a1a1f]">
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {incubateForm.errors.incubation_target_plan_key && (
+                                                    <p className="mt-2 text-xs text-rose-300/90">
+                                                        {incubateForm.errors.incubation_target_plan_key}
+                                                    </p>
+                                                )}
+                                            </div>
                                             </div>
                                             <button
                                                 type="submit"
@@ -613,28 +657,99 @@ export default function AgencyDashboard({
                                                 <BuildingOfficeIcon className="h-4 w-4 text-white/40" />
                                                 Incubated ({incubated.length})
                                             </h4>
-                                            <div className="space-y-2">
+                                            <div className="space-y-4">
                                                 {incubated.map((client) => (
                                                     <div
                                                         key={client.id}
-                                                        className="flex items-center justify-between gap-4 rounded-lg py-2 pl-2 pr-2 transition hover:bg-white/[0.04]"
+                                                        className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
                                                     >
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            <p className="text-sm font-medium text-white">{client.name}</p>
-                                                            <span className="inline-flex items-center rounded-md bg-white/[0.08] px-2 py-0.5 text-xs font-medium text-white/70 ring-1 ring-white/10">
-                                                                Incubated
-                                                            </span>
-                                                            {client.expiring_soon && (
-                                                                <span className="inline-flex items-center rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-200 ring-1 ring-amber-500/25">
-                                                                    <ExclamationTriangleIcon className="mr-1 h-3 w-3" />
-                                                                    {client.days_remaining} day{client.days_remaining !== 1 ? 's' : ''}{' '}
-                                                                    left
+                                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <p className="text-sm font-medium text-white">{client.name}</p>
+                                                                <span className="inline-flex items-center rounded-md bg-white/[0.08] px-2 py-0.5 text-xs font-medium text-white/70 ring-1 ring-white/10">
+                                                                    Incubated
                                                                 </span>
-                                                            )}
+                                                                {client.incubation_locked && (
+                                                                    <span className="inline-flex items-center rounded-md bg-rose-500/15 px-2 py-0.5 text-xs font-medium text-rose-200 ring-1 ring-rose-500/25">
+                                                                        Window ended — locked
+                                                                    </span>
+                                                                )}
+                                                                {client.expiring_soon && !client.incubation_locked && (
+                                                                    <span className="inline-flex items-center rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-200 ring-1 ring-amber-500/25">
+                                                                        <ExclamationTriangleIcon className="mr-1 h-3 w-3" />
+                                                                        {client.days_remaining} day
+                                                                        {client.days_remaining !== 1 ? 's' : ''} left
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-right text-xs text-white/40">
+                                                                {client.incubation_expires_at && (
+                                                                    <p>
+                                                                        Deadline: {formatDate(client.incubation_expires_at)}
+                                                                    </p>
+                                                                )}
+                                                                {client.incubation_extension_requested_at && (
+                                                                    <p className="mt-1 text-amber-200/80">
+                                                                        Extension requested{' '}
+                                                                        {formatDate(client.incubation_extension_requested_at)}
+                                                                    </p>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        {client.incubated_at && (
-                                                            <p className="text-xs text-white/40">{formatDate(client.incubated_at)}</p>
-                                                        )}
+                                                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+                                                            <div className="min-w-0 flex-1">
+                                                                <label
+                                                                    className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35"
+                                                                    htmlFor={`target-plan-${client.id}`}
+                                                                >
+                                                                    Target plan
+                                                                </label>
+                                                                <select
+                                                                    id={`target-plan-${client.id}`}
+                                                                    value={client.incubation_target_plan_key || 'pro'}
+                                                                    onChange={(e) =>
+                                                                        changeTargetPlan(client.id, e.target.value)
+                                                                    }
+                                                                    className="w-full max-w-xs rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                                                >
+                                                                    {incubationPlanOptions.map((opt) => (
+                                                                        <option key={opt.key} value={opt.key} className="bg-[#1a1a1f]">
+                                                                            {opt.label}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <label
+                                                                    className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35"
+                                                                    htmlFor={`ext-note-${client.id}`}
+                                                                >
+                                                                    Request deadline extension (support)
+                                                                </label>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    <input
+                                                                        id={`ext-note-${client.id}`}
+                                                                        type="text"
+                                                                        value={extensionNoteByClient[client.id] || ''}
+                                                                        onChange={(e) =>
+                                                                            setExtensionNoteByClient((prev) => ({
+                                                                                ...prev,
+                                                                                [client.id]: e.target.value,
+                                                                            }))
+                                                                        }
+                                                                        placeholder="Optional note"
+                                                                        className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-sm text-white placeholder:text-white/35"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => submitExtensionRequest(client.id)}
+                                                                        className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+                                                                    >
+                                                                        Submit request
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 ))}
                                                 <p className={`ml-6 mt-2 ${bodySmall}`}>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
 import TagQuality from '../../Components/Companies/TagQuality'
@@ -55,6 +56,9 @@ export default function CompanySettings({
     const [agencySelectedBrandIds, setAgencySelectedBrandIds] = useState(() => new Set())
     const [agencySaving, setAgencySaving] = useState(false)
     const [agencyError, setAgencyError] = useState(null)
+    const [showDeleteCompanyDialog, setShowDeleteCompanyDialog] = useState(false)
+    const [deleteCompanyLoading, setDeleteCompanyLoading] = useState(false)
+    const [deleteCompanyError, setDeleteCompanyError] = useState(null)
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -1673,19 +1677,7 @@ export default function CompanySettings({
                                             </div>
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE "${tenant.name}"? This action cannot be undone. All data, brands, assets, and team members will be permanently deleted.`)) {
-                                                        if (confirm(`Final confirmation: This will permanently delete "${tenant.name}" and all associated data. Continue?`)) {
-                                                            router.delete('/app/companies/settings', {
-                                                                onError: (errors) => {
-                                                                    if (errors.error) {
-                                                                        alert(errors.error)
-                                                                    }
-                                                                },
-                                                            })
-                                                        }
-                                                    }
-                                                }}
+                                                onClick={() => setShowDeleteCompanyDialog(true)}
                                                 className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                                             >
                                                 <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -1729,6 +1721,42 @@ export default function CompanySettings({
                 </div>
             </main>
             <AppFooter />
+
+            <ConfirmDialog
+                open={showDeleteCompanyDialog}
+                onClose={() => {
+                    if (!deleteCompanyLoading) {
+                        setShowDeleteCompanyDialog(false)
+                        setDeleteCompanyError(null)
+                    }
+                }}
+                onConfirm={() => {
+                    setDeleteCompanyError(null)
+                    setDeleteCompanyLoading(true)
+                    router.delete('/app/companies/settings', {
+                        preserveScroll: true,
+                        onFinish: () => setDeleteCompanyLoading(false),
+                        onSuccess: () => setShowDeleteCompanyDialog(false),
+                        onError: (errors) => {
+                            const msg =
+                                (typeof errors === 'object' && errors?.error) ||
+                                (typeof errors === 'object' && errors?.message) ||
+                                (typeof errors === 'string' ? errors : null) ||
+                                'Could not delete company. Try again or remove other team members first.'
+                            setDeleteCompanyError(msg)
+                        },
+                    })
+                }}
+                title="Delete company permanently?"
+                message={`This will permanently delete "${tenant.name}" and all associated data: brands, assets, billing links, and team memberships. This cannot be undone.`}
+                confirmInputMustMatch={tenant.name}
+                confirmInputHint="Type the company name exactly as shown to confirm."
+                variant="danger"
+                confirmText="Delete company permanently"
+                cancelText="Cancel"
+                loading={deleteCompanyLoading}
+                error={deleteCompanyError}
+            />
         </div>
     )
 }

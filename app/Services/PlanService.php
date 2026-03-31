@@ -49,6 +49,18 @@ class PlanService
             }
         }
 
+        // Incubated client (pre–ownership transfer): limits follow the target plan chosen at incubation.
+        if (
+            $tenant->incubated_by_agency_id
+            && $tenant->incubation_target_plan_key
+            && ! $tenant->hasCompletedOwnershipTransfer()
+        ) {
+            $target = $tenant->incubation_target_plan_key;
+            if (config("plans.{$target}")) {
+                return $target;
+            }
+        }
+
         // Get the most recent active subscription with name 'default'
         // Use relationship query (not lazy load) to avoid LazyLoadingViolationException
         $subscription = $tenant->subscriptions()

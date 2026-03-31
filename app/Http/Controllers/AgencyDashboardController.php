@@ -9,6 +9,7 @@ use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Services\Agency\BrandReadinessService;
+use App\Services\IncubationWorkspaceService;
 use App\Services\TenantAgencyService;
 use App\Support\DashboardLinks;
 use App\Models\User;
@@ -17,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -36,7 +38,8 @@ use Inertia\Response;
 class AgencyDashboardController extends Controller
 {
     public function __construct(
-        protected TenantAgencyService $tenantAgencyService
+        protected TenantAgencyService $tenantAgencyService,
+        protected IncubationWorkspaceService $incubationWorkspaceService
     ) {}
 
     /**
@@ -84,6 +87,16 @@ class AgencyDashboardController extends Controller
 
         // Phase AG-8: Get incubation window from agency tier (informational only)
         $incubationWindowDays = $agencyTier?->incubation_window_days;
+        $maxSupportExtensionDays = $agencyTier?->max_support_extension_days;
+        if ($maxSupportExtensionDays === null && $agencyTier) {
+            $maxSupportExtensionDays = match ($agencyTier->name) {
+                'Silver' => 14,
+                'Gold' => 30,
+                'Platinum' => 180,
+                default => 14,
+            };
+        }
+        $incubationPlanOptions = $this->incubationPlanOptions();
 
         // Get reward ledger (all rewards for this agency)
         $rewards = AgencyPartnerReward::where('agency_tenant_id', $tenant->id)
@@ -114,7 +127,15 @@ class AgencyDashboardController extends Controller
                             });
                     });
             })
-            ->get(['id', 'name', 'slug', 'incubated_at', 'incubation_expires_at'])
+            ->get([
+                'id',
+                'name',
+                'slug',
+                'incubated_at',
+                'incubation_expires_at',
+                'incubation_target_plan_key',
+                'incubation_extension_requested_at',
+            ])
             ->map(function ($client) {
                 // Phase AG-8: Compute days remaining for incubation window awareness
                 $daysRemaining = null;
@@ -125,15 +146,20 @@ class AgencyDashboardController extends Controller
                     $expiringsSoon = $daysRemaining >= 0 && $daysRemaining < 7;
                 }
 
+                $locked = $this->incubationWorkspaceService->isWorkspaceLocked($client);
+
                 return [
                     'id' => $client->id,
                     'name' => $client->name,
                     'slug' => $client->slug,
                     'incubated_at' => $client->incubated_at?->toISOString(),
                     'incubation_expires_at' => $client->incubation_expires_at?->toISOString(),
+                    'incubation_target_plan_key' => $client->incubation_target_plan_key,
+                    'incubation_extension_requested_at' => $client->incubation_extension_requested_at?->toISOString(),
                     // Phase AG-8: Computed flags for UI nudges (no enforcement)
                     'days_remaining' => $daysRemaining,
                     'expiring_soon' => $expiringsSoon,
+                    'incubation_locked' => $locked,
                 ];
             });
 
@@ -303,7 +329,9 @@ class AgencyDashboardController extends Controller
                     'reward_percentage' => $agencyTier?->reward_percentage,
                     // Phase AG-8: Incubation window for informational display
                     'incubation_window_days' => $incubationWindowDays,
+                    'max_support_extension_days' => $maxSupportExtensionDays,
                 ],
+                'incubation_plan_options' => $incubationPlanOptions,
                 'activated_client_count' => $activatedCount,
                 'next_tier' => $nextTier ? [
                     'name' => $nextTier->name,
@@ -352,8 +380,10 @@ class AgencyDashboardController extends Controller
             abort(403, 'You do not have permission to start an incubated client company.');
         }
 
+        $planKeys = array_keys(config('plans', []));
         $validated = $request->validate([
             'company_name' => ['required', 'string', 'max:255'],
+            'incubation_target_plan_key' => ['required', 'string', Rule::in($planKeys)],
         ]);
 
         $baseSlug = Str::slug($validated['company_name']);
@@ -365,10 +395,10 @@ class AgencyDashboardController extends Controller
         }
 
         $agencyTier = $agencyTenant->agencyTier;
-        $incubationExpiresAt = null;
-        if ($agencyTier?->incubation_window_days) {
-            $incubationExpiresAt = now()->addDays($agencyTier->incubation_window_days);
-        }
+        $windowDays = $this->resolveIncubationWindowDays($agencyTier);
+        $incubationExpiresAt = $windowDays !== null
+            ? now()->addDays($windowDays)
+            : null;
 
         $clientTenant = DB::transaction(function () use ($validated, $slug, $agencyTenant, $user, $incubationExpiresAt) {
             $clientTenant = Tenant::create([
@@ -377,6 +407,7 @@ class AgencyDashboardController extends Controller
                 'incubated_at' => now(),
                 'incubation_expires_at' => $incubationExpiresAt,
                 'incubated_by_agency_id' => $agencyTenant->id,
+                'incubation_target_plan_key' => $validated['incubation_target_plan_key'],
             ]);
 
             $defaultBrand = $clientTenant->defaultBrand;
@@ -400,6 +431,116 @@ class AgencyDashboardController extends Controller
         return redirect()
             ->route('agency.dashboard')
             ->with('success', "Company “{$clientTenant->name}” is now incubated. Switch to it from your managed clients when you are ready.");
+    }
+
+    /**
+     * Update the target (pre-transfer) plan for an incubated client workspace.
+     */
+    public function updateIncubatedClientTargetPlan(Request $request, Tenant $incubatedClient): RedirectResponse
+    {
+        $agencyTenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            abort(403);
+        }
+
+        if (! $user || ! $this->userCanStartIncubation($user, $agencyTenant)) {
+            abort(403);
+        }
+
+        $this->assertAgencyOwnsIncubatedClient($agencyTenant, $incubatedClient);
+
+        $planKeys = array_keys(config('plans', []));
+        $validated = $request->validate([
+            'incubation_target_plan_key' => ['required', 'string', Rule::in($planKeys)],
+        ]);
+
+        $incubatedClient->update([
+            'incubation_target_plan_key' => $validated['incubation_target_plan_key'],
+        ]);
+
+        return redirect()
+            ->to(route('agency.dashboard').'?tab=progress')
+            ->with('success', 'Target plan updated for '.$incubatedClient->name.'.');
+    }
+
+    /**
+     * Agency requests a deadline extension (ops/support follows up; max per grant is tier-capped on admin side).
+     */
+    public function requestIncubationExtension(Request $request, Tenant $incubatedClient): RedirectResponse
+    {
+        $agencyTenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            abort(403);
+        }
+
+        if (! $user || ! $this->userCanStartIncubation($user, $agencyTenant)) {
+            abort(403);
+        }
+
+        $this->assertAgencyOwnsIncubatedClient($agencyTenant, $incubatedClient);
+
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $incubatedClient->update([
+            'incubation_extension_requested_at' => now(),
+            'incubation_extension_request_note' => $validated['note'] ?? null,
+        ]);
+
+        return redirect()
+            ->to(route('agency.dashboard').'?tab=progress')
+            ->with('success', 'Extension request submitted for '.$incubatedClient->name.'. Support will follow up.');
+    }
+
+    /**
+     * @return list<array{key: string, label: string}>
+     */
+    protected function incubationPlanOptions(): array
+    {
+        $out = [];
+        foreach (config('plans', []) as $key => $cfg) {
+            if (! is_array($cfg)) {
+                continue;
+            }
+            $out[] = [
+                'key' => $key,
+                'label' => $cfg['name'] ?? ucfirst($key),
+            ];
+        }
+
+        return $out;
+    }
+
+    protected function resolveIncubationWindowDays(?AgencyTier $tier): ?int
+    {
+        if ($tier === null) {
+            return null;
+        }
+        if ($tier->incubation_window_days !== null && $tier->incubation_window_days > 0) {
+            return (int) $tier->incubation_window_days;
+        }
+
+        return match ($tier->name) {
+            'Silver' => 30,
+            'Gold' => 60,
+            'Platinum' => 180,
+            default => 30,
+        };
+    }
+
+    protected function assertAgencyOwnsIncubatedClient(Tenant $agencyTenant, Tenant $incubatedClient): void
+    {
+        if ((int) $incubatedClient->incubated_by_agency_id !== (int) $agencyTenant->id) {
+            abort(404);
+        }
+        if ($incubatedClient->hasCompletedOwnershipTransfer()) {
+            abort(422, 'Ownership transfer is already complete.');
+        }
     }
 
     protected function userCanStartIncubation(?User $user, Tenant $tenant): bool

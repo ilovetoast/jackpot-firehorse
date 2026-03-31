@@ -57,6 +57,45 @@ export default function AdminCompanyView({
         equivalentPlanValue: null,
     })
 
+    const incubation = company.incubation
+    const [extendDays, setExtendDays] = useState(14)
+    const [extendReason, setExtendReason] = useState('')
+    const [extendStatus, setExtendStatus] = useState(null)
+    const [extendSubmitting, setExtendSubmitting] = useState(false)
+
+    const submitIncubationExtend = (e) => {
+        e.preventDefault()
+        if (!company?.id || !incubation) return
+        const max = incubation.max_support_extension_days || 14
+        const days = Math.min(Math.max(1, parseInt(extendDays, 10) || 1), max)
+        setExtendSubmitting(true)
+        setExtendStatus(null)
+        fetch(`/app/admin/api/companies/${company.id}/incubation/extend`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ extend_days: days, reason: extendReason || null }),
+        })
+            .then(async (res) => {
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                    setExtendStatus({ type: 'error', message: data.message || 'Request failed' })
+                    return
+                }
+                setExtendStatus({ type: 'success', message: data.message || 'Deadline extended.' })
+                setExtendReason('')
+                router.reload({ only: ['company'] })
+            })
+            .catch(() => {
+                setExtendStatus({ type: 'error', message: 'Network error' })
+            })
+            .finally(() => setExtendSubmitting(false))
+    }
+
     // Load users from API when form is opened
     useEffect(() => {
         if (!showAddUserForm) {
@@ -331,6 +370,106 @@ export default function AdminCompanyView({
                             </div>
                         </div>
                     </div>
+
+                    {incubation && (
+                        <div className="mb-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="p-6">
+                                    <h2 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                                        <ClockIcon className="h-5 w-5 text-gray-400" />
+                                        Incubation
+                                    </h2>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        Client workspace stewarded by{' '}
+                                        <span className="font-medium text-gray-800">
+                                            {incubation.incubated_by?.name || 'an agency'}
+                                        </span>
+                                        . Target plan (pre-transfer limits):{' '}
+                                        <span className="font-mono text-gray-800">
+                                            {incubation.incubation_target_plan_key || '—'}
+                                        </span>
+                                        .
+                                    </p>
+                                    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm mb-4">
+                                        <div>
+                                            <dt className="text-gray-500">Incubated at</dt>
+                                            <dd className="text-gray-900">{formatDate(incubation.incubated_at)}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-gray-500">Transfer deadline</dt>
+                                            <dd className="text-gray-900">{formatDate(incubation.incubation_expires_at)}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-gray-500">Hard lock (expired window)</dt>
+                                            <dd>
+                                                {incubation.incubation_locked ? (
+                                                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                                                        Locked — uploads/downloads blocked
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-700">No</span>
+                                                )}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-gray-500">Max extension per grant (agency tier)</dt>
+                                            <dd className="text-gray-900">
+                                                {incubation.max_support_extension_days ?? '—'} days
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                    <form onSubmit={submitIncubationExtend} className="rounded-lg border border-gray-200 bg-gray-50/80 p-4">
+                                            <p className="text-sm font-medium text-gray-800 mb-3">Push transfer deadline</p>
+                                            <div className="flex flex-wrap items-end gap-3">
+                                                <div>
+                                                    <label htmlFor="extend-days" className="block text-xs text-gray-500 mb-1">
+                                                        Additional days (max {incubation.max_support_extension_days ?? 14})
+                                                    </label>
+                                                    <input
+                                                        id="extend-days"
+                                                        type="number"
+                                                        min={1}
+                                                        max={incubation.max_support_extension_days || 14}
+                                                        value={extendDays}
+                                                        onChange={(e) => setExtendDays(e.target.value)}
+                                                        className="block w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                                                    />
+                                                </div>
+                                                <div className="min-w-[200px] flex-1">
+                                                    <label htmlFor="extend-reason" className="block text-xs text-gray-500 mb-1">
+                                                        Reason (optional)
+                                                    </label>
+                                                    <input
+                                                        id="extend-reason"
+                                                        type="text"
+                                                        value={extendReason}
+                                                        onChange={(e) => setExtendReason(e.target.value)}
+                                                        className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                                                        placeholder="e.g. Customer billing delayed"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="submit"
+                                                    disabled={extendSubmitting}
+                                                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                                >
+                                                    {extendSubmitting ? 'Saving…' : 'Extend deadline'}
+                                                </button>
+                                            </div>
+                                            {extendStatus && (
+                                                <p
+                                                    className={`mt-3 text-sm ${
+                                                        extendStatus.type === 'success' ? 'text-green-700' : 'text-red-700'
+                                                    }`}
+                                                >
+                                                    {extendStatus.message}
+                                                </p>
+                                            )}
+                                        </form>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Linked agency partners (client company ↔ agency) */}
                     <div className="mb-8">
