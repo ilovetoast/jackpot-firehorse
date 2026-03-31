@@ -69,6 +69,12 @@ export default function Overview({
     }
     const hasDashboardLinks = Boolean(dashLinks.company)
 
+    const [brandSignalsState, setBrandSignalsState] = useState(brand_signals)
+    const [momentumDataState, setMomentumDataState] = useState(momentum_data)
+    const [aiInsightsState, setAiInsightsState] = useState(ai_insights)
+    const [insightsLoading, setInsightsLoading] = useState(Boolean(insights_deferred))
+    const [deferredAssetPayload, setDeferredAssetPayload] = useState(null)
+
     const mergedCollage = deferredAssetPayload?.collage_assets ?? collage_assets
     const mergedMostViewed = deferredAssetPayload?.most_viewed_assets ?? most_viewed_assets
     const mergedTrending = deferredAssetPayload?.most_trending_assets ?? most_trending_assets
@@ -86,12 +92,6 @@ export default function Overview({
     const downloadsCount = stats?.download_links?.value ?? 0
     const executionsCount = stats?.executions_count ?? 0
     const aiReviews = pending_ai_suggestions?.total ?? 0
-
-    const [brandSignalsState, setBrandSignalsState] = useState(brand_signals)
-    const [momentumDataState, setMomentumDataState] = useState(momentum_data)
-    const [aiInsightsState, setAiInsightsState] = useState(ai_insights)
-    const [insightsLoading, setInsightsLoading] = useState(Boolean(insights_deferred))
-    const [deferredAssetPayload, setDeferredAssetPayload] = useState(null)
 
     useEffect(() => {
         setBrandSignalsState(brand_signals)
