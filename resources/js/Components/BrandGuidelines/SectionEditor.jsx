@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useSidebarEditor } from './SidebarEditorContext'
 import ToggleControl from './controls/ToggleControl'
 import BackgroundControl from './controls/BackgroundControl'
@@ -22,6 +23,70 @@ const MISSION_STYLE_OPTIONS = [
     { value: 'plain', label: 'Plain' },
     { value: 'highlight', label: 'Highlight' },
 ]
+
+function unwrapValue(field) {
+    if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
+    return field
+}
+
+/** Walk model_payload by dot path (e.g. identity.mission) and unwrap { value } leaves. */
+function getDnaAtPath(modelPayload, path) {
+    if (!modelPayload || !path) return undefined
+    const parts = path.split('.')
+    let cur = modelPayload
+    for (const p of parts) {
+        if (cur == null) return undefined
+        cur = cur[p]
+    }
+    return unwrapValue(cur)
+}
+
+/** TipTap expects HTML; DNA strings are usually plain text from the builder. */
+function toEditorHtml(value) {
+    if (value == null || value === '') return ''
+    const s = typeof value === 'string' ? value : String(value)
+    const t = s.trim()
+    if (!t) return ''
+    if (/<\/?[a-z][\s\S]*>/i.test(t)) return t
+    const escaped = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return `<p>${escaped}</p>`
+}
+
+/**
+ * Same merge as the main preview: presentation_content override, else DNA (guidelines page).
+ */
+function getWysiwygValue(draftContent, modelPayload, sectionId, field) {
+    const override = draftContent?.[sectionId]?.[field.key]
+    const overrideIsSet = override && override !== '<p></p>' && String(override).trim() !== ''
+    if (overrideIsSet) return override
+    if (!field.dnaPath) return ''
+    const dna = getDnaAtPath(modelPayload, field.dnaPath)
+    if (dna == null || dna === '') return ''
+    return toEditorHtml(dna)
+}
+
+function EditableWysiwygField({ ctx, sectionId, field, modelPayload }) {
+    const value = useMemo(
+        () => getWysiwygValue(ctx.draftContent, modelPayload, sectionId, field),
+        [ctx.draftContent, modelPayload, sectionId, field.key, field.dnaPath],
+    )
+
+    return (
+        <div className="space-y-1">
+            <span className="text-xs text-gray-500 font-medium">{field.label}</span>
+            <div className="border border-gray-200 rounded-md p-2 bg-white">
+                <WysiwygField
+                    value={value}
+                    onChange={(html) => ctx.updateContent(sectionId, field.key, html)}
+                    placeholder={`Edit ${field.label.toLowerCase()}...`}
+                />
+            </div>
+            {ctx.editMode === 'content' && (
+                <p className="text-[10px] text-amber-600">Edits will update Brand DNA</p>
+            )}
+        </div>
+    )
+}
 
 const SECTION_CONFIGS = {
     'sec-hero': {
@@ -108,6 +173,7 @@ export default function SectionEditor({ sectionId, sectionConfig }) {
     if (!ctx) return null
 
     const config = SECTION_CONFIGS[sectionId] || {}
+    const modelPayload = ctx.modelPayload ?? {}
     const sectionOverrides = ctx.draftOverrides?.sections?.[sectionId] ?? {}
     const visible = sectionOverrides.visible !== false
 
@@ -128,6 +194,8 @@ export default function SectionEditor({ sectionId, sectionConfig }) {
                     <BackgroundControl
                         background={sectionOverrides.background || {}}
                         onChange={(bg) => updateField('background', bg)}
+                        presetImages={ctx.backgroundImagePresets ?? []}
+                        presentationStyle={ctx.draftPresentation?.style || 'clean'}
                     />
 
                     {config.textControls && (
@@ -169,19 +237,13 @@ export default function SectionEditor({ sectionId, sectionConfig }) {
                                 {ctx.editMode === 'content' ? 'Edit DNA' : 'Content Overrides'}
                             </div>
                             {config.editableFields.map((field) => (
-                                <div key={field.key} className="space-y-1">
-                                    <span className="text-xs text-gray-500 font-medium">{field.label}</span>
-                                    <div className="border border-gray-200 rounded-md p-2 bg-white">
-                                        <WysiwygField
-                                            value={ctx.draftContent?.[sectionId]?.[field.key] || ''}
-                                            onChange={(html) => ctx.updateContent(sectionId, field.key, html)}
-                                            placeholder={`Edit ${field.label.toLowerCase()}...`}
-                                        />
-                                    </div>
-                                    {ctx.editMode === 'content' && (
-                                        <p className="text-[10px] text-amber-600">Edits will update Brand DNA</p>
-                                    )}
-                                </div>
+                                <EditableWysiwygField
+                                    key={field.key}
+                                    ctx={ctx}
+                                    sectionId={sectionId}
+                                    field={field}
+                                    modelPayload={modelPayload}
+                                />
                             ))}
                         </div>
                     )}

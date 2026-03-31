@@ -375,13 +375,31 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
     const sectionBgOverride = (id) => sectionOverrides[id]?.background ?? null
     const sectionContentToggle = (id, key, defaultVal = true) => sectionOverrides[id]?.content?.[key] ?? defaultVal
 
+    /** Stock “textured” style uses visual-reference photos; hide that layer when a custom background is set. */
+    const showStyleTextureLayer = (sectionId, texIdx) => {
+        if (!isTextured || !texBg(texIdx)) return false
+        const bg = sectionBgOverride(sectionId)
+        if (bg && bg.type && bg.type !== 'default') return false
+        return true
+    }
+
     const resolveBgStyle = (id, defaultBg) => {
         const bg = sectionBgOverride(id)
         if (!bg || !bg.type || bg.type === 'default') return defaultBg
         if (bg.type === 'solid') return { background: bg.color || '#000000' }
         if (bg.type === 'gradient') return { background: `linear-gradient(180deg, ${bg.gradient_from || '#000000'} 0%, ${bg.gradient_to || '#333333'} 100%)` }
         if (bg.type === 'transparent') return { background: 'transparent' }
-        if (bg.type === 'image') return defaultBg
+        if (bg.type === 'image') {
+            const url = typeof bg.image_url === 'string' ? bg.image_url.trim() : ''
+            if (!url) return defaultBg
+            const op = typeof bg.image_opacity === 'number' ? bg.image_opacity : 0.35
+            const darken = Math.min(0.85, Math.max(0, 1 - op))
+            return {
+                backgroundImage: `linear-gradient(rgba(0,0,0,${darken}), rgba(0,0,0,${darken})), url(${JSON.stringify(url)})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+            }
+        }
         return defaultBg
     }
 
@@ -655,14 +673,36 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                     <>
                         {/* ═══ 1. HERO ═══ */}
                         <section id="sec-hero" className="relative w-full overflow-hidden" style={{ minHeight: '100vh' }}>
-                            {/* Cinematic background */}
-                            {isTextured && texBg(0) && (
-                                <img src={texBg(0)} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                            )}
+                            {/* Cinematic background — custom image override, else textured style rotation from visual references */}
+                            {(() => {
+                                const hBg = sectionBgOverride('sec-hero')
+                                const customUrl = hBg?.type === 'image' && typeof hBg.image_url === 'string' && hBg.image_url.trim()
+                                if (customUrl) {
+                                    const op = typeof hBg.image_opacity === 'number' ? hBg.image_opacity : 0.45
+                                    const blend =
+                                        hBg.blend_mode === 'multiply'
+                                            ? 'multiply'
+                                            : hBg.blend_mode === 'screen'
+                                              ? 'screen'
+                                              : 'normal'
+                                    return (
+                                        <img
+                                            src={hBg.image_url.trim()}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-cover"
+                                            style={{ opacity: op, mixBlendMode: blend }}
+                                        />
+                                    )
+                                }
+                                if (showStyleTextureLayer('sec-hero', 0)) {
+                                    return <img src={texBg(0)} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                                }
+                                return null
+                            })()}
                             <div
                                 className="absolute inset-0"
                                 style={{
-                                    ...(isTextured && texBg(0) ? { mixBlendMode: 'multiply' } : {}),
+                                    ...(showStyleTextureLayer('sec-hero', 0) ? { mixBlendMode: 'multiply' } : {}),
                                     background: isBold
                                         ? `linear-gradient(160deg, ${primaryDeep} 0%, ${primaryDark} 40%, ${primaryColor} 100%)`
                                         : isTextured
@@ -740,7 +780,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     ? primaryDeep
                                     : isBold ? `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.06)} 0%, white 100%)` : 'white'
                             })}>
-                                {isTextured && texBg(1) && (
+                                {showStyleTextureLayer('sec-purpose', 1) && (
                                     <>
                                         <img src={texBg(1)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'screen' }} />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -813,7 +853,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         : `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.04)} 0%, white 100%)`
                                 })}
                             >
-                                {isTextured && texBg(2) && (
+                                {showStyleTextureLayer('sec-values', 2) && (
                                     <>
                                         <img src={texBg(2)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15" style={{ mixBlendMode: 'screen' }} />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -896,7 +936,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     ? `linear-gradient(180deg, white 0%, ${hexToRgba(secondaryColor, 0.06)} 100%)`
                                     : `linear-gradient(180deg, ${hexToRgba(secondaryColor, 0.04)} 0%, ${hexToRgba(primaryColor, 0.02)} 100%)`
                             })}>
-                                {isTextured && texBg(3) && (
+                                {showStyleTextureLayer('sec-voice', 3) && (
                                     <>
                                         <img src={texBg(3)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'multiply' }} />
                                         <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -965,7 +1005,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                 background: `linear-gradient(135deg, ${primaryDeep} 0%, ${primaryDark} 50%, ${darkenHex(primaryColor, 0.5)} 100%)`,
                             })}
                         >
-                            {isTextured && texBg(4) && (
+                            {showStyleTextureLayer('sec-archetype', 4) && (
                                 <img src={texBg(4)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" style={{ mixBlendMode: 'screen', filter: 'saturate(0.4)' }} />
                             )}
                             <div className={`absolute inset-0 ${isTextured ? 'opacity-[0.06]' : 'opacity-[0.04]'}`} style={{ backgroundImage: isTextured ? `url("${grainSvg}")` : `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`, backgroundSize: isTextured ? undefined : '40px 40px' }} />
@@ -1013,7 +1053,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             <section id="sec-visual" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
                                 style={resolveBgStyle('sec-visual', isTextured ? { background: `linear-gradient(180deg, ${darkenHex(primaryColor, 0.55)} 0%, ${primaryDeep} 100%)` } : {})}
                             >
-                                {isTextured && texBg(5) && (
+                                {showStyleTextureLayer('sec-visual', 5) && (
                                     <>
                                         <img src={texBg(5)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15" style={{ mixBlendMode: 'screen', filter: 'saturate(0.3)' }} />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -1204,7 +1244,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     ? `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.07)} 0%, white 100%)`
                                     : `linear-gradient(180deg, ${hexToRgba(primaryColor, 0.04)} 0%, white 100%)`
                             })}>
-                                {isTextured && texBg(6) && (
+                                {showStyleTextureLayer('sec-typography', 6) && (
                                     <>
                                         <img src={texBg(6)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)' }} />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -1317,7 +1357,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             <section id="sec-logo" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
                                 style={resolveBgStyle('sec-logo', isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {})}
                             >
-                                {isTextured && texBg(7) && (
+                                {showStyleTextureLayer('sec-logo', 7) && (
                                     <>
                                         <img src={texBg(7)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)' }} />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
@@ -1470,7 +1510,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     background: `linear-gradient(160deg, ${primaryDeep} 0%, ${primaryDark} 60%, ${darkenHex(secondaryColor, 0.6)} 100%)`,
                                 }}
                             >
-                                {isTextured && texBg(0) && (
+                                {showStyleTextureLayer('sec-logo-standards', 0) && (
                                     <img src={texBg(0)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.15)' }} />
                                 )}
                                 <div className={`absolute inset-0 ${isTextured ? 'opacity-[0.05]' : 'opacity-[0.03]'}`} style={{ backgroundImage: isTextured ? `url("${grainSvg}")` : `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`, backgroundSize: isTextured ? undefined : '30px 30px' }} />
@@ -1562,7 +1602,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
 export default function BrandGuidelinesIndex(props) {
     if (props.canCustomize) {
         return (
-            <SidebarEditorProvider modelPayload={props.modelPayload} brand={props.brand} canCustomize={true}>
+            <SidebarEditorProvider
+                modelPayload={props.modelPayload}
+                brand={props.brand}
+                canCustomize={true}
+                visualReferences={props.visualReferences}
+            >
                 <BrandGuidelinesIndexInner {...props} />
             </SidebarEditorProvider>
         )

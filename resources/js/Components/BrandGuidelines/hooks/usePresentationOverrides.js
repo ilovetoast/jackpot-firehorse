@@ -143,6 +143,7 @@ export default function usePresentationOverrides({ modelPayload, brand, canCusto
     }, [canCustomize, brand?.id, draftOverrides, draftContent, draftPresentation])
 
     return {
+        modelPayload,
         draftOverrides,
         draftContent,
         draftPresentation,

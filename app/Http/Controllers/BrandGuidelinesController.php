@@ -229,23 +229,21 @@ class BrandGuidelinesController extends Controller
             }
 
             $assets = Asset::whereIn('id', $assetIds)->get();
-            $items = [];
             foreach ($assets as $asset) {
-                $items[] = [
+                $item = [
                     'id' => $asset->id,
                     'title' => $asset->title,
                     'url' => $asset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED)
                         ?: $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                     'thumbnail_url' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                 ];
-            }
-            if (! empty($items)) {
-                $results[$categoryKey] = $items;
+                $results[$categoryKey] = $this->appendUniqueVisualReferenceById($results[$categoryKey] ?? [], $item);
             }
         }
 
-        // Fallback: also gather from brand_model_version_assets pivot for legacy references
-        if ($activeVersion && empty($results)) {
+        // Merge builder / AI-attached references from the version pivot (visual_reference context).
+        // Always merge — do not require reference_categories to be empty so DNA + builder paths both appear.
+        if ($activeVersion) {
             $pivotRefs = $activeVersion->assetsForContext('visual_reference')->get();
 
             $legacyMap = [
@@ -258,17 +256,38 @@ class BrandGuidelinesController extends Controller
             foreach ($pivotRefs as $asset) {
                 $refType = $asset->pivot->reference_type ?? 'photography_reference';
                 $catKey = $legacyMap[$refType] ?? 'photography';
-                $results[$catKey][] = [
+                $item = [
                     'id' => $asset->id,
                     'title' => $asset->title,
                     'url' => $asset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED)
                         ?: $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                     'thumbnail_url' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                 ];
+                $results[$catKey] = $this->appendUniqueVisualReferenceById($results[$catKey] ?? [], $item);
             }
         }
 
         return $results;
+    }
+
+    /**
+     * @param  array<int, array{id?: int, title?: string, url?: string, thumbnail_url?: string}>  $items
+     * @param  array{id?: int, title?: string, url?: string, thumbnail_url?: string}  $item
+     * @return array<int, array{id?: int, title?: string, url?: string, thumbnail_url?: string}>
+     */
+    private function appendUniqueVisualReferenceById(array $items, array $item): array
+    {
+        $id = $item['id'] ?? null;
+        if ($id !== null) {
+            foreach ($items as $existing) {
+                if (($existing['id'] ?? null) === $id) {
+                    return $items;
+                }
+            }
+        }
+        $items[] = $item;
+
+        return $items;
     }
 
     protected static function deepUnwrap(array $data): array

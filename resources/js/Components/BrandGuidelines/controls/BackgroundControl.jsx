@@ -17,15 +17,76 @@ const BLEND_MODES = [
     { value: 'normal', label: 'Normal' },
 ]
 
-export default function BackgroundControl({ background = {}, onChange }) {
+export default function BackgroundControl({ background = {}, onChange, presetImages = [], presentationStyle = 'clean' }) {
     const type = background.type || 'default'
+    const isTexturedGlobal = presentationStyle === 'textured'
 
     const update = (key, value) => {
         onChange({ ...background, [key]: value })
     }
 
+    const applyPresetUrl = (url) => {
+        onChange({
+            ...background,
+            type: 'image',
+            image_url: url,
+            image_opacity: typeof background.image_opacity === 'number' ? background.image_opacity : 0.35,
+            blend_mode: background.blend_mode || 'multiply',
+        })
+    }
+
+    const clearPinnedImage = () => {
+        onChange({ type: 'default' })
+    }
+
     return (
         <div className="space-y-2.5">
+            {presetImages.length > 0 && (
+                <div className="rounded-lg border border-indigo-100/80 bg-indigo-50/40 p-2.5 space-y-2">
+                    <div>
+                        <span className="text-xs text-gray-700 font-medium">Brand reference images</span>
+                        <p className="text-[10px] text-gray-500 mt-0.5 leading-snug">
+                            Pulled from Brand DNA reference categories and from the AI builder when assets are attached
+                            as visual references. Use them in{' '}
+                            <strong>any</strong> presentation style — click to pin one to this section.
+                        </p>
+                        {isTexturedGlobal && (
+                            <p className="text-[10px] text-amber-800/90 mt-1 leading-snug">
+                                Textured + <strong>Default</strong> background rotates these automatically by section.
+                                Pinning an image here overrides rotation for this section only.
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {presetImages.map((p, i) => (
+                            <button
+                                key={`${p.url}-${i}`}
+                                type="button"
+                                title={p.label}
+                                onClick={() => applyPresetUrl(p.url)}
+                                className={`relative h-10 w-10 shrink-0 rounded-md overflow-hidden border-2 transition-all ${
+                                    type === 'image' && (background.image_url || '') === p.url
+                                        ? 'border-indigo-500 ring-1 ring-indigo-300'
+                                        : 'border-gray-200 hover:border-gray-400'
+                                }`}
+                            >
+                                <img src={p.url} alt="" className="h-full w-full object-cover" />
+                            </button>
+                        ))}
+                    </div>
+                    {type === 'image' && (background.image_url || '').trim() !== '' && (
+                        <button
+                            type="button"
+                            onClick={clearPinnedImage}
+                            className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800"
+                        >
+                            Clear pinned image — use section default
+                            {isTexturedGlobal ? ' (Textured: automatic rotation)' : ''}
+                        </button>
+                    )}
+                </div>
+            )}
+
             <SelectControl
                 label="Background"
                 value={type}
@@ -76,12 +137,12 @@ export default function BackgroundControl({ background = {}, onChange }) {
                     </div>
                     <SliderControl
                         label="Opacity"
-                        value={background.image_opacity ?? 0.2}
+                        value={background.image_opacity ?? 0.35}
                         onChange={(v) => update('image_opacity', v)}
                     />
                     <SelectControl
                         label="Blend"
-                        value={background.blend_mode || 'overlay'}
+                        value={background.blend_mode || 'multiply'}
                         onChange={(v) => update('blend_mode', v)}
                         options={BLEND_MODES}
                     />
