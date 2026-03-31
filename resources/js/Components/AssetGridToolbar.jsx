@@ -18,6 +18,8 @@
  * @param {Function} props.onToggleInfo - Callback to toggle info visibility
  * @param {number} props.cardSize - Current card size in pixels (160-360, default 220)
  * @param {Function} props.onCardSizeChange - Callback when card size changes
+ * @param {'grid'|'masonry'} props.layoutMode - Uniform tiles vs masonry columns
+ * @param {Function} props.onLayoutModeChange - (mode) => void
  * @param {string} props.primaryColor - Brand primary color for slider styling
  * @param {Array} props.filterable_schema - Filterable metadata schema from backend
  * @param {number|null} props.selectedCategoryId - Currently selected category ID
@@ -39,6 +41,8 @@ export default function AssetGridToolbar({
     onToggleInfo = () => {},
     cardSize = 220,
     onCardSizeChange = () => {},
+    layoutMode = 'grid',
+    onLayoutModeChange = () => {},
     primaryColor = '#6366f1', // Default indigo-600
     selectedCount = 0, // SelectionContext count (replaces bucketCount)
     filterable_schema = [], // Primary metadata filters
@@ -223,6 +227,28 @@ export default function AssetGridToolbar({
         return gridPatterns[size] || gridPatterns.medium
     }
 
+    /** Uniform grid vs masonry — icon-only radios beside tile size */
+    const LayoutUniformIcon = ({ className = 'h-4 w-4' }) => (
+        <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+            <rect x="1" y="1" width="5" height="6" rx="0.5" />
+            <rect x="7.5" y="1" width="5" height="6" rx="0.5" />
+            <rect x="14" y="1" width="5" height="6" rx="0.5" />
+            <rect x="1" y="9" width="5" height="6" rx="0.5" />
+            <rect x="7.5" y="9" width="5" height="6" rx="0.5" />
+            <rect x="14" y="9" width="5" height="6" rx="0.5" />
+        </svg>
+    )
+    const LayoutMasonryIcon = ({ className = 'h-4 w-4' }) => (
+        <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+            <rect x="1" y="1" width="5.5" height="4" rx="0.5" />
+            <rect x="8" y="1" width="5.5" height="7" rx="0.5" />
+            <rect x="14.5" y="1" width="4.5" height="5" rx="0.5" />
+            <rect x="1" y="6" width="5.5" height="9" rx="0.5" />
+            <rect x="8" y="9" width="5.5" height="6" rx="0.5" />
+            <rect x="14.5" y="7" width="4.5" height="8" rx="0.5" />
+        </svg>
+    )
+
     return (
         <div className={`bg-white ${showMoreFilters ? 'border-b border-gray-200' : 'border-b border-gray-200'}`}>
             {/* Pending Assets Callout - Above search bar */}
@@ -361,6 +387,53 @@ export default function AssetGridToolbar({
                                         </button>
                                     )
                                 })}
+                            </div>
+
+                            <div
+                                className="inline-flex rounded-md shadow-sm"
+                                role="radiogroup"
+                                aria-label="Asset layout"
+                            >
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={layoutMode === 'grid'}
+                                    onClick={() => onLayoutModeChange('grid')}
+                                    className={`
+                                        px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
+                                        flex items-center justify-center rounded-l-md border border-gray-300
+                                        focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
+                                        ${layoutMode === 'grid'
+                                            ? 'bg-white text-gray-900 shadow-sm z-10'
+                                            : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                                        }
+                                    `}
+                                    style={layoutMode === 'grid' ? { borderColor: primaryColor, '--tw-ring-color': primaryColor } : {}}
+                                    title="Uniform grid"
+                                >
+                                    <LayoutUniformIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    <span className="sr-only">Uniform grid</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={layoutMode === 'masonry'}
+                                    onClick={() => onLayoutModeChange('masonry')}
+                                    className={`
+                                        -ml-px px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
+                                        flex items-center justify-center rounded-r-md border border-gray-300
+                                        focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
+                                        ${layoutMode === 'masonry'
+                                            ? 'bg-white text-gray-900 shadow-sm z-10'
+                                            : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                                        }
+                                    `}
+                                    style={layoutMode === 'masonry' ? { borderColor: primaryColor, '--tw-ring-color': primaryColor } : {}}
+                                    title="Masonry — full image, max height"
+                                >
+                                    <LayoutMasonryIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    <span className="sr-only">Masonry</span>
+                                </button>
                             </div>
                         </div>
                     </div>

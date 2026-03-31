@@ -295,10 +295,17 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         const stored = localStorage.getItem('assetGridShowInfo')
         return stored ? stored === 'true' : true
     }
+
+    const getStoredGridLayout = () => {
+        if (typeof window === 'undefined') return 'grid'
+        const v = localStorage.getItem('assetGridLayout')
+        return v === 'masonry' ? 'masonry' : 'grid'
+    }
     
     // Card size with scaling enabled - loads from localStorage
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
+    const [layoutMode, setLayoutMode] = useState(getStoredGridLayout)
     
     // Save card size to localStorage when it changes
     useEffect(() => {
@@ -312,6 +319,12 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             localStorage.setItem('assetGridShowInfo', showInfo.toString())
         }
     }, [showInfo])
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridLayout', layoutMode)
+        }
+    }, [layoutMode])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=slug)
     // ARCHITECTURAL: Reload filterable_schema and available_values so primary/secondary filters match the selected category (same as Assets).
@@ -775,6 +788,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onToggleInfo={() => setShowInfo(v => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
+                                layoutMode={layoutMode}
+                                onLayoutModeChange={setLayoutMode}
                                 primaryColor={workspaceAccentColor}
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
@@ -851,6 +866,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onAssetClick={handleAssetGridClick}
                                 onAssetDoubleClick={handleAssetDoubleClick}
                                 cardSize={cardSize}
+                                layoutMode={layoutMode}
                                 cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                 showInfo={showInfo}
                                 selectedAssetId={activeAssetId}

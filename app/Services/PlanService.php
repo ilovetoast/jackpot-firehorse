@@ -676,7 +676,10 @@ class PlanService
      */
     public function canAddTag(Asset $asset): bool
     {
-        $tenant = $asset->tenant;
+        $tenant = Tenant::find($asset->tenant_id);
+        if (! $tenant) {
+            return false;
+        }
         $maxTags = $this->getMaxTagsPerAsset($tenant);
         $currentTags = $this->getCurrentTagCount($asset);
 
@@ -688,7 +691,10 @@ class PlanService
      */
     public function canAddTags(Asset $asset, int $tagCount): bool
     {
-        $tenant = $asset->tenant;
+        $tenant = Tenant::find($asset->tenant_id);
+        if (! $tenant) {
+            return false;
+        }
         $maxTags = $this->getMaxTagsPerAsset($tenant);
         $currentTags = $this->getCurrentTagCount($asset);
 
@@ -701,8 +707,8 @@ class PlanService
     public function enforceTagLimit(Asset $asset, int $additionalTags = 1): void
     {
         if (! $this->canAddTags($asset, $additionalTags)) {
-            $tenant = $asset->tenant;
-            $maxTags = $this->getMaxTagsPerAsset($tenant);
+            $tenant = Tenant::find($asset->tenant_id);
+            $maxTags = $tenant ? $this->getMaxTagsPerAsset($tenant) : 0;
             $currentTags = $this->getCurrentTagCount($asset);
 
             throw new PlanLimitExceededException(

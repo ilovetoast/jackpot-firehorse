@@ -43,6 +43,16 @@
         grid-template-columns: repeat(auto-fill, minmax(var(--asset-card-size), 1fr));
     }
 
+    /* Masonry: column width tracks card size; items keep natural height (capped in AssetCard) */
+    .asset-grid-container-masonry {
+        column-width: var(--asset-card-size);
+        column-gap: 1.75rem;
+    }
+    .asset-grid-container-masonry > * {
+        break-inside: avoid;
+        margin-bottom: 1.75rem;
+    }
+
     /* Download bucket: count "bump" when an asset is added (slot-machine style feedback) */
     @keyframes bucket-count-bump {
         0% {

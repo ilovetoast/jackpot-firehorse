@@ -17,19 +17,25 @@
  * 
  * @param {Object} props
  * @param {number} props.cardSize - Card size in pixels (160-360)
+ * @param {'grid'|'masonry'} props.layoutMode - Uniform tiles vs CSS-column masonry
  * @param {Array} props.children - Grid items (AssetCard components)
  */
-export default function AssetGridContainer({ cardSize = 220, children }) {
+export default function AssetGridContainer({ cardSize = 220, layoutMode = 'grid', children }) {
     // Clamp cardSize to valid range (160-600)
     const clampedSize = Math.max(160, Math.min(600, cardSize))
-    
+
+    const style = { '--asset-card-size': `${clampedSize}px` }
+
+    if (layoutMode === 'masonry') {
+        return (
+            <div className="asset-grid-container-masonry" style={style}>
+                {children}
+            </div>
+        )
+    }
+
     return (
-        <div
-            className="grid gap-7 asset-grid-container"
-            style={{
-                '--asset-card-size': `${clampedSize}px`,
-            }}
-        >
+        <div className="grid gap-7 asset-grid-container" style={style}>
             {children}
         </div>
     )

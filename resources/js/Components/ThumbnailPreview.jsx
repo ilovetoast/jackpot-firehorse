@@ -33,6 +33,7 @@
  * @param {boolean} props.shouldAnimateThumbnail - Whether to animate thumbnail appearance
  * @param {string|null} props.primaryColor - Brand primary color for placeholder
  * @param {string|null} props.forceObjectFit - Force object-fit value ('cover' or 'contain'), overrides category-based logic
+ * @param {number|null} props.masonryMaxHeight - When set, image sizes to natural aspect ratio up to this max height (masonry grid)
  * @param {boolean} props.preferLargeForVector - When true, use 'large' style (4096px) for SVG/vector assets in detail view for crisp rendering
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
@@ -69,6 +70,7 @@ export default function ThumbnailPreview({
     shouldAnimateThumbnail = false,
     primaryColor = null,
     forceObjectFit = null,
+    masonryMaxHeight = null,
     preferLargeForVector = false
 }) {
     const { auth } = usePage().props
@@ -205,6 +207,14 @@ export default function ThumbnailPreview({
         return 'object-cover'
     }, [forceObjectFit, isSmallThumbnail, asset?.category?.slug])
 
+    const isMasonryHeight = masonryMaxHeight != null && Number(masonryMaxHeight) > 0
+    const imgFitClasses = isMasonryHeight
+        ? 'w-full h-auto max-h-full object-contain object-center'
+        : `w-full h-full ${objectFitClass}`
+    const masonryWrapperStyle = isMasonryHeight
+        ? { maxHeight: Number(masonryMaxHeight), minHeight: 96 }
+        : undefined
+
     // Check thumbnail status - if FAILED, show icon immediately
     const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
     const isFailed = thumbnailStatus === 'FAILED' || thumbnailStatus === 'failed' || state === 'FAILED'
@@ -321,7 +331,7 @@ export default function ThumbnailPreview({
         }
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
                 {/* Background placeholder - only show if image not loaded and not animating */}
                 {!imageLoaded && !isAnimating && (
                     <div className="absolute inset-0 bg-gray-100" />
@@ -334,7 +344,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${objectFitClass}`}
+                    className={imgFitClasses}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0,
@@ -375,7 +385,7 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
                 {/* Preview image always renders when preview_thumbnail_url exists */}
                 {/* imageLoaded only affects opacity, not DOM presence */}
                 <img
@@ -385,7 +395,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${objectFitClass}`}
+                    className={imgFitClasses}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,
@@ -467,7 +477,7 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`}>
+            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
                 {/* Background placeholder - show while image loads */}
                 {!imageLoaded && (
                     <div className="absolute inset-0 bg-gray-100" />
@@ -483,7 +493,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`w-full h-full ${objectFitClass}`}
+                    className={imgFitClasses}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,

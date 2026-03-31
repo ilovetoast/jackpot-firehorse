@@ -466,10 +466,17 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         const stored = localStorage.getItem('assetGridShowInfo')
         return stored ? stored === 'true' : true
     }
+
+    const getStoredGridLayout = () => {
+        if (typeof window === 'undefined') return 'grid'
+        const v = localStorage.getItem('assetGridLayout')
+        return v === 'masonry' ? 'masonry' : 'grid'
+    }
     
     // Card size with scaling enabled - loads from localStorage
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
+    const [layoutMode, setLayoutMode] = useState(getStoredGridLayout)
 
     // Card style from brand settings: clean (guidelines) | impact (default)
     const cardStyle = (auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'
@@ -486,6 +493,12 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             localStorage.setItem('assetGridShowInfo', showInfo.toString())
         }
     }, [showInfo])
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridLayout', layoutMode)
+        }
+    }, [layoutMode])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
     const handleCategorySelect = useCallback((category) => {
@@ -1053,6 +1066,8 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 onToggleInfo={() => setShowInfo(v => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
+                                layoutMode={layoutMode}
+                                onLayoutModeChange={setLayoutMode}
                                 primaryColor={workspaceAccentColor}
                                 selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}
@@ -1121,6 +1136,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     onAssetClick={handleAssetClick}
                                     onAssetDoubleClick={handleAssetDoubleClick}
                                     cardSize={cardSize}
+                                    layoutMode={layoutMode}
                                     cardStyle={cardStyle}
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}

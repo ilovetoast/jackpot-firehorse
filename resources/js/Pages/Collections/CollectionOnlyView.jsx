@@ -2,7 +2,7 @@
  * C12: Collection-only view — read-only view of a single collection and its assets.
  * For users with collection access grant only (no brand membership).
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
@@ -22,6 +22,17 @@ export default function CollectionOnlyView({ collection, assets = [] }) {
         const stored = localStorage.getItem('assetGridShowInfo')
         return stored ? stored === 'true' : true
     })
+    const [layoutMode, setLayoutMode] = useState(() => {
+        if (typeof window === 'undefined') return 'grid'
+        const v = localStorage.getItem('assetGridLayout')
+        return v === 'masonry' ? 'masonry' : 'grid'
+    })
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridLayout', layoutMode)
+        }
+    }, [layoutMode])
 
     const handleAssetClick = (asset) => {
         if (!asset?.id) return
@@ -57,6 +68,8 @@ export default function CollectionOnlyView({ collection, assets = [] }) {
                                 onToggleInfo={() => setShowInfo((v) => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
+                                layoutMode={layoutMode}
+                                onLayoutModeChange={setLayoutMode}
                                 primaryColor="#6366f1"
                                 selectedCount={0}
                                 filterable_schema={[]}
@@ -71,6 +84,7 @@ export default function CollectionOnlyView({ collection, assets = [] }) {
                                 assets={assets}
                                 onAssetClick={handleAssetClick}
                                 cardSize={cardSize}
+                                layoutMode={layoutMode}
                                 cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                 showInfo={showInfo}
                                 selectedAssetId={null}

@@ -38,6 +38,8 @@ export default function AssetCard({
     cardVariant = 'default',
     cardStyle = 'default',
     selectionAssetType = 'asset',
+    layoutMode = 'grid',
+    masonryMaxHeightPx = 560,
 }) {
     const { auth } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
@@ -302,6 +304,14 @@ export default function AssetCard({
         }
     }
     const handleClick = (e) => {
+        if (
+            typeof window !== 'undefined' &&
+            window.__assetGridMarqueeSuppressClickUntil > Date.now()
+        ) {
+            e.preventDefault()
+            e.stopPropagation()
+            return
+        }
         if (isMobile && hasSelection && touchHandledRef.current) {
             touchHandledRef.current = false
             e.preventDefault()
@@ -313,6 +323,12 @@ export default function AssetCard({
             if (cardClickDelayRef.current) clearTimeout(cardClickDelayRef.current)
             cardClickDelayRef.current = setTimeout(() => {
                 cardClickDelayRef.current = null
+                if (
+                    typeof window !== 'undefined' &&
+                    window.__assetGridMarqueeSuppressClickUntil > Date.now()
+                ) {
+                    return
+                }
                 onClick(asset, e)
             }, 280)
             return
@@ -373,6 +389,7 @@ export default function AssetCard({
         ? (isSelected ? '' : 'shadow-md group-hover:shadow-lg')
         : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
+    const isMasonry = layoutMode === 'masonry'
 
     /** Light checkerboard so white/light marks stay visible (logos + graphics; CSS-only). */
     /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
@@ -410,11 +427,14 @@ export default function AssetCard({
                 '--primary-color': primaryColor,
             }}
         >
-            {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) or elongated (5:3) for guidelines */}
+            {/* Phase 3.1: Thumbnail — uniform aspect (grid) or natural height capped (masonry) */}
             {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
-                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
+                className={`${
+                    isMasonry ? 'w-full min-h-[120px]' : aspectRatio
+                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
+                    ...(isMasonry ? { maxHeight: masonryMaxHeightPx } : {}),
                     ...((!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}),
                     ...checkerboardThumbnailStyle,
                 }}
@@ -477,12 +497,17 @@ export default function AssetCard({
                         <ThumbnailPreview
                             asset={asset}
                             alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
-                            className={`w-full h-full ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                            className={`${
+                                isMasonry
+                                    ? 'block w-full h-auto max-h-full'
+                                    : 'w-full h-full'
+                            } ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
                             retryCount={0}
                             onRetry={null}
                             size="lg"
                             thumbnailVersion={thumbnailVersion}
                             shouldAnimateThumbnail={shouldAnimateThumbnail}
+                            masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
                         />
 
                         {/* Phase V-1: Play icon overlay for videos */}

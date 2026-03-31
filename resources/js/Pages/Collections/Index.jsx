@@ -178,14 +178,23 @@ export default function CollectionsIndex({
         const stored = localStorage.getItem('assetGridShowInfo')
         return stored ? stored === 'true' : true
     }
+    const getStoredGridLayout = () => {
+        if (typeof window === 'undefined') return 'grid'
+        const v = localStorage.getItem('assetGridLayout')
+        return v === 'masonry' ? 'masonry' : 'grid'
+    }
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
+    const [layoutMode, setLayoutMode] = useState(getStoredGridLayout)
     useEffect(() => {
         if (typeof window !== 'undefined') localStorage.setItem('assetGridCardSize', cardSize.toString())
     }, [cardSize])
     useEffect(() => {
         if (typeof window !== 'undefined') localStorage.setItem('assetGridShowInfo', showInfo.toString())
     }, [showInfo])
+    useEffect(() => {
+        if (typeof window !== 'undefined') localStorage.setItem('assetGridLayout', layoutMode)
+    }, [layoutMode])
 
     const handleLifecycleUpdate = (updatedAsset) => {
         setAssetsList((prev) =>
@@ -533,6 +542,8 @@ export default function CollectionsIndex({
                                             onToggleInfo={() => setShowInfo((v) => !v)}
                                             cardSize={cardSize}
                                             onCardSizeChange={setCardSize}
+                                            layoutMode={layoutMode}
+                                            onLayoutModeChange={setLayoutMode}
                                             primaryColor={workspaceAccentColor}
                                             selectedCount={selectedCount}
                                             filterable_schema={[]}
@@ -578,6 +589,7 @@ export default function CollectionsIndex({
                                             onAssetClick={handleAssetGridClick}
                                             onAssetDoubleClick={handleAssetDoubleClick}
                                             cardSize={cardSize}
+                                            layoutMode={layoutMode}
                                             cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                             showInfo={showInfo}
                                             selectedAssetId={activeAssetId}
