@@ -39,14 +39,14 @@ class AiTagPolicyServiceTest extends TestCase
     }
 
     /**
-     * Test: Default settings preserve existing behavior (AI enabled, suggestions on, auto-apply off)
+     * Test: Default settings when no DB row (AI enabled, suggestions on, auto-apply on with best-practices cap)
      */
     public function test_default_settings_preserve_existing_behavior(): void
     {
         // No settings record exists - should use safe defaults
         $this->assertTrue($this->service->isAiTaggingEnabled($this->tenant));
         $this->assertTrue($this->service->areAiTagSuggestionsEnabled($this->tenant));
-        $this->assertFalse($this->service->isAiTagAutoApplyEnabled($this->tenant)); // OFF by default
+        $this->assertTrue($this->service->isAiTagAutoApplyEnabled($this->tenant));
         $this->assertEquals(5, $this->service->getAutoApplyTagLimit($this->tenant)); // Best practices default
     }
 
@@ -61,10 +61,10 @@ class AiTagPolicyServiceTest extends TestCase
         ]);
 
         $this->assertFalse($this->service->isAiTaggingEnabled($this->tenant));
-        
-        // Other settings don't matter when master toggle is off
-        $this->assertTrue($this->service->areAiTagSuggestionsEnabled($this->tenant)); // Still true
-        $this->assertFalse($this->service->isAiTagAutoApplyEnabled($this->tenant)); // Still false
+
+        // Other policy flags remain stored; master toggle stops AI work at pipeline gates
+        $this->assertTrue($this->service->areAiTagSuggestionsEnabled($this->tenant));
+        $this->assertTrue($this->service->isAiTagAutoApplyEnabled($this->tenant));
     }
 
     /**
@@ -81,19 +81,17 @@ class AiTagPolicyServiceTest extends TestCase
     }
 
     /**
-     * Test: Auto-apply toggle (OFF by default per requirement)
+     * Test: Auto-apply defaults on and can be turned off
      */
-    public function test_auto_apply_toggle_off_by_default(): void
+    public function test_auto_apply_defaults_on_and_can_toggle_off(): void
     {
-        // Default state
-        $this->assertFalse($this->service->isAiTagAutoApplyEnabled($this->tenant));
+        $this->assertTrue($this->service->isAiTagAutoApplyEnabled($this->tenant));
 
-        // Enable auto-apply
         $this->service->updateTenantSettings($this->tenant, [
-            'enable_ai_tag_auto_apply' => true,
+            'enable_ai_tag_auto_apply' => false,
         ]);
 
-        $this->assertTrue($this->service->isAiTagAutoApplyEnabled($this->tenant));
+        $this->assertFalse($this->service->isAiTagAutoApplyEnabled($this->tenant));
     }
 
     /**
@@ -147,9 +145,13 @@ class AiTagPolicyServiceTest extends TestCase
      */
     public function test_tag_selection_for_auto_apply(): void
     {
+        $this->service->updateTenantSettings($this->tenant, [
+            'enable_ai_tag_auto_apply' => false,
+        ]);
+
         $asset = $this->createAsset();
 
-        // Auto-apply disabled by default
+        // Auto-apply explicitly off
         $candidates = [
             ['tag' => 'tag1', 'confidence' => 0.95],
             ['tag' => 'tag2', 'confidence' => 0.90],
@@ -187,7 +189,7 @@ class AiTagPolicyServiceTest extends TestCase
         $this->assertEquals($this->tenant->id, $status['tenant_id']);
         $this->assertTrue($status['ai_tagging_enabled']);
         $this->assertTrue($status['ai_suggestions_enabled']);
-        $this->assertFalse($status['ai_auto_apply_enabled']);
+        $this->assertTrue($status['ai_auto_apply_enabled']);
         $this->assertEquals(5, $status['auto_apply_limit']);
         $this->assertTrue($status['should_proceed']);
     }
@@ -310,9 +312,10 @@ class AiTagPolicyServiceTest extends TestCase
 
         $this->assertFalse($defaults['disable_ai_tagging']);
         $this->assertTrue($defaults['enable_ai_tag_suggestions']);
-        $this->assertFalse($defaults['enable_ai_tag_auto_apply']); // OFF by default
+        $this->assertTrue($defaults['enable_ai_tag_auto_apply']);
         $this->assertEquals('best_practices', $defaults['ai_auto_tag_limit_mode']);
         $this->assertNull($defaults['ai_auto_tag_limit_value']);
+        $this->assertEquals(5, $defaults['ai_best_practices_limit']);
     }
 
     /**

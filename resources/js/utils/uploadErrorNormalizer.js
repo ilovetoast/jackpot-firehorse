@@ -286,6 +286,18 @@ export function normalizeUploadError(error, context = {}) {
         userMessage = humanizeBytesInMessage(errorMessage);
         retryable = false;
     }
+    // HTML error page or non-JSON body (e.g. fetch().json() on login page / proxy HTML)
+    else if (
+        error instanceof SyntaxError ||
+        /Unexpected token/i.test(errorMessage) ||
+        /not valid JSON/i.test(errorMessage)
+    ) {
+        category = 'UNKNOWN';
+        errorCode = 'UPLOAD_UNEXPECTED_RESPONSE';
+        userMessage =
+            'The server did not return valid upload data (often an error page instead of JSON). If you dragged a file from a ZIP folder without extracting it, extract the file first, then upload. Otherwise refresh the page and try again.';
+        retryable = true;
+    }
 
     // Build normalized error object
     const normalized = {

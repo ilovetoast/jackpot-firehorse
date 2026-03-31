@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * Tenant AI Tag Settings Seeder
  *
- * Initializes AI tagging settings for all existing tenants with safe defaults.
+ * Initializes AI tagging settings for tenants missing a row (auto-apply up to best-practices cap by default).
  * Uses AiTagPolicyService to ensure consistency with the service's default settings.
  */
 class TenantAiTagSettingsSeeder extends Seeder
@@ -40,6 +40,7 @@ class TenantAiTagSettingsSeeder extends Seeder
                     'enable_ai_tag_auto_apply' => $defaultSettings['enable_ai_tag_auto_apply'],
                     'ai_auto_tag_limit_mode' => $defaultSettings['ai_auto_tag_limit_mode'],
                     'ai_auto_tag_limit_value' => $defaultSettings['ai_auto_tag_limit_value'],
+                    'ai_best_practices_limit' => $defaultSettings['ai_best_practices_limit'],
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);

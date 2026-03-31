@@ -115,7 +115,7 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         $download = Download::where('tenant_id', $this->tenant->id)->whereNotNull('direct_asset_path')->latest()->first();
         $this->assertNotNull($download);
         $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
-        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed-asset');
+        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrlForDownload')->with(\Mockery::type('string'), \Mockery::type('string'), 1800)->andReturn('https://example.com/signed-asset');
         $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
 
         $this->get(route('downloads.public.file', ['download' => $download->id]))->assertRedirect('https://example.com/signed-asset');

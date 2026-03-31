@@ -88,10 +88,14 @@ class AiTagAutoApplyIntegrationTest extends TestCase
     }
 
     /**
-     * Test: Auto-apply disabled by default (no tags applied)
+     * Test: When auto-apply is off, no tags are applied
      */
-    public function test_auto_apply_disabled_by_default(): void
+    public function test_auto_apply_skips_when_disabled(): void
     {
+        $this->policyService->updateTenantSettings($this->tenant, [
+            'enable_ai_tag_auto_apply' => false,
+        ]);
+
         // Create tag candidates
         $this->createTagCandidates([
             ['tag' => 'high-quality', 'confidence' => 0.95],

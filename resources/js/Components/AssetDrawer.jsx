@@ -4657,15 +4657,16 @@ export default function AssetDrawer({
                 />
             )}
             
-            {/* Delete asset confirmation modal (soft delete — permanent after grace period) */}
-            {showDeleteConfirm && displayAsset && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
+            {/* Delete asset confirmation — portaled above lightbox (z-[10050]) so Safari/stacking never hides it */}
+            {showDeleteConfirm && displayAsset && typeof document !== 'undefined' && createPortal(
+                <div className="fixed inset-0 z-[10070] isolate overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                         <div
-                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            className="fixed inset-0 z-0 bg-gray-500 bg-opacity-75 transition-opacity"
                             onClick={() => !deleteLoading && setShowDeleteConfirm(false)}
+                            aria-hidden
                         />
-                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                        <div className="relative z-10 transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                             <div className="sm:flex sm:items-start">
                                 <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
                                     <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
@@ -4701,18 +4702,20 @@ export default function AssetDrawer({
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
 
-            {/* Phase B2: Permanently delete from trash — type DELETE to confirm */}
-            {showForceDeleteConfirm && displayAsset && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
+            {/* Phase B2: Permanently delete from trash — portaled above lightbox */}
+            {showForceDeleteConfirm && displayAsset && typeof document !== 'undefined' && createPortal(
+                <div className="fixed inset-0 z-[10070] isolate overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                         <div
-                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            className="fixed inset-0 z-0 bg-gray-500 bg-opacity-75 transition-opacity"
                             onClick={() => !forceDeleteLoading && (setShowForceDeleteConfirm(false), setForceDeleteConfirmText(''))}
+                            aria-hidden
                         />
-                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                        <div className="relative z-10 transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                             <div className="sm:flex sm:items-start">
                                 <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
                                     <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
@@ -4754,7 +4757,8 @@ export default function AssetDrawer({
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
             
             {/* Quick Review Modal - opened from drawer */}

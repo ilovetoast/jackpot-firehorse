@@ -23,6 +23,7 @@ use App\Services\ActivityRecorder;
 use App\Services\TicketAttachmentService;
 use App\Services\TicketAuditService;
 use App\Services\TicketConversionService;
+use App\Services\TicketNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -400,6 +401,7 @@ class AdminTicketController extends Controller
     /**
      * Resolve a ticket.
      * Sets status to resolved and records resolution time for SLA tracking.
+     * A public reply is required so the requester always sees resolution context (even if brief).
      */
     public function resolve(Request $request, Ticket $ticket)
     {
@@ -414,23 +416,61 @@ class AdminTicketController extends Controller
             return redirect()->back()->withErrors(['status' => 'Cannot resolve a closed ticket. Please reopen it first.']);
         }
 
-        $oldStatus = $ticket->status->value;
-        $ticket->update(['status' => TicketStatus::RESOLVED]);
-        // Note: Ticket model observer will automatically call updateResolutionTime() for SLA tracking
+        $validated = $request->validate([
+            'resolution_message' => 'required|string|min:3|max:10000',
+        ]);
 
-        // Log status change
-        ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
-            eventType: EventType::TICKET_STATUS_CHANGED,
-            subject: $ticket,
-            actor: $user,
-            brand: null,
-            metadata: [
-                'old_status' => $oldStatus,
-                'new_status' => 'resolved',
-                'action' => 'resolve',
-            ]
-        );
+        $oldStatus = $ticket->status->value;
+        $createdMessageId = null;
+
+        DB::transaction(function () use ($ticket, $user, $validated, $oldStatus, &$createdMessageId) {
+            $message = TicketMessage::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $user->id,
+                'body' => $validated['resolution_message'],
+                'is_internal' => false,
+            ]);
+            $createdMessageId = $message->id;
+
+            $ticket->update(['status' => TicketStatus::RESOLVED]);
+
+            ActivityRecorder::record(
+                tenant: $ticket->tenant_id ?? 1,
+                eventType: EventType::TICKET_MESSAGE_CREATED,
+                subject: $ticket,
+                actor: $user,
+                brand: null,
+                metadata: [
+                    'message_id' => $message->id,
+                    'is_internal' => false,
+                    'context' => 'resolve',
+                ]
+            );
+
+            ActivityRecorder::record(
+                tenant: $ticket->tenant_id ?? 1,
+                eventType: EventType::TICKET_STATUS_CHANGED,
+                subject: $ticket->fresh(),
+                actor: $user,
+                brand: null,
+                metadata: [
+                    'old_status' => $oldStatus,
+                    'new_status' => 'resolved',
+                    'action' => 'resolve',
+                ]
+            );
+        });
+
+        $ticketId = $ticket->id;
+        if ($createdMessageId) {
+            DB::afterCommit(function () use ($ticketId, $createdMessageId) {
+                $t = Ticket::find($ticketId);
+                $m = TicketMessage::find($createdMessageId);
+                if ($t && $m) {
+                    app(TicketNotificationService::class)->notifyCreatorOfReplyFromOtherUser($t, $m);
+                }
+            });
+        }
 
         return redirect()->back()->with('success', 'Ticket resolved. Resolution time has been recorded for SLA tracking.');
     }
@@ -509,12 +549,80 @@ class AdminTicketController extends Controller
         $user = Auth::user();
         $this->authorize('assign', $ticket); // Use assign permission for status changes
 
+        $requestedStatus = $request->input('status');
+        if ($requestedStatus === 'resolved' && $ticket->status === TicketStatus::RESOLVED) {
+            return redirect()->back()->with('info', 'Ticket is already resolved.');
+        }
+
+        if ($requestedStatus === 'resolved' && $ticket->status === TicketStatus::CLOSED) {
+            return redirect()->back()->withErrors(['status' => 'Cannot resolve a closed ticket. Please reopen it first.']);
+        }
+
         $validated = $request->validate([
             'status' => 'required|string|in:' . implode(',', array_column(TicketStatus::cases(), 'value')),
+            'resolution_message' => 'exclude_unless:status,resolved|required|string|min:3|max:10000',
         ]);
 
+        $newStatus = TicketStatus::from($validated['status']);
+
+        if ($newStatus === TicketStatus::RESOLVED) {
+            $oldStatus = $ticket->status->value;
+            $createdMessageId = null;
+
+            DB::transaction(function () use ($ticket, $user, $validated, $oldStatus, &$createdMessageId) {
+                $message = TicketMessage::create([
+                    'ticket_id' => $ticket->id,
+                    'user_id' => $user->id,
+                    'body' => $validated['resolution_message'],
+                    'is_internal' => false,
+                ]);
+                $createdMessageId = $message->id;
+
+                $ticket->update(['status' => TicketStatus::RESOLVED]);
+
+                ActivityRecorder::record(
+                    tenant: $ticket->tenant_id ?? 1,
+                    eventType: EventType::TICKET_MESSAGE_CREATED,
+                    subject: $ticket,
+                    actor: $user,
+                    brand: null,
+                    metadata: [
+                        'message_id' => $message->id,
+                        'is_internal' => false,
+                        'context' => 'status_resolved',
+                    ]
+                );
+
+                ActivityRecorder::record(
+                    tenant: $ticket->tenant_id ?? 1,
+                    eventType: EventType::TICKET_STATUS_CHANGED,
+                    subject: $ticket->fresh(),
+                    actor: $user,
+                    brand: null,
+                    metadata: [
+                        'old_status' => $oldStatus,
+                        'new_status' => 'resolved',
+                        'action' => 'update_status',
+                    ]
+                );
+            });
+
+            $ticketId = $ticket->id;
+            if ($createdMessageId) {
+                DB::afterCommit(function () use ($ticketId, $createdMessageId) {
+                    $t = Ticket::find($ticketId);
+                    $m = TicketMessage::find($createdMessageId);
+                    if ($t && $m) {
+                        app(TicketNotificationService::class)->notifyCreatorOfReplyFromOtherUser($t, $m);
+                    }
+                });
+            }
+
+            return redirect()->back()->with('success', 'Ticket status updated.');
+        }
+
         $oldStatus = $ticket->status->value;
-        $ticket->update(['status' => TicketStatus::from($validated['status'])]);
+        $ticket->update(['status' => $newStatus]);
 
         // Log status change
         ActivityRecorder::record(
@@ -577,6 +685,16 @@ class AdminTicketController extends Controller
                 'is_internal' => false,
             ]
         );
+
+        $messageId = $message->id;
+        $ticketId = $ticket->id;
+        DB::afterCommit(function () use ($ticketId, $messageId) {
+            $t = Ticket::find($ticketId);
+            $m = TicketMessage::find($messageId);
+            if ($t && $m) {
+                app(TicketNotificationService::class)->notifyCreatorOfReplyFromOtherUser($t, $m);
+            }
+        });
 
         return redirect()->back()->with('success', 'Public reply added.');
     }

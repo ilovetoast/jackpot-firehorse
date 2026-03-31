@@ -600,6 +600,64 @@ HTML),
                 'variables' => ['assignee_name', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'creator_name', 'ticket_url', 'app_name', 'app_url'],
                 'is_active' => true,
             ],
+            [
+                'key' => 'support_ticket_creator_receipt',
+                'name' => 'Support ticket received (creator)',
+                'category' => 'tenant',
+                'subject' => 'We received your request — {{ticket_number}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">Your support ticket was created</h2>
+<p style="margin:0 0 16px;">Hi {{recipient_name}},</p>
+<p style="margin:0 0 20px;">Thanks for reaching out. We received your request and our team will review it shortly.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border-collapse:collapse;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:14px 16px;font-size:14px;"><strong style="color:#0f172a;">Ticket</strong><br /><span style="color:#334155;">{{ticket_number}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Subject</strong><br /><span style="color:#334155;">{{ticket_subject}}</span></td></tr>
+  <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Company</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+HTML),
+                'body_text' => "Your support ticket was created\n\nHi {{recipient_name}},\n\nWe received your request — {{ticket_number}}.\nSubject: {{ticket_subject}}\nCompany: {{tenant_name}}\n\nView ticket: {{ticket_url}}",
+                'variables' => ['recipient_name', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'support_ticket_creator_reply',
+                'name' => 'Support ticket new reply (creator)',
+                'category' => 'tenant',
+                'subject' => 'New reply on {{ticket_number}} — {{ticket_subject}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">There is a new reply on your ticket</h2>
+<p style="margin:0 0 16px;">Hi {{recipient_name}},</p>
+<p style="margin:0 0 12px;"><strong>{{replier_name}}</strong> added a message to <strong>{{ticket_number}}</strong>:</p>
+<p style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.5;">{{reply_excerpt}}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View conversation</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+HTML),
+                'body_text' => "New reply on your ticket\n\nHi {{recipient_name}},\n\n{{replier_name}} replied to {{ticket_number}}:\n\n{{reply_excerpt}}\n\nView: {{ticket_url}}",
+                'variables' => ['recipient_name', 'replier_name', 'reply_excerpt', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'support_ticket_creator_resolved',
+                'name' => 'Support ticket resolved / closed (creator)',
+                'category' => 'tenant',
+                'subject' => 'Ticket {{ticket_number}} — {{status_label}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">Your ticket was {{status_label}}</h2>
+<p style="margin:0 0 16px;">Hi {{recipient_name}},</p>
+<p style="margin:0 0 20px;">Your support ticket <strong>{{ticket_number}}</strong> has been marked <strong>{{status_label}}</strong>.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border-collapse:collapse;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:14px 16px;font-size:14px;"><strong style="color:#0f172a;">Subject</strong><br /><span style="color:#334155;">{{ticket_subject}}</span></td></tr>
+  <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Company</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+HTML),
+                'body_text' => "Ticket {{ticket_number}} — {{status_label}}\n\nHi {{recipient_name}},\n\nYour ticket was {{status_label}}.\nSubject: {{ticket_subject}}\nCompany: {{tenant_name}}\n\nView: {{ticket_url}}",
+                'variables' => ['recipient_name', 'status_label', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {

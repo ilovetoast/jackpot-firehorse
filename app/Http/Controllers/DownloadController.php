@@ -1378,11 +1378,21 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        // UX-R2: Single-asset download — redirect to CloudFront signed URL (no cookies)
+        // UX-R2: Single-asset download — redirect to CloudFront signed URL with Content-Disposition: attachment
+        // so browsers save the file instead of opening images/PDFs in a new tab.
         if (! empty($download->direct_asset_path)) {
             $download->increment('access_count');
             app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
-            $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrl($download->direct_asset_path, 1800);
+            $primaryAsset = $download->assets()->first();
+            $filename = $primaryAsset?->original_filename;
+            if (! is_string($filename) || trim($filename) === '') {
+                $filename = basename((string) $download->direct_asset_path);
+            }
+            $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrlForDownload(
+                $download->direct_asset_path,
+                $filename,
+                1800
+            );
             DownloadEventEmitter::emitDownloadZipRequested($download);
             DownloadEventEmitter::emitDownloadZipCompleted($download);
 

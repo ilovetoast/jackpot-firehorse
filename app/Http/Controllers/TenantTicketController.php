@@ -9,6 +9,7 @@ use App\Models\Brand;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Services\TicketAttachmentService;
+use App\Services\TicketNotificationService;
 use App\Services\TicketPlanGate;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -178,7 +179,9 @@ class TenantTicketController extends Controller
         }
 
         // Verify brands belong to tenant and user has access
-        $brandIds = $validated['brand_ids'];
+        // Unique IDs only: duplicate IDs (e.g. from mixed string/number state on the client) would make
+        // whereIn()->get()->count() differ from count($brandIds) and falsely trigger "invalid brands".
+        $brandIds = array_values(array_unique(array_map('intval', $validated['brand_ids'])));
         
         // Get user's tenant role
         $tenantRole = $user->getRoleForTenant($tenant);
@@ -394,6 +397,16 @@ class TenantTicketController extends Controller
 
             // Update ticket status to waiting_on_support
             $ticket->update(['status' => TicketStatus::WAITING_ON_SUPPORT]);
+
+            $messageId = $message->id;
+            $ticketId = $ticket->id;
+            DB::afterCommit(function () use ($ticketId, $messageId) {
+                $t = Ticket::find($ticketId);
+                $m = TicketMessage::find($messageId);
+                if ($t && $m) {
+                    app(TicketNotificationService::class)->notifyCreatorOfReplyFromOtherUser($t, $m);
+                }
+            });
 
             DB::commit();
 

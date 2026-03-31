@@ -63,6 +63,7 @@ export default function SuggestionPanel({ suggestions = [] }) {
                 </div>
                 <p className="mt-1 text-sm text-gray-600">
                     AI-generated suggestions to help manage this ticket. All suggestions require your approval before being applied.
+                    When you mark the ticket resolved, use Actions → Resolve and enter a short public message for the requester (required).
                 </p>
             </div>
 

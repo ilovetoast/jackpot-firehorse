@@ -27,6 +27,7 @@ import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
 import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import directly
 import { normalizeUploadError } from '../utils/uploadErrorNormalizer' // Phase 2.5 Step 1: Error normalization
+import { parseUploadJsonResponse } from '../utils/parseUploadJsonResponse'
 import DevUploadDiagnostics from './DevUploadDiagnostics' // Phase 2.5 Step 3: Dev-only diagnostics panel
 import MetadataGroups from './Upload/MetadataGroups' // Phase 2 – Step 2: Dynamic metadata schema
 import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // Phase 2 – Step 3: Required field validation
@@ -707,7 +708,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 throw error
             }
             
-            const responseData = await response.json()
+            const responseData = await parseUploadJsonResponse(response, 'initiate-batch')
             
             // c. Log session response
             console.log('[UPLOAD_V2] session response', responseData)
@@ -923,16 +924,25 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 })
             }
 
+            // Windows: drag from an unextracted ZIP often yields a 0-byte or unreadable File
+            const unreadableFromZip = file.size === 0
+
             return {
                 clientId,
                 file,
-                status: 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
+                status: unreadableFromZip ? 'failed' : 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
                 progress: 0, // 0-100
                 uploadKey: null, // Set when upload completes
                 title: null, // Will be derived from filename, can be edited
                 resolvedFilename: null, // Will be derived initially, can be edited directly
                 metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
-                error: null
+                error: unreadableFromZip
+                    ? {
+                        message:
+                            'This file is empty or could not be read. If it came from a ZIP archive, extract it to your computer first, then add the file again.',
+                        stage: 'upload',
+                    }
+                    : null,
             }
         })
 
@@ -1232,8 +1242,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             throw new Error(errorMessage)
         }
         
-        // Parse JSON response
-        const responseData = await response.json()
+        // Parse JSON response (HTML/XML error pages → clear message, e.g. drag-from-ZIP)
+        const responseData = await parseUploadJsonResponse(response, 'initiate-batch')
         
         // DEV-only logging
         console.log('[INITIATE] fetch response json', responseData)
@@ -2964,7 +2974,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 throw new Error(`Finalize failed: ${response.status} ${response.statusText} - ${errorText}`)
             }
 
-            const responseData = await response.json()
+            const responseData = await parseUploadJsonResponse(response, 'finalize')
             console.log('[FINALIZE_V2] Response received', responseData)
 
             // Handle backend response per file

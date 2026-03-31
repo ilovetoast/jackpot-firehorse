@@ -90,7 +90,7 @@ class CompanyAiSettingsTest extends TestCase
         $settings = $response->json('settings');
         $this->assertFalse($settings['disable_ai_tagging']);
         $this->assertTrue($settings['enable_ai_tag_suggestions']);
-        $this->assertFalse($settings['enable_ai_tag_auto_apply']); // OFF by default
+        $this->assertTrue($settings['enable_ai_tag_auto_apply']);
         $this->assertEquals('best_practices', $settings['ai_auto_tag_limit_mode']);
     }
 

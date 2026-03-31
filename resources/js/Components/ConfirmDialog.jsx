@@ -15,6 +15,8 @@ export default function ConfirmDialog({
     /** When set, user must type this exact string (after trim) to enable Confirm */
     confirmInputMustMatch = null,
     confirmInputHint = null,
+    /** Extra disable for Confirm (e.g. empty required textarea in message) */
+    confirmDisabled = false,
     /** Tailwind max-width classes for the panel (e.g. sm:max-w-2xl for longer copy) */
     panelClassName = 'sm:max-w-lg',
 }) {
@@ -169,7 +171,7 @@ export default function ConfirmDialog({
                         <button
                             type="button"
                             onClick={onConfirm}
-                            disabled={loading || !inputMatches}
+                            disabled={loading || !inputMatches || confirmDisabled}
                             className={`inline-flex w-full justify-center rounded-md ${config.buttonBg} px-3 py-2 text-sm font-semibold text-white shadow-sm ${config.buttonHover} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${config.buttonFocus} sm:ml-3 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             {loading ? 'Processing...' : confirmText}

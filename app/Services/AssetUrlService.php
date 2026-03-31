@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Support\AssetVariant;
 use App\Support\CdnUrl;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class AssetUrlService
 {
@@ -103,6 +104,66 @@ class AssetUrlService
         // Expires must be UNIX seconds (not milliseconds); now()->timestamp is already in seconds.
         $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
         return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+    }
+
+    /**
+     * Signed URL that sets Content-Disposition: attachment so browsers save the file instead of showing it inline (images, PDFs).
+     * CloudFront URL includes S3 GET query {@see https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html }.
+     *
+     * @param  string  $path  Storage path relative to CDN root
+     * @param  string  $downloadFilename  Suggested filename (basename only; sanitized)
+     */
+    public function getSignedCloudFrontUrlForDownload(string $path, string $downloadFilename, ?int $ttlSeconds = null): string
+    {
+        $ttlSeconds = $ttlSeconds ?? config('cloudfront.admin_signed_url_ttl', 300);
+        $safeName = $this->sanitizeDownloadFilename($downloadFilename);
+        $disposition = 'attachment; filename="'.$this->escapeQuotedFilenameToken($safeName).'"';
+
+        if (app()->environment('local')) {
+            return Storage::disk('s3')->temporaryUrl(
+                $path,
+                now()->addSeconds($ttlSeconds),
+                ['ResponseContentDisposition' => $disposition]
+            );
+        }
+
+        $cdnUrl = CdnUrl::url($path);
+        if ($cdnUrl === '') {
+            throw new \InvalidArgumentException('AssetUrlService: path resulted in empty CDN URL.');
+        }
+
+        if (! $this->cloudFrontSigningConfigured()) {
+            throw new \RuntimeException('CloudFront signing is not configured.');
+        }
+
+        $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
+        $separator = str_contains($cdnUrl, '?') ? '&' : '?';
+        $query = http_build_query(['response-content-disposition' => $disposition], '', '&', PHP_QUERY_RFC3986);
+        $urlWithDisposition = $cdnUrl.$separator.$query;
+
+        return $this->signedUrlService->sign($urlWithDisposition, $expiresAt);
+    }
+
+    /**
+     * @return string Basename safe for Content-Disposition filename=
+     */
+    protected function sanitizeDownloadFilename(string $filename): string
+    {
+        $base = basename(str_replace(["\0", '\\', '/'], '', $filename));
+        $base = trim($base);
+        if ($base === '' || $base === '.' || $base === '..') {
+            return 'download';
+        }
+
+        return $base;
+    }
+
+    /**
+     * Escape characters that must not appear inside the quoted filename token.
+     */
+    protected function escapeQuotedFilenameToken(string $filename): string
+    {
+        return str_replace(['"', '\\'], '_', $filename);
     }
 
     /**

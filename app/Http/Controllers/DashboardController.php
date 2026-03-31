@@ -213,6 +213,7 @@ class DashboardController extends Controller
         // Only count items for assets in the current brand
         $pendingMetadataCount = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+            ->whereNull('assets.deleted_at')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
@@ -222,6 +223,7 @@ class DashboardController extends Controller
 
         $pendingTagCount = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
+            ->whereNull('assets.deleted_at')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('asset_tag_candidates.producer', 'ai')

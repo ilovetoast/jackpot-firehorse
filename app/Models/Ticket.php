@@ -14,6 +14,7 @@ use App\Services\TicketAssignmentService;
 use App\Services\TicketNotificationService;
 use App\Services\TicketSLAService;
 use App\Traits\RecordsActivity;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -135,7 +136,9 @@ class Ticket extends Model
             DB::afterCommit(function () use ($ticketId) {
                 $committed = Ticket::find($ticketId);
                 if ($committed) {
-                    app(TicketNotificationService::class)->notifyAssignedStaffOfNewTicket($committed);
+                    $notifications = app(TicketNotificationService::class);
+                    $notifications->notifyAssignedStaffOfNewTicket($committed);
+                    $notifications->notifyCreatorOfReceipt($committed);
                 }
             });
         });
@@ -160,6 +163,35 @@ class Ticket extends Model
 
                 // Check for breaches after status change
                 $slaService->checkBreaches($ticket);
+
+                // Email tenant creator when ticket is resolved or closed by someone other than the creator
+                $oldRaw = $ticket->getOriginal('status');
+                $oldStr = $oldRaw instanceof TicketStatus ? $oldRaw->value : (string) $oldRaw;
+                $newStatus = $ticket->status;
+
+                if ($ticket->type === TicketType::TENANT
+                    && in_array($newStatus, [TicketStatus::RESOLVED, TicketStatus::CLOSED], true)
+                ) {
+                    $enteredResolved = $newStatus === TicketStatus::RESOLVED && $oldStr !== TicketStatus::RESOLVED->value;
+                    $enteredClosed = $newStatus === TicketStatus::CLOSED && $oldStr !== TicketStatus::CLOSED->value;
+
+                    if ($enteredResolved || $enteredClosed) {
+                        $actorId = Auth::id();
+                        if (! ($actorId && (int) $actorId === (int) $ticket->created_by_user_id)) {
+                            $terminalId = $ticket->id;
+                            $statusCopy = $newStatus;
+                            DB::afterCommit(function () use ($terminalId, $statusCopy) {
+                                $committed = Ticket::find($terminalId);
+                                if ($committed) {
+                                    app(TicketNotificationService::class)->notifyCreatorOfTerminalStatus(
+                                        $committed,
+                                        $statusCopy
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
             }
         });
     }

@@ -532,6 +532,7 @@ class HandleInertiaRequests extends Middleware
                 // Pending AI suggestions count (metadata candidates + tag candidates)
                 $pendingMetadataCount = DB::table('asset_metadata_candidates')
                     ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+                    ->whereNull('assets.deleted_at')
                     ->where('assets.tenant_id', $tenant->id)
                     ->where('assets.brand_id', $activeBrand->id)
                     ->whereNull('asset_metadata_candidates.resolved_at')
@@ -541,6 +542,7 @@ class HandleInertiaRequests extends Middleware
 
                 $pendingTagCount = DB::table('asset_tag_candidates')
                     ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
+                    ->whereNull('assets.deleted_at')
                     ->where('assets.tenant_id', $tenant->id)
                     ->where('assets.brand_id', $activeBrand->id)
                     ->where('asset_tag_candidates.producer', 'ai')

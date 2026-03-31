@@ -12,22 +12,29 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
     const [processing, setProcessing] = useState(false)
     const [action, setAction] = useState(null)
     const [showResolveConfirm, setShowResolveConfirm] = useState(false)
+    const [resolveMessage, setResolveMessage] = useState('')
     const [showCloseConfirm, setShowCloseConfirm] = useState(false)
     const [showReopenConfirm, setShowReopenConfirm] = useState(false)
 
     const handleResolveClick = () => {
+        setResolveMessage('')
         setShowResolveConfirm(true)
     }
 
     const confirmResolve = () => {
+        const body = resolveMessage.trim()
+        if (body.length < 3) {
+            return
+        }
         setShowResolveConfirm(false)
         setProcessing(true)
         setAction('resolve')
-        router.put(`/app/admin/support/tickets/${ticket.id}/resolve`, {}, {
+        router.put(`/app/admin/support/tickets/${ticket.id}/resolve`, { resolution_message: body }, {
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false)
                 setAction(null)
+                setResolveMessage('')
             },
         })
     }
@@ -131,20 +138,43 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
                 <p className="mt-3 text-xs text-gray-500">
                     {isFinalState 
                         ? 'This ticket is in a final state. Use Reopen to change the status back to open.'
-                        : 'Resolve marks the ticket as completed and records resolution time for SLA tracking. Close marks the ticket as permanently closed.'}
+                        : 'Resolve requires a short public reply to the requester (e.g. fix summary or “closing — no response”). Close marks the ticket as permanently closed.'}
                 </p>
             </div>
 
             {/* Confirmation Dialogs */}
             <ConfirmDialog
                 open={showResolveConfirm}
-                onClose={() => setShowResolveConfirm(false)}
+                onClose={() => {
+                    setShowResolveConfirm(false)
+                    setResolveMessage('')
+                }}
                 onConfirm={confirmResolve}
-                title="Resolve Ticket"
-                message="Mark this ticket as resolved? The resolution time will be recorded for SLA tracking."
+                title="Resolve ticket"
+                message={
+                    <div className="text-left">
+                        <p className="text-sm text-gray-600 mb-2">
+                            Add a public reply visible to the requester. This is required so resolution is always communicated (even briefly, e.g. “Resolved — no further response from requester.”).
+                        </p>
+                        <label htmlFor="resolve-message" className="block text-xs font-medium text-gray-700 mb-1">
+                            Resolution message
+                        </label>
+                        <textarea
+                            id="resolve-message"
+                            rows={4}
+                            value={resolveMessage}
+                            onChange={(e) => setResolveMessage(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="Brief public summary for the requester…"
+                            autoFocus
+                        />
+                    </div>
+                }
                 variant="info"
                 confirmText="Resolve"
                 loading={processing && action === 'resolve'}
+                confirmDisabled={resolveMessage.trim().length < 3}
+                panelClassName="sm:max-w-lg"
             />
             <ConfirmDialog
                 open={showCloseConfirm}

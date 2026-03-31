@@ -53,15 +53,16 @@ class AiTagPolicyService
     }
 
     /**
-     * Check if AI tags should be auto-applied (without user intervention).
+     * Check if AI tags should be auto-applied (without user intervention / review).
      *
      * @param Tenant $tenant The tenant to check
-     * @return bool True if auto-apply is enabled (OFF by default per requirement)
+     * @return bool True if auto-apply is enabled (ON by default for new tenants; limit via best-practices cap)
      */
     public function isAiTagAutoApplyEnabled(Tenant $tenant): bool
     {
         $settings = $this->getTenantSettings($tenant);
-        return $settings['enable_ai_tag_auto_apply'] ?? false; // Default false (OFF by default)
+
+        return $settings['enable_ai_tag_auto_apply'] ?? true;
     }
 
     /**
@@ -239,9 +240,11 @@ class AiTagPolicyService
                     ]));
             }
         } else {
-            // Insert new record (set both timestamps)
+            // Insert new record: merge with app defaults so DB row matches new-tenant policy (not migration NULLs).
+            $merged = array_merge($this->getDefaultSettings(), $settingsToUpdate);
+            $row = array_intersect_key($merged, array_flip($allowedKeys));
             DB::table('tenant_ai_tag_settings')
-                ->insert(array_merge($settingsToUpdate, [
+                ->insert(array_merge($row, [
                     'tenant_id' => $tenant->id,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -270,14 +273,14 @@ class AiTagPolicyService
                 ->where('tenant_id', $tenant->id)
                 ->first();
 
-            if (!$settings) {
-                // Return safe defaults that preserve existing behavior
+            if (! $settings) {
                 return [
                     'disable_ai_tagging' => false,
                     'enable_ai_tag_suggestions' => true,
-                    'enable_ai_tag_auto_apply' => false, // OFF by default per requirement
+                    'enable_ai_tag_auto_apply' => true,
                     'ai_auto_tag_limit_mode' => 'best_practices',
                     'ai_auto_tag_limit_value' => null,
+                    'ai_best_practices_limit' => self::BEST_PRACTICES_AUTO_TAG_LIMIT,
                 ];
             }
 
@@ -304,18 +307,19 @@ class AiTagPolicyService
     }
 
     /**
-     * Get the recommended settings for a new tenant (safe defaults).
+     * Get the recommended settings for a new tenant (seeders, bulk helpers).
      *
-     * @return array Default settings that preserve existing behavior
+     * @return array<string, mixed>
      */
     public function getDefaultSettings(): array
     {
         return [
-            'disable_ai_tagging' => false,           // AI enabled by default
-            'enable_ai_tag_suggestions' => true,    // Suggestions enabled by default
-            'enable_ai_tag_auto_apply' => false,    // Auto-apply OFF by default per requirement
+            'disable_ai_tagging' => false,
+            'enable_ai_tag_suggestions' => true,
+            'enable_ai_tag_auto_apply' => true,
             'ai_auto_tag_limit_mode' => 'best_practices',
             'ai_auto_tag_limit_value' => null,
+            'ai_best_practices_limit' => self::BEST_PRACTICES_AUTO_TAG_LIMIT,
         ];
     }
 
@@ -347,6 +351,7 @@ class AiTagPolicyService
                     'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
                     'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
                     'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
+                    'ai_best_practices_limit' => (int) ($settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT),
                 ];
             }
         }

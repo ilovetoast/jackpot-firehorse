@@ -143,9 +143,8 @@ export default function AssetDetailPanel({
     const [unpublishing, setUnpublishing] = useState(false)
     const [archiving, setArchiving] = useState(false)
     const [restoring, setRestoring] = useState(false)
-    const [regeneratingAiMetadata, setRegeneratingAiMetadata] = useState(false)
+    const [regeneratingAiAnalysis, setRegeneratingAiAnalysis] = useState(false)
     const [regeneratingSystemMetadata, setRegeneratingSystemMetadata] = useState(false)
-    const [regeneratingAiTagging, setRegeneratingAiTagging] = useState(false)
     const [regeneratingThumbnails, setRegeneratingThumbnails] = useState(false)
     const [regeneratingVideoThumbnail, setRegeneratingVideoThumbnail] = useState(false)
     const [regeneratingVideoPreview, setRegeneratingVideoPreview] = useState(false)
@@ -378,14 +377,21 @@ export default function AssetDetailPanel({
             setRestoring(false)
         }
     }
-    const handleRegenerateAiMetadata = async () => {
+    /** Vision/metadata fields (AiMetadataGenerationJob) + tag pipeline (AITaggingJob) — two backend steps, one action. */
+    const handleRegenerateAiAnalysis = async () => {
         if (!asset?.id || !canRegenerateAiMetadataForTroubleshooting) return
-        setRegeneratingAiMetadata(true)
+        setRegeneratingAiAnalysis(true)
         try {
-            const res = await window.axios.post(`/app/assets/${asset.id}/ai-metadata/regenerate`)
-            if (res.data?.success) setTimeout(fetchMetadata, 1500)
+            const metaRes = await window.axios.post(`/app/assets/${asset.id}/ai-metadata/regenerate`)
+            if (!metaRes.data?.success) return
+            try {
+                await window.axios.post(`/app/assets/${asset.id}/ai-tagging/regenerate`)
+            } catch {
+                // Tagging may 422 if thumbnails are not ready; metadata job is still queued
+            }
+            setTimeout(fetchMetadata, 1500)
         } finally {
-            setRegeneratingAiMetadata(false)
+            setRegeneratingAiAnalysis(false)
         }
     }
     const handleRegenerateSystemMetadata = async () => {
@@ -396,16 +402,6 @@ export default function AssetDetailPanel({
             if (res.data?.success) setTimeout(fetchMetadata, 1500)
         } finally {
             setRegeneratingSystemMetadata(false)
-        }
-    }
-    const handleRegenerateAiTagging = async () => {
-        if (!asset?.id || !canRegenerateAiMetadataForTroubleshooting) return
-        setRegeneratingAiTagging(true)
-        try {
-            const res = await window.axios.post(`/app/assets/${asset.id}/ai-tagging/regenerate`)
-            if (res.data?.success) setTimeout(fetchMetadata, 1500)
-        } finally {
-            setRegeneratingAiTagging(false)
         }
     }
     const handleRegenerateThumbnails = async () => {
@@ -836,12 +832,12 @@ export default function AssetDetailPanel({
                                                             <>
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => { setShowActionsDropdown(false); handleRegenerateAiMetadata(); }}
-                                                                    disabled={regeneratingAiMetadata}
+                                                                    onClick={() => { setShowActionsDropdown(false); handleRegenerateAiAnalysis(); }}
+                                                                    disabled={regeneratingAiAnalysis}
                                                                     className={dropdownItemClass}
                                                                 >
-                                                                    <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                                    Re-run AI analysis
+                                                                    <ArrowPathIcon className={`h-4 w-4 flex-shrink-0 ${regeneratingAiAnalysis ? 'animate-spin' : ''}`} />
+                                                                    Re-run AI analysis (metadata & tags)
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -851,15 +847,6 @@ export default function AssetDetailPanel({
                                                                 >
                                                                     <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
                                                                     Reprocess metadata
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { setShowActionsDropdown(false); handleRegenerateAiTagging(); }}
-                                                                    disabled={regeneratingAiTagging}
-                                                                    className={dropdownItemClass}
-                                                                >
-                                                                    <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                                    Reprocess tags
                                                                 </button>
                                                             </>
                                                         )}

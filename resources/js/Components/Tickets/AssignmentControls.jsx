@@ -14,6 +14,7 @@ export default function AssignmentControls({ ticket, staffUsers = [] }) {
         assigned_to_user_id: ticket.assigned_to?.id || '',
         assigned_team: ticket.assigned_team || '',
         status: ticket.status,
+        resolution_message: '',
     })
 
     const handleAssignmentSubmit = (e) => {
@@ -89,7 +90,14 @@ export default function AssignmentControls({ ticket, staffUsers = [] }) {
                         <select
                             id="status"
                             value={data.status}
-                            onChange={(e) => setData('status', e.target.value)}
+                            onChange={(e) => {
+                                const v = e.target.value
+                                setData({
+                                    ...data,
+                                    status: v,
+                                    resolution_message: v !== 'resolved' ? '' : data.resolution_message,
+                                })
+                            }}
                             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                             required
                         >
@@ -102,6 +110,26 @@ export default function AssignmentControls({ ticket, staffUsers = [] }) {
                             <option value="closed">Closed</option>
                         </select>
                     </div>
+                    {data.status === 'resolved' && (
+                        <div>
+                            <label htmlFor="resolution_message" className="block text-sm font-medium text-gray-700 mb-1">
+                                Public resolution message (required)
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Shown to the requester when resolving this ticket.
+                            </p>
+                            <textarea
+                                id="resolution_message"
+                                value={data.resolution_message}
+                                onChange={(e) => setData('resolution_message', e.target.value)}
+                                rows={3}
+                                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                placeholder="e.g. Issue fixed, or closing due to no response…"
+                                required
+                                minLength={3}
+                            />
+                        </div>
+                    )}
                     <button
                         type="submit"
                         disabled={processing}

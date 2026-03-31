@@ -4,6 +4,16 @@ import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 import AppFooter from '../../../Components/AppFooter'
 
+/** Laravel `old` input may stringify IDs; JSON brands use numbers — unify so includes() / toggles work. */
+function normalizeBrandIds(ids) {
+    if (ids == null || ids === '') {
+        return []
+    }
+    const raw = Array.isArray(ids) ? ids : [ids]
+    const nums = raw.map((id) => Number(id)).filter((n) => !Number.isNaN(n))
+    return [...new Set(nums)]
+}
+
 export default function TicketsCreate({ 
     brands = [], 
     plan_limits = { max_attachment_size: '10 MB', max_attachments: 5, can_attach_files: true }, 
@@ -20,7 +30,7 @@ export default function TicketsCreate({
     // Use useMemo to ensure we always use the latest old values
     const initialFormData = useMemo(() => ({
         category: old?.category || '',
-        brand_ids: old?.brand_ids ? (Array.isArray(old.brand_ids) ? old.brand_ids : [old.brand_ids]) : [],
+        brand_ids: normalizeBrandIds(old?.brand_ids),
         subject: old?.subject || '',
         description: old?.description || '',
         attachments: [],
@@ -44,8 +54,7 @@ export default function TicketsCreate({
                 setData('category', old.category)
             }
             if (old.brand_ids !== undefined) {
-                const brandIds = Array.isArray(old.brand_ids) ? old.brand_ids : [old.brand_ids]
-                setData('brand_ids', brandIds)
+                setData('brand_ids', normalizeBrandIds(old.brand_ids))
             }
             if (old.subject !== undefined) {
                 setData('subject', old.subject)
@@ -74,9 +83,11 @@ export default function TicketsCreate({
     }
 
     const handleBrandToggle = (brandId) => {
-        const newBrandIds = data.brand_ids.includes(brandId)
-            ? data.brand_ids.filter((id) => id !== brandId)
-            : [...data.brand_ids, brandId]
+        const id = Number(brandId)
+        const current = normalizeBrandIds(data.brand_ids)
+        const newBrandIds = current.includes(id)
+            ? current.filter((x) => x !== id)
+            : [...current, id]
         setData('brand_ids', newBrandIds)
     }
 
@@ -158,7 +169,7 @@ export default function TicketsCreate({
                                     <label key={brand.id} className="flex items-center">
                                         <input
                                             type="checkbox"
-                                            checked={data.brand_ids.includes(brand.id)}
+                                            checked={normalizeBrandIds(data.brand_ids).includes(Number(brand.id))}
                                             onChange={() => handleBrandToggle(brand.id)}
                                             className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                                         />

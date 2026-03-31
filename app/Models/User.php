@@ -712,9 +712,10 @@ class User extends Authenticatable
     }
 
     /**
-     * True when this user is an agency steward for an incubated client: managed on the client
-     * tenant by the incubating agency, owner/admin/agency_admin on that agency workspace, and no completed
-     * ownership transfer yet.
+     * True when this user is an agency steward for an incubated client: owner/admin/agency_admin on the
+     * incubating agency workspace, no completed ownership transfer yet, and either (a) tenant_user.role
+     * is owner on the client (promoted incubator; agency pivot flags optional), or (b) agency-managed
+     * membership on the client for that agency (agency_tenant_id may be unset on legacy rows).
      */
     public function canActAsIncubatingAgencyStewardForClient(Tenant $clientTenant): bool
     {
@@ -740,12 +741,7 @@ class User extends Authenticatable
             ->where('user_id', $this->id)
             ->where('tenant_id', $clientTenant->id)
             ->first();
-        if (! $pivot || ! (bool) ($pivot->is_agency_managed ?? false)) {
-            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
-
-            return false;
-        }
-        if ((int) ($pivot->agency_tenant_id ?? 0) !== $incubatingAgencyId) {
+        if (! $pivot) {
             $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
 
             return false;
@@ -759,11 +755,36 @@ class User extends Authenticatable
         }
 
         $roleOnAgency = $this->getRoleForTenant($agencyTenant);
+        if (! in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true)) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
 
-        $result = in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true);
-        $this->incubatingAgencyStewardForClientCache[$cacheKey] = $result;
+            return false;
+        }
 
-        return $result;
+        // Promoted incubator: tenant_user.role = owner on the client. Older rows may lack
+        // is_agency_managed / agency_tenant_id even though the user is the designated steward.
+        if (strtolower((string) $pivot->role) === 'owner') {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = true;
+
+            return true;
+        }
+
+        if (! (bool) ($pivot->is_agency_managed ?? false)) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
+            return false;
+        }
+
+        $pivotAgencyId = (int) ($pivot->agency_tenant_id ?? 0);
+        if ($pivotAgencyId !== 0 && $pivotAgencyId !== $incubatingAgencyId) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
+            return false;
+        }
+
+        $this->incubatingAgencyStewardForClientCache[$cacheKey] = true;
+
+        return true;
     }
 
     /**

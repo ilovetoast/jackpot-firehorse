@@ -224,6 +224,16 @@ class Asset extends Model
                 ]);
             });
         }
+
+        // Soft-delete: FK cascade only runs on hard delete. Drop pending AI review rows so Insights/accept flows stay consistent.
+        static::deleted(function (Asset $asset) {
+            if ($asset->isForceDeleting()) {
+                return;
+            }
+            $id = $asset->getKey();
+            DB::table('asset_tag_candidates')->where('asset_id', $id)->delete();
+            DB::table('asset_metadata_candidates')->where('asset_id', $id)->delete();
+        });
     }
 
     /**
