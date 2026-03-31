@@ -1,6 +1,6 @@
-import { Link, router } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
 import { BuildingOffice2Icon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
-import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
+import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 
 function normalizeName(s) {
     return (s ?? '').trim().toLowerCase()
@@ -12,21 +12,7 @@ function normalizeName(s) {
  */
 export default function AgencyBrandQuickJump({ clients = [], brandColor = '#6366f1' }) {
     const openBrand = (companyId, brandId) => {
-        showWorkspaceSwitchingOverlay('company')
-        router.post(
-            `/app/companies/${companyId}/switch`,
-            { redirect: '/app/overview', brand_id: brandId },
-            {
-                preserveState: true,
-                preserveScroll: true,
-                onSuccess: () => {
-                    window.location.href = '/app/overview'
-                },
-                onError: () => {
-                    window.location.href = '/app/overview'
-                },
-            }
-        )
+        switchCompanyWorkspace({ companyId, brandId, redirect: '/app/overview' })
     }
 
     const list = Array.isArray(clients) ? clients : []

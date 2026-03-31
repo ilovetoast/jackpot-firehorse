@@ -1,8 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { router } from '@inertiajs/react'
 import { BuildingOffice2Icon, ChevronDownIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
-import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
+import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 import ReadinessScoreDots from '../agency/ReadinessScoreDots'
 import AgencyReadinessChecklist from '../agency/AgencyReadinessChecklist'
 import { agencyNavigateToBrandPath } from '../../utils/agencyBrandNavigation'
@@ -69,20 +68,10 @@ function ManagedCompanyCard({
     const isDark = theme === 'dark'
 
     const openWorkspace = (brandId) => {
-        showWorkspaceSwitchingOverlay('company')
-        const body = { redirect: '/app/overview' }
-        if (brandId != null) {
-            body.brand_id = brandId
-        }
-        router.post(`/app/companies/${client.id}/switch`, body, {
-            preserveState: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                window.location.href = '/app/overview'
-            },
-            onError: () => {
-                window.location.href = '/app/overview'
-            },
+        switchCompanyWorkspace({
+            companyId: client.id,
+            brandId: brandId != null ? brandId : null,
+            redirect: '/app/overview',
         })
     }
 

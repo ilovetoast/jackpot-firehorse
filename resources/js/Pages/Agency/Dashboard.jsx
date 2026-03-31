@@ -261,7 +261,6 @@ export default function AgencyDashboard({
                     tenant={tenant}
                     variant="transparent"
                     hideWorkspaceAppNav
-                    hideAgencyStrip
                 />
             </div>
 
@@ -301,7 +300,7 @@ export default function AgencyDashboard({
                             {agencySyncToast}
                         </div>
                     )}
-                    <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pt-28 lg:px-12">
+                    <div className="w-full max-w-[min(100%,90rem)] px-4 pb-16 pt-[calc(8rem+env(safe-area-inset-top))] sm:px-6 sm:pt-[calc(8.5rem+env(safe-area-inset-top))] lg:pl-5 lg:pr-10 xl:pl-6 xl:pr-12 2xl:pl-8 2xl:pr-16 mx-auto lg:mx-0 lg:ml-4 xl:ml-6 2xl:ml-8">
                         <header className="mb-8 w-full max-w-none">
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                 <div className="min-w-0">
@@ -334,9 +333,9 @@ export default function AgencyDashboard({
                             </div>
                         )}
 
-                        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+                        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
                             <nav
-                                className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-48 lg:flex-col"
+                                className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-52 lg:flex-col"
                                 aria-label="Agency dashboard sections"
                             >
                                 {DASH_TABS.map((t) => {
@@ -665,7 +664,12 @@ export default function AgencyDashboard({
                             <div className={`${glassPanel} overflow-hidden`}>
                                 <div className="border-b border-white/10 px-6 py-5">
                                     <h3 className="text-lg font-semibold text-white">Client overview</h3>
-                                    <p className={`mt-1 ${bodyMuted}`}>Incubated and activated clients</p>
+                                    <p className={`mt-1 ${bodyMuted}`}>
+                                        Incubated and activated clients.{' '}
+                                        <span className="text-white/40">
+                                            Sync agency users adds your agency team to the client workspace (same as on the Clients tab).
+                                        </span>
+                                    </p>
                                 </div>
                                 <div className="p-6">
                                     <div className="mb-8">
@@ -776,6 +780,23 @@ export default function AgencyDashboard({
                                                                             {formatDate(client.incubation_extension_requested_at)}
                                                                         </p>
                                                                     )}
+                                                                </div>
+                                                            )}
+                                                            {typeof client.tenant_agency_id === 'number' && (
+                                                                <div className="mt-3">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            handleSyncAgencyUsers(client.tenant_agency_id, client.name)
+                                                                        }
+                                                                        disabled={syncingTenantAgencyId === client.tenant_agency_id}
+                                                                        className="shrink-0 rounded-lg bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/15 hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-50"
+                                                                        title="Add agency staff who are not yet members of this client workspace"
+                                                                    >
+                                                                        {syncingTenantAgencyId === client.tenant_agency_id
+                                                                            ? 'Syncing…'
+                                                                            : 'Sync agency users'}
+                                                                    </button>
                                                                 </div>
                                                             )}
                                                         </div>

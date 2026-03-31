@@ -1,6 +1,6 @@
 import { usePage, router } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
-import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
+import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 import { useState, useRef, useEffect } from 'react'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -96,21 +96,11 @@ export default function CompanyOverview({
     }
 
     const handleOpenClientManagedBrand = (clientTenantId, brandId) => {
-        showWorkspaceSwitchingOverlay('company')
-        router.post(
-            `/app/companies/${clientTenantId}/switch`,
-            { brand_id: brandId, redirect: '/app/overview' },
-            {
-                preserveState: true,
-                preserveScroll: true,
-                onSuccess: () => {
-                    window.location.href = '/app/overview'
-                },
-                onError: () => {
-                    window.location.href = '/app/overview'
-                },
-            }
-        )
+        switchCompanyWorkspace({
+            companyId: clientTenantId,
+            brandId,
+            redirect: '/app/overview',
+        })
     }
 
     const handleDeleteClick = (brandId, brandName) => {

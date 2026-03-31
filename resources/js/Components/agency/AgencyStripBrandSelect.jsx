@@ -1,7 +1,6 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
-import { router } from '@inertiajs/react'
 import { ChevronDownIcon } from '@heroicons/react/24/outline'
-import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
+import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 
 /**
  * Compact brand-only switcher for the agency workspace strip (agency tenant + linked client brands).
@@ -42,21 +41,11 @@ export default function AgencyStripBrandSelect({
             setOpen(false)
             return
         }
-        showWorkspaceSwitchingOverlay('company')
-        router.post(
-            `/app/companies/${tenantId}/switch`,
-            { redirect: '/app/overview', brand_id: brandId },
-            {
-                preserveState: true,
-                preserveScroll: true,
-                onSuccess: () => {
-                    window.location.href = '/app/overview'
-                },
-                onError: () => {
-                    window.location.href = '/app/overview'
-                },
-            }
-        )
+        switchCompanyWorkspace({
+            companyId: tenantId,
+            brandId,
+            redirect: '/app/overview',
+        })
     }
 
     return (

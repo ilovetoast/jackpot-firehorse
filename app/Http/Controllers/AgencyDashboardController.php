@@ -8,6 +8,7 @@ use App\Models\AgencyPartnerReward;
 use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Services\Agency\BrandReadinessService;
 use App\Services\AgencyBrandAccessService;
 use App\Services\IncubationWorkspaceService;
@@ -118,7 +119,7 @@ class AgencyDashboardController extends Controller
 
         // Incubated = still linked to this agency and no completed ownership transfer yet.
         // (incubated_at null = legacy rows; set = explicit window start — expiry is advisory only, not enforced.)
-        $incubatedClients = Tenant::query()
+        $incubatedRows = Tenant::query()
             ->where('incubated_by_agency_id', $tenant->id)
             ->where(function ($query) {
                 $query->whereNull('incubated_at')
@@ -137,8 +138,14 @@ class AgencyDashboardController extends Controller
                 'incubation_expires_at',
                 'incubation_target_plan_key',
                 'incubation_extension_requested_at',
-            ])
-            ->map(function ($client) {
+            ]);
+
+        $tenantAgencyIdByClientId = TenantAgency::query()
+            ->where('agency_tenant_id', $tenant->id)
+            ->whereIn('tenant_id', $incubatedRows->pluck('id'))
+            ->pluck('id', 'tenant_id');
+
+        $incubatedClients = $incubatedRows->map(function ($client) use ($tenantAgencyIdByClientId) {
                 // Phase AG-8: Compute days remaining for incubation window awareness
                 $daysRemaining = null;
                 $expiringsSoon = false;
@@ -158,6 +165,8 @@ class AgencyDashboardController extends Controller
                     'incubation_expires_at' => $client->incubation_expires_at?->toISOString(),
                     'incubation_target_plan_key' => $client->incubation_target_plan_key,
                     'incubation_extension_requested_at' => $client->incubation_extension_requested_at?->toISOString(),
+                    // Agency ↔ client link id for sync (adds agency staff to client workspace)
+                    'tenant_agency_id' => $tenantAgencyIdByClientId[$client->id] ?? null,
                     // Phase AG-8: Computed flags for UI nudges (no enforcement)
                     'days_remaining' => $daysRemaining,
                     'expiring_soon' => $expiringsSoon,

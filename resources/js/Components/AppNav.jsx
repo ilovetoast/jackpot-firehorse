@@ -351,7 +351,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         { href: '/app/collections', label: 'Collections', shortLabel: 'Coll', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
     ]
 
-    /** When the Velvet Hammer agency strip is visible, park notifications + user menu there; agency dashboard uses hideAgencyStrip so menu stays in main nav. */
+    /** When the Velvet Hammer agency strip is visible, park notifications + user menu there. */
     const relocateUserChromeToAgencyStrip = Boolean(isAppPage && agencyHomeCompany && !hideAgencyStrip)
 
     const userMenuAndNotifications = (
