@@ -229,6 +229,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Empty override on a file = inherits global value.
      */
     const [globalMetadataDraft, setGlobalMetadataDraft] = useState({})
+    /** Ref to TagInputUnified in metadata (tags field) — flush pending text before finalize */
+    const tagFieldInputRef = useRef(null)
 
     /**
      * Phase 2 – Step 3: Metadata Validation State
@@ -570,6 +572,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         
         return true
     })
+
+    /** System Photography category: collapse Legal / Rights (usage, expiration, license) until expanded */
+    const selectedCategoryForUpload = useMemo(
+        () => filteredCategories.find((c) => String(c.id) === String(selectedCategoryId)),
+        [filteredCategories, selectedCategoryId]
+    )
+    const photographyUploadCollapsedGroupKeys = useMemo(() => {
+        if (!selectedCategoryForUpload) return null
+        const slug = (selectedCategoryForUpload.slug || '').toLowerCase().trim()
+        const name = (selectedCategoryForUpload.name || '').toLowerCase().trim()
+        const isPhotography = slug === 'photography' || name === 'photography'
+        if (!isPhotography) return null
+        return ['legal', 'legal_rights', 'license', 'expiration']
+    }, [selectedCategoryForUpload])
     
     // Debug: Log all categories received vs filtered
     if (categories && categories.length > 0) {
@@ -2575,20 +2591,17 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
         const hasCategory = selectedCategoryId !== null
 
-        // Phase 2 – Step 3: Check if all required metadata fields are satisfied
-        const metadataSatisfied = uploadMetadataSchema
-            ? areAllRequiredFieldsSatisfied(uploadMetadataSchema.groups || [], globalMetadataDraft)
-            : true // If no schema, assume satisfied (no requirements)
-
+        // Required metadata (including tags still in the tag input) is validated inside handleFinalizeV2
+        // after flushPending(), so we do not gate the button on globalMetadataDraft here — otherwise
+        // users could not click Finalize until they blurred the tag field.
         // Phase 3.0: Can finalize ONLY when:
         // - ALL uploads are completed (not just some)
         // - No active uploads (no uploading, no queued/selected)
         // - No failed uploads (failed blocks finalize)
         // - Not currently finalizing
         // - Category is selected
-        // - All required metadata fields are satisfied (Phase 2 – Step 3)
-        return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory && metadataSatisfied
-    }, [v2Files, selectedCategoryId, uploadManagerStateVersion, uploadMetadataSchema, globalMetadataDraft])
+        return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
+    }, [v2Files, selectedCategoryId, uploadManagerStateVersion, uploadMetadataSchema])
 
     /**
      * CLEAN UPLOADER V2 — Get warnings for missing required fields
@@ -2652,11 +2665,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Handles responses per file and updates batchStatus accordingly.
      */
     const handleFinalizeV2 = useCallback(async () => {
+        const flushedTags = tagFieldInputRef.current?.flushPending?.()
+        const metadataDraftForFinalize =
+            flushedTags !== undefined
+                ? { ...globalMetadataDraft, tags: flushedTags }
+                : globalMetadataDraft
+        if (flushedTags !== undefined) {
+            setGlobalMetadataDraft(metadataDraftForFinalize)
+        }
+
         // Phase 2 – Step 3: Validate required metadata fields before finalizing
         if (uploadMetadataSchema) {
             const allSatisfied = areAllRequiredFieldsSatisfied(
                 uploadMetadataSchema.groups || [],
-                globalMetadataDraft
+                metadataDraftForFinalize
             )
 
             if (!allSatisfied) {
@@ -2767,9 +2789,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // CRITICAL: Read current state directly instead of using callback to avoid stale closures
             const file = v2Files.find((f) => f.clientId === fileEntry.clientId)
             const effectiveMetadata = file ? {
-                ...globalMetadataDraft,
+                ...metadataDraftForFinalize,
                 ...(file.metadataDraft || {}),
-            } : globalMetadataDraft
+            } : metadataDraftForFinalize
             const metadataPayload = {}
             
             if (uploadMetadataSchema && effectiveMetadata) {
@@ -2827,11 +2849,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 })
             }
             
-            // FINAL SAFETY CHECK: If we still have no metadata but globalMetadataDraft has values, use it directly
-            if (Object.keys(metadataPayload).length === 0 && Object.keys(globalMetadataDraft).length > 0) {
-                // LAST RESORT: Use globalMetadataDraft directly
-                Object.keys(globalMetadataDraft).forEach(fieldKey => {
-                    const value = globalMetadataDraft[fieldKey]
+            // FINAL SAFETY CHECK: If we still have no metadata but global draft has values, use it directly
+            if (Object.keys(metadataPayload).length === 0 && Object.keys(metadataDraftForFinalize).length > 0) {
+                // LAST RESORT: Use merged global draft directly
+                Object.keys(metadataDraftForFinalize).forEach(fieldKey => {
+                    const value = metadataDraftForFinalize[fieldKey]
                     if (value !== null && value !== undefined && value !== '') {
                         if (Array.isArray(value) && value.length > 0) {
                             metadataPayload[fieldKey] = value
@@ -4346,6 +4368,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                         showCreateButton: true,
                                                         onCreateClick: () => setShowCreateCollectionModal(true),
                                                     } : null}
+                                                    tagFieldInputRef={tagFieldInputRef}
+                                                    defaultCollapsedGroupKeys={photographyUploadCollapsedGroupKeys || undefined}
                                                 />
                                             ) : (
                                                 <div className="rounded-md bg-gray-50 border border-gray-200 p-3">

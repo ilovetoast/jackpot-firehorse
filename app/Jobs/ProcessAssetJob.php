@@ -207,16 +207,20 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
-        // Only process assets that are VISIBLE (not hidden or failed)
-        // Asset.status represents VISIBILITY, not processing progress
-        // Processing jobs must NOT mutate Asset.status (assets must remain visible in grid)
-        // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
+        // Only process assets that are VISIBLE (not hidden or failed).
+        // Exception: category-based approval (requires_approval on Category) sets status to HIDDEN
+        // before publish, while analysis_status is still the initial "uploading" value. Those assets
+        // must still run thumbnails + AI so approvers can review; visibility stays HIDDEN until published.
         if ($asset->status !== AssetStatus::VISIBLE) {
-            Log::info('Asset processing skipped - asset is not visible', [
-                'asset_id' => $asset->id,
-                'status' => $asset->status->value,
-            ]);
-            return;
+            $hiddenAwaitingFirstPipeline = $asset->status === AssetStatus::HIDDEN
+                && ($asset->analysis_status ?? 'uploading') === 'uploading';
+            if (! $hiddenAwaitingFirstPipeline) {
+                Log::info('Asset processing skipped - asset is not visible', [
+                    'asset_id' => $asset->id,
+                    'status' => $asset->status->value,
+                ]);
+                return;
+            }
         }
 
         // Idempotency: Check if processing has already started (via metadata)

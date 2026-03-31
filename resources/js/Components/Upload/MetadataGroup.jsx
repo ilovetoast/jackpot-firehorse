@@ -22,9 +22,10 @@ import { validateMetadata } from '../../utils/metadataValidation'
  * @param {boolean} [props.disabled] - Whether fields are disabled
  * @param {boolean} [props.showErrors] - Whether to show validation errors
  * @param {boolean} [props.autoExpand] - Whether to auto-expand if group has errors
+ * @param {boolean} [props.defaultExpanded] - Initial expanded state (default true)
  */
-export default function MetadataGroup({ group, values = {}, onChange, disabled = false, showErrors = false, autoExpand = false, collectionProps = null }) {
-    const [isExpanded, setIsExpanded] = useState(true)
+export default function MetadataGroup({ group, values = {}, onChange, disabled = false, showErrors = false, autoExpand = false, defaultExpanded = true, collectionProps = null, tagFieldInputRef = null }) {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
     // Check if this group has any validation errors
     const groupErrors = validateMetadata([group], values)
@@ -75,6 +76,7 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                         {fieldsToRender.map((field) => (
                             <div key={field.key}>
                                 <MetadataFieldInput
+                                    ref={field.key === 'tags' ? tagFieldInputRef : undefined}
                                     field={field}
                                     value={field.key === 'collection' && collectionProps ? collectionProps.selectedIds : values[field.key]}
                                     onChange={field.key === 'collection' && collectionProps ? collectionProps.onChange : (value) => onChange(field.key, value)}

@@ -9,6 +9,7 @@
  * Handles empty options gracefully.
  */
 
+import { forwardRef } from 'react'
 import { isFieldSatisfied } from '../../utils/metadataValidation'
 import TagInputUnified from '../TagInputUnified'
 import CollectionSelector from '../Collections/CollectionSelector'
@@ -25,7 +26,11 @@ import { usePage } from '@inertiajs/react'
  * @param {boolean} [props.disabled] - Whether field is disabled
  * @param {boolean} [props.showError] - Whether to show validation error
  */
-export default function MetadataFieldInput({ field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null }) {
+const MetadataFieldInput = forwardRef(function MetadataFieldInput(
+    { field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null },
+    ref
+) {
+    const { tenant } = usePage().props
     const isRequired = field.is_required || false
     // UPLOAD CONTEXT FIX: During upload, all fields are editable (approval happens after upload)
     // For non-upload contexts (e.g., asset drawer), respect can_edit permission
@@ -69,9 +74,8 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
 
     // Phase J.2.8: Special handling for tags field
     if (field.key === 'tags') {
-        const { tenant } = usePage().props
         const tenantId = tenant?.id
-        
+
         return (
             <div className="flex items-start gap-2 min-w-0">
                 <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
@@ -80,6 +84,7 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                 </label>
                 <div className="flex-1 min-w-0">
                     <TagInputUnified
+                        ref={ref}
                         mode="upload"
                         value={Array.isArray(value) ? value : []}
                         onChange={handleChange}
@@ -333,4 +338,6 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             // Unknown type - fail safe (render nothing)
             return null
     }
-}
+})
+
+export default MetadataFieldInput

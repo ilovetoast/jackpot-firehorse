@@ -24,6 +24,7 @@ import { validateMetadata } from '../../utils/metadataValidation'
  * @param {boolean} [props.disabled] - Whether fields are disabled
  * @param {boolean} [props.showErrors] - Whether to show validation errors
  * @param {Function} [props.onValidationAttempt] - Callback when validation is attempted
+ * @param {string[]} [props.defaultCollapsedGroupKeys] - Group keys (case-insensitive) that start collapsed on upload
  */
 export default function MetadataGroups({ 
     groups = [], 
@@ -33,6 +34,8 @@ export default function MetadataGroups({
     showErrors = false,
     onValidationAttempt = null,
     collectionProps = null,
+    tagFieldInputRef = null,
+    defaultCollapsedGroupKeys = null,
 }) {
     const { auth } = usePage().props
     const groupRefs = useRef({})
@@ -42,6 +45,17 @@ export default function MetadataGroups({
     const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
     const hasBypassPermission = (auth?.effective_permissions || []).includes('metadata.bypass_approval')
     const showApprovalMessage = metadataApprovalEnabled && !hasBypassPermission
+
+    const collapsedKeySet =
+        defaultCollapsedGroupKeys?.length > 0
+            ? new Set(defaultCollapsedGroupKeys.map((k) => String(k).toLowerCase()))
+            : null
+
+    /** Remount groups when default-collapse set changes (e.g. Photography vs other category) */
+    const collapseModeKey =
+        defaultCollapsedGroupKeys?.length > 0
+            ? [...defaultCollapsedGroupKeys].sort().join('|')
+            : 'none'
 
     // Handle empty state
     if (!groups || groups.length === 0) {
@@ -79,9 +93,13 @@ export default function MetadataGroups({
                     }, 100)
                 }
 
+                const defaultExpanded = collapsedKeySet
+                    ? !collapsedKeySet.has(String(group.key || '').toLowerCase())
+                    : true
+
                 return (
                     <div
-                        key={group.key}
+                        key={`${group.key}__${collapseModeKey}`}
                         ref={(el) => {
                             if (el) {
                                 groupRefs.current[group.key] = el
@@ -95,7 +113,9 @@ export default function MetadataGroups({
                             disabled={disabled}
                             showErrors={showErrors}
                             autoExpand={showErrors && hasErrors}
+                            defaultExpanded={defaultExpanded}
                             collectionProps={collectionProps}
+                            tagFieldInputRef={tagFieldInputRef}
                         />
                     </div>
                 )

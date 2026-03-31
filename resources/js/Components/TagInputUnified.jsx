@@ -18,10 +18,11 @@
  * - 'filter': For primary filter rendering (values only, no API calls)
  */
 
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { XMarkIcon, TagIcon } from '@heroicons/react/24/outline'
+import { normalizeTagString } from '../utils/tagInputNormalize'
 
-export default function TagInputUnified({ 
+const TagInputUnified = forwardRef(function TagInputUnified({ 
     // Mode configuration
     mode = 'asset', // 'asset' | 'upload' | 'filter'
     
@@ -50,13 +51,14 @@ export default function TagInputUnified({
     
     // Accessibility
     ariaLabel = "Tag input"
-}) {
+}, ref) {
     const [inputValue, setInputValue] = useState('')
     const [suggestions, setSuggestions] = useState([])
     const [showSuggestions, setShowSuggestions] = useState(false)
     const [selectedIndex, setSelectedIndex] = useState(-1)
     const [loading, setLoading] = useState(false)
     const [localTags, setLocalTags] = useState(value) // For upload/filter mode
+    const [pendingTagHint, setPendingTagHint] = useState(null) // upload/filter: invalid text that didn't become a tag
     
     const inputRef = useRef(null)
     const suggestionsRef = useRef(null)
@@ -171,9 +173,15 @@ export default function TagInputUnified({
                 setLoading(false)
             }
         } else {
-            // Upload/Filter mode: Local state management
-            if (!localTags.includes(trimmedTag)) {
-                const newTags = [...localTags, trimmedTag]
+            // Upload/Filter mode: Local state management (canonical normalization)
+            const normalized = normalizeTagString(trimmedTag)
+            if (!normalized) {
+                clearInput()
+                return
+            }
+            if (!localTags.includes(normalized)) {
+                if (maxTags && localTags.length >= maxTags) return
+                const newTags = [...localTags, normalized]
                 setLocalTags(newTags)
                 onChange(newTags)
                 clearInput()
@@ -262,17 +270,55 @@ export default function TagInputUnified({
         addTag(suggestion.tag)
     }
 
-    // Handle input blur
+    // Get display tags based on mode
+    const displayTags = mode === 'asset' ? [] : localTags
+    const isAtMaxTags = maxTags && displayTags.length >= maxTags
+
+    /** Apply text still in the input as a tag (upload/filter). Returns full tag list after flush, or undefined if nothing changed. */
+    const flushPendingTags = useCallback(() => {
+        if (mode !== 'upload' && mode !== 'filter') return undefined
+        if (loading || disabled) return undefined
+        setPendingTagHint(null)
+        const raw = inputValue.trim()
+        if (!raw) return undefined
+        if (maxTags && localTags.length >= maxTags) {
+            setPendingTagHint(`Maximum ${maxTags} tags. Remove a tag or clear the box.`)
+            return undefined
+        }
+        const normalized = normalizeTagString(raw)
+        if (!normalized) {
+            setInputValue('')
+            setPendingTagHint('That text can\'t be used as a tag. Use letters, numbers, spaces, or hyphens.')
+            return undefined
+        }
+        if (localTags.includes(normalized)) {
+            setInputValue('')
+            setSuggestions([])
+            setShowSuggestions(false)
+            setSelectedIndex(-1)
+            return [...localTags]
+        }
+        const newTags = [...localTags, normalized]
+        setLocalTags(newTags)
+        onChange(newTags)
+        setInputValue('')
+        setSuggestions([])
+        setShowSuggestions(false)
+        setSelectedIndex(-1)
+        return newTags
+    }, [mode, loading, disabled, inputValue, maxTags, localTags, onChange])
+
+    useImperativeHandle(ref, () => ({
+        flushPending: flushPendingTags,
+    }), [flushPendingTags])
+
     const handleBlur = () => {
+        flushPendingTags()
         setTimeout(() => {
             setShowSuggestions(false)
             setSelectedIndex(-1)
         }, 150)
     }
-
-    // Get display tags based on mode
-    const displayTags = mode === 'asset' ? [] : localTags
-    const isAtMaxTags = maxTags && displayTags.length >= maxTags
 
     return (
         <div className={className}>
@@ -326,7 +372,10 @@ export default function TagInputUnified({
                         ref={inputRef}
                         type="text"
                         value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
+                        onChange={(e) => {
+                            setInputValue(e.target.value)
+                            setPendingTagHint(null)
+                        }}
                         onKeyDown={handleKeyDown}
                         onBlur={handleBlur}
                         onFocus={() => {
@@ -394,10 +443,19 @@ export default function TagInputUnified({
 
             {/* Helper text */}
             {mode === 'upload' && !compact && (
-                <div className="mt-1 text-xs text-gray-500">
-                    Add tags to help with discovery. Press Enter or comma to add.
+                <div className="mt-1 space-y-0.5">
+                    <div className="text-xs text-gray-500">
+                        Add tags to help with discovery. Press Enter or comma to add; leaving the field also adds what you typed.
+                    </div>
+                    {pendingTagHint && (
+                        <div className="text-xs text-amber-700" role="alert">
+                            {pendingTagHint}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
     )
-}
+})
+
+export default TagInputUnified

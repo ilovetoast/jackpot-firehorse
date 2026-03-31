@@ -23,7 +23,7 @@ import { updateFilterDebug } from '../utils/assetFilterDebug'
  * - Includes TTL safety (stale jobs >10 minutes are auto-cleared)
  * 
  * Features:
- * - Expandable/minimizable (remembers state in sessionStorage)
+ * - Expandable/minimizable (defaults minimized; remembers expanded state in sessionStorage)
  * - Auto-dismisses when all assets complete
  * - Shows processing status for each asset
  * - Handles failure states gracefully
@@ -41,12 +41,13 @@ export default function AssetProcessingTray() {
     
     const [processingAssets, setProcessingAssets] = useState([])
     const [isExpanded, setIsExpanded] = useState(() => {
-        // Restore minimized state from sessionStorage
+        // Default minimized until the user expands. Toggle stores (!expanded).toString() as 'minimized':
+        // 'false' => user left expanded, 'true' => minimized; absent key => start minimized.
         if (typeof window !== 'undefined') {
             const stored = sessionStorage.getItem('asset_processing_tray_minimized')
-            return stored !== 'true'
+            return stored === 'false'
         }
-        return true
+        return false
     })
     const [isDismissed, setIsDismissed] = useState(false)
     const [isLoading, setIsLoading] = useState(true)

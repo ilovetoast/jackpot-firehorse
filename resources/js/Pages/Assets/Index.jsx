@@ -249,7 +249,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                 }
             }
         }
-    }, [safeAssetsList, searchQuery])
+    }, [safeAssetsList, searchQuery, activeAssetId])
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
@@ -418,40 +418,6 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         })
     }, [assetsList, selectedCategoryId, filterable_schema])
 
-    // Track drawer animation state to freeze grid layout during animation
-    // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
-    // By delaying padding change until after animation (300ms), grid recalculates once cleanly
-    const [isDrawerAnimating, setIsDrawerAnimating] = useState(false)
-    
-    // Separate layout concerns (drawer visibility) from content concerns (active asset)
-    // Grid layout changes should only trigger on drawer open/close, not on asset changes
-    // This prevents grid rescaling when switching assets while drawer is already open
-    const isDrawerOpen = !!activeAsset
-    const prevDrawerOpenRef = useRef(isDrawerOpen)
-    
-    useEffect(() => {
-        const prevDrawerOpen = prevDrawerOpenRef.current
-        const drawerVisibilityChanged = prevDrawerOpen !== isDrawerOpen
-        
-        // Only trigger animation logic when drawer visibility changes (open/close)
-        // Asset changes while drawer is open are content swaps, not layout events
-        if (drawerVisibilityChanged) {
-            if (isDrawerOpen) {
-                // Drawer opening - delay padding change to prevent mid-animation grid reflow
-                setIsDrawerAnimating(true)
-                const timer = setTimeout(() => {
-                    setIsDrawerAnimating(false)
-                }, 300) // Match transition duration
-                prevDrawerOpenRef.current = isDrawerOpen
-                return () => clearTimeout(timer)
-            } else {
-                // Drawer closing - apply padding change immediately for clean close
-                setIsDrawerAnimating(false)
-                prevDrawerOpenRef.current = isDrawerOpen
-            }
-        }
-    }, [isDrawerOpen])
-    
     // Load toolbar settings from localStorage
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
@@ -1017,14 +983,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         </div>
                     </div>
                     <div 
-                        className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative pb-0 ${lifecycle === 'deleted' ? 'bg-gray-100' : ''}`}
-                        style={{ 
-                            // Freeze grid layout during drawer animation to prevent mid-animation reflow
-                            // CSS Grid recalculates columns immediately on width change
-                            // By delaying padding change until after animation, we get one controlled snap instead of dropping items mid-animation
-                            // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
-                            paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
-                        }}
+                        className={`flex-1 min-h-0 overflow-y-auto relative pb-0 ${lifecycle === 'deleted' ? 'bg-gray-100' : ''} ${activeAssetId ? 'md:pr-[480px]' : ''}`}
                         onDragOver={canUpload ? handleDragOver : undefined}
                         onDragEnter={canUpload ? handleDragEnter : undefined}
                         onDragLeave={canUpload ? handleDragLeave : undefined}

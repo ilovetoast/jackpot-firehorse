@@ -106,9 +106,7 @@ export default function AssetDrawer({
     const [showLightboxDetails, setShowLightboxDetails] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
-    // Track layout settling to prevent preview jump during grid recalculation
-    // When drawer opens, grid container padding animates (300ms), causing CSS Grid to recalculate
-    // This state delays preview render until layout stabilizes
+    // Track layout settling to prevent preview jump during grid reflow (grid reserves drawer width in one frame)
     const [isLayoutSettling, setIsLayoutSettling] = useState(true)
     // Phase 3.0C: Track thumbnail retry count (UI only, max 2 retries)
     const [thumbnailRetryCount, setThumbnailRetryCount] = useState(0)
@@ -325,9 +323,7 @@ export default function AssetDrawer({
         })
     }, [asset?.id, getViewCount, getDownloadCount])
 
-    // Delay preview render until grid layout settles
-    // Grid container padding animates over 300ms when drawer opens
-    // Delay by 350ms to allow layout recalculation to complete
+    // Briefly hide preview until after layout (grid reserves drawer width in one frame; no animated padding)
     useEffect(() => {
         if (!asset) {
             setIsLayoutSettling(true)
@@ -335,11 +331,11 @@ export default function AssetDrawer({
         }
 
         setIsLayoutSettling(true)
-        const timer = setTimeout(() => {
+        const id = requestAnimationFrame(() => {
             setIsLayoutSettling(false)
-        }, 350) // Slightly longer than grid transition (300ms)
+        })
 
-        return () => clearTimeout(timer)
+        return () => cancelAnimationFrame(id)
     }, [asset?.id])
 
     // Fetch activity events when asset is set

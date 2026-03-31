@@ -11,7 +11,7 @@
  * 5. Execute with progress
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { XMarkIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
@@ -48,6 +48,7 @@ export default function BulkMetadataEditModal({
     const [showCategoryChangeConfirm, setShowCategoryChangeConfirm] = useState(false)
     const [pendingCategoryField, setPendingCategoryField] = useState(null)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
+    const tagFieldInputRef = useRef(null)
 
     const canShowCategoryWarning = () => {
         const brandRole = (auth?.user?.brand_role || auth?.brand_role || '').toLowerCase()
@@ -200,13 +201,22 @@ export default function BulkMetadataEditModal({
 
     // Handle preview
     const handlePreview = async () => {
+        let valueForPreview = value
+        if (selectedField && typeof selectedField === 'object' && selectedField.field_key === 'tags') {
+            const flushed = tagFieldInputRef.current?.flushPending?.()
+            if (flushed !== undefined) {
+                valueForPreview = flushed
+                setValue(flushed)
+            }
+        }
+
         // C9.2: For collections, validate selectedCollectionIds
         if (selectedField === 'collections') {
             if (operationType !== 'clear' && selectedCollectionIds.length === 0 && value === null) {
                 setError('Please select at least one collection or use Clear operation')
                 return
             }
-        } else if (!selectedField || (operationType !== 'clear' && value === null)) {
+        } else if (!selectedField || (operationType !== 'clear' && valueForPreview === null)) {
             setError('Please select a field and enter a value')
             return
         }
@@ -289,7 +299,7 @@ export default function BulkMetadataEditModal({
                         asset_ids: assetIds,
                         operation_type: operationType,
                         metadata: {
-                            [selectedField.field_key]: operationType === 'clear' ? null : value,
+                            [selectedField.field_key]: operationType === 'clear' ? null : valueForPreview,
                         },
                     }),
                 })
@@ -594,6 +604,7 @@ export default function BulkMetadataEditModal({
                                     </div>
                                 ) : (
                                     <MetadataFieldInput
+                                        ref={selectedField.field_key === 'tags' ? tagFieldInputRef : undefined}
                                         field={selectedField}
                                         value={value}
                                         onChange={setValue}
