@@ -65,6 +65,35 @@ function groupLabel(key) {
     return GROUP_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : 'General')
 }
 
+/** Human-readable line for asset.metadata AI tag inference (skipped vs ran vs zero results). */
+function formatAiTagInferenceSummary(meta) {
+    if (!meta || typeof meta !== 'object') return null
+    const status = meta.ai_tag_inference_status
+    if (!status) return null
+    const map = {
+        vision_skipped_no_inputs: 'Skipped — no metadata fields or tag inference to run',
+        skipped_tags_not_eligible: 'Skipped — AI tags not enabled for this category',
+        skipped_upload_opt_out: 'Skipped — upload disabled AI tagging',
+        attempted_ok: `Ran — ${meta.ai_tag_candidates_created ?? 0} tag candidate(s)`,
+        attempted_empty: 'Ran — no tag candidates passed filters',
+    }
+    let s = map[status] || status
+    if (status === 'attempted_empty' && meta.ai_tag_inference_detail === 'empty_model') {
+        s += ' (model returned no tags)'
+    } else if (status === 'attempted_empty' && meta.ai_tag_inference_detail === 'no_tags_passed_filters') {
+        s += ' (below confidence or filtered)'
+    }
+    const st = meta.ai_tag_parse_stats
+    if (st && typeof st === 'object' && (st.raw !== undefined || st.passed !== undefined)) {
+        const parts = []
+        if (st.raw != null) parts.push(`raw ${st.raw}`)
+        if (st.passed != null) parts.push(`passed ${st.passed}`)
+        if (st.rejected_low_conf) parts.push(`rejected ${st.rejected_low_conf}`)
+        if (parts.length) s += ` — ${parts.join(', ')}`
+    }
+    return s
+}
+
 export default function AssetDetailPanel({
     asset,
     isOpen,
@@ -386,8 +415,9 @@ export default function AssetDetailPanel({
             if (!metaRes.data?.success) return
             try {
                 await window.axios.post(`/app/assets/${asset.id}/ai-tagging/regenerate`)
-            } catch {
-                // Tagging may 422 if thumbnails are not ready; metadata job is still queued
+            } catch (err) {
+                const msg = err.response?.data?.message || err.message || 'AI tagging regenerate failed'
+                onToast?.(`Metadata queued; AI tagging step: ${msg}`, 'warning')
             }
             setTimeout(fetchMetadata, 1500)
         } finally {
@@ -1819,6 +1849,18 @@ export default function AssetDetailPanel({
                                         <dd className={ddClass} title={lb ? 'Thumbnail status' : undefined}>
                                             {asset?.thumbnail_status ?? '—'}
                                         </dd>
+                                        {(() => {
+                                            const aiTagInferenceLine = formatAiTagInferenceSummary(asset?.metadata)
+                                            if (!canRegenerateAiMetadataForTroubleshooting || !aiTagInferenceLine) return null
+                                            return (
+                                                <>
+                                                    <dt className={lb ? 'sr-only' : dtClass}>AI tag inference</dt>
+                                                    <dd className={ddClass} title={lb ? 'AI tag inference' : aiTagInferenceLine}>
+                                                        {aiTagInferenceLine}
+                                                    </dd>
+                                                </>
+                                            )
+                                        })()}
                                         {/* Asset ID (UUID) — at bottom for copy/reference */}
                                         {asset?.id && (
                                             <div className={`sm:col-span-2 pt-3 mt-3 border-t ${lb ? 'border-neutral-800/60' : 'border-gray-200'}`}>

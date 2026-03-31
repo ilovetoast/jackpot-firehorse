@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\Brand;
+use App\Models\Category;
 use App\Models\Tenant;
 use App\Services\AI\Contracts\AIProviderInterface;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +35,9 @@ class AiMetadataGenerationService
 
     protected TenantBucketService $bucketService;
 
+    /** Minimum confidence (0–1) for structured fields and free-form tags from Vision JSON. */
+    protected float $minConfidenceMetadata;
+
     /**
      * Create a new service instance.
      *
@@ -48,12 +53,26 @@ class AiMetadataGenerationService
 
         $modelConfig = config('ai.models.gpt-4o-mini', []);
         $this->defaultModel = $modelConfig['model_name'] ?? 'gpt-4o-mini';
+        $this->minConfidenceMetadata = (float) config('ai.metadata_tagging.min_confidence', 0.85);
+    }
+
+    protected function getTaggingMinConfidence(): float
+    {
+        $v = $this->minConfidenceMetadata;
+        if ($v < 0.5) {
+            return 0.5;
+        }
+        if ($v > 0.99) {
+            return 0.99;
+        }
+
+        return $v;
     }
 
     /**
      * Generate AI metadata candidates for an asset.
      *
-     * @return array Results: candidates_created, tags_created, tag_inference_attempted, cost, fields_processed, tokens_in, tokens_out, model
+     * @return array Results: candidates_created, tags_created, tag_inference_attempted, ai_tag_inference_status, ai_tag_inference_detail, tag_parse_stats, cost, fields_processed, tokens_in, tokens_out, model
      *
      * @throws \Exception If API call fails (caller should handle gracefully)
      */
@@ -79,6 +98,9 @@ class AiMetadataGenerationService
                 'candidates_created' => 0,
                 'tags_created' => 0,
                 'tag_inference_attempted' => false,
+                'ai_tag_inference_status' => 'vision_skipped_no_inputs',
+                'ai_tag_inference_detail' => null,
+                'tag_parse_stats' => null,
                 'cost' => 0.0,
                 'fields_processed' => [],
                 'tokens_in' => 0,
@@ -112,12 +134,13 @@ class AiMetadataGenerationService
         $parsed = $this->parseResponse($response, $asset, $fields);
         $candidates = $parsed['candidates'] ?? [];
         $tags = $parsed['tags'] ?? [];
+        $tagParseStats = $parsed['tag_parse_stats'] ?? null;
 
         // Create candidates in database
         $candidatesCreated = $this->createCandidates($asset, $candidates);
 
-        // Create tag candidates only when upload did not opt out of AI tagging (see ProcessAssetJob / _skip_ai_tagging).
-        $tagsCreated = $skipAiTaggingUpload ? 0 : $this->createTags($asset, $tags);
+        // Tag candidates only when Tags is AI-eligible for this category, upload did not opt out, and no approved tag yet.
+        $tagsCreated = $tagsInference ? $this->createTags($asset, $tags) : 0;
 
         // Calculate cost using provider's cost calculation
         $cost = $this->provider->calculateCost(
@@ -138,16 +161,60 @@ class AiMetadataGenerationService
 
         $tagInferenceAttempted = $tagsInference;
 
+        [$aiTagInferenceStatus, $aiTagInferenceDetail] = $this->resolveAiTagInferenceOutcome(
+            $tagsInference,
+            $tagInferenceDesired,
+            $skipAiTaggingUpload,
+            $tagsCreated,
+            $tagParseStats
+        );
+
         return [
             'candidates_created' => $candidatesCreated,
             'tags_created' => $tagsCreated,
             'tag_inference_attempted' => $tagInferenceAttempted,
+            'ai_tag_inference_status' => $aiTagInferenceStatus,
+            'ai_tag_inference_detail' => $aiTagInferenceDetail,
+            'tag_parse_stats' => $tagParseStats,
             'cost' => $cost,
             'fields_processed' => array_keys($candidates),
             'tokens_in' => $response['tokens_in'] ?? 0,
             'tokens_out' => $response['tokens_out'] ?? 0,
             'model' => $response['model'] ?? $this->defaultModel,
         ];
+    }
+
+    /**
+     * Human/debug status for asset metadata: skipped vs attempted vs zero usable tags.
+     *
+     * @param  array<string, mixed>|null  $tagParseStats
+     * @return array{0: string, 1: string|null}
+     */
+    protected function resolveAiTagInferenceOutcome(
+        bool $tagsInference,
+        bool $tagInferenceDesired,
+        bool $skipAiTaggingUpload,
+        int $tagsCreated,
+        ?array $tagParseStats
+    ): array {
+        if (! $tagsInference) {
+            if ($tagInferenceDesired && $skipAiTaggingUpload) {
+                return ['skipped_upload_opt_out', null];
+            }
+
+            return ['skipped_tags_not_eligible', null];
+        }
+
+        if ($tagsCreated > 0) {
+            return ['attempted_ok', null];
+        }
+
+        $raw = (int) ($tagParseStats['raw_tag_count'] ?? 0);
+        if ($raw === 0) {
+            return ['attempted_empty', 'empty_model'];
+        }
+
+        return ['attempted_empty', 'no_tags_passed_filters'];
     }
 
     /**
@@ -504,26 +571,34 @@ class AiMetadataGenerationService
             ];
         }
 
+        $min = $this->getTaggingMinConfidence();
+        $minStr = number_format($min, 2, '.', '');
+        $ctx = $this->buildPromptContextBlock($asset);
+
         $isVideo = str_starts_with($asset->mime_type ?? '', 'video/');
         $prompt = $isVideo
-            ? "This is a frame from a video. Analyze it and describe what the video is likely about (subject, setting, action, mood). Provide both structured metadata field values and general descriptive tags.\n\n"
-            : "Analyze this image and provide both structured metadata field values and general descriptive tags.\n\n";
+            ? "This is a frame from a video. Analyze it and describe what the video is likely about (subject, setting, action, mood). Provide both structured metadata field values and searchable tags.\n\n"
+            : "Analyze this image and provide both structured metadata field values and searchable tags.\n\n";
+
+        $prompt .= $ctx;
 
         $prompt .= "STRUCTURED FIELDS:\n";
         $prompt .= "For each field below, select ONLY from the provided allowed values.\n";
         $prompt .= "Fields to analyze:\n";
         $prompt .= json_encode($fieldsJson, JSON_PRETTY_PRINT)."\n\n";
 
-        $prompt .= "GENERAL TAGS:\n";
-        $prompt .= "Also provide descriptive tags that capture the content, style, mood, or subject matter of the image.\n";
-        $prompt .= "Tags should be: lowercase, singular form, no punctuation, descriptive keywords.\n\n";
+        $prompt .= "GENERAL TAGS (for search & discovery):\n";
+        $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
+        $prompt .= "Prefer concrete, searchable terms: subject, setting, style, mood, notable people or objects, production type when visible.\n";
+        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"photo shoot\", \"model\", \"product\"); avoid punctuation.\n";
+        $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
 
         $prompt .= "REQUIREMENTS:\n";
-        $prompt .= "- Only return fields/tags where you have high confidence (>= 0.90)\n";
+        $prompt .= "- Only return fields/tags where confidence is >= {$minStr} ({$minStr} = 0–1 scale)\n";
         $prompt .= "- Include confidence score for each value/tag\n";
-        $prompt .= "- If confidence is below 0.90, omit that field/tag\n";
+        $prompt .= "- If confidence is below {$minStr}, omit that field/tag\n";
         $prompt .= "- Field values must exactly match one of the allowed_values\n";
-        $prompt .= "- Tags must be lowercase, singular, no punctuation\n";
+        $prompt .= "- Tags must be lowercase; short phrases (spaces allowed) are OK\n";
         $prompt .= "- Return JSON format with both 'fields' and 'tags' sections:\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {\n";
@@ -544,19 +619,27 @@ class AiMetadataGenerationService
      */
     protected function buildPromptTagsOnly(Asset $asset): string
     {
+        $min = $this->getTaggingMinConfidence();
+        $minStr = number_format($min, 2, '.', '');
+        $ctx = $this->buildPromptContextBlock($asset);
+
         $isVideo = str_starts_with($asset->mime_type ?? '', 'video/');
         $prompt = $isVideo
-            ? "This is a frame from a video. Analyze it and provide descriptive tags.\n\n"
-            : "Analyze this image and provide descriptive tags.\n\n";
+            ? "This is a frame from a video. Analyze it and provide searchable tags.\n\n"
+            : "Analyze this image and provide searchable tags.\n\n";
 
-        $prompt .= "GENERAL TAGS:\n";
-        $prompt .= "Provide descriptive tags that capture the content, style, mood, or subject matter.\n";
-        $prompt .= "Tags should be: lowercase, singular form, no punctuation, descriptive keywords.\n\n";
+        $prompt .= $ctx;
+
+        $prompt .= "GENERAL TAGS (for search & discovery):\n";
+        $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
+        $prompt .= "Prefer concrete, searchable terms: subject, setting, style, mood, notable people or objects, production type when visible.\n";
+        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"photo shoot\", \"model\", \"product\"); avoid punctuation.\n";
+        $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
 
         $prompt .= "REQUIREMENTS:\n";
-        $prompt .= "- Only return tags where you have high confidence (>= 0.90)\n";
+        $prompt .= "- Only return tags where confidence is >= {$minStr}\n";
         $prompt .= "- Include confidence score for each tag\n";
-        $prompt .= "- Tags must be lowercase, singular, no punctuation\n";
+        $prompt .= "- Tags must be lowercase; short phrases (spaces allowed) are OK\n";
         $prompt .= "- Return JSON with a \"tags\" array (and may use an empty \"fields\" object):\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {},\n";
@@ -568,6 +651,59 @@ class AiMetadataGenerationService
         $prompt .= 'Response:';
 
         return $prompt;
+    }
+
+    /**
+     * Category/brand context and category-specific guidance for vision prompts.
+     */
+    protected function buildPromptContextBlock(Asset $asset): string
+    {
+        $lines = [];
+        $meta = $asset->metadata ?? [];
+        $categoryId = $meta['category_id'] ?? null;
+        $category = null;
+        if ($categoryId) {
+            $category = Category::find($categoryId);
+            if ($category && $category->name) {
+                $lines[] = 'Library category: '.$category->name.'.';
+            }
+        }
+        if ($asset->brand_id) {
+            $brand = Brand::find($asset->brand_id);
+            if ($brand && $brand->name) {
+                $lines[] = 'Brand: '.$brand->name.'.';
+            }
+        }
+        if ($categoryId && ! $category) {
+            $lines[] = 'Library category id: '.$categoryId.'.';
+        }
+
+        $hint = $this->searchTagsHintForCategory($category);
+        if ($hint !== '') {
+            $lines[] = $hint;
+        }
+
+        if (! empty($lines)) {
+            return "CONTEXT:\n".implode("\n", $lines)."\n\n";
+        }
+
+        return '';
+    }
+
+    /**
+     * Extra guidance for common categories (e.g. photography) so tags are useful in search.
+     */
+    protected function searchTagsHintForCategory(?Category $category): string
+    {
+        if (! $category || ! $category->name) {
+            return '';
+        }
+        $name = strtolower($category->name);
+        if (str_contains($name, 'photo')) {
+            return 'For photography, include search-friendly terms when visible: e.g. shoot type (studio, on location, editorial), roles (model, talent), product, and composition (portrait, full body, product shot).';
+        }
+
+        return 'Include terms users might search for: subject, setting, style, mood, and notable objects or people when clearly visible.';
     }
 
     /**
@@ -584,6 +720,12 @@ class AiMetadataGenerationService
         $text = $response['text'] ?? '';
         $candidates = [];
         $tags = [];
+        $minConf = $this->getTaggingMinConfidence();
+        $tagParseStats = [
+            'raw_tag_count' => 0,
+            'passed_confidence_count' => 0,
+            'rejected_low_confidence_count' => 0,
+        ];
 
         try {
             $data = json_decode($text, true);
@@ -593,7 +735,7 @@ class AiMetadataGenerationService
                     'response' => $text,
                 ]);
 
-                return ['candidates' => [], 'tags' => []];
+                return ['candidates' => [], 'tags' => [], 'tag_parse_stats' => $tagParseStats];
             }
 
             // Parse structured fields
@@ -607,12 +749,12 @@ class AiMetadataGenerationService
                     $value = $fieldData['value'] ?? null;
                     $confidence = $fieldData['confidence'] ?? null;
 
-                    // Validate confidence (must be >= 0.90)
-                    if (! is_numeric($confidence) || (float) $confidence < 0.90) {
+                    if (! is_numeric($confidence) || (float) $confidence < $minConf) {
                         Log::debug('[AiMetadataGenerationService] Low confidence field skipped', [
                             'asset_id' => $asset->id,
                             'field_key' => $fieldKey,
                             'confidence' => $confidence,
+                            'min_confidence' => $minConf,
                         ]);
 
                         continue;
@@ -656,7 +798,7 @@ class AiMetadataGenerationService
                     if (! is_array($tagData)) {
                         // Handle case where tags might be simple strings
                         if (is_string($tagData)) {
-                            $tagData = ['value' => $tagData, 'confidence' => 0.90];
+                            $tagData = ['value' => $tagData, 'confidence' => $minConf];
                         } else {
                             continue;
                         }
@@ -669,13 +811,22 @@ class AiMetadataGenerationService
                         continue;
                     }
 
-                    // Validate confidence (must be >= 0.90)
-                    if (! is_numeric($confidence) || (float) $confidence < 0.90) {
+                    $tagParseStats['raw_tag_count']++;
+
+                    if (! is_numeric($confidence)) {
+                        $tagParseStats['rejected_low_confidence_count']++;
+
+                        continue;
+                    }
+
+                    if ((float) $confidence < $minConf) {
                         Log::debug('[AiMetadataGenerationService] Low confidence tag skipped', [
                             'asset_id' => $asset->id,
                             'tag' => $tagValue,
                             'confidence' => $confidence,
+                            'min_confidence' => $minConf,
                         ]);
+                        $tagParseStats['rejected_low_confidence_count']++;
 
                         continue;
                     }
@@ -683,9 +834,12 @@ class AiMetadataGenerationService
                     // Normalize tag: lowercase, singular, no punctuation
                     $normalizedTag = $this->normalizeTag($tagValue);
                     if (empty($normalizedTag)) {
+                        $tagParseStats['rejected_low_confidence_count']++;
+
                         continue;
                     }
 
+                    $tagParseStats['passed_confidence_count']++;
                     $tags[] = [
                         'value' => $normalizedTag,
                         'confidence' => (float) $confidence,
@@ -703,6 +857,7 @@ class AiMetadataGenerationService
         return [
             'candidates' => $candidates,
             'tags' => $tags,
+            'tag_parse_stats' => $tagParseStats,
         ];
     }
 

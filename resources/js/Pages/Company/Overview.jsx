@@ -40,7 +40,8 @@ export default function CompanyOverview({
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
     const [actionsOpen, setActionsOpen] = useState(null)
     const actionsRef = useRef(null)
-    const { auth } = usePage().props
+    const { auth, currentWorkspace } = usePage().props
+    const workspaceTitle = currentWorkspace?.name || auth?.activeCompany?.name || tenant?.name
     const dashLinks = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
 
     useEffect(() => {
@@ -169,6 +170,9 @@ export default function CompanyOverview({
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
                         <div className="min-w-0 flex-1">
+                            {workspaceTitle && (
+                                <p className="text-sm font-semibold text-gray-500">{workspaceTitle}</p>
+                            )}
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Overview</h1>
                                 {plan?.name && (

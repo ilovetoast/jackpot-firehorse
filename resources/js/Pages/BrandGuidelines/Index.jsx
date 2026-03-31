@@ -3,7 +3,8 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 
 export default function BrandGuidelinesIndex() {
-  const { auth } = usePage().props
+  const { auth, currentWorkspace } = usePage().props
+  const workspaceName = currentWorkspace?.name || auth?.activeCompany?.name
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -11,6 +12,9 @@ export default function BrandGuidelinesIndex() {
       <AppNav brand={auth?.activeBrand} tenant={null} />
       <main className="flex-1 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-3xl mx-auto">
+          {workspaceName && (
+            <p className="text-sm font-semibold text-gray-500">{workspaceName}</p>
+          )}
           <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
             Brand Guidelines
           </h1>

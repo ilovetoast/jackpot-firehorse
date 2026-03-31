@@ -190,6 +190,18 @@ class AiMetadataGenerationJob implements ShouldQueue
             // Observability: tag candidate rows created (0 = ran but model returned none, when tag inference was attempted)
             $tagsCreated = (int) ($results['tags_created'] ?? 0);
             $metadata['ai_tag_candidates_created'] = $tagsCreated;
+            $metadata['ai_tag_inference_status'] = $results['ai_tag_inference_status'] ?? null;
+            $metadata['ai_tag_inference_detail'] = $results['ai_tag_inference_detail'] ?? null;
+            $tagStats = $results['tag_parse_stats'] ?? null;
+            if (is_array($tagStats) && (($results['tag_inference_attempted'] ?? false) === true)) {
+                $metadata['ai_tag_parse_stats'] = [
+                    'raw' => (int) ($tagStats['raw_tag_count'] ?? 0),
+                    'passed' => (int) ($tagStats['passed_confidence_count'] ?? 0),
+                    'rejected_low_conf' => (int) ($tagStats['rejected_low_confidence_count'] ?? 0),
+                ];
+            } else {
+                unset($metadata['ai_tag_parse_stats']);
+            }
             if (($results['tag_inference_attempted'] ?? false) === true) {
                 $metadata['ai_tagging_zero_recommendations'] = $tagsCreated === 0;
             } else {
@@ -207,6 +219,9 @@ class AiMetadataGenerationJob implements ShouldQueue
                     'candidates_created' => $results['candidates_created'],
                     'tags_created' => $results['tags_created'] ?? 0,
                     'tag_inference_attempted' => $results['tag_inference_attempted'] ?? false,
+                    'ai_tag_inference_status' => $results['ai_tag_inference_status'] ?? null,
+                    'ai_tag_inference_detail' => $results['ai_tag_inference_detail'] ?? null,
+                    'tag_parse_stats' => $results['tag_parse_stats'] ?? null,
                     'fields_processed' => $results['fields_processed'],
                 ])
             );

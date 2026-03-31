@@ -29,6 +29,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Asset metadata & AI tag inference (Vision)
+    |--------------------------------------------------------------------------
+    |
+    | Used by AiMetadataGenerationService for structured field candidates and
+    | asset_tag_candidates. Lower values return more tags; higher values are stricter.
+    | Tags are normalized (lowercase, etc.) after filtering.
+    |
+    */
+    'metadata_tagging' => [
+        'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.85),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | OpenAI Provider
     |--------------------------------------------------------------------------
     |

@@ -62,9 +62,11 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'landscape',
-                        'confidence' => 0.95,
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'landscape',
+                            'confidence' => 0.95,
+                        ],
                     ],
                 ]),
                 'tokens_in' => 1000,
@@ -113,6 +115,7 @@ class AiMetadataGenerationServiceTest extends TestCase
         $this->assertEquals(0, $results['candidates_created']);
         $this->assertEquals(0, $results['tags_created']);
         $this->assertFalse($results['tag_inference_attempted']);
+        $this->assertSame('vision_skipped_no_inputs', $results['ai_tag_inference_status'] ?? null);
         $this->assertEquals(0.0, $results['cost']);
         $this->assertEmpty($results['fields_processed']);
     }
@@ -152,6 +155,7 @@ class AiMetadataGenerationServiceTest extends TestCase
         $this->assertEquals(0, $results['candidates_created']);
         $this->assertGreaterThanOrEqual(1, $results['tags_created']);
         $this->assertTrue($results['tag_inference_attempted']);
+        $this->assertSame('attempted_ok', $results['ai_tag_inference_status'] ?? null);
         $this->assertEmpty($results['fields_processed']);
 
         $row = DB::table('asset_tag_candidates')
@@ -171,9 +175,11 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'landscape',
-                        'confidence' => 0.95,
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'landscape',
+                            'confidence' => 0.95,
+                        ],
                     ],
                     'tags' => [
                         ['value' => 'should-not-persist', 'confidence' => 0.99],
@@ -206,6 +212,7 @@ class AiMetadataGenerationServiceTest extends TestCase
         $this->assertEquals(1, $results['candidates_created']);
         $this->assertEquals(0, $results['tags_created']);
         $this->assertFalse($results['tag_inference_attempted']);
+        $this->assertSame('skipped_upload_opt_out', $results['ai_tag_inference_status'] ?? null);
 
         $this->assertEquals(0, DB::table('asset_tag_candidates')->where('asset_id', $asset->id)->count());
     }
@@ -222,6 +229,7 @@ class AiMetadataGenerationServiceTest extends TestCase
         $this->assertEquals(0, $results['candidates_created']);
         $this->assertEquals(0, $results['tags_created']);
         $this->assertFalse($results['tag_inference_attempted']);
+        $this->assertSame('vision_skipped_no_inputs', $results['ai_tag_inference_status'] ?? null);
     }
 
     /**
@@ -234,9 +242,11 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'landscape',
-                        'confidence' => 0.95,
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'landscape',
+                            'confidence' => 0.95,
+                        ],
                     ],
                 ]),
                 'tokens_in' => 1000,
@@ -305,9 +315,11 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'landscape',
-                        'confidence' => 0.85, // Below 0.90 threshold
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'landscape',
+                            'confidence' => 0.80, // Below default min (0.85)
+                        ],
                     ],
                 ]),
                 'tokens_in' => 1000,
@@ -340,9 +352,11 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'invalid_value', // Not in options
-                        'confidence' => 0.95,
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'invalid_value', // Not in options
+                            'confidence' => 0.95,
+                        ],
                     ],
                 ]),
                 'tokens_in' => 1000,
@@ -441,13 +455,15 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'photo_type' => [
-                        'value' => 'landscape',
-                        'confidence' => 0.95,
-                    ],
-                    'usage_rights' => [
-                        'value' => 'editorial',
-                        'confidence' => 0.92,
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'landscape',
+                            'confidence' => 0.95,
+                        ],
+                        'usage_rights' => [
+                            'value' => 'editorial',
+                            'confidence' => 0.92,
+                        ],
                     ],
                 ]),
                 'tokens_in' => 1000,
