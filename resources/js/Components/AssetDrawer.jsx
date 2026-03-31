@@ -1638,7 +1638,7 @@ export default function AssetDrawer({
     return (
         <div
             ref={drawerRef}
-            className="fixed inset-y-0 right-0 z-50 bg-white shadow-xl overflow-y-auto w-full md:w-auto"
+            className="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6"
             style={{
                 maxWidth: '480px',
             }}

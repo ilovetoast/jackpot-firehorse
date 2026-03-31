@@ -281,7 +281,9 @@ export default function Overview({
                 {/* Main content — scroll on small viewports (PWA: single pane + overscroll containment) */}
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
                     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:px-12">
-                        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain [-webkit-overflow-scrolling:touch] lg:overflow-visible lg:overscroll-auto">
+                        <div
+                            className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain [-webkit-overflow-scrolling:touch] max-lg:[scrollbar-width:none] max-lg:[-ms-overflow-style:none] max-lg:[&::-webkit-scrollbar]:hidden lg:overflow-visible lg:overscroll-auto"
+                        >
                             {/*
                              * ---------------------------------------------------------------------------
                              * OVERVIEW COLUMN LAYOUT — DO NOT CHANGE without explicit design/product sign-off.
