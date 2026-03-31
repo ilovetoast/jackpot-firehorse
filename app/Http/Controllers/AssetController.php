@@ -4,12 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\User;
+use App\Exceptions\PlanLimitExceededException;
+use App\Jobs\AiMetadataGenerationJob;
+use App\Jobs\AITaggingJob;
 use App\Services\AiMetadataConfidenceService;
+use App\Services\AiTagPolicyService;
+use App\Services\AiUsageService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
@@ -1962,6 +1968,162 @@ class AssetController extends Controller
             'url' => $previewUrl,
             'expires_at' => $previewUrl ? now()->addMinutes(15)->toIso8601String() : null,
         ], 200);
+    }
+
+    /**
+     * Regenerate AI metadata (vision pipeline) for an asset — manual rerun.
+     *
+     * POST /app/assets/{asset}/ai-metadata/regenerate
+     */
+    public function regenerateAiMetadata(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Asset not found',
+            ], 404);
+        }
+
+        if (! $user) {
+            return response()->json(['success' => false, 'error' => 'Unauthenticated'], 401);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            if (! in_array($tenantRole, ['owner', 'admin'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'You do not have permission to regenerate AI metadata',
+                ], 403);
+            }
+        }
+
+        $policyCheck = app(AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
+        if (! $policyCheck['should_proceed']) {
+            return response()->json([
+                'success' => false,
+                'error' => 'AI tagging is disabled for this tenant',
+                'reason' => $policyCheck['reason'] ?? 'policy_denied',
+            ], 403);
+        }
+
+        try {
+            app(AiUsageService::class)->checkUsage($tenant, 'tagging', 1);
+        } catch (PlanLimitExceededException $e) {
+            return response()->json([
+                'error' => 'Plan limit exceeded',
+                'message' => $e->getMessage(),
+            ], 403);
+        }
+
+        try {
+            AiMetadataGenerationJob::dispatch($asset->id, true);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'AI metadata regeneration queued',
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('[AssetController] Failed to queue AI metadata regeneration', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to queue AI metadata regeneration',
+            ], 500);
+        }
+    }
+
+    /**
+     * Re-run the AI tagging pipeline step (AITaggingJob) after clearing completion flags.
+     *
+     * POST /app/assets/{asset}/ai-tagging/regenerate
+     */
+    public function regenerateAiTagging(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Asset not found',
+            ], 404);
+        }
+
+        if (! $user) {
+            return response()->json(['success' => false, 'error' => 'Unauthenticated'], 401);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            if (! in_array($tenantRole, ['owner', 'admin'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'You do not have permission to regenerate AI tagging',
+                ], 403);
+            }
+        }
+
+        $policyCheck = app(AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
+        if (! $policyCheck['should_proceed']) {
+            return response()->json([
+                'success' => false,
+                'error' => 'AI tagging is disabled for this tenant',
+                'reason' => $policyCheck['reason'] ?? 'policy_denied',
+            ], 403);
+        }
+
+        try {
+            app(AiUsageService::class)->checkUsage($tenant, 'tagging', 1);
+        } catch (PlanLimitExceededException $e) {
+            return response()->json([
+                'error' => 'Plan limit exceeded',
+                'message' => $e->getMessage(),
+            ], 403);
+        }
+
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Thumbnails must be complete before regenerating AI tagging',
+            ], 422);
+        }
+
+        $metadata = $asset->metadata ?? [];
+        unset(
+            $metadata['ai_tagging_completed'],
+            $metadata['ai_tagging_completed_at'],
+            $metadata['_ai_tagging_skipped'],
+            $metadata['_ai_tagging_skip_reason'],
+            $metadata['_ai_tagging_skipped_at'],
+            $metadata['_ai_tagging_status'],
+        );
+        $asset->update(['metadata' => $metadata]);
+
+        try {
+            AITaggingJob::dispatch($asset->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'AI tagging regeneration queued',
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('[AssetController] Failed to queue AI tagging regeneration', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to queue AI tagging regeneration',
+            ], 500);
+        }
     }
 
     /**
