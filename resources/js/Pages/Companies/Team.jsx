@@ -37,6 +37,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
     const [linkedAgencies, setLinkedAgencies] = useState([])
     const [detachAgencyDialog, setDetachAgencyDialog] = useState({ open: false, link: null })
     const [detachAgencySubmitting, setDetachAgencySubmitting] = useState(false)
+    const [pendingConvertUserId, setPendingConvertUserId] = useState(null)
 
     const debouncedSearch = useDebounce(search, 300)
 
@@ -206,6 +207,45 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
         setDetachAgencyDialog({ open: true, link })
     }
 
+    const handleConvertToAgency = async (userId, agencyTenantId) => {
+        if (
+            !window.confirm(
+                'This person will be managed by the agency link: their company role and brand access will follow the link settings (same as other agency staff). Direct-only changes will no longer apply. Continue?'
+            )
+        ) {
+            return
+        }
+        setPendingConvertUserId(userId)
+        try {
+            const res = await fetch(`/app/api/companies/users/${userId}/agency-managed`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body: JSON.stringify({ agency_tenant_id: agencyTenantId }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                const msg =
+                    data.errors?.agency_tenant_id?.[0] ||
+                    data.errors?.user_id?.[0] ||
+                    data.message ||
+                    'Could not switch this member to agency-managed access.'
+                window.alert(msg)
+                return
+            }
+            fetchUsers()
+        } catch {
+            window.alert('Network error.')
+        } finally {
+            setPendingConvertUserId(null)
+        }
+    }
+
     const confirmDetachAgency = async () => {
         const link = detachAgencyDialog.link
         if (!link?.id) {
@@ -263,7 +303,8 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                             >
                                 Company settings → Agencies
                             </Link>
-                            .
+                            . Use <span className="font-medium">Switch to agency</span> on a direct team member when they
+                            should follow the agency link instead of a direct invite.
                         </p>
                     </div>
                 )}
@@ -350,6 +391,9 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                                             onRemoveBrand={handleRemoveBrand}
                                             onDeleteFromCompany={handleDeleteFromCompany}
                                             updatingKeys={updatingKeys}
+                                            linkedAgencies={linkedAgencies}
+                                            onConvertToAgency={handleConvertToAgency}
+                                            convertPending={pendingConvertUserId === user.id}
                                         />
                                     ))}
                                 </div>

@@ -46,6 +46,9 @@ export default function UserRow({
     onDeleteFromCompany,
     updatingKeys = {},
     groupedUnderAgencySection = false,
+    linkedAgencies = [],
+    onConvertToAgency,
+    convertPending = false,
 }) {
     const [expanded, setExpanded] = useState(false)
     const [addBrandOpen, setAddBrandOpen] = useState(false)
@@ -156,6 +159,38 @@ export default function UserRow({
                 )}
                 {updatingKeys[`tenant_${user.id}`] && (
                     <span className="text-xs text-gray-500">Updating...</span>
+                )}
+                {canModify && linkedAgencies.length > 0 && typeof onConvertToAgency === 'function' && (
+                    <div onClick={(e) => e.stopPropagation()}>
+                        <label className="sr-only" htmlFor={`agency-convert-${user.id}`}>
+                            Switch member to agency-managed access
+                        </label>
+                        <select
+                            id={`agency-convert-${user.id}`}
+                            disabled={convertPending}
+                            defaultValue=""
+                            onChange={(e) => {
+                                const v = e.target.value
+                                if (v) {
+                                    onConvertToAgency(user.id, parseInt(v, 10))
+                                    e.target.value = ''
+                                }
+                            }}
+                            className="max-w-[11rem] rounded-md border border-violet-200 bg-violet-50/80 py-1 pl-2 pr-7 text-xs font-medium text-violet-900 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400 disabled:opacity-50"
+                            title="Use the agency link’s roles and brand access for this person"
+                        >
+                            <option value="">Switch to agency…</option>
+                            {linkedAgencies.map((l) => {
+                                const aid = l.agency_tenant?.id ?? l.agency_tenant_id
+                                const aname = l.agency_tenant?.name ?? 'Agency'
+                                return (
+                                    <option key={aid} value={aid}>
+                                        {aname}
+                                    </option>
+                                )
+                            })}
+                        </select>
+                    </div>
                 )}
                 {canModify && (
                     <button

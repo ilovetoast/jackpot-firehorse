@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Brand;
 use App\Models\TenantAgency;
 use App\Models\User;
+use App\Services\TenantAgencyService;
 use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,10 @@ use Illuminate\Support\Facades\DB;
  */
 class CompanyTeamApiController extends Controller
 {
+    public function __construct(
+        protected TenantAgencyService $tenantAgencyService
+    ) {}
+
     /**
      * GET /api/companies/users — paginated users with brand roles.
      *
@@ -182,5 +187,46 @@ class CompanyTeamApiController extends Controller
                 'role' => $validated['role'],
             ],
         ]);
+    }
+
+    /**
+     * POST /api/companies/users/{user}/agency-managed
+     *
+     * Convert a direct member to agency-managed for a linked agency (single membership row).
+     */
+    public function convertToAgencyManaged(Request $request, User $user): JsonResponse
+    {
+        $tenant = app('tenant');
+        if (! $tenant) {
+            return response()->json(['error' => 'No company selected'], 400);
+        }
+
+        $authUser = Auth::user();
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        $validated = $request->validate([
+            'agency_tenant_id' => 'required|integer|exists:tenants,id',
+        ]);
+
+        if (! TenantAgency::where('tenant_id', $tenant->id)->where('agency_tenant_id', $validated['agency_tenant_id'])->exists()) {
+            return response()->json(['error' => 'That agency is not linked to this company.'], 422);
+        }
+
+        try {
+            $this->tenantAgencyService->convertDirectMemberToAgencyManaged(
+                $tenant,
+                $user,
+                (int) $validated['agency_tenant_id']
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json(['success' => true]);
     }
 }

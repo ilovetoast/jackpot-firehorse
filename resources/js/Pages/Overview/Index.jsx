@@ -24,6 +24,36 @@ const brandOverviewInsightsInflight = new Map()
 /** Dedupe concurrent /overview/assets fetches (collage + top lists; deferred after first paint). */
 const brandOverviewAssetsInflight = new Map()
 
+const INSIGHTS_SESSION_PREFIX = 'overview_insights_v1:'
+/** Client-side cache (aligns with server TTL; avoids duplicate JSON calls on SPA revisits). */
+const INSIGHTS_CLIENT_TTL_MS = 5 * 60 * 1000
+
+function readInsightsSessionCache(brandId) {
+    if (typeof sessionStorage === 'undefined' || brandId == null) return null
+    try {
+        const raw = sessionStorage.getItem(`${INSIGHTS_SESSION_PREFIX}${brandId}`)
+        if (!raw) return null
+        const { at, payload } = JSON.parse(raw)
+        if (!payload || typeof payload !== 'object') return null
+        if (Date.now() - at > INSIGHTS_CLIENT_TTL_MS) return null
+        return payload
+    } catch {
+        return null
+    }
+}
+
+function writeInsightsSessionCache(brandId, payload) {
+    if (typeof sessionStorage === 'undefined' || brandId == null) return
+    try {
+        sessionStorage.setItem(
+            `${INSIGHTS_SESSION_PREFIX}${brandId}`,
+            JSON.stringify({ at: Date.now(), payload })
+        )
+    } catch {
+        /* session quota */
+    }
+}
+
 export default function Overview({
     auth,
     tenant,
@@ -73,6 +103,7 @@ export default function Overview({
     const [momentumDataState, setMomentumDataState] = useState(momentum_data)
     const [aiInsightsState, setAiInsightsState] = useState(ai_insights)
     const [insightsLoading, setInsightsLoading] = useState(Boolean(insights_deferred))
+    const [insightsUpdatedAt, setInsightsUpdatedAt] = useState(null)
     const [deferredAssetPayload, setDeferredAssetPayload] = useState(null)
 
     const mergedCollage = deferredAssetPayload?.collage_assets ?? collage_assets
@@ -110,6 +141,18 @@ export default function Overview({
             return
         }
         let cancelled = false
+        setInsightsUpdatedAt(null)
+
+        const cached = readInsightsSessionCache(brandId)
+        if (cached) {
+            setBrandSignalsState(cached.brand_signals ?? [])
+            setMomentumDataState(cached.momentum_data ?? {})
+            setAiInsightsState(cached.ai_insights ?? [])
+            setInsightsUpdatedAt(cached.generated_at ?? null)
+            setInsightsLoading(false)
+            return
+        }
+
         setInsightsLoading(true)
 
         let inflight = brandOverviewInsightsInflight.get(brandId)
@@ -134,6 +177,8 @@ export default function Overview({
                 setBrandSignalsState(data.brand_signals ?? [])
                 setMomentumDataState(data.momentum_data ?? {})
                 setAiInsightsState(data.ai_insights ?? [])
+                setInsightsUpdatedAt(data.generated_at ?? null)
+                writeInsightsSessionCache(brandId, data)
             })
             .catch(() => {
                 /* keep empty; overview still usable */
@@ -324,6 +369,7 @@ export default function Overview({
                                 insights={aiInsightsState}
                                 brandColor={brandColor}
                                 permissions={permissions}
+                                insightsUpdatedAt={insightsUpdatedAt}
                             />
                         )}
 

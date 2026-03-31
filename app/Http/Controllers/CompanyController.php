@@ -173,15 +173,34 @@ class CompanyController extends Controller
             ]);
         }
 
+        $target = $this->resolveCompanySwitchRedirectTarget($request);
+
+        if ($this->shouldReturnJsonForWorkspaceSwitch($request)) {
+            return response()->json([
+                'ok' => true,
+                'tenant_id' => $tenant->id,
+                'redirect' => $target,
+            ]);
+        }
+
+        return redirect()->to($target);
+    }
+
+    /**
+     * Same destination as legacy redirect + redirectToIntendedApp, without issuing an HTTP redirect
+     * (used for JSON workspace switch responses).
+     */
+    protected function resolveCompanySwitchRedirectTarget(Request $request): string
+    {
         $redirect = $request->input('redirect');
         if ($redirect && is_string($redirect)) {
             $path = parse_url($redirect, PHP_URL_PATH) ?? '';
             if ($path !== '' && str_starts_with($path, '/app') && ! str_starts_with($path, '/app/api')) {
-                return redirect()->to($redirect);
+                return $redirect;
             }
         }
 
-        return $this->redirectToIntendedApp('/app/overview');
+        return $this->peekIntendedAppUrl('/app/overview');
     }
 
     /**

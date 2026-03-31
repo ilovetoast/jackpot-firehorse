@@ -64,12 +64,15 @@ class AgencyBrandAccessService
             return [];
         }
 
-        $linkedClientIds = TenantAgency::query()
+        $links = TenantAgency::query()
             ->where('agency_tenant_id', $agencyTenant->id)
-            ->pluck('tenant_id');
-        if ($linkedClientIds->isEmpty()) {
+            ->get(['id', 'tenant_id']);
+        if ($links->isEmpty()) {
             return [];
         }
+
+        $tenantAgencyIdByClientId = $links->pluck('id', 'tenant_id');
+        $linkedClientIds = $links->pluck('tenant_id');
 
         $memberIds = $user->tenants()->pluck('tenants.id');
         $accessibleIds = $linkedClientIds->intersect($memberIds);
@@ -81,11 +84,12 @@ class AgencyBrandAccessService
             ->whereIn('id', $accessibleIds)
             ->orderBy('name')
             ->get(['id', 'name', 'slug'])
-            ->map(function (Tenant $t) use ($user) {
+            ->map(function (Tenant $t) use ($user, $tenantAgencyIdByClientId) {
                 return [
                     'id' => $t->id,
                     'name' => $t->name,
                     'slug' => $t->slug,
+                    'tenant_agency_id' => $tenantAgencyIdByClientId[$t->id] ?? null,
                     'brands' => $this->brandsUserCanOpenInClientTenant($user, $t),
                 ];
             })

@@ -166,9 +166,17 @@ class BrandController extends Controller
         $planService = app(PlanService::class);
         if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {
             $info = $planService->getBrandLimitInfo($tenant);
+            $message = "This brand is not accessible on your current plan. Your plan allows {$info['max_brands']} brand(s), but you have {$info['total_brands']}. Please upgrade your plan to access all brands.";
+
+            if ($this->shouldReturnJsonForWorkspaceSwitch($request)) {
+                return response()->json([
+                    'message' => $message,
+                    'errors' => ['brand' => [$message]],
+                ], 422);
+            }
 
             return back()->withErrors([
-                'brand' => "This brand is not accessible on your current plan. Your plan allows {$info['max_brands']} brand(s), but you have {$info['total_brands']}. Please upgrade your plan to access all brands.",
+                'brand' => $message,
             ]);
         }
 
@@ -185,8 +193,15 @@ class BrandController extends Controller
         // Update session with new brand
         session(['brand_id' => $brand->id]);
 
-        // For Inertia requests, return back to allow client-side navigation without full page reload
-        // The frontend will reload only the auth props to update activeBrand
+        // fetch() + Accept: application/json: return JSON so the client navigates once (no 302 follow + window.location).
+        if ($this->shouldReturnJsonForWorkspaceSwitch($request)) {
+            return response()->json([
+                'ok' => true,
+                'brand_id' => $brand->id,
+            ]);
+        }
+
+        // Inertia: return back to allow client-side navigation without full page reload
         return back();
     }
 

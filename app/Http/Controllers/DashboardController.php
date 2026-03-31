@@ -29,6 +29,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -1093,24 +1094,38 @@ class DashboardController extends Controller
         }
 
         $payload = $this->buildBrandInsightsPayload($brand, $user);
+        $ttl = (int) config('brand_intelligence.overview_insights_ttl_seconds', 300);
+        $maxAge = min(max(60, $ttl), 3600);
 
-        return response()->json($payload);
+        return response()->json($payload)
+            ->header('Cache-Control', 'private, max-age='.$maxAge);
     }
 
     /**
-     * @return array{brand_signals: mixed, momentum_data: mixed, ai_insights: mixed}
+     * @return array{brand_signals: mixed, momentum_data: mixed, ai_insights: mixed, generated_at: string}
      */
     protected function buildBrandInsightsPayload(\App\Models\Brand $brand, User $user): array
     {
-        $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
-        $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
-        $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
+        $tenantId = (int) $brand->tenant_id;
+        $brandId = (int) $brand->id;
+        $userId = (int) $user->id;
+        $ttl = (int) config('brand_intelligence.overview_insights_ttl_seconds', 300);
+        $ttl = max(60, $ttl);
 
-        return [
-            'brand_signals' => $brandSignals,
-            'momentum_data' => $momentumData,
-            'ai_insights' => $aiInsights,
-        ];
+        $cacheKey = sprintf('brand_overview_insights:%d:%d:%d', $tenantId, $brandId, $userId);
+
+        return Cache::remember($cacheKey, $ttl, function () use ($brand, $user) {
+            $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
+            $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
+            $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
+
+            return [
+                'brand_signals' => $brandSignals,
+                'momentum_data' => $momentumData,
+                'ai_insights' => $aiInsights,
+                'generated_at' => now()->toIso8601String(),
+            ];
+        });
     }
 
     /**

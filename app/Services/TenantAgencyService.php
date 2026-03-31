@@ -14,8 +14,10 @@ class TenantAgencyService
     /**
      * Link an agency tenant to a client tenant and grant all agency users access via RBAC.
      *
-     * New users added to the agency tenant later are not auto-synced (V1). A future
-     * “Sync agency users” action can re-run attach logic for the same link if needed.
+     * Agency staff who already have any membership on the client are skipped (direct invites
+     * and other links are not overwritten). Use {@see syncUsersForLink} to add staff who joined
+     * the agency later, and {@see convertDirectMemberToAgencyManaged} when the client chooses
+     * to move someone from direct to agency-managed for a linked agency.
      *
      * @param  array<int, array{brand_id: int, role: string}>  $brandAssignments
      */
@@ -59,26 +61,133 @@ class TenantAgencyService
                 ->flip();
 
             foreach ($agencyUsers as $user) {
-                // Never override an existing client membership (manual invites, another agency link, etc.).
                 if ($alreadyOnClient->has($user->id)) {
                     continue;
                 }
 
-                $clientTenant->users()->attach($user->id, [
-                    'role' => $tenantRole,
-                    'is_agency_managed' => true,
-                    'agency_tenant_id' => $agencyTenant->id,
-                ]);
-
-                foreach ($brandAssignments as $ba) {
-                    $brand = Brand::where('id', $ba['brand_id'])->where('tenant_id', $clientTenant->id)->first();
-                    if ($brand) {
-                        $user->setRoleForBrand($brand, $ba['role']);
-                    }
-                }
+                $this->grantAgencyUserOnClient($clientTenant, $agencyTenant, $user, $tenantRole, $brandAssignments);
             }
 
             return $record;
+        });
+    }
+
+    /**
+     * For an existing agency–client link: add client memberships for agency users who are not
+     * on the client yet (same rules as initial attach — existing client members are skipped).
+     *
+     * @return array{added: int, skipped_existing_membership: int}
+     */
+    public function syncUsersForLink(TenantAgency $tenantAgency): array
+    {
+        $clientTenant = $tenantAgency->tenant;
+        $agencyTenant = $tenantAgency->agencyTenant;
+
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            throw ValidationException::withMessages(['tenant_agency' => 'Invalid agency link.']);
+        }
+
+        $tenantRole = strtolower((string) $tenantAgency->role);
+        \App\Support\Roles\RoleRegistry::validateTenantRoleAssignment($tenantRole);
+
+        $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $tenantAgency->brand_assignments ?? []);
+
+        return DB::transaction(function () use ($clientTenant, $agencyTenant, $tenantRole, $brandAssignments) {
+            $agencyUsers = $agencyTenant->users()->get();
+            $alreadyOnClient = DB::table('tenant_user')
+                ->where('tenant_id', $clientTenant->id)
+                ->whereIn('user_id', $agencyUsers->pluck('id'))
+                ->pluck('user_id')
+                ->flip();
+
+            $added = 0;
+            $skippedExistingMembership = 0;
+
+            foreach ($agencyUsers as $user) {
+                if ($alreadyOnClient->has($user->id)) {
+                    $skippedExistingMembership++;
+
+                    continue;
+                }
+
+                $this->grantAgencyUserOnClient($clientTenant, $agencyTenant, $user, $tenantRole, $brandAssignments);
+                $added++;
+            }
+
+            return [
+                'added' => $added,
+                'skipped_existing_membership' => $skippedExistingMembership,
+            ];
+        });
+    }
+
+    /**
+     * Client admin: turn a direct (non–agency-managed) member into agency-managed for a linked agency.
+     * Updates the single tenant_user row and applies the link’s company role and brand assignments
+     * (same as the agency link configuration).
+     */
+    public function convertDirectMemberToAgencyManaged(
+        Tenant $clientTenant,
+        User $subjectUser,
+        int $agencyTenantId,
+    ): void {
+        $agencyTenant = Tenant::find($agencyTenantId);
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            throw ValidationException::withMessages(['agency_tenant_id' => 'Invalid agency.']);
+        }
+
+        $tenantAgency = TenantAgency::where('tenant_id', $clientTenant->id)
+            ->where('agency_tenant_id', $agencyTenantId)
+            ->first();
+
+        if (! $tenantAgency) {
+            throw ValidationException::withMessages(['agency_tenant_id' => 'That agency is not linked to this company.']);
+        }
+
+        if (! $clientTenant->users()->where('users.id', $subjectUser->id)->exists()) {
+            throw ValidationException::withMessages(['user_id' => 'User is not a member of this company.']);
+        }
+
+        if ($clientTenant->isOwner($subjectUser)) {
+            throw ValidationException::withMessages(['user_id' => 'The company owner cannot be switched to agency-managed access.']);
+        }
+
+        $pivot = DB::table('tenant_user')
+            ->where('tenant_id', $clientTenant->id)
+            ->where('user_id', $subjectUser->id)
+            ->first();
+
+        if (! $pivot) {
+            throw ValidationException::withMessages(['user_id' => 'Membership not found.']);
+        }
+
+        if ((bool) ($pivot->is_agency_managed ?? false)) {
+            if ((int) ($pivot->agency_tenant_id ?? 0) === (int) $agencyTenantId) {
+                return;
+            }
+
+            throw ValidationException::withMessages([
+                'user_id' => 'This member is already managed by another agency link. Remove that link first or detach the other agency.',
+            ]);
+        }
+
+        $tenantRole = strtolower((string) $tenantAgency->role);
+        \App\Support\Roles\RoleRegistry::validateTenantRoleAssignment($tenantRole);
+        $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $tenantAgency->brand_assignments ?? []);
+
+        DB::transaction(function () use ($clientTenant, $agencyTenant, $subjectUser, $tenantRole, $brandAssignments) {
+            $clientTenant->users()->updateExistingPivot($subjectUser->id, [
+                'role' => $tenantRole,
+                'is_agency_managed' => true,
+                'agency_tenant_id' => $agencyTenant->id,
+            ]);
+
+            foreach ($brandAssignments as $ba) {
+                $brand = Brand::where('id', $ba['brand_id'])->where('tenant_id', $clientTenant->id)->first();
+                if ($brand) {
+                    $subjectUser->setRoleForBrand($brand, $ba['role']);
+                }
+            }
         });
     }
 
@@ -122,6 +231,30 @@ class TenantAgencyService
 
             $tenantAgency->delete();
         });
+    }
+
+    /**
+     * @param  array<int, array{brand_id: int, role: string}>  $brandAssignmentsNormalized
+     */
+    protected function grantAgencyUserOnClient(
+        Tenant $clientTenant,
+        Tenant $agencyTenant,
+        User $user,
+        string $tenantRole,
+        array $brandAssignmentsNormalized
+    ): void {
+        $clientTenant->users()->attach($user->id, [
+            'role' => $tenantRole,
+            'is_agency_managed' => true,
+            'agency_tenant_id' => $agencyTenant->id,
+        ]);
+
+        foreach ($brandAssignmentsNormalized as $ba) {
+            $brand = Brand::where('id', $ba['brand_id'])->where('tenant_id', $clientTenant->id)->first();
+            if ($brand) {
+                $user->setRoleForBrand($brand, $ba['role']);
+            }
+        }
     }
 
     /**

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { motion } from 'framer-motion'
 
 const NUM_COLUMNS = 3
 /** Cap thumbnails passed from overview (backend may send more). */
@@ -109,7 +110,9 @@ export default function AssetCollage({ assets = [] }) {
                     transformStyle: 'preserve-3d',
                 }}
             >
-                {displayColumns.map((imgs, ci) => {
+                {(() => {
+                    let photoStagger = 0
+                    return displayColumns.map((imgs, ci) => {
                     const isEmpty = !imgs || imgs.length === 0
                     const useFilmDrift = enableColumnDrift && !isEmpty
                     const driftClass = useFilmDrift ? `animate-collage-scroll-${(ci % 3) + 1}` : ''
@@ -117,26 +120,47 @@ export default function AssetCollage({ assets = [] }) {
                     const renderCards = (list, keySuffix = '') =>
                         list.map((src, ii) => {
                             const nudge = getCardNudge(ci, ii)
+                            const staggerIndex = keySuffix === '' ? photoStagger++ : 0
+                            const cardClass =
+                                'w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0'
+                            const cardStyle = {
+                                aspectRatio: isFew ? '3/4' : '4/5',
+                                marginLeft: nudge !== 0 ? `${nudge}px` : undefined,
+                                contain: 'layout paint',
+                                transform: 'translateZ(0)',
+                            }
+                            const img = (
+                                <img
+                                    src={src}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                    loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
+                                    decoding="async"
+                                    fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
+                                />
+                            )
+                            if (keySuffix !== '') {
+                                return (
+                                    <div key={`${ci}-${ii}-${keySuffix}`} className={cardClass} style={cardStyle}>
+                                        {img}
+                                    </div>
+                                )
+                            }
                             return (
-                                <div
-                                    key={`${ii}${keySuffix}`}
-                                    className="w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
-                                    style={{
-                                        aspectRatio: isFew ? '3/4' : '4/5',
-                                        marginLeft: nudge !== 0 ? `${nudge}px` : undefined,
-                                        contain: 'layout paint',
-                                        transform: 'translateZ(0)',
+                                <motion.div
+                                    key={`${ci}-${ii}-${keySuffix}`}
+                                    className={cardClass}
+                                    style={cardStyle}
+                                    initial={{ opacity: 0, y: 18, scale: 0.96, filter: 'blur(8px)' }}
+                                    animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                                    transition={{
+                                        duration: 0.52,
+                                        delay: staggerIndex * 0.06,
+                                        ease: [0.22, 1, 0.36, 1],
                                     }}
                                 >
-                                    <img
-                                        src={src}
-                                        alt=""
-                                        className="w-full h-full object-cover"
-                                        loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
-                                        decoding="async"
-                                        fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
-                                    />
-                                </div>
+                                    {img}
+                                </motion.div>
                             )
                         })
 
@@ -179,7 +203,8 @@ export default function AssetCollage({ assets = [] }) {
                             )}
                         </div>
                     )
-                })}
+                })
+                })()}
             </div>
         </div>
     )

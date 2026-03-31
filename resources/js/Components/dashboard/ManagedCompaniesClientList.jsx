@@ -62,6 +62,8 @@ function ManagedCompanyCard({
     expandedBrandKey,
     onExpandedBrandKeyChange,
     readinessDotsPulseKey,
+    onSyncAgencyUsers,
+    syncingTenantAgencyId,
 }) {
     const brands = Array.isArray(client.brands) ? client.brands : []
     const isDark = theme === 'dark'
@@ -144,17 +146,34 @@ function ManagedCompanyCard({
                             {client.name}
                         </h3>
                     </div>
-                    {brands.length > 0 && (
-                        <span
-                            className={
-                                isDark
-                                    ? 'shrink-0 rounded-full bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/70 ring-1 ring-white/10'
-                                    : 'shrink-0 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200/80'
-                            }
-                        >
-                            {brands.length} brand{brands.length !== 1 ? 's' : ''}
-                        </span>
-                    )}
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        {typeof client.tenant_agency_id === 'number' && typeof onSyncAgencyUsers === 'function' && (
+                            <button
+                                type="button"
+                                onClick={() => onSyncAgencyUsers(client.tenant_agency_id, client.name)}
+                                disabled={syncingTenantAgencyId === client.tenant_agency_id}
+                                className={
+                                    isDark
+                                        ? 'shrink-0 rounded-lg bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/15 hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-50'
+                                        : 'shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50'
+                                }
+                                title="Add agency staff who are not yet members of this client (does not change direct members)"
+                            >
+                                {syncingTenantAgencyId === client.tenant_agency_id ? 'Syncing…' : 'Sync agency users'}
+                            </button>
+                        )}
+                        {brands.length > 0 && (
+                            <span
+                                className={
+                                    isDark
+                                        ? 'shrink-0 rounded-full bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/70 ring-1 ring-white/10'
+                                        : 'shrink-0 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200/80'
+                                }
+                            >
+                                {brands.length} brand{brands.length !== 1 ? 's' : ''}
+                            </span>
+                        )}
+                    </div>
                 </div>
             </header>
 
@@ -456,6 +475,8 @@ export default function ManagedCompaniesClientList({
     readinessSummary = null,
     brandsReadiness = [],
     readinessAnimateKey = 0,
+    onSyncAgencyUsers = null,
+    syncingTenantAgencyId = null,
 }) {
     const [expandedBrandKey, setExpandedBrandKey] = useState(null)
     const [fixNextPulse, setFixNextPulse] = useState(0)
@@ -577,6 +598,8 @@ export default function ManagedCompaniesClientList({
                         expandedBrandKey={expandedBrandKey}
                         onExpandedBrandKeyChange={setExpandedBrandKey}
                         readinessDotsPulseKey={readinessDotsPulseKey}
+                        onSyncAgencyUsers={onSyncAgencyUsers}
+                        syncingTenantAgencyId={syncingTenantAgencyId}
                     />
                 ))}
             </div>

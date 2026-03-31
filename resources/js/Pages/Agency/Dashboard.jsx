@@ -44,6 +44,8 @@ export default function AgencyDashboard({
 }) {
     const [dashTab, setDashTab] = useState('overview')
     const [readinessToast, setReadinessToast] = useState(null)
+    const [agencySyncToast, setAgencySyncToast] = useState(null)
+    const [syncingTenantAgencyId, setSyncingTenantAgencyId] = useState(null)
 
     useEffect(() => {
         const tab = new URLSearchParams(window.location.search).get('tab')
@@ -186,6 +188,51 @@ export default function AgencyDashboard({
     }, [readinessToast])
 
     useEffect(() => {
+        if (!agencySyncToast) {
+            return
+        }
+        const t = setTimeout(() => setAgencySyncToast(null), 6000)
+        return () => clearTimeout(t)
+    }, [agencySyncToast])
+
+    const csrfToken = () =>
+        typeof document !== 'undefined'
+            ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+            : ''
+
+    const handleSyncAgencyUsers = async (tenantAgencyId, clientName) => {
+        setSyncingTenantAgencyId(tenantAgencyId)
+        setAgencySyncToast(null)
+        try {
+            const res = await fetch(`/app/api/agency/tenant-agencies/${tenantAgencyId}/sync-users`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                setAgencySyncToast(data.error || 'Could not sync agency users.')
+                return
+            }
+            const added = data.added ?? 0
+            const skipped = data.skipped_existing_membership ?? 0
+            setAgencySyncToast(
+                added > 0
+                    ? `Added ${added} team member${added !== 1 ? 's' : ''} to ${clientName}.`
+                    : `No new members to add. (${skipped} already had access to ${clientName}.)`
+            )
+        } catch {
+            setAgencySyncToast('Network error while syncing.')
+        } finally {
+            setSyncingTenantAgencyId(null)
+        }
+    }
+
+    useEffect(() => {
         if (dashTab !== 'clients') {
             return
         }
@@ -242,6 +289,16 @@ export default function AgencyDashboard({
                             role="status"
                         >
                             {readinessToast}
+                        </div>
+                    )}
+                    {agencySyncToast && (
+                        <div
+                            className={`fixed left-1/2 z-[100] max-w-md -translate-x-1/2 rounded-lg border border-sky-500/30 bg-sky-950/95 px-4 py-3 text-center text-sm text-sky-100 shadow-lg ring-1 ring-sky-500/20 ${
+                                readinessToast ? 'bottom-24' : 'bottom-6'
+                            }`}
+                            role="status"
+                        >
+                            {agencySyncToast}
                         </div>
                     )}
                     <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pt-28 lg:px-12">
@@ -536,6 +593,8 @@ export default function AgencyDashboard({
                                                 readinessSummary={readiness_summary}
                                                 brandsReadiness={brands_readiness}
                                                 readinessAnimateKey={readinessAnimateKey}
+                                                onSyncAgencyUsers={handleSyncAgencyUsers}
+                                                syncingTenantAgencyId={syncingTenantAgencyId}
                                             />
                                         </div>
                                     ) : (

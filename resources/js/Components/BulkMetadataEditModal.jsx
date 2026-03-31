@@ -318,8 +318,46 @@ export default function BulkMetadataEditModal({
             return handleExecuteCollections()
         }
 
-        // Phase 11: Regular metadata bulk execute not yet wired
-        setError('Bulk metadata editing is not yet available. Collection assignments work — select Collections as the field.')
+        if (!previewToken) {
+            setError('Preview expired or missing. Go back and run Preview again.')
+            return
+        }
+
+        setExecuting(true)
+        setExecuteProgress(0)
+        setError(null)
+
+        try {
+            const res = await fetch('/app/assets/metadata/bulk/execute', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ preview_token: previewToken }),
+            })
+
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                throw new Error(data.message || `Execution failed (${res.status})`)
+            }
+
+            const r = data.results || {}
+            setResults({
+                successes: r.successes || [],
+                failures: r.failures || [],
+            })
+            setExecuteProgress(assetIds.length)
+            setStep(5)
+        } catch (err) {
+            console.error('[BulkMetadataEditModal] Execute failed', err)
+            setError(err.message || 'Failed to apply bulk metadata changes')
+        } finally {
+            setExecuting(false)
+        }
     }
 
     // Execute bulk collection assignment via per-asset sync
@@ -638,7 +676,7 @@ export default function BulkMetadataEditModal({
                                     )}
                                 </div>
 
-                                {executing && (
+                                {executing && selectedField === 'collections' && (
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-xs text-gray-600">
                                             <span>Processing assets…</span>
@@ -652,13 +690,20 @@ export default function BulkMetadataEditModal({
                                         </div>
                                     </div>
                                 )}
+                                {executing && selectedField !== 'collections' && (
+                                    <p className="text-sm text-gray-600">Applying changes…</p>
+                                )}
                                 <button
                                     type="button"
                                     onClick={handleExecute}
                                     disabled={executing || preview.errors.length > 0}
                                     className="w-full px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    {executing ? `Updating ${executeProgress} of ${assetIds.length}…` : 'Confirm & Execute'}
+                                    {executing
+                                        ? selectedField === 'collections'
+                                            ? `Updating ${executeProgress} of ${assetIds.length}…`
+                                            : 'Applying…'
+                                        : 'Confirm & Execute'}
                                 </button>
                             </div>
                         )}

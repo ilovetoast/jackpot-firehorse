@@ -213,6 +213,13 @@ class BulkMetadataService
                 $newValue = null;
             }
 
+            // Add: merge multiselect (e.g. tags) with existing so preview matches execute
+            if ($operationType === 'add' && ($fieldDef->type ?? '') === 'multiselect' && $newValue !== null) {
+                $oldArr = is_array($oldValue) ? $oldValue : ($oldValue ? [$oldValue] : []);
+                $incoming = is_array($newValue) ? $newValue : ($newValue ? [$newValue] : []);
+                $newValue = array_values(array_unique(array_merge($oldArr, $incoming)));
+            }
+
             // Validate value
             if ($newValue !== null && !$this->validateValue($fieldDef, $newValue)) {
                 $result['errors'][] = "Invalid value for field '{$fieldKey}'";
@@ -422,8 +429,18 @@ class BulkMetadataService
                 $newValue = null;
             }
 
+            // Previous value for audit / delta (read before mutating $newValue)
+            $oldValue = $currentMetadata[$fieldKey] ?? null;
+
+            // Add + multiselect: only insert values not already present (avoids duplicate rows)
+            if ($operationType === 'add' && ($fieldDef->type ?? '') === 'multiselect' && $newValue !== null) {
+                $oldArr = is_array($oldValue) ? $oldValue : ($oldValue ? [$oldValue] : []);
+                $incoming = is_array($newValue) ? $newValue : ($newValue ? [$newValue] : []);
+                $newValue = array_values(array_diff($incoming, $oldArr));
+            }
+
             // Skip if value is empty and operation is not clear
-            if ($newValue === null || $newValue === '') {
+            if ($newValue === null || $newValue === '' || (is_array($newValue) && $newValue === [])) {
                 if ($operationType !== 'clear') {
                     continue;
                 }
@@ -434,8 +451,6 @@ class BulkMetadataService
                 continue; // Skip invalid values
             }
 
-            // Get previous value for audit
-            $oldValue = $currentMetadata[$fieldKey] ?? null;
             $oldValueJson = $oldValue !== null ? json_encode($oldValue) : null;
 
             // Normalize value

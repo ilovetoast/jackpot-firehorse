@@ -195,6 +195,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::post('/agency/incubated-clients/{incubatedClient}/extension-request', [\App\Http\Controllers\AgencyDashboardController::class, 'requestIncubationExtension'])
             ->name('agency.incubated-clients.extension-request');
 
+        // Agency ↔ client link: sync agency staff to client (adds users not yet on the client)
+        Route::post('/api/agency/tenant-agencies/{tenantAgency}/sync-users', [\App\Http\Controllers\AgencyTenantAgencySyncController::class, 'sync'])
+            ->name('api.agency.tenant-agencies.sync-users');
+
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
         Route::get('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'show'])->name('tenant.metadata.fields.show');
@@ -234,6 +238,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Company team management API (paginated users, add brand access)
         Route::get('/api/companies/users', [\App\Http\Controllers\CompanyTeamApiController::class, 'users'])->name('api.companies.users');
         Route::post('/api/companies/users/{user}/brands', [\App\Http\Controllers\CompanyTeamApiController::class, 'addBrandAccess'])->name('api.companies.users.brands');
+        Route::post('/api/companies/users/{user}/agency-managed', [\App\Http\Controllers\CompanyTeamApiController::class, 'convertToAgencyManaged'])->name('api.companies.users.agency-managed');
 
         // Role API endpoints (canonical role lists for frontend)
         Route::get('/api/roles/tenant', [\App\Http\Controllers\RoleController::class, 'tenantRoles'])->name('api.roles.tenant');

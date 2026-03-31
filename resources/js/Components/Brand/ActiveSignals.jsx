@@ -25,12 +25,34 @@ function signalCategoryToInsightType(signal) {
     return null
 }
 
+function formatInsightsUpdatedLabel(iso) {
+    if (!iso) return null
+    try {
+        const d = new Date(iso)
+        if (Number.isNaN(d.getTime())) return null
+        return d.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        })
+    } catch {
+        return null
+    }
+}
+
 /**
  * ActiveSignals — "What Needs Attention" structured block.
  * When insights are provided, matches by type and shows "Why it matters" under each signal.
  * Each item clickable, high-priority glow, subtle dividers.
  */
-export default function ActiveSignals({ signals = [], insights = [], brandColor = '#6366f1', permissions = {} }) {
+export default function ActiveSignals({
+    signals = [],
+    insights = [],
+    brandColor = '#6366f1',
+    permissions = {},
+    insightsUpdatedAt = null,
+}) {
     const visible = signals.filter((s) => {
         if (!s.permission) return true
         return permissions[s.permission] !== false
@@ -39,6 +61,7 @@ export default function ActiveSignals({ signals = [], insights = [], brandColor 
     if (visible.length === 0) return null
 
     const primaryHref = visible[0]?.href
+    const updatedLabel = formatInsightsUpdatedLabel(insightsUpdatedAt)
 
     return (
         <motion.div
@@ -61,10 +84,18 @@ export default function ActiveSignals({ signals = [], insights = [], brandColor 
                 }}
             >
                 <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center justify-between gap-3 mb-3">
                         <span className="text-xs font-semibold uppercase tracking-wider text-white/50">
                             ⚡ What Needs Attention
                         </span>
+                        {updatedLabel && (
+                            <span
+                                className="shrink-0 text-[10px] font-medium tabular-nums tracking-wide text-white/20"
+                                title="When this block was last computed"
+                            >
+                                {updatedLabel}
+                            </span>
+                        )}
                     </div>
                     <ul className="divide-y divide-white/[0.06]">
                         {visible.map((signal, i) => {
