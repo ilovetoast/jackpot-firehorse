@@ -1272,19 +1272,21 @@ class CompanyController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
-        // Check if user has permission to delete the company
+        // Owner, or incubating agency steward (pre-transfer), via CompanyPolicy + PermissionMap
         $this->authorize('delete', $tenant);
 
-        // Check if user is the owner (only owners can delete companies)
-        $userRole = $user->getRoleForTenant($tenant);
-        if ($userRole !== 'owner') {
-            return back()->withErrors([
-                'error' => 'Only the company owner can delete the company.',
-            ]);
+        // Prevent deletion if there are other non-agency members (incubated clients may keep agency team on the tenant)
+        $otherUsersQuery = $tenant->users()->where('users.id', '!=', $user->id);
+        if ($tenant->incubated_by_agency_id) {
+            $incubatingId = (int) $tenant->incubated_by_agency_id;
+            $otherUsersQuery->where(function ($q) use ($incubatingId) {
+                $q->whereNull('tenant_user.is_agency_managed')
+                    ->orWhere('tenant_user.is_agency_managed', false)
+                    ->orWhere('tenant_user.agency_tenant_id', '!=', $incubatingId)
+                    ->orWhereNull('tenant_user.agency_tenant_id');
+            });
         }
-
-        // Prevent deletion if there are other users in the company
-        $otherUsersCount = $tenant->users()->where('users.id', '!=', $user->id)->count();
+        $otherUsersCount = $otherUsersQuery->count();
         if ($otherUsersCount > 0) {
             return back()->withErrors([
                 'error' => 'Cannot delete company. Please remove all other team members first.',

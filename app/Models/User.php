@@ -614,6 +614,14 @@ class User extends Authenticatable
      */
     public function hasPermissionForTenant(Tenant $tenant, string $permission): bool
     {
+        // Incubating agency stewards (owner/admin on agency workspace) get owner-only surfaces
+        // until the client completes an ownership transfer.
+        if (in_array($permission, ['company_settings.delete_company', 'company_settings.ownership_transfer'], true)) {
+            if ($this->canActAsIncubatingAgencyStewardForClient($tenant)) {
+                return true;
+            }
+        }
+
         // CRITICAL: Check PermissionMap FIRST (owner/admin have all permissions)
         // This prevents the bug where owner/admin permissions were missed
         $tenantRole = $this->getRoleForTenant($tenant);
@@ -656,6 +664,43 @@ class User extends Authenticatable
         }
 
         return false;
+    }
+
+    /**
+     * True when this user is an agency steward for an incubated client: managed on the client
+     * tenant by the incubating agency, owner or admin on that agency workspace, and no completed
+     * ownership transfer yet.
+     */
+    public function canActAsIncubatingAgencyStewardForClient(Tenant $clientTenant): bool
+    {
+        if (! $clientTenant->incubated_by_agency_id) {
+            return false;
+        }
+        if ($clientTenant->hasCompletedOwnershipTransfer()) {
+            return false;
+        }
+
+        $incubatingAgencyId = (int) $clientTenant->incubated_by_agency_id;
+
+        $pivot = DB::table('tenant_user')
+            ->where('user_id', $this->id)
+            ->where('tenant_id', $clientTenant->id)
+            ->first();
+        if (! $pivot || ! (bool) ($pivot->is_agency_managed ?? false)) {
+            return false;
+        }
+        if ((int) ($pivot->agency_tenant_id ?? 0) !== $incubatingAgencyId) {
+            return false;
+        }
+
+        $agencyTenant = Tenant::find($incubatingAgencyId);
+        if (! $agencyTenant) {
+            return false;
+        }
+
+        $roleOnAgency = $this->getRoleForTenant($agencyTenant);
+
+        return in_array($roleOnAgency, ['owner', 'admin'], true);
     }
 
     /**

@@ -44,6 +44,13 @@ export default function AgencyDashboard({
 }) {
     const [dashTab, setDashTab] = useState('overview')
     const [readinessToast, setReadinessToast] = useState(null)
+
+    useEffect(() => {
+        const tab = new URLSearchParams(window.location.search).get('tab')
+        if (tab === 'clients' || tab === 'overview' || tab === 'progress') {
+            setDashTab(tab)
+        }
+    }, [])
     const [readinessAnimateKey, setReadinessAnimateKey] = useState(0)
     const page = usePage()
     const { auth: authFromPage, flash = {} } = page.props

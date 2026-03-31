@@ -13,12 +13,18 @@ use Illuminate\Support\Facades\Log;
  * Brand Insight LLM — LLM-generated human-readable insights.
  *
  * Uses internal AIService (model registry, token tracking, tenant/brand association).
- * Cached 30 min. Falls back to rule-based BrandInsightAI on failure.
+ * Cached with a content fingerprint (metrics + signal summary + agency links) so the
+ * same library state reuses one LLM result; TTL caps how long we keep that snapshot.
+ * bustCache() / AssetUploaded still invalidate via insights-bust. Falls back to rule-based on failure.
  * Type-based href mapping for deterministic navigation (no hallucinated routes).
  */
 class BrandInsightLLM
 {
-    public const CACHE_TTL_MINUTES = 30;
+    /**
+     * How long to keep a cached LLM result for an unchanged fingerprint (same metrics/signals).
+     * New assets or pending-review counts change the fingerprint → new cache entry → one new LLM call.
+     */
+    public const CACHE_TTL_MINUTES = 120;
 
     public const CACHE_KEY_PREFIX = 'brand:';
 
@@ -47,10 +53,11 @@ class BrandInsightLLM
         // Per-user cache: signals are role/permission-specific (see BrandInsightEngine::getSignals).
         $bust = (int) Cache::get('brand:'.$brand->id.':insights-bust', 0);
         $userKey = $user ? 'user:'.$user->id : 'anon';
-        $cacheKey = self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX.':b'.$bust.':'.$userKey;
+        $metrics = $this->brandInsightAI->getMetricsForBrand($brand);
+        $fingerprint = $this->buildInsightsCacheFingerprint($brand, $metrics, $signals);
+        $cacheKey = self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX.':b'.$bust.':'.$userKey.':fp:'.$fingerprint;
 
-        return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL_MINUTES), function () use ($brand, $signals) {
-            $metrics = $this->brandInsightAI->getMetricsForBrand($brand);
+        return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL_MINUTES), function () use ($brand, $signals, $metrics) {
             $ta = (int) ($metrics['total_assets'] ?? 0);
             $u7 = (int) ($metrics['uploads_last_7_days'] ?? 0);
             $metricsContext = array_merge($metrics, [
@@ -75,6 +82,44 @@ class BrandInsightLLM
 
             return $this->fallbackToRuleBased($brand, $metrics);
         });
+    }
+
+    /**
+     * Stable hash of inputs that affect the LLM prompt. When this changes (new assets, uploads,
+     * pending AI reviews, agency client count, or attention signals), we intentionally miss cache.
+     *
+     * @param  array<string, mixed>  $metrics
+     * @param  array<int, array<string, mixed>>  $signals
+     */
+    protected function buildInsightsCacheFingerprint(Brand $brand, array $metrics, array $signals): string
+    {
+        $tenant = $brand->tenant;
+        $linkedClientCompanies = 0;
+        if ($tenant && $tenant->is_agency) {
+            $linkedClientCompanies = TenantAgency::where('agency_tenant_id', $tenant->id)->count();
+        }
+
+        $signalSummary = [];
+        foreach ($signals as $s) {
+            $signalSummary[] = [
+                'type' => $s['type'] ?? '',
+                'priority' => $s['priority'] ?? '',
+                'label' => $s['label'] ?? '',
+                'category' => $s['context']['category'] ?? '',
+            ];
+        }
+        usort($signalSummary, fn ($a, $b) => strcmp(
+            json_encode($a) ?: '',
+            json_encode($b) ?: ''
+        ));
+
+        $payload = [
+            'metrics' => $metrics,
+            'linked_client_company_count' => $linkedClientCompanies,
+            'signals' => $signalSummary,
+        ];
+
+        return hash('sha256', json_encode($payload));
     }
 
     /**
@@ -451,7 +496,12 @@ PROMPT;
     public function bustCache(Brand $brand): void
     {
         // Invalidates all per-user insight caches (BrandInsightEngine + LLM) without enumerating users.
-        Cache::put('brand:'.$brand->id.':insights-bust', time(), now()->addYears(10));
+        // Microsecond stamp so rapid successive busts (batch uploads) still get distinct keys.
+        Cache::put(
+            'brand:'.$brand->id.':insights-bust',
+            (int) (microtime(true) * 1_000_000),
+            now()->addYears(10)
+        );
 
         Cache::forget(self::CACHE_KEY_PREFIX.$brand->id.self::CACHE_KEY_SUFFIX);
         // Heuristic signals (What Needs Attention) — must clear when uploads/metrics change

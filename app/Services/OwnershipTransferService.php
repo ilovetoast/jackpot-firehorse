@@ -43,9 +43,9 @@ class OwnershipTransferService
      */
     public function initiateTransfer(Tenant $tenant, User $initiator, User $newOwner): OwnershipTransfer
     {
-        // Validate current owner is initiating
-        if (!$tenant->isOwner($initiator)) {
-            throw new InvalidArgumentException('Only the current tenant owner can initiate an ownership transfer.');
+        // Owner or incubating agency steward (same rules as OwnershipTransferPolicy::initiate)
+        if (! $tenant->isOwner($initiator) && ! $initiator->canActAsIncubatingAgencyStewardForClient($tenant)) {
+            throw new InvalidArgumentException('Only the company owner or an authorized agency administrator can initiate an ownership transfer.');
         }
 
         // Prevent transferring to the same user

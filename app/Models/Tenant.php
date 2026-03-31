@@ -378,4 +378,16 @@ class Tenant extends Model
             'disabled' => $disabledUserIds,
         ];
     }
+
+    /**
+     * Whether this tenant has completed an ownership transfer (client-owned going forward).
+     * Used to end incubating-agency stewardship for delete / transfer UI.
+     */
+    public function hasCompletedOwnershipTransfer(): bool
+    {
+        return \App\Models\OwnershipTransfer::query()
+            ->where('tenant_id', $this->id)
+            ->where('status', \App\Enums\OwnershipTransferStatus::COMPLETED)
+            ->exists();
+    }
 }

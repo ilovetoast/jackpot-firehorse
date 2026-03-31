@@ -42,8 +42,9 @@ export default function CompanySettings({
     const canManageAiSettings = is_current_user_owner || can('company_settings.manage_ai_settings')
     const canViewTagQuality = is_current_user_owner || can('company_settings.view_tag_quality')
     const canManageDownloadPolicy = is_current_user_owner || can('company_settings.manage_download_policy')
-    const canOwnershipTransfer = is_current_user_owner
-    const canDeleteCompany = is_current_user_owner
+    const canOwnershipTransfer =
+        is_current_user_owner || can('company_settings.ownership_transfer')
+    const canDeleteCompany = is_current_user_owner || can('company_settings.delete_company')
     const canViewMetadata = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [agencySearch, setAgencySearch] = useState('')
     const [agencySearchResults, setAgencySearchResults] = useState([])

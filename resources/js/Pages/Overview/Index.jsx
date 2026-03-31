@@ -18,6 +18,9 @@ function formatStorage(mb) {
     return `${(mb / 1024).toFixed(1)} GB`
 }
 
+/** Dedupe concurrent /overview/insights fetches (e.g. React Strict Mode double-mount). */
+const brandOverviewInsightsInflight = new Map()
+
 export default function Overview({
     auth,
     tenant,
@@ -92,18 +95,31 @@ export default function Overview({
             setInsightsLoading(false)
             return
         }
-        const ac = new AbortController()
+        const brandId = brand?.id
+        if (brandId === undefined || brandId === null) {
+            setInsightsLoading(false)
+            return
+        }
         let cancelled = false
         setInsightsLoading(true)
-        fetch('/app/overview/insights', {
-            credentials: 'same-origin',
-            headers: {
-                Accept: 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            signal: ac.signal,
-        })
-            .then((r) => (r.ok ? r.json() : null))
+
+        let inflight = brandOverviewInsightsInflight.get(brandId)
+        if (!inflight) {
+            inflight = fetch('/app/overview/insights', {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            })
+                .then((r) => (r.ok ? r.json() : null))
+                .finally(() => {
+                    brandOverviewInsightsInflight.delete(brandId)
+                })
+            brandOverviewInsightsInflight.set(brandId, inflight)
+        }
+
+        inflight
             .then((data) => {
                 if (cancelled || !data) return
                 setBrandSignalsState(data.brand_signals ?? [])
@@ -118,7 +134,6 @@ export default function Overview({
             })
         return () => {
             cancelled = true
-            ac.abort()
         }
     }, [insights_deferred, brand?.id])
 

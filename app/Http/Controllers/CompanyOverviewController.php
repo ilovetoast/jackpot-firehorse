@@ -8,6 +8,8 @@ use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Download;
+use App\Models\Tenant;
+use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\BrandService;
 use App\Support\DashboardLinks;
@@ -286,11 +288,14 @@ class CompanyOverviewController extends Controller
 
         $tenant->loadMissing('defaultBrand');
         $brandForPortal = $activeBrand ?? $tenant->defaultBrand;
+        $showAgencyIncubate = $tenant->is_agency && $this->userCanOpenAgencyIncubation($user, $tenant);
+
         return Inertia::render('Company/Overview', [
             'tenant' => $tenant,
             'activeBrand' => $activeBrand,
             'canCreateBrand' => $canCreateBrand,
             'canManageBrands' => $hasBrandSettingsManage,
+            'show_agency_incubate' => $showAgencyIncubate,
             'plan' => [
                 'name' => $planDisplayName,
                 'key' => $planName,
@@ -322,6 +327,23 @@ class CompanyOverviewController extends Controller
                 'brand_label' => DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brandForPortal?->name)['brand'],
             ],
         ]);
+    }
+
+    /**
+     * Same rules as AgencyDashboardController::userCanStartIncubation (agency workspace only).
+     */
+    protected function userCanOpenAgencyIncubation(User $user, Tenant $tenant): bool
+    {
+        if (! $tenant->is_agency) {
+            return false;
+        }
+
+        $role = $user->getRoleForTenant($tenant);
+        if (in_array($role, ['owner', 'admin'], true)) {
+            return true;
+        }
+
+        return $user->hasPermissionForTenant($tenant, 'company_settings.edit');
     }
 
     /**

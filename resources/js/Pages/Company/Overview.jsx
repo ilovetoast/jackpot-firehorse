@@ -21,6 +21,7 @@ import {
     TrashIcon,
     EllipsisVerticalIcon,
     PlusIcon,
+    BuildingOffice2Icon,
 } from '@heroicons/react/24/outline'
 
 export default function CompanyOverview({
@@ -34,6 +35,7 @@ export default function CompanyOverview({
     canManageBrands = false,
     agency_managed_brands = [],
     dashboard_links = {},
+    show_agency_incubate = false,
 }) {
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
     const [actionsOpen, setActionsOpen] = useState(null)
@@ -175,29 +177,48 @@ export default function CompanyOverview({
 
             <main className="flex-1">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h1 className="text-3xl font-bold text-gray-900">Company Overview</h1>
+                    <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Overview</h1>
+                                {plan?.name && (
+                                    <span className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-100">
+                                        {plan.name} Plan
+                                    </span>
+                                )}
+                            </div>
                             <p className="mt-2 text-sm text-gray-600">{tenant?.name} organization</p>
                         </div>
-                    <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                        {plan?.name && (
-                            <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
-                                {plan.name} Plan
-                            </span>
-                        )}
-                        <DashboardLinksRow links={dashLinks} variant="light" />
-                        {canCreateBrand && (
-                            <Link
-                                href="/app/brands/create"
-                                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                            >
-                                <PlusIcon className="h-4 w-4" />
-                                Create Brand
-                            </Link>
-                        )}
+                        <div className="flex w-full shrink-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-end lg:w-auto lg:max-w-md">
+                            <DashboardLinksRow
+                                links={dashLinks}
+                                variant="light"
+                                className="sm:text-right"
+                            />
+                            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-4 sm:border-t-0 sm:pt-0">
+                                {show_agency_incubate && (
+                                    <Link
+                                        href="/app/agency/dashboard?tab=clients"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
+                                        title="Start a new client company from your agency dashboard"
+                                    >
+                                        <BuildingOffice2Icon className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                                        Incubate
+                                    </Link>
+                                )}
+                                {canCreateBrand && (
+                                    <Link
+                                        href="/app/brands/create"
+                                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                        title="Add a brand to this company"
+                                    >
+                                        <PlusIcon className="h-4 w-4" />
+                                        Create Brand
+                                    </Link>
+                                )}
+                            </div>
+                        </div>
                     </div>
-                </div>
 
                 <CompanyTabs showAgencyTab={false} />
 

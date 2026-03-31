@@ -28,8 +28,12 @@ class OwnershipTransferPolicy
             return false;
         }
 
-        // Only current tenant owner can initiate
-        return $tenant->isOwner($user);
+        if ($tenant->isOwner($user)) {
+            return true;
+        }
+
+        // Incubating agency owner/admin may initiate transfer to the client before completion
+        return $user->canActAsIncubatingAgencyStewardForClient($tenant);
     }
 
     /**

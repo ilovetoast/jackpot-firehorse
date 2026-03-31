@@ -45,7 +45,10 @@ class CompanyPolicy
      */
     public function delete(User $user, Tenant $tenant): bool
     {
-        return $user->tenants()->where('tenants.id', $tenant->id)->exists()
-            && $user->can('manage brands');
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return false;
+        }
+
+        return $user->hasPermissionForTenant($tenant, 'company_settings.delete_company');
     }
 }
