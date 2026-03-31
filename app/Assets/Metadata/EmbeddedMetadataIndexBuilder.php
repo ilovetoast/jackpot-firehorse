@@ -9,6 +9,11 @@ use Illuminate\Support\Str;
 
 class EmbeddedMetadataIndexBuilder
 {
+    /** @var list<array<string, mixed>> */
+    private array $pendingIndexRows = [];
+
+    private ?CarbonInterface $indexInsertTimestamp = null;
+
     public function __construct(
         protected EmbeddedMetadataRegistry $registry,
         protected EmbeddedMetadataSearchTextNormalizer $searchTextNormalizer,
@@ -22,44 +27,54 @@ class EmbeddedMetadataIndexBuilder
      */
     public function rebuild(Asset $asset, array $normalizedPayload): void
     {
-        AssetMetadataIndexEntry::query()->where('asset_id', $asset->id)->delete();
+        $this->pendingIndexRows = [];
+        $this->indexInsertTimestamp = now();
 
-        foreach ($this->registry->allowlistedKeys() as $fqKey => $def) {
-            $entry = $this->registry->indexEntryFor($fqKey);
-            if ($entry === null) {
-                continue;
-            }
+        try {
+            AssetMetadataIndexEntry::query()->where('asset_id', $asset->id)->delete();
 
-            $value = $this->valueFromPayload($normalizedPayload, $fqKey);
-            if ($value === null || $value === '') {
-                continue;
-            }
-
-            $type = $entry['type'] ?? 'string';
-            if ($type === 'keyword') {
-                $items = is_array($value) ? $value : preg_split('/\s*,\s*/', (string) $value, -1, PREG_SPLIT_NO_EMPTY);
-                foreach ($items as $item) {
-                    if (! is_string($item) && ! is_numeric($item)) {
-                        continue;
-                    }
-                    $s = Str::limit(trim((string) $item), 4090, '');
-                    if ($s === '') {
-                        continue;
-                    }
-                    $this->createRow(
-                        $asset,
-                        $entry,
-                        $fqKey,
-                        'keyword',
-                        $s,
-                        valueString: $s
-                    );
+            foreach ($this->registry->allowlistedKeys() as $fqKey => $def) {
+                $entry = $this->registry->indexEntryFor($fqKey);
+                if ($entry === null) {
+                    continue;
                 }
 
-                continue;
+                $value = $this->valueFromPayload($normalizedPayload, $fqKey);
+                if ($value === null || $value === '') {
+                    continue;
+                }
+
+                $type = $entry['type'] ?? 'string';
+                if ($type === 'keyword') {
+                    $items = is_array($value) ? $value : preg_split('/\s*,\s*/', (string) $value, -1, PREG_SPLIT_NO_EMPTY);
+                    foreach ($items as $item) {
+                        if (! is_string($item) && ! is_numeric($item)) {
+                            continue;
+                        }
+                        $s = Str::limit(trim((string) $item), 4090, '');
+                        if ($s === '') {
+                            continue;
+                        }
+                        $this->appendRow(
+                            $asset,
+                            $entry,
+                            $fqKey,
+                            'keyword',
+                            $s,
+                            valueString: $s
+                        );
+                    }
+
+                    continue;
+                }
+
+                $this->insertTypedRow($asset, $entry, $fqKey, $type, $value);
             }
 
-            $this->insertTypedRow($asset, $entry, $fqKey, $type, $value);
+            $this->flushPendingIndexRows();
+        } finally {
+            $this->pendingIndexRows = [];
+            $this->indexInsertTimestamp = null;
         }
     }
 
@@ -90,7 +105,7 @@ class EmbeddedMetadataIndexBuilder
             'boolean' => $this->insertBooleanRow($asset, $entry, $fqKey, $value),
             'date' => $this->insertDateRow($asset, $entry, $fqKey, $value, $pdfHint),
             'datetime' => $this->insertDatetimeRow($asset, $entry, $fqKey, $value, $pdfHint),
-            'json' => $this->createRow(
+            'json' => $this->appendRow(
                 $asset,
                 $entry,
                 $fqKey,
@@ -108,7 +123,7 @@ class EmbeddedMetadataIndexBuilder
     protected function insertStringRow(Asset $asset, array $entry, string $fqKey, mixed $value): void
     {
         $display = $this->stringDisplayValue($entry, $value);
-        $this->createRow(
+        $this->appendRow(
             $asset,
             $entry,
             $fqKey,
@@ -138,7 +153,7 @@ class EmbeddedMetadataIndexBuilder
             return;
         }
         $label = $b ? 'true' : 'false';
-        $this->createRow(
+        $this->appendRow(
             $asset,
             $entry,
             $fqKey,
@@ -157,7 +172,7 @@ class EmbeddedMetadataIndexBuilder
 
         if (($entry['normalized_key'] ?? '') === 'iso') {
             $display = $this->technicalNormalizer->formatDisplay('iso', 'number', $value);
-            $this->createRow(
+            $this->appendRow(
                 $asset,
                 $entry,
                 $fqKey,
@@ -169,7 +184,7 @@ class EmbeddedMetadataIndexBuilder
             return;
         }
 
-        $this->createRow(
+        $this->appendRow(
             $asset,
             $entry,
             $fqKey,
@@ -185,7 +200,7 @@ class EmbeddedMetadataIndexBuilder
         if (! $dt) {
             return;
         }
-        $this->createRow(
+        $this->appendRow(
             $asset,
             $entry,
             $fqKey,
@@ -201,7 +216,7 @@ class EmbeddedMetadataIndexBuilder
         if (! $dt) {
             return;
         }
-        $this->createRow(
+        $this->appendRow(
             $asset,
             $entry,
             $fqKey,
@@ -214,7 +229,7 @@ class EmbeddedMetadataIndexBuilder
     /**
      * @param  array<string, mixed>  $entry
      */
-    protected function createRow(
+    protected function appendRow(
         Asset $asset,
         array $entry,
         string $fqKey,
@@ -231,7 +246,10 @@ class EmbeddedMetadataIndexBuilder
 
         $normalizedSearch = $this->searchTextNormalizer->normalize($searchTextSource);
 
-        AssetMetadataIndexEntry::create([
+        $ts = $this->indexInsertTimestamp ?? now();
+
+        $this->pendingIndexRows[] = [
+            'id' => (string) Str::uuid(),
             'asset_id' => $asset->id,
             'namespace' => $entry['namespace'],
             'key' => $logicalKey,
@@ -241,13 +259,26 @@ class EmbeddedMetadataIndexBuilder
             'value_number' => $valueNumber,
             'value_boolean' => $valueBoolean,
             'value_date' => $valueDate,
-            'value_datetime' => $valueDatetime,
-            'value_json' => $valueJson,
+            'value_datetime' => $valueDatetime !== null ? $valueDatetime->format('Y-m-d H:i:s') : null,
+            'value_json' => $valueJson !== null ? json_encode($valueJson) : null,
             'search_text' => Str::limit($normalizedSearch, 65000, ''),
             'is_filterable' => (bool) ($entry['filterable'] ?? false),
             'is_visible' => (bool) ($entry['visible'] ?? false),
             'source_priority' => (int) ($entry['source_priority'] ?? 100),
-        ]);
+            'created_at' => $ts->format('Y-m-d H:i:s'),
+            'updated_at' => $ts->format('Y-m-d H:i:s'),
+        ];
+    }
+
+    private function flushPendingIndexRows(): void
+    {
+        if ($this->pendingIndexRows === []) {
+            return;
+        }
+
+        foreach (array_chunk($this->pendingIndexRows, 500) as $chunk) {
+            AssetMetadataIndexEntry::insert($chunk);
+        }
     }
 
     protected function scalarString(mixed $value): string

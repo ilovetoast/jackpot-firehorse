@@ -4,8 +4,12 @@ namespace App\Services;
 
 use App\Enums\EventType;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Category;
+use App\Models\Tenant;
+use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -32,7 +36,10 @@ class MetadataPersistenceService
 {
     public function __construct(
         protected UploadMetadataSchemaResolver $uploadMetadataSchemaResolver,
-        protected MetadataApprovalResolver $approvalResolver
+        protected MetadataApprovalResolver $approvalResolver,
+        protected TagNormalizationService $tagNormalizationService,
+        protected PlanService $planService,
+        protected BrandIntelligenceScheduleService $brandIntelligenceScheduleService,
     ) {
     }
 
@@ -127,26 +134,19 @@ class MetadataPersistenceService
                 // Normalize value based on field type
                 $normalizedValues = $this->normalizeValue($fieldDef, $value);
 
+                // Resolve tenant/brand/user once per field (approval is identical for each value row)
+                $tenant = Tenant::find($asset->tenant_id);
+                $brand = Brand::find($asset->brand_id);
+                $user = $userId ? User::find($userId) : null;
+
+                if ($autoApprove) {
+                    $requiresApproval = false;
+                } else {
+                    $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
+                }
+
                 // Persist each value (one row per value for multi-value fields)
                 foreach ($normalizedValues as $normalizedValue) {
-                    // Load tenant, brand, and user once for approval resolution
-                    $tenant = \App\Models\Tenant::find($asset->tenant_id);
-                    $brand = \App\Models\Brand::find($asset->brand_id);
-                    $user = $userId ? \App\Models\User::find($userId) : null;
-
-                    // Invariant:
-                    // Approval requirements must be evaluated for BOTH upload and edit contexts.
-                    // Upload context must never bypass approval logic.
-                    if ($autoApprove) {
-                        // Upload context: Metadata is always accepted, approval determined after asset creation
-                        $requiresApproval = false;
-                    } else {
-                        // Edit context: Check if approval is required
-                        // Post-upload edits require approval if workflow is enabled (unless user has bypass_approval permission)
-                        // Phase M-2: Pass brand for company + brand level gating
-                        $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
-                    }
-
                     // Insert asset_metadata row
                     // Phase B7: User-uploaded metadata has confidence = 1.0 and producer = 'user'
                     $assetMetadataId = DB::table('asset_metadata')->insertGetId([
@@ -213,8 +213,80 @@ class MetadataPersistenceService
                         }
                     }
                 }
+
+                // Tags field: asset grid, drawer, and search read from `asset_tags` (see AssetTagController, AssetSearchService).
+                // Metadata persistence only wrote `asset_metadata`; sync here when values are approved immediately.
+                if ($fieldKey === 'tags' && ! $requiresApproval && $tenant && $normalizedValues !== []) {
+                    $this->syncApprovedMetadataTagsToAssetTags($asset, $normalizedValues, $tenant);
+                }
             }
         });
+    }
+
+    /**
+     * Public hook for approval flows (e.g. AssetMetadataController::approveMetadata) — same storage as persistMetadata.
+     *
+     * @param  list<mixed>  $normalizedTagValues
+     */
+    public function syncApprovedTagBatchValues(Asset $asset, Tenant $tenant, array $normalizedTagValues): void
+    {
+        if ($normalizedTagValues === []) {
+            return;
+        }
+
+        $this->syncApprovedMetadataTagsToAssetTags($asset, $normalizedTagValues, $tenant);
+    }
+
+    /**
+     * Mirror approved Tags metadata into asset_tags so UI + search match POST /api/assets/{id}/tags behavior.
+     *
+     * @param  list<mixed>  $normalizedTagValues
+     */
+    private function syncApprovedMetadataTagsToAssetTags(Asset $asset, array $normalizedTagValues, Tenant $tenant): void
+    {
+        $anyInserted = false;
+
+        foreach ($normalizedTagValues as $raw) {
+            if ($raw === null || $raw === '') {
+                continue;
+            }
+
+            $canonical = $this->tagNormalizationService->normalize((string) $raw, $tenant);
+            if ($canonical === null) {
+                continue;
+            }
+
+            $exists = DB::table('asset_tags')
+                ->where('asset_id', $asset->id)
+                ->where('tag', $canonical)
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            if (! $this->planService->canAddTag($asset)) {
+                Log::warning('[MetadataPersistence] Tag sync skipped: plan limit reached', [
+                    'asset_id' => $asset->id,
+                    'tag' => $canonical,
+                ]);
+
+                break;
+            }
+
+            DB::table('asset_tags')->insert([
+                'asset_id' => $asset->id,
+                'tag' => $canonical,
+                'source' => 'manual',
+                'confidence' => null,
+                'created_at' => now(),
+            ]);
+            $anyInserted = true;
+        }
+
+        if ($anyInserted) {
+            $this->brandIntelligenceScheduleService->scheduleDebouncedRescoreAfterUserEdit($asset);
+        }
     }
 
     /**

@@ -3718,11 +3718,11 @@ export default function AssetDrawer({
             {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) */}
             {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && (
                 <div
-                    className="fixed inset-0 z-[60] flex flex-col bg-black/90 md:flex-row"
+                    className="fixed inset-0 z-[60] flex min-h-0 w-full max-h-[100dvh] flex-col overflow-hidden bg-black/90 md:flex-row md:items-stretch"
                     onClick={() => setShowZoomModal(false)}
                 >
                     <div
-                        className={`relative order-1 flex min-h-0 min-w-0 flex-col bg-black/90 ${
+                        className={`relative order-1 flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/90 md:self-stretch ${
                             showLightboxDetails ? 'flex-1 md:flex-[1_1_55%]' : 'flex-1'
                         }`}
                         onClick={(e) => e.stopPropagation()}
@@ -3773,7 +3773,7 @@ export default function AssetDrawer({
                         )}
 
                     <div 
-                        className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden p-4"
+                        className="relative flex h-full min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden p-4"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Phase V-1: Check if current asset is a video */}
@@ -3858,7 +3858,7 @@ export default function AssetDrawer({
                                 return (
                                     <video
                                         key={currentCarouselAsset.id} // Key forces remount for clean transition
-                                        className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out bg-black"
+                                        className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out bg-black"
                                         controls
                                         autoPlay
                                         poster={currentCarouselAsset.video_poster_url || currentCarouselAsset.thumbnail_url || currentCarouselAsset.final_thumbnail_url || undefined}
@@ -3889,7 +3889,7 @@ export default function AssetDrawer({
                                         key={currentCarouselAsset.id}
                                         src={carouselImgUrl}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
-                                        className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out"
+                                        className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
                                         style={{
                                             transform: transitionDirection === 'left' 
                                                 ? 'translateX(30px)' 
@@ -3913,7 +3913,7 @@ export default function AssetDrawer({
 
                     {showLightboxDetails && currentCarouselAsset?.id && (
                         <div
-                            className="order-2 flex max-h-[min(50vh,520px)] w-full min-h-0 flex-col overflow-hidden bg-neutral-950 md:max-h-none md:h-full md:w-[min(500px,50vw)] md:flex-shrink-0"
+                            className="order-2 flex max-h-[min(50vh,520px)] w-full min-h-0 flex-col overflow-hidden bg-neutral-950 md:max-h-none md:h-full md:min-h-0 md:w-[min(500px,50vw)] md:flex-shrink-0 md:self-stretch"
                             onClick={(e) => e.stopPropagation()}
                         >
                             {currentCarouselAsset.is_virtual_google_font ? (

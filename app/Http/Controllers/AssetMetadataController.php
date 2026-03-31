@@ -41,6 +41,7 @@ use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\MetadataApprovalResolver;
+use App\Services\MetadataPersistenceService;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
@@ -3147,6 +3148,12 @@ class AssetMetadataController extends Controller
             }
         });
 
+        // Tags: grid/drawer/search use asset_tags; pending rows only had asset_metadata until approval.
+        if ($fieldKey === 'tags') {
+            $decoded = json_decode($metadata->value_json, true);
+            app(MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, [$decoded]);
+        }
+
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
         $this->triggerAiSuggestionsIfReady($asset);
 
@@ -3250,6 +3257,10 @@ class AssetMetadataController extends Controller
         $fieldKey = $field->key ?? null;
         if ($fieldKey && in_array($fieldKey, ['starred', 'quality_rating'], true) && ! empty($normalizedValues)) {
             $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
+        }
+
+        if ($fieldKey === 'tags' && ! empty($normalizedValues)) {
+            app(MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $normalizedValues);
         }
 
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions

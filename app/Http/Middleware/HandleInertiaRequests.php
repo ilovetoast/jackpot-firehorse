@@ -4,8 +4,8 @@ namespace App\Http\Middleware;
 
 use App\Models\Brand;
 use App\Models\Tenant;
-use App\Models\TenantAgency;
 use App\Models\User;
+use App\Services\AgencyBrandAccessService;
 use App\Services\AuthPermissionService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
@@ -16,6 +16,10 @@ use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
+    public function __construct(
+        protected AgencyBrandAccessService $agencyBrandAccessService
+    ) {}
+
     /**
      * The root template that's loaded on the first page visit.
      *
@@ -50,6 +54,7 @@ class HandleInertiaRequests extends Middleware
         // Membership list for nav — load tenants only; default brand colors come from a batch query (no Tenant->defaultBrand access).
         if ($user) {
             $user->loadMissing('tenants');
+            $user->warmTenantRoleCacheFromLoadedTenants();
         }
 
         /** @var array<int|string, string|null> primary_color keyed by tenant id for auth.companies / activeCompany */
@@ -290,6 +295,7 @@ class HandleInertiaRequests extends Middleware
         // When tenant is null (e.g. admin dashboard without company selected), still include Spatie (site) role permissions
         if ($user) {
             $user->load('tenants');
+            $user->warmTenantRoleCacheFromLoadedTenants();
         }
         $effectivePermissions = [];
         if ($user) {
@@ -439,8 +445,10 @@ class HandleInertiaRequests extends Middleware
                     'agency_tier' => $tenant->agencyTier?->name, // Phase AG-7.1: Agency nav link
                     'primary_color' => $defaultBrandPrimaryByTenantId[$tenant->id] ?? null,
                 ] : null,
-                /** Client companies linked to this agency (tenant_agencies) that the user may open */
-                'managed_agency_clients' => $this->managedAgencyClientsForUser($user, $tenant),
+                /** Client companies linked to the user's agency (not session tenant) — for nav badges / overview teaser */
+                'managed_agency_clients' => $user ? $this->agencyBrandAccessService->managedAgencyClientSummariesForUser($user) : [],
+                /** Agency + linked-client brands the user can open (flat list for agency strip quick switch) */
+                'agency_flat_brands' => $user ? $this->agencyBrandAccessService->flatBrandsForAgencyStrip($user) : [],
                 'activeBrand' => $activeBrand ? [
                     'id' => $activeBrand->id,
                     'name' => $activeBrand->name,
@@ -610,40 +618,5 @@ class HandleInertiaRequests extends Middleware
         ]);
 
         return $shared;
-    }
-
-    /**
-     * @return array<int, array{id: int, name: string, slug: string}>
-     */
-    protected function managedAgencyClientsForUser(?User $user, ?Tenant $agencyTenant): array
-    {
-        if (! $user || ! $agencyTenant || ! $agencyTenant->is_agency) {
-            return [];
-        }
-
-        $linkedClientIds = TenantAgency::query()
-            ->where('agency_tenant_id', $agencyTenant->id)
-            ->pluck('tenant_id');
-        if ($linkedClientIds->isEmpty()) {
-            return [];
-        }
-
-        $memberIds = $user->tenants()->pluck('tenants.id');
-        $accessibleIds = $linkedClientIds->intersect($memberIds);
-        if ($accessibleIds->isEmpty()) {
-            return [];
-        }
-
-        return Tenant::query()
-            ->whereIn('id', $accessibleIds)
-            ->orderBy('name')
-            ->get(['id', 'name', 'slug'])
-            ->map(fn (Tenant $t) => [
-                'id' => $t->id,
-                'name' => $t->name,
-                'slug' => $t->slug,
-            ])
-            ->values()
-            ->all();
     }
 }

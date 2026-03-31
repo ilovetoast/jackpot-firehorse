@@ -10,6 +10,7 @@ use App\Models\Brand;
 use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AgencyBrandAccessService;
 use App\Services\AiUsageService;
 use App\Services\BrandService;
 use App\Support\DashboardLinks;
@@ -26,7 +27,8 @@ class CompanyOverviewController extends Controller
     public function __construct(
         protected PlanService $planService,
         protected AiUsageService $aiUsageService,
-        protected BrandService $brandService
+        protected BrandService $brandService,
+        protected AgencyBrandAccessService $agencyBrandAccessService
     ) {}
 
     /**
@@ -185,7 +187,7 @@ class CompanyOverviewController extends Controller
 
         $agencyManagedBrands = [];
         if ($tenant->is_agency) {
-            $managedClients = app(CompanyController::class)->managedAgencyClientsForUser($user, $tenant);
+            $managedClients = $this->agencyBrandAccessService->managedAgencyClientsForUser($user, $tenant);
             foreach ($managedClients as $clientData) {
                 $clientTenantId = (int) $clientData['id'];
                 $brandMetas = $clientData['brands'] ?? [];

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
@@ -37,6 +38,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Cached routes (route:cache) or rolling deploys may still reference this middleware by string.
+        // Without an alias, the container treats "incubation.not_locked" as a class name and throws.
+        $this->app->alias(EnsureIncubationWorkspaceNotLocked::class, 'incubation.not_locked');
+
         $this->app->singleton(AIProviderInterface::class, function ($app) {
             $defaultProviderName = config('ai.default_provider', 'openai');
 

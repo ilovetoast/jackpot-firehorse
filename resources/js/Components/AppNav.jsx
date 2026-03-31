@@ -7,6 +7,7 @@ import JackpotLogo from './JackpotLogo'
 import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
 import NotificationBell from './NotificationBell'
+import AgencyStripBrandSelect from './agency/AgencyStripBrandSelect'
 import {
     ArrowDownTrayIcon,
     BookOpenIcon,
@@ -105,6 +106,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
     const managedAgencyClients = Array.isArray(auth.managed_agency_clients) ? auth.managed_agency_clients : []
+    const agencyFlatBrands = Array.isArray(auth.agency_flat_brands) ? auth.agency_flat_brands : []
     const managedClientIdSet = new Set(managedAgencyClients.map((c) => c.id))
     const agencyHomeCompany = auth.companies?.find((c) => c.is_agency === true) ?? null
     const showAgencyQuickLink = Boolean(agencyHomeCompany)
@@ -505,21 +507,30 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 </p>
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={goAgencyDashboardFromMenu}
-                            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
-                                isTransparentVariant
-                                    ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
-                                    : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-indigo-500 focus-visible:ring-offset-white'
-                            }`}
-                            style={!isTransparentVariant ? { color: agencyBrandColor } : undefined}
-                            title="Agency dashboard"
-                        >
-                            <span className="hidden sm:inline">Agency dashboard</span>
-                            <span className="sm:hidden">Dashboard</span>
-                            <ChevronRightIcon className="h-4 w-4 opacity-80" aria-hidden />
-                        </button>
+                        <div className="flex min-w-0 shrink-0 items-center gap-2">
+                            <AgencyStripBrandSelect
+                                brands={agencyFlatBrands}
+                                brandColor={agencyBrandColor}
+                                isTransparentVariant={isTransparentVariant}
+                                currentTenantId={activeCompany?.id}
+                                currentBrandId={auth.activeBrand?.id}
+                            />
+                            <button
+                                type="button"
+                                onClick={goAgencyDashboardFromMenu}
+                                className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
+                                    isTransparentVariant
+                                        ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
+                                        : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-indigo-500 focus-visible:ring-offset-white'
+                                }`}
+                                style={!isTransparentVariant ? { color: agencyBrandColor } : undefined}
+                                title="Agency dashboard"
+                            >
+                                <span className="hidden sm:inline">Agency dashboard</span>
+                                <span className="sm:hidden">Dashboard</span>
+                                <ChevronRightIcon className="h-4 w-4 opacity-80" aria-hidden />
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

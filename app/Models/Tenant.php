@@ -341,10 +341,15 @@ class Tenant extends Model
         $limits = $planService->getPlanLimits($this);
         $maxUsers = $limits['max_users'] ?? PHP_INT_MAX;
 
+        $tenantId = $this->id;
+
         // Get all users ordered by users.created_at (user account creation) to match owner logic
         // This ensures consistency with isOwner() which uses users.created_at
+        // Eager-load membership on *this* tenant only so isOwner() → getRoleForTenant() does not
+        // issue one tenant_user query per user (N+1 in HandleInertiaRequests / plan limit UI).
         $allUsers = $this->users()
             ->orderBy('users.created_at')
+            ->with(['tenants' => fn ($q) => $q->where('tenants.id', $tenantId)])
             ->get();
 
         // Ensure owner exists in database (fixes any discrepancies)

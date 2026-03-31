@@ -43,6 +43,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.user.within.plan.limit' => \App\Http\Middleware\EnsureUserWithinPlanLimit::class,
             'restrict.collection.only' => \App\Http\Middleware\RestrictCollectionOnlyUser::class,
             'collect.asset_url_metrics' => \App\Http\Middleware\CollectAssetUrlMetrics::class,
+            // Must be registered here (not only AppServiceProvider::alias): the router resolves
+            // middleware strings via this map; route:cache may still reference this name.
             'incubation.not_locked' => \App\Http\Middleware\EnsureIncubationWorkspaceNotLocked::class,
         ]);
 

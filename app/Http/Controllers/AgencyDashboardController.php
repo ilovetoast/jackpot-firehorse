@@ -9,6 +9,7 @@ use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Services\Agency\BrandReadinessService;
+use App\Services\AgencyBrandAccessService;
 use App\Services\IncubationWorkspaceService;
 use App\Services\TenantAgencyService;
 use App\Support\DashboardLinks;
@@ -39,7 +40,8 @@ class AgencyDashboardController extends Controller
 {
     public function __construct(
         protected TenantAgencyService $tenantAgencyService,
-        protected IncubationWorkspaceService $incubationWorkspaceService
+        protected IncubationWorkspaceService $incubationWorkspaceService,
+        protected AgencyBrandAccessService $agencyBrandAccessService
     ) {}
 
     /**
@@ -219,8 +221,7 @@ class AgencyDashboardController extends Controller
         $activatedReferrals = $referrals->where('is_activated', true)->values();
         $pendingReferrals = $referrals->where('is_activated', false)->values();
 
-        $companyController = app(CompanyController::class);
-        $managedClients = $companyController->managedAgencyClientsForUser($user, $tenant);
+        $managedClients = $this->agencyBrandAccessService->managedAgencyClientsForUser($user, $tenant);
 
         $brandIds = collect($managedClients)
             ->pluck('brands')

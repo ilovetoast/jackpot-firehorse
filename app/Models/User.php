@@ -228,6 +228,31 @@ class User extends Authenticatable
     protected array $tenantRoleForTenantCache = [];
 
     /**
+     * Per-request memo for {@see canActAsIncubatingAgencyStewardForClient()} (avoids repeated tenant_user reads in permission loops).
+     *
+     * @var array<string, bool>
+     */
+    protected array $incubatingAgencyStewardForClientCache = [];
+
+    /**
+     * Pre-fill {@see $tenantRoleForTenantCache} from the loaded tenants pivot so permission checks and
+     * agency brand lists do not issue one tenant_user query per tenant.
+     */
+    public function warmTenantRoleCacheFromLoadedTenants(): void
+    {
+        if (! $this->relationLoaded('tenants')) {
+            return;
+        }
+
+        foreach ($this->tenants as $t) {
+            $key = (string) $t->id;
+            if (! array_key_exists($key, $this->tenantRoleForTenantCache)) {
+                $this->tenantRoleForTenantCache[$key] = $t->pivot?->role ?? null;
+            }
+        }
+    }
+
+    /**
      * Whether this user has a brand_user row for the given brand.
      * Caches the full id list on first call to fix N+1 in CategoryPolicy::view and similar loops.
      */
@@ -309,11 +334,14 @@ class User extends Authenticatable
         }
 
         if ($this->relationLoaded('tenants')) {
-            $t = $this->tenants->firstWhere('id', $tenant->id);
-            $role = $t?->pivot?->role ?? null;
-            $this->tenantRoleForTenantCache[$tenantId] = $role;
+            $t = $this->tenants->first(fn (Tenant $t) => (string) $t->id === (string) $tenant->id);
+            if ($t !== null) {
+                $role = $t->pivot?->role ?? null;
+                $this->tenantRoleForTenantCache[$tenantId] = $role;
 
-            return $role;
+                return $role;
+            }
+            // Partial eager load (e.g. tenants filtered to one id) — fall through to DB once
         }
 
         $pivot = DB::table('tenant_user')
@@ -680,10 +708,19 @@ class User extends Authenticatable
      */
     public function canActAsIncubatingAgencyStewardForClient(Tenant $clientTenant): bool
     {
+        $cacheKey = (string) $clientTenant->id;
+        if (array_key_exists($cacheKey, $this->incubatingAgencyStewardForClientCache)) {
+            return $this->incubatingAgencyStewardForClientCache[$cacheKey];
+        }
+
         if (! $clientTenant->incubated_by_agency_id) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
             return false;
         }
         if ($clientTenant->hasCompletedOwnershipTransfer()) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
             return false;
         }
 
@@ -694,20 +731,29 @@ class User extends Authenticatable
             ->where('tenant_id', $clientTenant->id)
             ->first();
         if (! $pivot || ! (bool) ($pivot->is_agency_managed ?? false)) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
             return false;
         }
         if ((int) ($pivot->agency_tenant_id ?? 0) !== $incubatingAgencyId) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
             return false;
         }
 
         $agencyTenant = Tenant::find($incubatingAgencyId);
         if (! $agencyTenant) {
+            $this->incubatingAgencyStewardForClientCache[$cacheKey] = false;
+
             return false;
         }
 
         $roleOnAgency = $this->getRoleForTenant($agencyTenant);
 
-        return in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true);
+        $result = in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true);
+        $this->incubatingAgencyStewardForClientCache[$cacheKey] = $result;
+
+        return $result;
     }
 
     /**

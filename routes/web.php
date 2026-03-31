@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\SignupController;
 use App\Http\Controllers\BrandGatewayController;
@@ -658,7 +659,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/metadata/candidates/{candidateId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectCandidate'])->name('metadata.candidates.reject');
             Route::post('/metadata/candidates/{candidateId}/defer', [\App\Http\Controllers\AssetMetadataController::class, 'deferCandidate'])->name('metadata.candidates.defer');
 
-            Route::middleware('incubation.not_locked')->group(function () {
+            Route::middleware([EnsureIncubationWorkspaceNotLocked::class])->group(function () {
                 // Asset download endpoint with metric tracking (GET = direct signed URL, no record)
                 Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
                 // UX-R2: Single-asset tracked download (POST = create Download record + redirect to file)
@@ -744,7 +745,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             })->name('downloads.limits');
 
             // Upload routes (tenant-scoped) — blocked when incubation window expired (hard lock)
-            Route::middleware('incubation.not_locked')->group(function () {
+            Route::middleware([EnsureIncubationWorkspaceNotLocked::class])->group(function () {
                 Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
                 Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
                 Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
@@ -770,7 +771,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Brand routes (tenant-scoped)
             Route::get('/brands', fn () => redirect()->route('app'))->name('brands.index');
             Route::resource('brands', \App\Http\Controllers\BrandController::class)->except(['index']);
-            Route::middleware('incubation.not_locked')->group(function () {
+            Route::middleware([EnsureIncubationWorkspaceNotLocked::class])->group(function () {
                 Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
                 Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
             });

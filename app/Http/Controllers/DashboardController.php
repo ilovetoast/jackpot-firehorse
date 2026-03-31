@@ -11,9 +11,11 @@ use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetMetric;
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Download;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
@@ -249,7 +251,7 @@ class DashboardController extends Controller
 
             $categories = collect();
             if (! empty($categoryIds)) {
-                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
+                $categories = Category::with(['tenant', 'brand'])->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
@@ -357,7 +359,7 @@ class DashboardController extends Controller
 
             $categories = collect();
             if (! empty($categoryIds)) {
-                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
+                $categories = Category::with(['tenant', 'brand'])->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
@@ -467,7 +469,7 @@ class DashboardController extends Controller
 
             $categories = collect();
             if (! empty($categoryIds)) {
-                $categories = Category::with('tenant')->whereIn('id', $categoryIds)
+                $categories = Category::with(['tenant', 'brand'])->whereIn('id', $categoryIds)
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
                     ->get()
@@ -669,8 +671,18 @@ class DashboardController extends Controller
             }
             $activityEvents = $activityQuery->orderBy('created_at', 'desc')
                 ->limit(5)
-                ->with(['brand', 'subject'])
+                ->with(['brand'])
                 ->get();
+
+            // Batch-load polymorphic subjects (with(['subject']) can still hit per-row Asset queries for
+            // soft-deleted subjects or morph edge cases). Audit events may reference trashed assets.
+            $activityEvents->loadMorph('subject', [
+                Asset::class => fn ($q) => $q->withTrashed(),
+                User::class => [],
+                Tenant::class => [],
+                Brand::class => [],
+                Category::class => [],
+            ]);
 
             // One query for all user actors (getActorModel() otherwise runs User::find per row — N+1).
             $actorUserIds = $activityEvents
