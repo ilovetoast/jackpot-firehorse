@@ -583,7 +583,7 @@ class AiMetadataGenerationService
 
         $min = $this->getTaggingMinConfidence();
         $minStr = number_format($min, 2, '.', '');
-        $ctx = $this->buildPromptContextBlock($asset);
+        $ctx = $this->buildPromptContextBlock($asset, 'full');
 
         $prompt = "Analyze this image and provide both structured metadata field values and searchable tags.\n\n";
 
@@ -626,7 +626,7 @@ class AiMetadataGenerationService
     {
         $min = $this->getTaggingMinConfidence();
         $minStr = number_format($min, 2, '.', '');
-        $ctx = $this->buildPromptContextBlock($asset);
+        $ctx = $this->buildPromptContextBlock($asset, 'tags');
 
         $prompt = "Analyze this image and generate SEARCHABLE TAGS for a digital asset management system.\n\n";
 
@@ -674,9 +674,12 @@ class AiMetadataGenerationService
 
 
     /**
-     * Category/brand context and category-specific guidance for vision prompts.
+     * Category/brand context for vision prompts.
+     *
+     * @param  string  $mode  'full' — category hints for structured fields + tags (searchTagsHintForCategory).
+     *                        'tags' — category/brand only plus strict visual-only instruction (no search hints).
      */
-    protected function buildPromptContextBlock(Asset $asset): string
+    protected function buildPromptContextBlock(Asset $asset, string $mode = 'full'): string
     {
         $lines = [];
         $meta = $asset->metadata ?? [];
@@ -698,9 +701,13 @@ class AiMetadataGenerationService
             $lines[] = 'Library category id: '.$categoryId.'.';
         }
 
-        $hint = $this->searchTagsHintForCategory($category);
-        if ($hint !== '') {
-            $lines[] = $hint;
+        if ($mode === 'tags') {
+            $lines[] = 'Only include concrete, visually verifiable elements such as objects, people, environments, and actions. Do not infer style, mood, or intent.';
+        } else {
+            $hint = $this->searchTagsHintForCategory($category);
+            if ($hint !== '') {
+                $lines[] = $hint;
+            }
         }
 
         if (! empty($lines)) {
