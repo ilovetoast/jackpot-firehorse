@@ -7,6 +7,12 @@
 
 const NS = '[JackpotPush]'
 
+/**
+ * Master switch: set to `false` to re-enable OneSignal init, first-run dialog, and profile push toggles.
+ * (Also comment `PushServiceInit` back into `app.jsx` if you removed it.)
+ */
+export const PUSH_CLIENT_DISABLED = true
+
 function log(...args) {
     if (typeof console !== 'undefined' && console.log) {
         console.log(NS, ...args)
@@ -364,6 +370,9 @@ export function getPushConsentModalEligibility(user) {
  * chosen allow/deny yet. Drives the first-load site dialog — not the master toggle on settings.
  */
 export function shouldShowPushPermissionDialog(user) {
+    if (PUSH_CLIENT_DISABLED) {
+        return false
+    }
     return getPushConsentModalEligibility(user).eligible
 }
 
@@ -375,6 +384,10 @@ export function shouldShowPushPermissionDialog(user) {
 export async function initPush(user) {
     if (!user?.id || typeof window === 'undefined') {
         log('initPush:skip', { reason: 'no user or window' })
+        return { ready: false }
+    }
+    if (PUSH_CLIENT_DISABLED) {
+        log('initPush:skip', { reason: 'PUSH_CLIENT_DISABLED' })
         return { ready: false }
     }
     if (!(await waitForOneSignalDeferred())) {
@@ -440,6 +453,10 @@ export async function requestPushPermission(user) {
     if (!user?.id || typeof window === 'undefined') {
         return { granted: false }
     }
+    if (PUSH_CLIENT_DISABLED) {
+        log('requestPushPermission:abort', { reason: 'PUSH_CLIENT_DISABLED' })
+        return { granted: false }
+    }
     if (!(await waitForOneSignalDeferred())) {
         log('requestPushPermission:abort', { reason: 'no SDK (timeout waiting for script)' })
         return { granted: false }
@@ -481,6 +498,9 @@ export async function requestPushPermission(user) {
  */
 export async function dismissPushPermissionPrompt() {
     log('dismissPushPermissionPrompt')
+    if (PUSH_CLIENT_DISABLED) {
+        return
+    }
     await postPushStatus(false)
 }
 
@@ -490,6 +510,16 @@ export async function dismissPushPermissionPrompt() {
 export async function togglePush(user, enabled) {
     log('togglePush', { enabled, userId: user?.id })
     if (!user?.id || typeof window === 'undefined') {
+        return
+    }
+
+    if (PUSH_CLIENT_DISABLED) {
+        if (!enabled) {
+            await postPushStatus(false)
+        }
+        if (enabled) {
+            throw new Error('Browser push is temporarily turned off for this site.')
+        }
         return
     }
 

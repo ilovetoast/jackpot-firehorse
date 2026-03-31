@@ -88,11 +88,50 @@ const timezones = [
     'Pacific/Auckland',
 ]
 
+function CompanyRow({ company }) {
+    return (
+        <li className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-3 min-w-0">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm font-bold">
+                    {company.name?.charAt(0)?.toUpperCase() || '?'}
+                </div>
+                <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{company.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{company.slug}</p>
+                </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+                {company.is_active && (
+                    <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                        Active
+                    </span>
+                )}
+                {!company.is_active && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            showWorkspaceSwitchingOverlay('company')
+                            router.post(`/app/companies/${company.id}/switch`)
+                        }}
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                    >
+                        Switch
+                    </button>
+                )}
+            </div>
+        </li>
+    )
+}
+
 function CompaniesSection({ companies = [] }) {
     const [showCreateForm, setShowCreateForm] = useState(false)
     const { data, setData, post, processing, errors, reset } = useForm({
         company_name: '',
     })
+
+    /** Direct membership — not agency-provisioned client access (see HandleInertiaRequests `is_agency_managed`). */
+    const directCompanies = companies.filter((c) => !c.is_agency_managed)
+    const agencyManagedCompanies = companies.filter((c) => c.is_agency_managed === true)
 
     const handleCreate = (e) => {
         e.preventDefault()
@@ -111,47 +150,42 @@ function CompaniesSection({ companies = [] }) {
                 <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
                     <h2 className="text-lg font-semibold text-gray-900">Companies</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                        Manage your companies or create a new one. You'll become the owner of any company you create.
+                        Workspaces you <span className="font-medium text-gray-700">own or joined directly</span>. Create a
+                        new company here and you become its owner.
                     </p>
+                    {agencyManagedCompanies.length > 0 && (
+                        <p className="mt-3 text-sm text-gray-500">
+                            Client companies your <span className="font-medium text-gray-700">agency</span> added for you
+                            are listed separately — you are not the owner of those client workspaces.
+                        </p>
+                    )}
                 </div>
                 <div className="lg:col-span-2 px-6 py-6">
-                    {companies.length > 0 && (
+                    {directCompanies.length > 0 && (
                         <div className="mb-6">
-                            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Your Companies</h3>
+                            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">
+                                Your companies
+                            </h3>
                             <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                                {companies.map((company) => (
-                                    <li key={company.id} className="flex items-center justify-between px-4 py-3">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm font-bold">
-                                                {company.name?.charAt(0)?.toUpperCase() || '?'}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate">{company.name}</p>
-                                                <p className="text-xs text-gray-500 truncate">{company.slug}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            {company.is_active && (
-                                                <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                                                    Active
-                                                </span>
-                                            )}
-                                            {!company.is_active && (
-                                                <form method="POST" action={`/app/companies/${company.id}/switch`}>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            showWorkspaceSwitchingOverlay('company')
-                                                            router.post(`/app/companies/${company.id}/switch`)
-                                                        }}
-                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
-                                                    >
-                                                        Switch
-                                                    </button>
-                                                </form>
-                                            )}
-                                        </div>
-                                    </li>
+                                {directCompanies.map((company) => (
+                                    <CompanyRow key={company.id} company={company} />
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {agencyManagedCompanies.length > 0 && (
+                        <div className="mb-6">
+                            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-1">
+                                Client workspaces (agency access)
+                            </h3>
+                            <p className="mb-3 text-xs text-gray-500">
+                                Your agency provisioned access to these client companies. Switch workspace here or from
+                                the agency bar in the app.
+                            </p>
+                            <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 border-dashed">
+                                {agencyManagedCompanies.map((company) => (
+                                    <CompanyRow key={company.id} company={company} />
                                 ))}
                             </ul>
                         </div>

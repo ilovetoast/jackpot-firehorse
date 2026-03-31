@@ -1,7 +1,7 @@
 import { Link, usePage } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
 import PushPermissionDialog from './PushPermissionDialog'
-import { initPush, shouldShowPushPermissionDialog } from '../services/pushService'
+import { initPush, shouldShowPushPermissionDialog, PUSH_CLIENT_DISABLED } from '../services/pushService'
 
 const NS = '[JackpotPush]'
 const UNAVAILABLE_DISMISS_KEY = 'jackpot_push_unavailable_notice_dismissed'
@@ -38,7 +38,7 @@ export default function PushServiceInit() {
     }, [user?.id, page.url, clientEnabled])
 
     useEffect(() => {
-        if (!clientEnabled || !user?.id) {
+        if (PUSH_CLIENT_DISABLED || !clientEnabled || !user?.id) {
             return
         }
 
@@ -68,6 +68,10 @@ export default function PushServiceInit() {
             // ignore
         }
         setUnavailableDismissed(true)
+    }
+
+    if (PUSH_CLIENT_DISABLED) {
+        return null
     }
 
     return (

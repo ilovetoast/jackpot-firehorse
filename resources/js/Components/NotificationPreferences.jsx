@@ -1,6 +1,6 @@
 import { usePage } from '@inertiajs/react'
 import { useCallback, useEffect, useState } from 'react'
-import { formatPushUserError, togglePush } from '../services/pushService'
+import { formatPushUserError, togglePush, PUSH_CLIENT_DISABLED } from '../services/pushService'
 
 const GROUPS = [
     {
@@ -44,6 +44,8 @@ export default function NotificationPreferences() {
     const page = usePage()
     const authUser = page.props.auth?.user
     const pushClientEnabled = Boolean(page.props.oneSignal?.client_enabled)
+    /** Server allows push SDK and we have not disabled it in code (`pushService.js`). */
+    const pushClientAvailable = pushClientEnabled && !PUSH_CLIENT_DISABLED
 
     const [prefs, setPrefs] = useState(defaultPreferences)
     const [pushEnabled, setPushEnabled] = useState(false)
@@ -139,9 +141,11 @@ export default function NotificationPreferences() {
         if (!authUser?.id || pushBusy || saving) {
             return
         }
-        if (!pushClientEnabled) {
+        if (!pushClientAvailable) {
             setError(
-                'Browser push isn’t enabled for this site yet. Your team can turn it on in the server environment (PUSH_NOTIFICATIONS_ENABLED and ONESIGNAL_APP_ID), then reload this page.'
+                PUSH_CLIENT_DISABLED
+                    ? 'Browser push is temporarily turned off in the app.'
+                    : 'Browser push isn’t enabled for this site yet. Your team can turn it on in the server environment (PUSH_NOTIFICATIONS_ENABLED and ONESIGNAL_APP_ID), then reload this page.'
             )
             return
         }
@@ -149,7 +153,7 @@ export default function NotificationPreferences() {
     }
 
     const onMasterPushToggle = async (nextOn) => {
-        if (!authUser?.id || pushBusy || !pushClientEnabled) {
+        if (!authUser?.id || pushBusy || !pushClientAvailable) {
             return
         }
         setPushBusy(true)
@@ -174,7 +178,7 @@ export default function NotificationPreferences() {
     }
 
     const masterOn = pushEnabled === true
-    const showAllowCallout = pushClientEnabled && browserPermission === 'default' && !masterOn
+    const showAllowCallout = pushClientAvailable && browserPermission === 'default' && !masterOn
 
     const savingSpinner = (
         <span
@@ -192,26 +196,45 @@ export default function NotificationPreferences() {
             )}
             <p className="text-xs text-gray-500">
                 Choose which kinds of updates you care about below.
-                {pushClientEnabled ? (
+                {pushClientAvailable ? (
                     <>
                         {' '}
                         Turning on <strong>Push notifications</strong> lets us send alerts to this browser after you allow
                         them in the prompt.
+                    </>
+                ) : PUSH_CLIENT_DISABLED ? (
+                    <>
+                        {' '}
+                        Browser push is <strong>temporarily off</strong> in the app; category choices below are still
+                        saved for when we turn it back on.
                     </>
                 ) : (
                     <> Category choices apply when browser push is available for this site.</>
                 )}
             </p>
 
-            {!pushClientEnabled && (
+            {!pushClientAvailable && (
                 <div
                     className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800"
                     role="status"
                 >
-                    <p className="font-medium text-gray-900">Browser push isn’t turned on for this site yet</p>
+                    <p className="font-medium text-gray-900">
+                        {PUSH_CLIENT_DISABLED
+                            ? 'Browser push is temporarily turned off'
+                            : 'Browser push isn’t turned on for this site yet'}
+                    </p>
                     <p className="mt-1 text-xs leading-relaxed text-gray-600">
-                        You can still choose which kinds of updates you’d want. When your team enables notifications for
-                        this app, reload the page and you’ll be able to allow alerts here.
+                        {PUSH_CLIENT_DISABLED ? (
+                            <>
+                                We’ve disabled the push prompt and device registration for now. You can still set which
+                                kinds of updates you care about; they’ll apply when push is re-enabled.
+                            </>
+                        ) : (
+                            <>
+                                You can still choose which kinds of updates you’d want. When your team enables
+                                notifications for this app, reload the page and you’ll be able to allow alerts here.
+                            </>
+                        )}
                     </p>
                 </div>
             )}
@@ -252,9 +275,11 @@ export default function NotificationPreferences() {
                     <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900">Push notifications</p>
                         <p className="text-xs text-gray-500">Browser alerts on this device — on or off.</p>
-                        {!pushClientEnabled && (
+                        {!pushClientAvailable && (
                             <p className="mt-2 text-xs text-gray-500">
-                                Unavailable until push is enabled for this app (reload after your team turns it on).
+                                {PUSH_CLIENT_DISABLED
+                                    ? 'Unavailable while push is disabled in the app.'
+                                    : 'Unavailable until push is enabled for this app (reload after your team turns it on).'}
                             </p>
                         )}
                         {browserPermission === 'denied' && (
@@ -269,16 +294,18 @@ export default function NotificationPreferences() {
                             type="button"
                             role="switch"
                             aria-checked={masterOn}
-                            aria-disabled={!pushClientEnabled}
+                            aria-disabled={!pushClientAvailable}
                             title={
-                                !pushClientEnabled
-                                    ? 'Push is not enabled for this app yet — click for details'
+                                !pushClientAvailable
+                                    ? PUSH_CLIENT_DISABLED
+                                        ? 'Push is temporarily turned off in the app'
+                                        : 'Push is not enabled for this app yet — click for details'
                                     : undefined
                             }
                             disabled={pushBusy || saving}
                             onClick={onMasterPushToggleClick}
                             className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${
-                                !pushClientEnabled ? 'cursor-pointer opacity-60' : 'cursor-pointer'
+                                !pushClientAvailable ? 'cursor-pointer opacity-60' : 'cursor-pointer'
                             } ${masterOn ? 'bg-indigo-600' : 'bg-gray-200'}`}
                         >
                             <span

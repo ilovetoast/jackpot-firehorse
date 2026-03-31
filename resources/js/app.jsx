@@ -42,7 +42,7 @@ import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
-import PushServiceInit from './Components/PushServiceInit'
+// import PushServiceInit from './Components/PushServiceInit' // off while PUSH_CLIENT_DISABLED — see pushService.js
 import { BucketProvider } from './contexts/BucketContext'
 import { SelectionProvider } from './contexts/SelectionContext'
 
@@ -113,8 +113,8 @@ createInertiaApp({
             <>
                 <PageComponent {...props} />
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
-                {/* Mounts on any logged-in app page (not Experience/Gateway). Push SDK runs only when oneSignal.client_enabled. */}
-                {props.auth?.user && <PushServiceInit />}
+                {/* Push / OneSignal pre-prompt: disabled — uncomment PushServiceInit import + line below when re-enabling (pushService.js PUSH_CLIENT_DISABLED). */}
+                {/* {props.auth?.user && <PushServiceInit />} */}
                 <FlashMessage />
                 <AssetProcessingTray />
                 {false && <DownloadBucketBarGlobal />}
