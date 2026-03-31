@@ -491,8 +491,23 @@ export default function OperationsCenterIndex({
                                                     </td>
                                                     <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-900">{row.category}</td>
                                                     <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">{row.code || '—'}</td>
-                                                    <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">
-                                                        {row.tenant_id != null ? `tenant ${row.tenant_id}` : '—'}
+                                                    <td className="py-3 px-3 text-sm text-gray-700 max-w-[14rem]">
+                                                        {row.tenant_id != null ? (
+                                                            <span className="block">
+                                                                <span className="font-medium text-gray-900">
+                                                                    {row.tenant_name || `Tenant #${row.tenant_id}`}
+                                                                </span>
+                                                                {row.tenant_slug ? (
+                                                                    <span className="block text-xs text-gray-500 truncate" title={row.tenant_slug}>
+                                                                        {row.tenant_slug}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="block text-xs text-gray-500">ID {row.tenant_id}</span>
+                                                                )}
+                                                            </span>
+                                                        ) : (
+                                                            '—'
+                                                        )}
                                                     </td>
                                                     <td className="py-3 px-3 text-sm text-gray-500">
                                                         {row.source_type}/{row.source_id || '—'}

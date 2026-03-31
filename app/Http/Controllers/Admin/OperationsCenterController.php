@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\ApplicationErrorEvent;
 use App\Models\SystemIncident;
+use App\Models\Tenant;
 use App\Services\Reliability\ReliabilityMetricsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,7 +31,7 @@ class OperationsCenterController extends Controller
         $siteRoles = $user->getSiteRoles();
         $isSiteOwner = $user->id === 1;
         $isSiteAdmin = in_array('site_admin', $siteRoles) || in_array('site_owner', $siteRoles);
-        if (!$isSiteOwner && !$isSiteAdmin) {
+        if (! $isSiteOwner && ! $isSiteAdmin) {
             abort(403, 'Only system administrators can access this page.');
         }
     }
@@ -67,6 +68,7 @@ class OperationsCenterController extends Controller
             ->get()
             ->map(function ($job) {
                 $payload = json_decode($job->payload, true);
+
                 return [
                     'id' => $job->id,
                     'uuid' => $job->uuid,
@@ -79,21 +81,32 @@ class OperationsCenterController extends Controller
 
         $applicationErrors = collect();
         if (Schema::hasTable('application_error_events')) {
-            $applicationErrors = ApplicationErrorEvent::query()
+            $applicationErrorRows = ApplicationErrorEvent::query()
                 ->orderByDesc('created_at')
                 ->limit(100)
-                ->get()
-                ->map(fn ($e) => [
+                ->get();
+            $tenantIds = $applicationErrorRows->pluck('tenant_id')->filter()->unique()->values()->all();
+            $tenantLabels = $tenantIds === []
+                ? collect()
+                : Tenant::query()->whereIn('id', $tenantIds)->get(['id', 'name', 'slug'])->keyBy('id');
+            $applicationErrors = $applicationErrorRows->map(function ($e) use ($tenantLabels) {
+                $tid = $e->tenant_id;
+                $t = $tid ? $tenantLabels->get($tid) : null;
+
+                return [
                     'id' => $e->id,
                     'category' => $e->category,
                     'code' => $e->code,
                     'source_type' => $e->source_type,
                     'source_id' => $e->source_id,
                     'tenant_id' => $e->tenant_id,
+                    'tenant_name' => $t?->name,
+                    'tenant_slug' => $t?->slug,
                     'message' => $e->message,
                     'context' => $e->context,
                     'created_at' => $e->created_at?->toIso8601String(),
-                ]);
+                ];
+            });
         }
 
         $metricsService = app(ReliabilityMetricsService::class);
@@ -143,6 +156,7 @@ class OperationsCenterController extends Controller
             if ($driver === 'redis') {
                 $pending = Queue::size(config('queue.connections.redis.queue', 'default')) + Queue::size('downloads');
                 $failed = (int) DB::table('failed_jobs')->count();
+
                 return [
                     'status' => $failed > 10 ? 'unhealthy' : ($failed > 0 ? 'warning' : 'healthy'),
                     'pending_count' => $pending,
@@ -151,6 +165,7 @@ class OperationsCenterController extends Controller
             }
             $pending = (int) DB::table('jobs')->count();
             $failed = (int) DB::table('failed_jobs')->count();
+
             return [
                 'status' => $failed > 10 ? 'unhealthy' : ($failed > 0 ? 'warning' : 'healthy'),
                 'pending_count' => $pending,
@@ -170,15 +185,16 @@ class OperationsCenterController extends Controller
             } catch (\Throwable $e) {
                 // ignore
             }
-            if (!$lastHeartbeat) {
+            if (! $lastHeartbeat) {
                 $lastHeartbeat = Cache::get('laravel_scheduler_last_heartbeat');
             }
-            if (!$lastHeartbeat) {
+            if (! $lastHeartbeat) {
                 return ['status' => 'not_running', 'last_heartbeat' => null];
             }
             $time = $lastHeartbeat instanceof \Carbon\Carbon ? $lastHeartbeat : \Carbon\Carbon::parse($lastHeartbeat);
             $minutes = $time->diffInMinutes(now());
             $status = $minutes >= 2 ? 'unhealthy' : ($minutes >= 1 ? 'delayed' : 'healthy');
+
             return [
                 'status' => $status,
                 'last_heartbeat' => $time->toIso8601String(),

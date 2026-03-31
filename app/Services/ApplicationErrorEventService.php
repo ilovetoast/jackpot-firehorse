@@ -34,6 +34,15 @@ class ApplicationErrorEventService
 
         $this->maybeNotifySentry($run, $message, $code);
 
+        try {
+            app(AiUsageCapNotifier::class)->maybeNotifyOwnerFromFailedAgentRun($run, $message);
+        } catch (\Throwable $e) {
+            \Log::warning('[ApplicationErrorEventService] AiUsageCapNotifier failed', [
+                'ai_agent_run_id' => $run->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return $event;
     }
 
@@ -65,6 +74,9 @@ class ApplicationErrorEventService
         }
         if (str_contains($lower, '503') || str_contains($lower, 'service unavailable')) {
             return 'service_unavailable';
+        }
+        if (str_contains($lower, 'cap exceeded') && str_contains($lower, 'monthly ai')) {
+            return 'ai_monthly_cap_exceeded';
         }
 
         return null;

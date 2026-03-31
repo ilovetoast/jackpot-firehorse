@@ -5,11 +5,13 @@ import {
     CloudArrowDownIcon,
     SparklesIcon,
     ArrowRightIcon,
+    ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AnalyticsUsage({
     stats = {},
     ai_usage = null,
+    ai_monthly_cap_alert = null,
     plan = {},
 }) {
     const formatStorage = (mb) => {
@@ -40,6 +42,29 @@ export default function AnalyticsUsage({
     return (
         <InsightsLayout title="Usage" activeSection="usage">
             <div className="space-y-8">
+                {ai_monthly_cap_alert?.features?.length > 0 && (
+                    <section
+                        className="rounded-xl border border-amber-300 bg-amber-50 p-4 sm:p-5"
+                        role="status"
+                    >
+                        <div className="flex gap-3">
+                            <ExclamationTriangleIcon className="h-6 w-6 flex-shrink-0 text-amber-600" aria-hidden />
+                            <div className="min-w-0">
+                                <h2 className="text-base font-semibold text-amber-900">Monthly AI limit reached</h2>
+                                <p className="mt-1 text-sm text-amber-950/90">
+                                    Monthly allowance for{' '}
+                                    <span className="font-medium">
+                                        {ai_monthly_cap_alert.features.map((f) => (f === 'tagging' ? 'AI tagging' : 'AI suggestions')).join(' and ')}
+                                    </span>{' '}
+                                    is exhausted for this billing period.
+                                </p>
+                                {ai_monthly_cap_alert.reset_hint && (
+                                    <p className="mt-2 text-sm text-amber-900/80">{ai_monthly_cap_alert.reset_hint}</p>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                )}
                 <section>
                     <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
                         Storage & Downloads

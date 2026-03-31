@@ -8,6 +8,7 @@ use App\Models\ApplicationErrorEvent;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -61,6 +62,86 @@ class ApplicationErrorEventsAndAiAgentHealthTest extends TestCase
         $this->assertNotNull($event);
         $this->assertStringContainsString('Overloaded', $event->message);
         $this->assertSame('brand_pdf_extractor', $event->context['agent_id']);
+    }
+
+    #[Test]
+    public function mark_as_failed_monthly_cap_sets_code_and_can_notify_owner(): void
+    {
+        Mail::fake();
+        config(['mail.automations_enabled' => true]);
+
+        $tenant = Tenant::create([
+            'name' => 'CapCo',
+            'slug' => 'capco',
+        ]);
+
+        $owner = User::factory()->create(['email' => 'owner-cap@example.com']);
+        $owner->tenants()->attach($tenant->id, ['role' => 'owner']);
+
+        $run = AIAgentRun::create([
+            'agent_id' => 'metadata_agent',
+            'agent_name' => 'Metadata',
+            'triggering_context' => 'tenant',
+            'environment' => 'testing',
+            'tenant_id' => $tenant->id,
+            'user_id' => null,
+            'task_type' => AITaskType::ASSET_METADATA_GENERATION,
+            'entity_type' => 'asset',
+            'entity_id' => '00000000-0000-0000-0000-000000000002',
+            'model_used' => 'gpt-test',
+            'tokens_in' => 0,
+            'tokens_out' => 0,
+            'estimated_cost' => 0,
+            'status' => 'failed',
+            'started_at' => now(),
+        ]);
+
+        $run->markAsFailed('Monthly AI tagging cap exceeded. Current: 5, Cap: 5. Usage resets at the start of next month.');
+
+        $this->assertDatabaseHas('application_error_events', [
+            'source_id' => (string) $run->id,
+            'code' => 'ai_monthly_cap_exceeded',
+        ]);
+
+        Mail::assertSent(\App\Mail\AiMonthlyUsageCapReachedMail::class);
+    }
+
+    #[Test]
+    public function mark_as_failed_monthly_cap_skips_email_when_incubating(): void
+    {
+        Mail::fake();
+
+        $agency = Tenant::create(['name' => 'Agency', 'slug' => 'agency']);
+        $tenant = Tenant::create([
+            'name' => 'Incubated',
+            'slug' => 'incubated',
+            'incubated_by_agency_id' => $agency->id,
+        ]);
+
+        $owner = User::factory()->create(['email' => 'owner-inc@example.com']);
+        $owner->tenants()->attach($tenant->id, ['role' => 'owner']);
+
+        $run = AIAgentRun::create([
+            'agent_id' => 'metadata_agent',
+            'agent_name' => 'Metadata',
+            'triggering_context' => 'tenant',
+            'environment' => 'testing',
+            'tenant_id' => $tenant->id,
+            'user_id' => null,
+            'task_type' => AITaskType::ASSET_METADATA_GENERATION,
+            'entity_type' => 'asset',
+            'entity_id' => '00000000-0000-0000-0000-000000000003',
+            'model_used' => 'gpt-test',
+            'tokens_in' => 0,
+            'tokens_out' => 0,
+            'estimated_cost' => 0,
+            'status' => 'failed',
+            'started_at' => now(),
+        ]);
+
+        $run->markAsFailed('Monthly AI tagging cap exceeded. Current: 5, Cap: 5. Usage resets at the start of next month.');
+
+        Mail::assertNothingSent();
     }
 
     #[Test]
@@ -134,5 +215,7 @@ class ApplicationErrorEventsAndAiAgentHealthTest extends TestCase
         $this->assertArrayHasKey('applicationErrors', $props);
         $this->assertCount(1, $props['applicationErrors']);
         $this->assertSame('provider_overloaded', $props['applicationErrors'][0]['code']);
+        $this->assertSame('Acme', $props['applicationErrors'][0]['tenant_name']);
+        $this->assertSame('acme-3', $props['applicationErrors'][0]['tenant_slug']);
     }
 }

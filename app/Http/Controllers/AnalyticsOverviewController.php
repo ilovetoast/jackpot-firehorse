@@ -27,8 +27,7 @@ class AnalyticsOverviewController extends Controller
         protected PlanService $planService,
         protected AiUsageService $aiUsageService,
         protected MetadataAnalyticsService $metadataAnalytics
-    ) {
-    }
+    ) {}
 
     /**
      * Display the analytics overview (combined metrics).
@@ -37,6 +36,7 @@ class AnalyticsOverviewController extends Controller
     public function index(Request $request): Response
     {
         $data = $this->getOverviewData($request);
+
         return Inertia::render('Insights/Overview', [
             'stats' => [
                 'total_assets' => $data['total_assets'],
@@ -48,6 +48,7 @@ class AnalyticsOverviewController extends Controller
                 'executions' => $data['executions'],
             ],
             'ai_usage' => $data['ai_usage'],
+            'ai_monthly_cap_alert' => $data['ai_monthly_cap_alert'],
             'metadata_overview' => $data['metadata_overview'],
             'metadata_coverage' => $data['metadata_coverage'],
             'ai_effectiveness' => $data['ai_effectiveness'],
@@ -64,6 +65,7 @@ class AnalyticsOverviewController extends Controller
     public function usage(Request $request): Response
     {
         $data = $this->getOverviewData($request);
+
         return Inertia::render('Insights/Usage', [
             'stats' => [
                 'total_assets' => $data['total_assets'],
@@ -73,22 +75,23 @@ class AnalyticsOverviewController extends Controller
                 'downloads_limit' => $data['max_downloads_per_month'],
             ],
             'ai_usage' => $data['ai_usage'],
+            'ai_monthly_cap_alert' => $data['ai_monthly_cap_alert'],
             'plan' => $data['plan'],
         ]);
     }
 
     /**
-     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array}
+     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, ai_monthly_cap_alert: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array}
      */
     private function getOverviewData(Request $request): array
     {
         $tenant = app('tenant');
         $brand = app('brand');
-        if (!$tenant || !$brand) {
+        if (! $tenant || ! $brand) {
             abort(403, 'Tenant and brand must be selected.');
         }
         $user = Auth::user();
-        if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
             abort(403, 'You do not have permission to view insights.');
         }
         $planName = $this->planService->getCurrentPlan($tenant);
@@ -116,11 +119,31 @@ class AnalyticsOverviewController extends Controller
             ->where('type', AssetType::DELIVERABLE)
             ->whereNull('deleted_at')
             ->count();
+        $usageStatusFull = $this->aiUsageService->getUsageStatus($tenant);
+
         $aiUsageData = null;
         if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
-            $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
-            $aiUsageData = ['tagging' => $usageStatus['tagging'] ?? [], 'suggestions' => $usageStatus['suggestions'] ?? []];
+            $aiUsageData = ['tagging' => $usageStatusFull['tagging'] ?? [], 'suggestions' => $usageStatusFull['suggestions'] ?? []];
         }
+
+        /** Shown for brand admins / brand managers (brand_settings.manage) when AI tagging or suggestions monthly cap is reached. */
+        $aiMonthlyCapAlert = null;
+        if ($user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            $exceeded = [];
+            foreach (['tagging', 'suggestions'] as $feature) {
+                $row = $usageStatusFull[$feature] ?? [];
+                if (($row['is_exceeded'] ?? false) && ($row['cap'] ?? 0) > 0) {
+                    $exceeded[] = $feature;
+                }
+            }
+            if ($exceeded !== []) {
+                $aiMonthlyCapAlert = [
+                    'features' => $exceeded,
+                    'reset_hint' => 'Usage resets at the start of the next calendar month. Upgrade your plan or adjust AI settings if you need more capacity.',
+                ];
+            }
+        }
+
         $metadataAnalytics = $this->metadataAnalytics->getAnalytics($tenant->id, $brand->id, null, null, null, false);
 
         $brand->loadMissing('brandModel.activeVersion');
@@ -149,6 +172,7 @@ class AnalyticsOverviewController extends Controller
             'collections' => $collectionsCount,
             'executions' => $executionsCount,
             'ai_usage' => $aiUsageData,
+            'ai_monthly_cap_alert' => $aiMonthlyCapAlert,
             'metadata_overview' => $metadataAnalytics['overview'] ?? [],
             'metadata_coverage' => $metadataAnalytics['coverage'] ?? [],
             'ai_effectiveness' => $metadataAnalytics['ai_effectiveness'] ?? [],

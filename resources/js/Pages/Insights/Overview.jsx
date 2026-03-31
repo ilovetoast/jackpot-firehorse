@@ -19,6 +19,8 @@ import {
 export default function AnalyticsOverview({
     stats = {},
     ai_usage = null,
+    /** When monthly AI tagging/suggestions cap is reached — brand admins / brand managers only */
+    ai_monthly_cap_alert = null,
     metadata_overview = {},
     metadata_coverage = {},
     ai_effectiveness = {},
@@ -110,6 +112,30 @@ export default function AnalyticsOverview({
     return (
         <InsightsLayout title="Insights Overview" activeSection="overview">
             <div className="space-y-8 animate-fadeInUp-d1">
+                {ai_monthly_cap_alert?.features?.length > 0 && (
+                    <section
+                        className="rounded-xl border border-amber-300 bg-amber-50 p-4 sm:p-5"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <div className="flex gap-3">
+                            <ExclamationTriangleIcon className="h-6 w-6 flex-shrink-0 text-amber-600" aria-hidden />
+                            <div className="min-w-0">
+                                <h2 className="text-base font-semibold text-amber-900">Monthly AI limit reached</h2>
+                                <p className="mt-1 text-sm text-amber-950/90">
+                                    Your plan&apos;s monthly allowance for{' '}
+                                    <span className="font-medium">
+                                        {ai_monthly_cap_alert.features.map((f) => (f === 'tagging' ? 'AI tagging' : 'AI suggestions')).join(' and ')}
+                                    </span>{' '}
+                                    has been used. Automated tagging and related AI runs may be paused until usage resets or you upgrade.
+                                </p>
+                                {ai_monthly_cap_alert.reset_hint && (
+                                    <p className="mt-2 text-sm text-amber-900/80">{ai_monthly_cap_alert.reset_hint}</p>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                )}
                 {/* Brand guidelines — always surface: scoring + generative AI depend on published DNA */}
                 <section
                     className={`rounded-xl border p-4 sm:p-5 ${
