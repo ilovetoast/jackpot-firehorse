@@ -256,11 +256,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Downloads poll: mutable fields only for processing downloads (patch-based polling, no Inertia)
         Route::get('/api/downloads/poll', [\App\Http\Controllers\DownloadController::class, 'poll'])->name('api.downloads.poll');
 
-        // Presence: Redis-based tenant/brand online indicator (admin/owner/brand manager only)
-        Route::prefix('presence')->group(function () {
-            Route::post('/heartbeat', [\App\Http\Controllers\PresenceController::class, 'heartbeat'])->name('presence.heartbeat');
-            Route::get('/online', [\App\Http\Controllers\PresenceController::class, 'online'])->name('presence.online');
-        });
+        // Presence: disabled — re-enable with OnlineUsersIndicator.jsx PRESENCE_UI_ENABLED + uncomment below
+        // Route::prefix('presence')->group(function () {
+        //     Route::post('/heartbeat', [\App\Http\Controllers\PresenceController::class, 'heartbeat'])->name('presence.heartbeat');
+        //     Route::get('/online', [\App\Http\Controllers\PresenceController::class, 'online'])->name('presence.online');
+        // });
 
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');

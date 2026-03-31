@@ -26,7 +26,6 @@ import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
-import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
 import { motion } from 'framer-motion'
 import {

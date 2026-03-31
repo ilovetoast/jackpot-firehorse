@@ -6,7 +6,6 @@ use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Redis;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -21,8 +20,9 @@ class PresenceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\PermissionSeeder::class);
-        Redis::fake();
+        $this->markTestSkipped(
+            'Presence API disabled: uncomment presence routes in web.php and set PRESENCE_UI_ENABLED in OnlineUsersIndicator.jsx.'
+        );
     }
 
     #[Test]

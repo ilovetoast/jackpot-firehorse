@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { usePermission } from '../hooks/usePermission'
 import { usePresencePolling } from '../hooks/usePresencePolling'
 
+/** Set true when re-enabling online indicator; restore POST/GET routes in routes/web.php (presence group). */
+const PRESENCE_UI_ENABLED = false
+
 function pageToLabel(path) {
   if (!path || typeof path !== 'string') return null
   const p = path.toLowerCase()
@@ -79,6 +82,7 @@ export default function OnlineUsersIndicator({ textColor = '#6b7280', primaryCol
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [popoverOpen])
 
+  if (!PRESENCE_UI_ENABLED) return null
   if (!canSeePresence) return null
   if (online.length === 0) return null
 

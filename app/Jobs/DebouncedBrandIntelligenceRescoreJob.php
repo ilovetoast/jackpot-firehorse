@@ -44,7 +44,8 @@ class DebouncedBrandIntelligenceRescoreJob implements ShouldQueue
             return;
         }
 
-        if (! $asset->category || ! $asset->category->isEbiEnabled()) {
+        $category = $asset->resolveCategoryForTenant();
+        if (! $category || ! $category->isEbiEnabled()) {
             return;
         }
 

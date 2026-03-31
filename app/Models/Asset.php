@@ -646,6 +646,28 @@ class Asset extends Model
     }
 
     /**
+     * Load category from metadata JSON with an explicit query (no lazy load on {@see category()}).
+     * Use anywhere {@see Model::preventLazyLoading()} is enabled.
+     */
+    public function resolveCategoryForTenant(): ?Category
+    {
+        $meta = $this->metadata ?? [];
+        $raw = $meta['category_id'] ?? null;
+        if ($raw === null || $raw === '' || (is_string($raw) && strtolower(trim($raw)) === 'null')) {
+            return null;
+        }
+        $id = (int) $raw;
+        if ($id <= 0) {
+            return null;
+        }
+
+        return Category::query()
+            ->where('id', $id)
+            ->where('tenant_id', $this->tenant_id)
+            ->first();
+    }
+
+    /**
      * Get the user who uploaded this asset.
      */
     public function user(): BelongsTo

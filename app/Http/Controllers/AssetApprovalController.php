@@ -125,7 +125,8 @@ class AssetApprovalController extends Controller
             
             // Get category_id from asset (could be in category_id column or metadata)
             $categoryId = $asset->category_id ?? ($asset->metadata['category_id'] ?? null);
-            
+            $categoryModel = $asset->resolveCategoryForTenant();
+
             return [
                 'id' => $asset->id,
                 'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
@@ -134,9 +135,9 @@ class AssetApprovalController extends Controller
                 'size_bytes' => $asset->size_bytes,
                 'created_at' => $asset->created_at?->toISOString(),
                 'category_id' => $categoryId,
-                'category' => $asset->category ? [
-                    'id' => $asset->category->id,
-                    'name' => $asset->category->name,
+                'category' => $categoryModel ? [
+                    'id' => $categoryModel->id,
+                    'name' => $categoryModel->name,
                 ] : null,
                 'uploader' => $asset->user ? [
                     'id' => $asset->user->id,

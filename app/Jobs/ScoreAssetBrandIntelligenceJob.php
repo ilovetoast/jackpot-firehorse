@@ -25,7 +25,7 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
     public function handle(BrandIntelligenceEngine $engine): void
     {
         $asset = Asset::query()
-            ->with(['brand', 'category'])
+            ->with(['brand'])
             ->find($this->asset->getKey());
 
         if (! $asset || ! $asset->brand_id) {
@@ -37,7 +37,7 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
             return;
         }
 
-        $category = $asset->category;
+        $category = $asset->resolveCategoryForTenant();
         $ebiEnabled = $this->forceRun || ($category && $category->isEbiEnabled());
 
         if ($ebiEnabled && ! $this->alreadyScoredForCurrentEngine($asset)) {

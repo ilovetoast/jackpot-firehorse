@@ -26,8 +26,7 @@ class BrandIntelligenceScheduleService
      */
     public function dispatchAfterPipelineComplete(Asset $asset): void
     {
-        // category is an accessor (metadata.category_id), not a relation
-        $category = $asset->category;
+        $category = $asset->resolveCategoryForTenant();
         if (! $category instanceof Category || ! $category->isEbiEnabled()) {
             return;
         }
@@ -47,7 +46,8 @@ class BrandIntelligenceScheduleService
      */
     public function scheduleDebouncedRescoreAfterUserEdit(Asset $asset): void
     {
-        if (! $asset->category instanceof Category || ! $asset->category->isEbiEnabled()) {
+        $category = $asset->resolveCategoryForTenant();
+        if (! $category instanceof Category || ! $category->isEbiEnabled()) {
             return;
         }
 

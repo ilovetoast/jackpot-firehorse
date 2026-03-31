@@ -6,6 +6,9 @@ use App\Services\AuthPermissionService;
 use App\Services\PresenceService;
 use Illuminate\Http\Request;
 
+/**
+ * Presence (heartbeat + online list). Routes are commented out in routes/web.php while feature is off.
+ */
 class PresenceController extends Controller
 {
     public function heartbeat(Request $request): \Illuminate\Http\Response
