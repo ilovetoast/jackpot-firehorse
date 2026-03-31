@@ -15,6 +15,7 @@ use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\BrandLibraryCategoryCountService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
@@ -49,7 +50,8 @@ class AssetController extends Controller
         protected LifecycleResolver $lifecycleResolver,
         protected AssetSearchService $assetSearchService,
         protected AssetSortService $assetSortService,
-        protected UploadInitiationService $uploadInitiationService
+        protected UploadInitiationService $uploadInitiationService,
+        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService
     ) {}
 
     /**
@@ -246,35 +248,20 @@ class AssetController extends Controller
         // queue view — so the sidebar stays accurate. total_asset_count for the response is still
         // overridden to stagedCount when source=staged (see Inertia props below).
         if (! empty($viewableCategoryIds)) {
-            $countQuery = Asset::query()
-                ->normalIntakeOnly()
-                ->excludeBuilderStaged()
-                ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
-                ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET)
-                ->whereNotNull('metadata')
-                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
-            $this->lifecycleResolver->apply(
-                $countQuery,
-                $normalizedLifecycle,
-                $user,
+            $countResult = $this->brandLibraryCategoryCountService->getCounts(
                 $tenant,
-                $brand
+                $brand,
+                $user,
+                $viewableCategoryIds,
+                $categoryIds,
+                $normalizedLifecycle,
+                $isTrashView,
+                AssetType::ASSET,
+                true,
+                false
             );
-            $totalAssetCount = (clone $countQuery)->count();
-            if (! empty($categoryIds)) {
-                $countRows = (clone $countQuery)
-                    ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
-                    ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
-                    ->get();
-                foreach ($countRows as $row) {
-                    $cid = (int) ($row->category_id ?? 0);
-                    if ($cid > 0) {
-                        $assetCounts[$cid] = (int) ($row->count ?? 0);
-                    }
-                }
-            }
+            $totalAssetCount = $countResult['total'];
+            $assetCounts = $countResult['by_category'];
         }
         // Add counts to categories (integer keys — MySQL/pluck often returns string category_id keys)
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
@@ -301,7 +288,7 @@ class AssetController extends Controller
                     ->where('brand_id', $brand->id)
                     ->where('type', AssetType::ASSET)
                     ->whereNotNull('metadata')
-                    ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds))
+                    ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds))
                     ->count();
             }
         }
@@ -1423,10 +1410,11 @@ class AssetController extends Controller
     /**
      * GET /app/assets/processing
      *
-     * Returns all assets currently processing (backend-driven truth).
-     * This is the authoritative source for processing indicators.
+     * Returns assets currently processing for the **authenticated user only** (uploader),
+     * so the processing tray does not appear for teammates when someone else uploads.
      *
      * CRITICAL RULES:
+     * - Scoped by tenant, brand, and user_id (uploader)
      * - Only returns assets with terminal states excluded (pending, processing, or null)
      * - Includes TTL check to detect stale jobs (>10 minutes)
      * - Terminal states (completed, failed, skipped) are never returned
@@ -1449,10 +1437,11 @@ class AssetController extends Controller
         $staleCount = 0;
 
         try {
-            // CRITICAL: Only include assets that are actively processing
+            // CRITICAL: Only this user's uploads — not tenant-wide (avoids tray for every member)
             // Terminal states (failed, skipped, completed) are automatically excluded
             $processingAssets = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
+                ->where('user_id', $user->id)
                 ->where(function ($query) {
                     // Only include actively processing states: pending, processing, or null (legacy)
                     $query->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
@@ -1462,7 +1451,7 @@ class AssetController extends Controller
                 ->whereNull('deleted_at')
                 ->orderBy('created_at', 'desc')
                 ->limit(100) // Reasonable limit
-                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
+                ->get(['id', 'user_id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
                 ->map(function ($asset) use ($now, $staleThreshold, &$staleCount) {
                     $ageMinutes = $asset->created_at->diffInMinutes($now);
                     $isStale = $ageMinutes > $staleThreshold;
@@ -1479,6 +1468,7 @@ class AssetController extends Controller
 
                     return [
                         'id' => $asset->id,
+                        'user_id' => $asset->user_id,
                         'title' => $asset->title ?? $asset->original_filename ?? 'Untitled Asset',
                         'thumbnail_status' => $asset->thumbnail_status?->value ?? 'pending',
                         'thumbnail_error' => $asset->thumbnail_error,
@@ -1500,6 +1490,7 @@ class AssetController extends Controller
                 'stale_count' => $staleCount,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
+                'user_id' => $user->id,
             ]);
 
             return response()->json([

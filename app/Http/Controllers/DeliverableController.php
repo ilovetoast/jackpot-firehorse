@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\BrandLibraryCategoryCountService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
@@ -35,7 +36,8 @@ class DeliverableController extends Controller
         protected AiMetadataConfidenceService $confidenceService,
         protected LifecycleResolver $lifecycleResolver,
         protected AssetSearchService $assetSearchService,
-        protected AssetSortService $assetSortService
+        protected AssetSortService $assetSortService,
+        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService
     ) {}
 
     /**
@@ -184,34 +186,20 @@ class DeliverableController extends Controller
         $assetCounts = [];
         $totalDeliverableCount = 0;
         if (! empty($viewableCategoryIds)) {
-            $countQuery = Asset::query()
-                ->excludeBuilderStaged()
-                ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->where('type', AssetType::DELIVERABLE)
-                ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q->whereNull('deleted_at'))
-                ->whereNotNull('metadata')
-                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
-            $this->lifecycleResolver->apply(
-                $countQuery,
-                $normalizedLifecycle,
-                $user,
+            $countResult = $this->brandLibraryCategoryCountService->getCounts(
                 $tenant,
-                $brand
+                $brand,
+                $user,
+                $viewableCategoryIds,
+                $categoryIds,
+                $normalizedLifecycle,
+                $isTrashView,
+                AssetType::DELIVERABLE,
+                false,
+                true
             );
-            $totalDeliverableCount = (clone $countQuery)->count();
-            if (! empty($categoryIds)) {
-                $countRows = (clone $countQuery)
-                    ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
-                    ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
-                    ->get();
-                foreach ($countRows as $row) {
-                    $cid = (int) ($row->category_id ?? 0);
-                    if ($cid > 0) {
-                        $assetCounts[$cid] = (int) ($row->count ?? 0);
-                    }
-                }
-            }
+            $totalDeliverableCount = $countResult['total'];
+            $assetCounts = $countResult['by_category'];
         }
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
             $id = isset($category['id']) ? (int) $category['id'] : 0;
@@ -233,7 +221,7 @@ class DeliverableController extends Controller
                     ->where('brand_id', $brand->id)
                     ->where('type', AssetType::DELIVERABLE)
                     ->whereNotNull('metadata')
-                    ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds))
+                    ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds))
                     ->count();
             }
         }

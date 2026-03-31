@@ -386,7 +386,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: 'all',
                 label: 'All',
-                count: total_asset_count > 0 ? total_asset_count : null,
+                count: total_asset_count,
                 category: null,
                 categoryId: null,
             })
@@ -396,7 +396,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: String(category.id ?? `template-${category.slug}-${category.asset_type}`),
                 label: category.name,
-                count: category.asset_count > 0 ? category.asset_count : null,
+                count: typeof category.asset_count === 'number' ? category.asset_count : null,
                 category,
                 categoryId: category.id ?? null,
             })
@@ -702,7 +702,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         >
                                             <span className="inline-flex items-center gap-1">
                                                 {tab.label}
-                                                {tab.count != null && tab.count > 0 ? (
+                                                {tab.count != null ? (
                                                     <span className="text-xs opacity-70">({tab.count})</span>
                                                 ) : null}
                                             </span>

@@ -521,6 +521,24 @@ class Asset extends Model
     }
 
     /**
+     * SQL expression casting metadata JSON category_id to integer for WHERE IN / GROUP BY (driver-specific).
+     * Matches countNonDeletedByCategoryForTenant() casting rules.
+     */
+    public static function categoryIdMetadataCastExpression(): string
+    {
+        $extract = static::categoryIdJsonExtract();
+        $driver = DB::getDriverName();
+        if ($driver === 'mysql') {
+            return "CAST({$extract} AS UNSIGNED)";
+        }
+        if ($driver === 'pgsql') {
+            return "NULLIF(TRIM({$extract}), '')::bigint";
+        }
+
+        return "CAST({$extract} AS INTEGER)";
+    }
+
+    /**
      * JSON extract for category_id (driver-specific).
      */
     protected static function categoryIdJsonExtract(): string

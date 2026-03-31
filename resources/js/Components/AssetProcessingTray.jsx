@@ -13,7 +13,7 @@ import { updateFilterDebug } from '../utils/assetFilterDebug'
 /**
  * AssetProcessingTray Component
  * 
- * Backend-driven processing indicator that shows assets currently processing.
+ * Backend-driven processing indicator for **your** uploads only (GET /app/assets/processing is user-scoped).
  * 
  * CRITICAL RULES:
  * - NO optimistic UI tracking - all state comes from backend
@@ -214,13 +214,13 @@ export default function AssetProcessingTray() {
         return title.substring(0, maxLength) + '...'
     }
 
-    // Detect if any processing assets were uploaded by OTHER users (not current user)
+    // API is user-scoped; other users' jobs are not listed. Kept for defense if payload ever mixes users.
     const currentUserId = auth?.user?.id
     const hasOtherUsersAssets = processingAssets.some(
         (asset) => asset.user_id && asset.user_id !== currentUserId
     )
 
-    // Staleness flag: Track if asset grid is stale (has other users' processing assets)
+    // Staleness: intended when others' uploads were visible (legacy tenant-wide tray)
     // This flag is set when hasOtherUsersAssets becomes true, and cleared on refresh/navigation
     const [hasStaleAssetGrid, setHasStaleAssetGrid] = useState(() => {
         // Initialize from window-level state (persists across component remounts)
