@@ -15,6 +15,8 @@ export default function ConfirmDialog({
     /** When set, user must type this exact string (after trim) to enable Confirm */
     confirmInputMustMatch = null,
     confirmInputHint = null,
+    /** Tailwind max-width classes for the panel (e.g. sm:max-w-2xl for longer copy) */
+    panelClassName = 'sm:max-w-lg',
 }) {
     const [typedMatch, setTypedMatch] = useState('')
 
@@ -100,7 +102,9 @@ export default function ConfirmDialog({
                 />
 
                 {/* Modal */}
-                <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                <div
+                    className={`relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:p-6 ${panelClassName}`}
+                >
                     {/* Close button */}
                     <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
                         <button
@@ -130,10 +134,12 @@ export default function ConfirmDialog({
                             <h3 className="text-base font-semibold leading-6 text-gray-900">
                                 {title}
                             </h3>
-                            <div className="mt-2">
-                                <p className="text-sm text-gray-500">
-                                    {message}
-                                </p>
+                            <div className="mt-2 text-sm text-gray-500">
+                                {typeof message === 'string' || typeof message === 'number' ? (
+                                    <p>{message}</p>
+                                ) : (
+                                    message
+                                )}
                             </div>
                             {confirmInputMustMatch !== null && confirmInputMustMatch !== undefined && (
                                 <div className="mt-4">

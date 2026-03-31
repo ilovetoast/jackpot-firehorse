@@ -38,6 +38,14 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
     const [detachAgencyDialog, setDetachAgencyDialog] = useState({ open: false, link: null })
     const [detachAgencySubmitting, setDetachAgencySubmitting] = useState(false)
     const [pendingConvertUserId, setPendingConvertUserId] = useState(null)
+    const [convertAgencyDialog, setConvertAgencyDialog] = useState({
+        open: false,
+        userId: null,
+        userName: '',
+        agencyTenantId: null,
+        agencyName: '',
+    })
+    const [convertAgencySubmitting, setConvertAgencySubmitting] = useState(false)
 
     const debouncedSearch = useDebounce(search, 300)
 
@@ -207,14 +215,25 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
         setDetachAgencyDialog({ open: true, link })
     }
 
-    const handleConvertToAgency = async (userId, agencyTenantId) => {
-        if (
-            !window.confirm(
-                'This person will be managed by the agency link: their company role and brand access will follow the link settings (same as other agency staff). Direct-only changes will no longer apply. Continue?'
-            )
-        ) {
+    const handleConvertToAgency = (userId, agencyTenantId) => {
+        const u = users.find((x) => x.id === userId)
+        const link = findTenantAgencyLink(agencyTenantId)
+        const agencyName = link?.agency_tenant?.name ?? 'Agency'
+        setConvertAgencyDialog({
+            open: true,
+            userId,
+            userName: u?.name || u?.email || 'This person',
+            agencyTenantId,
+            agencyName,
+        })
+    }
+
+    const confirmConvertToAgency = async () => {
+        const { userId, agencyTenantId } = convertAgencyDialog
+        if (!userId || agencyTenantId == null) {
             return
         }
+        setConvertAgencySubmitting(true)
         setPendingConvertUserId(userId)
         try {
             const res = await fetch(`/app/api/companies/users/${userId}/agency-managed`, {
@@ -238,10 +257,18 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 window.alert(msg)
                 return
             }
+            setConvertAgencyDialog({
+                open: false,
+                userId: null,
+                userName: '',
+                agencyTenantId: null,
+                agencyName: '',
+            })
             fetchUsers()
         } catch {
             window.alert('Network error.')
         } finally {
+            setConvertAgencySubmitting(false)
             setPendingConvertUserId(null)
         }
     }
@@ -579,6 +606,79 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 cancelText="Cancel"
                 variant="danger"
                 loading={detachAgencySubmitting}
+            />
+
+            <ConfirmDialog
+                open={convertAgencyDialog.open}
+                onClose={() =>
+                    !convertAgencySubmitting &&
+                    setConvertAgencyDialog({
+                        open: false,
+                        userId: null,
+                        userName: '',
+                        agencyTenantId: null,
+                        agencyName: '',
+                    })
+                }
+                onConfirm={confirmConvertToAgency}
+                title="Switch to agency-managed access?"
+                panelClassName="sm:max-w-2xl"
+                message={
+                    convertAgencyDialog.open ? (
+                        <div className="space-y-4 text-left">
+                            <p>
+                                <span className="font-medium text-gray-800">{convertAgencyDialog.userName}</span> is
+                                currently a <span className="font-medium text-gray-800">direct</span> team member:
+                                their company role and per-brand access are managed here on the Team page.
+                            </p>
+                            <p>
+                                You are about to move them to an{' '}
+                                <span className="font-medium text-gray-800">agency association</span> under{' '}
+                                <span className="font-medium text-gray-800">{convertAgencyDialog.agencyName}</span>.
+                                After this change, they are managed like other staff on that agency link—not as a
+                                standalone direct invite.
+                            </p>
+                            <div>
+                                <p className="font-medium text-gray-800">What this means</p>
+                                <ul className="mt-2 list-disc space-y-2 pl-5">
+                                    <li>
+                                        <span className="font-medium text-gray-700">Brand access from the workspace</span>
+                                        — They open this client&apos;s brands from the agency workspace: the{' '}
+                                        <span className="font-medium">top agency bar</span> and{' '}
+                                        <span className="font-medium">brand / workspace dropdown</span>, the same way
+                                        other agency users reach linked client companies.
+                                    </li>
+                                    <li>
+                                        <span className="font-medium text-gray-700">Roles follow the agency link</span>
+                                        — Company role and brand permissions come from{' '}
+                                        <Link
+                                            href="/app/companies/settings#agencies"
+                                            className="font-medium text-indigo-600 underline decoration-indigo-200 underline-offset-2 hover:text-indigo-800"
+                                        >
+                                            Company settings → Agencies
+                                        </Link>{' '}
+                                        for that partnership, not from individual edits on this Team page.
+                                    </li>
+                                    <li>
+                                        <span className="font-medium text-gray-700">Agency program context</span>
+                                        — They align with your agency partnership rules (for example tier, incubation,
+                                        or managed-client workflows) the same way as teammates added by the agency,
+                                        rather than as a one-off direct member.
+                                    </li>
+                                </ul>
+                            </div>
+                            <p className="text-gray-600">
+                                Direct-only changes you made here will no longer apply. Continue?
+                            </p>
+                        </div>
+                    ) : (
+                        ''
+                    )
+                }
+                confirmText="Switch to agency access"
+                cancelText="Cancel"
+                variant="info"
+                loading={convertAgencySubmitting}
             />
         </div>
     )

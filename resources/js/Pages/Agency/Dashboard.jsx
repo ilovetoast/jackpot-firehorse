@@ -300,7 +300,7 @@ export default function AgencyDashboard({
                             {agencySyncToast}
                         </div>
                     )}
-                    <div className="w-full max-w-[min(100%,90rem)] px-4 pb-16 pt-[calc(8rem+env(safe-area-inset-top))] sm:px-6 sm:pt-[calc(8.5rem+env(safe-area-inset-top))] lg:pl-5 lg:pr-10 xl:pl-6 xl:pr-12 2xl:pl-8 2xl:pr-16 mx-auto lg:mx-0 lg:ml-4 xl:ml-6 2xl:ml-8">
+                    <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-[calc(8rem+env(safe-area-inset-top))] sm:px-6 sm:pt-[calc(8.5rem+env(safe-area-inset-top))] lg:px-12">
                         <header className="mb-8 w-full max-w-none">
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                 <div className="min-w-0">
@@ -333,9 +333,9 @@ export default function AgencyDashboard({
                             </div>
                         )}
 
-                        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+                        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
                             <nav
-                                className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-52 lg:flex-col"
+                                className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1 lg:w-48 lg:flex-col"
                                 aria-label="Agency dashboard sections"
                             >
                                 {DASH_TABS.map((t) => {
@@ -364,7 +364,11 @@ export default function AgencyDashboard({
                             <>
                         {/* Tier card */}
                         <div className={`${glassPanel} p-6 sm:p-8 mb-0`}>
-                            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+                            <div
+                                className={`flex flex-col gap-6 sm:flex-row sm:items-start ${
+                                    agency.tier.reward_percentage ? 'sm:justify-between' : ''
+                                }`}
+                            >
                                 <div className="flex items-start gap-4">
                                     <div
                                         className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white/[0.08] ring-1 ring-white/10"
@@ -617,51 +621,9 @@ export default function AgencyDashboard({
 
                         {dashTab === 'progress' && (
                             <>
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                            {/* Rewards */}
-                            <div className={`${glassPanel} overflow-hidden`}>
-                                <div className="border-b border-white/10 px-6 py-5">
-                                    <h3 className="text-lg font-semibold text-white">Partner rewards ledger</h3>
-                                    <p className={`mt-1 ${bodyMuted}`}>History of earned partner rewards</p>
-                                </div>
-                                <div className="p-6">
-                                    {rewards.length === 0 ? (
-                                        <div className="py-10 text-center">
-                                            <ChartBarIcon className="mx-auto mb-3 h-12 w-12 text-white/20" />
-                                            <p className="text-white/55">No partner rewards earned yet</p>
-                                            <p className={`mt-2 ${bodySmall}`}>
-                                                Transfer to client and activate billing to earn partner rewards
-                                            </p>
-                                            {agency.tier.reward_percentage && (
-                                                <p className="mt-3 text-xs" style={{ color: brandColor }}>
-                                                    Earn up to {agency.tier.reward_percentage}% in partner credits
-                                                </p>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {rewards.map((reward) => (
-                                                <div
-                                                    key={reward.id}
-                                                    className="flex items-center justify-between gap-4 border-b border-white/[0.06] py-3 last:border-0"
-                                                >
-                                                    <div>
-                                                        <p className="font-medium text-white">{reward.client_name}</p>
-                                                        <p className="text-xs text-white/40">{reward.reward_type}</p>
-                                                    </div>
-                                                    <p className="text-xs text-white/45">{reward.created_at_human}</p>
-                                                </div>
-                                            ))}
-                                            <div className="border-t border-white/10 pt-4">
-                                                <p className="text-sm text-white/50">Total partner rewards: {rewards.length}</p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Clients */}
-                            <div className={`${glassPanel} overflow-hidden`}>
+                        <div className="flex w-full min-w-0 flex-col gap-6">
+                            {/* Client overview — full width */}
+                            <div className={`${glassPanel} w-full min-w-0 overflow-hidden`}>
                                 <div className="border-b border-white/10 px-6 py-5">
                                     <h3 className="text-lg font-semibold text-white">Client overview</h3>
                                     <p className={`mt-1 ${bodyMuted}`}>
@@ -877,6 +839,48 @@ export default function AgencyDashboard({
                                             <BuildingOfficeIcon className="mx-auto mb-3 h-12 w-12 text-white/20" />
                                             <p className="text-white/55">No clients yet</p>
                                             <p className={`mt-1 ${bodySmall}`}>Incubate a client company to get started</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Partner rewards ledger — full width below */}
+                            <div className={`${glassPanel} w-full min-w-0 overflow-hidden`}>
+                                <div className="border-b border-white/10 px-6 py-5">
+                                    <h3 className="text-lg font-semibold text-white">Partner rewards ledger</h3>
+                                    <p className={`mt-1 ${bodyMuted}`}>History of earned partner rewards</p>
+                                </div>
+                                <div className="p-6">
+                                    {rewards.length === 0 ? (
+                                        <div className="py-10 text-center">
+                                            <ChartBarIcon className="mx-auto mb-3 h-12 w-12 text-white/20" />
+                                            <p className="text-white/55">No partner rewards earned yet</p>
+                                            <p className={`mt-2 ${bodySmall}`}>
+                                                Transfer to client and activate billing to earn partner rewards
+                                            </p>
+                                            {agency.tier.reward_percentage && (
+                                                <p className="mt-3 text-xs" style={{ color: brandColor }}>
+                                                    Earn up to {agency.tier.reward_percentage}% in partner credits
+                                                </p>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {rewards.map((reward) => (
+                                                <div
+                                                    key={reward.id}
+                                                    className="flex items-center justify-between gap-4 border-b border-white/[0.06] py-3 last:border-0"
+                                                >
+                                                    <div>
+                                                        <p className="font-medium text-white">{reward.client_name}</p>
+                                                        <p className="text-xs text-white/40">{reward.reward_type}</p>
+                                                    </div>
+                                                    <p className="text-xs text-white/45">{reward.created_at_human}</p>
+                                                </div>
+                                            ))}
+                                            <div className="border-t border-white/10 pt-4">
+                                                <p className="text-sm text-white/50">Total partner rewards: {rewards.length}</p>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
