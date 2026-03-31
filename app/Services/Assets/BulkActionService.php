@@ -9,10 +9,13 @@ use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Models\Tenant;
 use App\Services\BulkMetadataService;
 use App\Support\Roles\PermissionMap;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Phase B1: Bulk Action Service for Assets.
@@ -44,6 +47,9 @@ class BulkActionService
 
         if ($actionEnum === AssetBulkAction::ASSIGN_CATEGORY) {
             return $this->executeAssignCategory($assetIds, $payload, $user, $tenantId, $brandId);
+        }
+        if ($actionEnum === AssetBulkAction::RENAME_ASSETS) {
+            return $this->executeRenameAssets($assetIds, $payload, $user, $tenantId, $brandId);
         }
         if ($actionEnum->isMetadataAction()) {
             $opType = $actionEnum->metadataOperationType();
@@ -267,6 +273,93 @@ class BulkActionService
         }
     }
 
+    /**
+     * Batch rename display title and filename (same pattern as upload batch naming): "Base 1 of N" titles and slug-01.ext filenames.
+     *
+     * @throws AuthorizationException When user lacks metadata.edit_post_upload for the tenant.
+     */
+    protected function executeRenameAssets(array $assetIds, array $payload, User $user, int $tenantId, ?int $brandId): BulkActionResult
+    {
+        $baseName = trim((string) ($payload['base_name'] ?? ''));
+        if ($baseName === '') {
+            throw new \InvalidArgumentException('base_name is required.');
+        }
+        if (count($assetIds) < 2) {
+            throw new \InvalidArgumentException('Select at least two assets for batch rename.');
+        }
+
+        $tenant = Tenant::find($tenantId);
+        if (! $tenant) {
+            throw new \InvalidArgumentException('Tenant not found.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')) {
+            throw new AuthorizationException('You do not have permission to rename assets.');
+        }
+
+        $query = Asset::whereIn('id', $assetIds)
+            ->where('tenant_id', $tenantId)
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId));
+
+        $assetsById = $query->get()->keyBy('id');
+        $ordered = [];
+        foreach ($assetIds as $id) {
+            if ($assetsById->has($id)) {
+                $ordered[] = $assetsById->get($id);
+            }
+        }
+
+        $total = count($ordered);
+        if ($total < 2) {
+            throw new \InvalidArgumentException('Some assets were not found or not accessible.');
+        }
+
+        $slug = Str::slug($baseName);
+        if ($slug === '') {
+            $slug = 'asset';
+        }
+        $padLen = $total <= 9 ? 1 : ($total <= 99 ? 2 : 3);
+
+        $processed = 0;
+        $skipped = 0;
+        $errors = [];
+
+        foreach ($ordered as $i => $asset) {
+            if (! Gate::forUser($user)->allows('view', $asset)) {
+                $skipped++;
+
+                continue;
+            }
+
+            try {
+                $previousState = $this->snapshotState($asset);
+                $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+                $indexStr = str_pad((string) ($i + 1), $padLen, '0', STR_PAD_LEFT);
+                $newFilename = $ext !== '' ? "{$slug}-{$indexStr}.{$ext}" : "{$slug}-{$indexStr}";
+                $asset->title = $baseName.' '.($i + 1).' of '.$total;
+                $asset->original_filename = $newFilename;
+                $asset->save();
+                $newState = $this->snapshotState($asset);
+                $this->emitBulkActionPerformed($asset, $user, AssetBulkAction::RENAME_ASSETS->value, $previousState, $newState);
+                $processed++;
+            } catch (\Throwable $e) {
+                Log::warning('[BulkActionService] Rename asset failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $errors[] = ['asset_id' => $asset->id, 'reason' => $e->getMessage()];
+            }
+        }
+
+        return new BulkActionResult(
+            totalSelected: count($assetIds),
+            processed: $processed,
+            skipped: $skipped,
+            errors: $errors,
+            perActionSummary: []
+        );
+    }
+
     protected function executeAssignCategory(array $assetIds, array $payload, User $user, int $tenantId, ?int $brandId): BulkActionResult
     {
         $categoryId = (int) ($payload['category_id'] ?? 0);
@@ -392,6 +485,8 @@ class BulkActionService
             'archived_at' => $asset->archived_at?->toIso8601String(),
             'approval_status' => $asset->approval_status?->value ?? null,
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
+            'title' => $asset->title,
+            'original_filename' => $asset->original_filename,
         ];
     }
 

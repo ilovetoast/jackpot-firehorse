@@ -24,8 +24,36 @@ import {
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import axios from 'axios'
+import { usePermission } from '../hooks/usePermission'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
+
+const RENAME_ASSETS_ACTION = 'RENAME_ASSETS'
+
+/** Match upload batch naming slug (see Upload/BatchNamingBar.jsx). */
+function slugifyForRename(str) {
+    if (!str || typeof str !== 'string') return 'untitled'
+    return str
+        .toLowerCase()
+        .trim()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/[\s_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 100) || 'untitled'
+}
+
+function extensionFromFilename(name) {
+    if (!name || typeof name !== 'string') return ''
+    const lastDot = name.lastIndexOf('.')
+    if (lastDot === -1 || lastDot === name.length - 1) return ''
+    return name.substring(lastDot + 1).toLowerCase()
+}
+
+function getIndexPadding(count) {
+    if (count <= 9) return 1
+    if (count <= 99) return 2
+    return 3
+}
 
 // Dynamic group config; rendering layer uses computedValidActions for contextual visibility
 const BULK_ACTION_GROUPS = [
@@ -68,6 +96,18 @@ const BULK_ACTION_GROUPS = [
             { id: 'METADATA_ADD', label: 'Add Metadata', helper: 'Add or merge field values', icon: PencilSquareIcon },
             { id: 'METADATA_REPLACE', label: 'Replace Metadata', helper: 'Overwrite field values', icon: PencilSquareIcon },
             { id: 'METADATA_CLEAR', label: 'Clear Metadata', helper: 'Remove field values', icon: PencilSquareIcon },
+        ],
+    },
+    {
+        label: 'Names',
+        sectionDescription: 'Rename display names and filenames in sequence (same pattern as batch upload).',
+        actions: [
+            {
+                id: RENAME_ASSETS_ACTION,
+                label: 'Rename assets',
+                helper: 'Base name with 1 of N titles and matching filenames',
+                icon: PencilSquareIcon,
+            },
         ],
     },
     {
@@ -140,7 +180,7 @@ export function computeSelectionSummary(assets, selectedIds) {
  *   Trash: Move to Trash only when deletedCount === 0; Restore from Trash only when deletedCount > 0.
  *   Phase B2: When isTrashMode and canForceDelete, add FORCE_DELETE; in trash mode hide SOFT_DELETE (deletedCount > 0).
  */
-function computeValidActionIds(selectionSummary, { isTrashMode = false, canForceDelete = false } = {}) {
+function computeValidActionIds(selectionSummary, { isTrashMode = false, canForceDelete = false, selectedCount = 0 } = {}) {
     if (!selectionSummary) return null
     const publishedCount = Number(selectionSummary.publishedCount ?? 0)
     const unpublishedCount = Number(selectionSummary.unpublishedCount ?? 0)
@@ -166,6 +206,9 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
     if (deletedCount === 0) valid.add('SOFT_DELETE')
     if (deletedCount > 0) valid.add('RESTORE_TRASH')
     if (isTrashMode && deletedCount > 0 && canForceDelete) valid.add('FORCE_DELETE')
+    if (selectedCount >= 2) {
+        valid.add(RENAME_ASSETS_ACTION)
+    }
     return valid
 }
 
@@ -174,7 +217,7 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
  * When validIds is null, all actions in all groups are shown.
  * Classification (ASSIGN_CATEGORY) is hidden when there are no categories for any asset type.
  */
-function computedValidActions(groups, validIds, categories = [], bulkCategoriesByAssetType = null) {
+function computedValidActions(groups, validIds, categories = [], bulkCategoriesByAssetType = null, assetCount = 0) {
     let filteredGroups = groups
     const hasAnyTypedCategory =
         bulkCategoriesByAssetType &&
@@ -185,13 +228,26 @@ function computedValidActions(groups, validIds, categories = [], bulkCategoriesB
     if (Array.isArray(categories) && categories.length === 0 && !hasAnyTypedCategory) {
         filteredGroups = groups.filter((g) => g.label !== 'Classification')
     }
-    if (!validIds) return filteredGroups.map((g) => ({ ...g, validActions: g.actions }))
-    return filteredGroups
-        .map((group) => ({
-            ...group,
-            validActions: group.actions.filter((a) => validIds.has(a.id)),
-        }))
-        .filter((g) => g.validActions.length > 0)
+    const stripRenameIfNeeded = (list) => {
+        if (assetCount >= 2) return list
+        return list
+            .map((g) => ({
+                ...g,
+                validActions: g.validActions.filter((a) => a.id !== RENAME_ASSETS_ACTION),
+            }))
+            .filter((g) => g.validActions.length > 0)
+    }
+    if (!validIds) {
+        return stripRenameIfNeeded(filteredGroups.map((g) => ({ ...g, validActions: g.actions })))
+    }
+    return stripRenameIfNeeded(
+        filteredGroups
+            .map((group) => ({
+                ...group,
+                validActions: group.actions.filter((a) => validIds.has(a.id)),
+            }))
+            .filter((g) => g.validActions.length > 0)
+    )
 }
 
 function getActionLabel(actionId) {
@@ -226,11 +282,16 @@ export default function BulkActionsModal({
     /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution / Generative */
     bulkCategoriesByAssetType = null,
 }) {
+    const { can } = usePermission()
+    const canBulkRename = can('metadata.edit_post_upload')
+
     const [step, setStep] = useState('select')
     const [selectedAction, setSelectedAction] = useState(null)
     const [rejectionReason, setRejectionReason] = useState('')
     const [assignAssetType, setAssignAssetType] = useState('asset')
     const [assignCategoryId, setAssignCategoryId] = useState('')
+    const [bulkRenameBase, setBulkRenameBase] = useState('')
+    const [renamePreviewExpanded, setRenamePreviewExpanded] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
     const [modalEntered, setModalEntered] = useState(false)
@@ -241,13 +302,38 @@ export default function BulkActionsModal({
     const n = assetIds.length
 
     const validIds = useMemo(
-        () => computeValidActionIds(selectionSummary, { isTrashMode, canForceDelete }),
-        [selectionSummary, isTrashMode, canForceDelete]
+        () => computeValidActionIds(selectionSummary, { isTrashMode, canForceDelete, selectedCount: n }),
+        [selectionSummary, isTrashMode, canForceDelete, n]
     )
-    const groupsWithValidActions = useMemo(
-        () => computedValidActions(BULK_ACTION_GROUPS, validIds, categories, bulkCategoriesByAssetType),
-        [validIds, categories, bulkCategoriesByAssetType]
-    )
+    const groupsWithValidActions = useMemo(() => {
+        let g = computedValidActions(BULK_ACTION_GROUPS, validIds, categories, bulkCategoriesByAssetType, n)
+        if (!canBulkRename) {
+            g = g
+                .map((gr) => ({
+                    ...gr,
+                    validActions: gr.validActions.filter((a) => a.id !== RENAME_ASSETS_ACTION),
+                }))
+                .filter((gr) => gr.validActions.length > 0)
+        }
+        return g
+    }, [validIds, categories, bulkCategoriesByAssetType, n, canBulkRename])
+
+    const renamePreview = useMemo(() => {
+        if (!bulkRenameBase.trim() || n < 2) return []
+        const base = bulkRenameBase.trim()
+        const slug = slugifyForRename(base)
+        const total = n
+        const padLen = getIndexPadding(total)
+        const byId = new Map((selectedAssetSummary || []).map((x) => [x.id, x]))
+        return assetIds.map((id, i) => {
+            const row = byId.get(id)
+            const ext = extensionFromFilename(row?.original_filename || '')
+            const indexStr = String(i + 1).padStart(padLen, '0')
+            const filename = ext ? `${slug}-${indexStr}.${ext}` : `${slug}-${indexStr}`
+            const title = `${base} ${i + 1} of ${total}`
+            return { id, title, filename }
+        })
+    }, [bulkRenameBase, n, assetIds, selectedAssetSummary])
 
     const hasTypedBulkCategories =
         bulkCategoriesByAssetType &&
@@ -296,12 +382,18 @@ export default function BulkActionsModal({
             setAssignCategoryId('')
             setAssignAssetType('asset')
         }
+        if (actionId === RENAME_ASSETS_ACTION) {
+            setBulkRenameBase('')
+            setRenamePreviewExpanded(false)
+        }
     }, [assetIds, onOpenMetadataEdit, onClose])
 
     const handleBack = useCallback(() => {
         setStep('select')
         setSelectedAction(null)
         setRejectionReason('')
+        setBulkRenameBase('')
+        setRenamePreviewExpanded(false)
         setError(null)
     }, [])
 
@@ -311,6 +403,8 @@ export default function BulkActionsModal({
         setRejectionReason('')
         setAssignCategoryId('')
         setAssignAssetType('asset')
+        setBulkRenameBase('')
+        setRenamePreviewExpanded(false)
         setError(null)
         onClose()
     }, [onClose])
@@ -324,11 +418,22 @@ export default function BulkActionsModal({
             setError('Please select a category.')
             return
         }
+        if (selectedAction === RENAME_ASSETS_ACTION) {
+            if (n < 2) {
+                setError('Select at least two assets.')
+                return
+            }
+            if (!bulkRenameBase.trim()) {
+                setError('Enter a base name for the naming pattern.')
+                return
+            }
+        }
         setSubmitting(true)
         setError(null)
         try {
             let payload = {}
             if (selectedAction === 'REJECT') payload = { rejection_reason: rejectionReason.trim() }
+            else if (selectedAction === RENAME_ASSETS_ACTION) payload = { base_name: bulkRenameBase.trim() }
             else if (selectedAction === ASSIGN_CATEGORY_ACTION) {
                 payload = { category_id: parseInt(assignCategoryId, 10) }
                 if (hasTypedBulkCategories) {
@@ -364,6 +469,7 @@ export default function BulkActionsModal({
 
     const isReject = selectedAction === 'REJECT'
     const isAssignCategory = selectedAction === ASSIGN_CATEGORY_ACTION
+    const isRename = selectedAction === RENAME_ASSETS_ACTION
     const isLifecycle = selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)
 
     const summaryEligible = selectedAssetSummary
@@ -571,6 +677,66 @@ export default function BulkActionsModal({
                                 </>
                             )}
 
+                            {isRename && (
+                                <div className="space-y-4">
+                                    <p className="text-sm text-gray-600">
+                                        Assets are renamed in the order shown below. Each asset gets a display title like{' '}
+                                        <span className="font-medium text-gray-900">Base name 1 of {n}</span> and a filename like{' '}
+                                        <span className="font-mono text-xs text-gray-800">base-name-01.ext</span> (extension preserved from the current filename).
+                                    </p>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="bulk-rename-base">
+                                            Base name
+                                        </label>
+                                        <input
+                                            id="bulk-rename-base"
+                                            type="text"
+                                            value={bulkRenameBase}
+                                            onChange={(e) => setBulkRenameBase(e.target.value)}
+                                            placeholder="e.g. Photo Shoot XY"
+                                            maxLength={200}
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                        />
+                                    </div>
+                                    {bulkRenameBase.trim() && renamePreview.length > 0 && (
+                                        <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+                                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                <span className="text-xs font-medium text-gray-600">Preview</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRenamePreviewExpanded(!renamePreviewExpanded)}
+                                                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    <DocumentDuplicateIcon className="h-4 w-4" />
+                                                    {renamePreviewExpanded ? 'Hide list' : 'Show all filenames'}
+                                                </button>
+                                            </div>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="text-gray-500">Example title:</span>{' '}
+                                                <span className="font-medium">{renamePreview[0]?.title}</span>
+                                                {renamePreview.length > 1 && (
+                                                    <span className="text-gray-500"> · … · </span>
+                                                )}
+                                                {renamePreview.length > 1 && (
+                                                    <span className="font-medium">{renamePreview[renamePreview.length - 1]?.title}</span>
+                                                )}
+                                            </p>
+                                            {renamePreviewExpanded && (
+                                                <ul className="mt-3 max-h-40 overflow-y-auto space-y-1 border-t border-gray-200 pt-3">
+                                                    {renamePreview.map((row) => (
+                                                        <li key={row.id} className="text-xs font-mono text-gray-700 truncate" title={row.filename}>
+                                                            <span className="text-gray-500 select-none">{row.title}</span>
+                                                            <span className="mx-2 text-gray-300">→</span>
+                                                            {row.filename}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {isLifecycle && (
                                 <div
                                     className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out"
@@ -606,7 +772,12 @@ export default function BulkActionsModal({
                                 <button
                                     type="button"
                                     onClick={handleSubmit}
-                                    disabled={submitting || (isReject && !rejectionReason.trim()) || (isAssignCategory && !assignCategoryId)}
+                                    disabled={
+                                        submitting ||
+                                        (isReject && !rejectionReason.trim()) ||
+                                        (isAssignCategory && !assignCategoryId) ||
+                                        (isRename && (!bulkRenameBase.trim() || n < 2))
+                                    }
                                     className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors"
                                 >
                                     {submitting
@@ -617,6 +788,8 @@ export default function BulkActionsModal({
                                         ? 'Reject'
                                         : isAssignCategory
                                         ? 'Assign Category'
+                                        : isRename
+                                        ? 'Rename assets'
                                         : 'Apply'}
                                 </button>
                             </div>

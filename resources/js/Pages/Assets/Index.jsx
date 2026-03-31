@@ -344,10 +344,10 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             router.get(window.location.pathname, Object.fromEntries(urlParams), {
                 preserveState: true,
                 preserveScroll: true,
-                only: ['assets', 'next_page_url'],
+                only: ['assets', 'next_page_url', 'q'],
             })
         }
-    }, [selectedCategoryId])
+   }, [selectedCategoryId])
     
     // HARD STABILIZATION: Background reconciliation disabled
     // Assets only change when Inertia provides a new snapshot.
@@ -478,8 +478,20 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
 
         setSelectedCategoryId(categoryId)
 
-        // Clear source when switching to category (leave reference materials view)
-        const params = categorySlug ? { category: categorySlug } : {}
+        // Inertia merges GET data with the current URL — empty {} for "All" would keep ?q=…
+        // and partial reloads omitting `q` left a stale search prop (drawer UUID logic, toolbar).
+        let params
+        if (categorySlug) {
+            params = { category: categorySlug }
+        } else {
+            const urlParams = new URLSearchParams(window.location.search)
+            urlParams.delete('q')
+            urlParams.delete('category')
+            urlParams.delete('asset')
+            urlParams.delete('source')
+            urlParams.delete('lifecycle')
+            params = Object.fromEntries(urlParams)
+        }
 
         router.get('/app/assets', params, {
             preserveState: true,
@@ -492,6 +504,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                 'selected_category',
                 'selected_category_slug',
                 'source',
+                'q',
                 ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
             ],
         })
@@ -513,6 +526,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                 'selected_category',
                 'selected_category_slug',
                 'source',
+                'q',
                 ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
             ],
         })
@@ -1267,6 +1281,10 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkActionsModal
                     assetIds={bulkSelectedAssetIds}
+                    selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
+                        const a = safeAssetsList.find((x) => x.id === id)
+                        return a ? { id: a.id, original_filename: a.original_filename ?? '' } : { id, original_filename: '' }
+                    })}
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
                     isTrashMode={lifecycle === 'deleted'}
                     canForceDelete={auth?.user?.tenant_role === 'owner' || auth?.user?.tenant_role === 'admin' || auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin'}

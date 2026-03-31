@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetBulkAction;
 use App\Services\Assets\BulkActionService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -49,6 +50,17 @@ class AssetBulkActionController extends Controller
                     'errors' => ['payload.rejection_reason' => ['The rejection reason field is required.']],
                 ], 422);
             }
+        }
+        if (AssetBulkAction::RENAME_ASSETS->value === $action) {
+            if (count($validated['asset_ids']) < 2) {
+                return response()->json([
+                    'message' => 'Select at least two assets for batch rename.',
+                    'errors' => ['asset_ids' => ['At least two assets are required.']],
+                ], 422);
+            }
+            $request->validate([
+                'payload.base_name' => 'required|string|max:200',
+            ]);
         }
         if (AssetBulkAction::ASSIGN_CATEGORY->value === $action) {
             $categoryId = $payload['category_id'] ?? null;
@@ -97,6 +109,10 @@ class AssetBulkActionController extends Controller
             Log::info('[AssetBulkActionController] Validation error', ['message' => $e->getMessage()]);
 
             return response()->json(['message' => $e->getMessage()], 422);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'message' => $e->getMessage() ?: 'You do not have permission to perform this action.',
+            ], 403);
         } catch (\Throwable $e) {
             Log::error('[AssetBulkActionController] Bulk action failed', [
                 'action' => $action,

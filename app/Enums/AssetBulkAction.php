@@ -23,6 +23,7 @@ enum AssetBulkAction: string
     case METADATA_REPLACE = 'METADATA_REPLACE';
     case METADATA_CLEAR = 'METADATA_CLEAR';
     case ASSIGN_CATEGORY = 'ASSIGN_CATEGORY'; // Staged intake: set category_id + intake_state=normal
+    case RENAME_ASSETS = 'RENAME_ASSETS'; // Batch rename title + original_filename (base name + index of total)
 
     public function isApprovalAction(): bool
     {

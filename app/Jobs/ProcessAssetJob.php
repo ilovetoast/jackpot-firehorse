@@ -97,18 +97,23 @@ class ProcessAssetJob implements ShouldQueue
             return []; // Skip AI jobs entirely
         }
 
-        // Policy allows AI tagging - build job array based on skip flags
+        // Policy allows AI tagging - build job array based on skip flags.
+        // Order is critical: AiMetadataGenerationJob creates asset_tag_candidates; AiTagAutoApplyJob must run after that.
         $jobs = [];
-        
-        // C9.2: Only add AI tagging jobs if not skipped
-        if (!$skipAiTagging) {
-            $jobs[] = new AiTagAutoApplyJob($asset->id); // Phase J.2.2: Auto-apply high-confidence tags (if enabled)
+
+        // C9.2: AI metadata generation (creates tag + field candidates)
+        if (! $skipAiMetadata) {
+            $jobs[] = new AiMetadataGenerationJob($asset->id);
         }
-        
-        // C9.2: Only add AI metadata jobs if not skipped
-        if (!$skipAiMetadata) {
-            $jobs[] = new AiMetadataGenerationJob($asset->id); // Phase I: AI metadata generation (creates candidates)
-            $jobs[] = new AiMetadataSuggestionJob($asset->id); // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
+
+        // C9.2: Auto-apply high-confidence tags (tenant setting enable_ai_tag_auto_apply) — only after candidates exist
+        if (! $skipAiTagging) {
+            $jobs[] = new AiTagAutoApplyJob($asset->id);
+        }
+
+        // Phase 2 – Step 5: suggestions from structured candidates
+        if (! $skipAiMetadata) {
+            $jobs[] = new AiMetadataSuggestionJob($asset->id);
         }
         
         if (empty($jobs)) {
@@ -295,11 +300,12 @@ class ProcessAssetJob implements ShouldQueue
         // 6. ComputedMetadataJob - Compute technical metadata (Phase 5)
         // 7. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
         // 8. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
-        // 9. AITaggingJob - AI-powered tagging
-        // 10. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
-        // 11. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
-        // 12. FinalizeAssetJob - Mark asset as completed
-        // 13. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        // 9. AITaggingJob - pipeline completion flag for tagging step
+        // 10. AiMetadataGenerationJob - vision: creates asset_tag_candidates + field candidates
+        // 11. AiTagAutoApplyJob - applies tags when enable_ai_tag_auto_apply (must run after step 10)
+        // 12. AiMetadataSuggestionJob - suggestions from candidates (after generation)
+        // 13. FinalizeAssetJob - Mark asset as completed
+        // 14. PromoteAssetJob - Move from temp/ to canonical assets/ location
         //    (runs after thumbnail generation, requires COMPLETED status)
         
         // Check if asset is a video to conditionally add video preview job

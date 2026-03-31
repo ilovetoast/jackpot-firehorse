@@ -53,7 +53,7 @@ class AiMetadataGenerationService
 
         $modelConfig = config('ai.models.gpt-4o-mini', []);
         $this->defaultModel = $modelConfig['model_name'] ?? 'gpt-4o-mini';
-        $this->minConfidenceMetadata = (float) config('ai.metadata_tagging.min_confidence', 0.85);
+        $this->minConfidenceMetadata = (float) config('ai.metadata_tagging.min_confidence', 0.90);
     }
 
     protected function getTaggingMinConfidence(): float
@@ -72,11 +72,12 @@ class AiMetadataGenerationService
     /**
      * Generate AI metadata candidates for an asset.
      *
+     * @param  bool  $isManualRerun  From {@see AiMetadataGenerationJob} — allows tag inference even if Tags were previously approved.
      * @return array Results: candidates_created, tags_created, tag_inference_attempted, ai_tag_inference_status, ai_tag_inference_detail, tag_parse_stats, cost, fields_processed, tokens_in, tokens_out, model
      *
      * @throws \Exception If API call fails (caller should handle gracefully)
      */
-    public function generateMetadata(Asset $asset): array
+    public function generateMetadata(Asset $asset, bool $isManualRerun = false): array
     {
         // Structured fields (select/multiselect with options). Tags field has no options — excluded here.
         $fields = $this->getEligibleFields($asset);
@@ -85,7 +86,8 @@ class AiMetadataGenerationService
         // for this category even if no structured fields qualify — otherwise executions/deliverables often
         // skip the vision call entirely and never get AI tags.
         // Upload-time "Apply AI Tagging" sets _skip_ai_tagging — must not create tag candidates (same vision call can still fill structured fields).
-        $tagInferenceDesired = $this->tagInferenceDesired($asset);
+        // Manual rerun: {@see AiMetadataGenerationJob} clears _skip_ai_tagging and ignores approved Tags so vision can run again.
+        $tagInferenceDesired = $this->tagInferenceDesired($asset, $isManualRerun);
         $skipAiTaggingUpload = (bool) (($asset->metadata ?? [])['_skip_ai_tagging'] ?? false);
         $tagsInference = $tagInferenceDesired && ! $skipAiTaggingUpload;
 
@@ -358,8 +360,10 @@ class AiMetadataGenerationService
 
     /**
      * Whether the Tags field would qualify for AI tag inference (ignores upload-time _skip_ai_tagging).
+     *
+     * @param  bool  $ignoreApprovedTags  Manual rerun: allow new tag candidates even if Tags was previously approved.
      */
-    protected function tagInferenceDesired(Asset $asset): bool
+    protected function tagInferenceDesired(Asset $asset, bool $ignoreApprovedTags = false): bool
     {
         $categoryId = $asset->metadata['category_id'] ?? null;
         if (! $categoryId) {
@@ -387,13 +391,19 @@ class AiMetadataGenerationService
             return false;
         }
 
-        $hasApprovedValue = DB::table('asset_metadata')
-            ->where('asset_id', $asset->id)
-            ->where('metadata_field_id', $field->id)
-            ->whereNotNull('approved_at')
-            ->exists();
+        if (! $ignoreApprovedTags) {
+            $hasApprovedValue = DB::table('asset_metadata')
+                ->where('asset_id', $asset->id)
+                ->where('metadata_field_id', $field->id)
+                ->whereNotNull('approved_at')
+                ->exists();
 
-        return ! $hasApprovedValue;
+            if ($hasApprovedValue) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -407,7 +417,7 @@ class AiMetadataGenerationService
             return false;
         }
 
-        return $this->tagInferenceDesired($asset);
+        return $this->tagInferenceDesired($asset, false);
     }
 
     /**
@@ -604,11 +614,9 @@ class AiMetadataGenerationService
         $prompt .= "  \"fields\": {\n";
         $prompt .= "    \"photo_type\": {\"value\": \"studio\", \"confidence\": 0.94}\n";
         $prompt .= "  },\n";
-        $prompt .= "  \"tags\": [\n";
-        $prompt .= "    {\"value\": \"beer\", \"confidence\": 0.91},\n";
-        $prompt .= "    {\"value\": \"dramatic\", \"confidence\": 0.88}\n";
-        $prompt .= "  ]\n";
-        $prompt .= "}\n\n";
+        $prompt .= "  \"tags\": []\n";
+        $prompt .= "}\n";
+        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}; use [] if none qualify.)\n\n";
         $prompt .= 'Response:';
 
         return $prompt;
@@ -643,11 +651,9 @@ class AiMetadataGenerationService
         $prompt .= "- Return JSON with a \"tags\" array (and may use an empty \"fields\" object):\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {},\n";
-        $prompt .= "  \"tags\": [\n";
-        $prompt .= "    {\"value\": \"beer\", \"confidence\": 0.91},\n";
-        $prompt .= "    {\"value\": \"dramatic\", \"confidence\": 0.92}\n";
-        $prompt .= "  ]\n";
-        $prompt .= "}\n\n";
+        $prompt .= "  \"tags\": []\n";
+        $prompt .= "}\n";
+        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}; use [] if none qualify.)\n\n";
         $prompt .= 'Response:';
 
         return $prompt;

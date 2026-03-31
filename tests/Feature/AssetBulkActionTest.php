@@ -207,4 +207,46 @@ class AssetBulkActionTest extends TestCase
         $this->assertNull($this->asset1->published_at);
         $this->assertNull($this->asset2->published_at);
     }
+
+    public function test_bulk_rename_assets_sets_title_and_filename(): void
+    {
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id, $this->asset2->id],
+                'action' => 'RENAME_ASSETS',
+                'payload' => ['base_name' => 'Photo Shoot XY'],
+            ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'total_selected' => 2,
+            'processed' => 2,
+            'errors' => [],
+        ]);
+
+        $this->asset1->refresh();
+        $this->asset2->refresh();
+        $this->assertSame('Photo Shoot XY 1 of 2', $this->asset1->title);
+        $this->assertSame('Photo Shoot XY 2 of 2', $this->asset2->title);
+        $this->assertSame('photo-shoot-xy-1.jpg', $this->asset1->original_filename);
+        $this->assertSame('photo-shoot-xy-2.jpg', $this->asset2->original_filename);
+    }
+
+    public function test_bulk_rename_requires_two_assets(): void
+    {
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'RENAME_ASSETS',
+                'payload' => ['base_name' => 'Test'],
+            ]);
+
+        $response->assertStatus(422);
+    }
 }

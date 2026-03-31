@@ -957,6 +957,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkActionsModal
                     assetIds={bulkSelectedAssetIds}
+                    selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
+                        const a = safeAssetsList.find((x) => x.id === id)
+                        return a ? { id: a.id, original_filename: a.original_filename ?? '' } : { id, original_filename: '' }
+                    })}
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {

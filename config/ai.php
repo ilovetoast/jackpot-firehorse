@@ -38,7 +38,7 @@ return [
     |
     */
     'metadata_tagging' => [
-        'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.85),
+        'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.90),
     ],
 
     /*

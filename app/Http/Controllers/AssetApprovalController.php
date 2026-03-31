@@ -18,6 +18,7 @@ use App\Support\Roles\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
@@ -347,10 +348,13 @@ class AssetApprovalController extends Controller
                         \App\Jobs\AITaggingJob::dispatch($asset->id);
                     }
                     
-                    if (!$aiMetadataCompleted) {
-                        \App\Jobs\AiMetadataGenerationJob::dispatch($asset->id);
-                        \App\Jobs\AiTagAutoApplyJob::dispatch($asset->id);
-                        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
+                    if (! $aiMetadataCompleted) {
+                        // Must run in order: metadata job creates tag candidates; auto-apply reads them; suggestions last.
+                        Bus::chain([
+                            new \App\Jobs\AiMetadataGenerationJob($asset->id),
+                            new \App\Jobs\AiTagAutoApplyJob($asset->id),
+                            new \App\Jobs\AiMetadataSuggestionJob($asset->id),
+                        ])->dispatch();
                     }
                     
                     Log::info('[AssetApprovalController] AI jobs dispatched after approval', [

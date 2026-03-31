@@ -176,7 +176,18 @@ class AiMetadataGenerationJob implements ShouldQueue
 
         // 5. Generate metadata (use thumbnail URL from waitForThumbnail)
         try {
-            $results = $service->generateMetadata($asset);
+            // Manual "Regenerate AI analysis": honor current brand intent — drop upload-time opt-out and allow tag inference even if Tags were previously approved.
+            if ($this->isManualRerun) {
+                $meta = $asset->metadata ?? [];
+                if (array_key_exists('_skip_ai_tagging', $meta)) {
+                    unset($meta['_skip_ai_tagging']);
+                    $asset->metadata = $meta;
+                    $asset->save();
+                }
+                $asset->refresh();
+            }
+
+            $results = $service->generateMetadata($asset, $this->isManualRerun);
 
             // 6. Mark as generated (prevents silent re-runs)
             // This timestamp is updated even on manual rerun

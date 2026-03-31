@@ -318,7 +318,7 @@ class AiMetadataGenerationServiceTest extends TestCase
                     'fields' => [
                         'photo_type' => [
                             'value' => 'landscape',
-                            'confidence' => 0.80, // Below default min (0.85)
+                            'confidence' => 0.80, // Below default min (0.90)
                         ],
                     ],
                 ]),

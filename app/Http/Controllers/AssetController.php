@@ -7,6 +7,7 @@ use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
 use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\AiMetadataGenerationJob;
+use App\Jobs\AiTagAutoApplyJob;
 use App\Jobs\AITaggingJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
@@ -36,6 +37,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -2029,7 +2031,11 @@ class AssetController extends Controller
         }
 
         try {
-            AiMetadataGenerationJob::dispatch($asset->id, true);
+            // Chain: vision creates tag candidates; auto-apply promotes to asset_tags when tenant enables it.
+            Bus::chain([
+                new AiMetadataGenerationJob($asset->id, true),
+                new AiTagAutoApplyJob($asset->id),
+            ])->dispatch();
 
             return response()->json([
                 'success' => true,

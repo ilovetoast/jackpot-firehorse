@@ -10,8 +10,8 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -75,7 +75,7 @@ class AiMetadataRegenerationTest extends TestCase
      */
     public function test_regenerate_endpoint_dispatches_job(): void
     {
-        Queue::fake();
+        Bus::fake();
 
         $user = User::factory()->create();
         $tenant = Tenant::factory()->create();
@@ -92,9 +92,10 @@ class AiMetadataRegenerationTest extends TestCase
             'message' => 'AI metadata regeneration queued',
         ]);
 
-        Queue::assertPushed(\App\Jobs\AiMetadataGenerationJob::class, function ($job) use ($asset) {
-            return $job->assetId === $asset->id && $job->isManualRerun === true;
-        });
+        Bus::assertChained([
+            new \App\Jobs\AiMetadataGenerationJob($asset->id, true),
+            new \App\Jobs\AiTagAutoApplyJob($asset->id),
+        ]);
     }
 
     /**
