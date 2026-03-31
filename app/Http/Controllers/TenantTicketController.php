@@ -120,11 +120,11 @@ class TenantTicketController extends Controller
         if ($isOwner || $isAdmin) {
             $brands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
         } else {
-            // Only show brands the user is actually added to
+            // Only show brands the user is actually added to (BelongsToMany join: qualify columns)
             $brands = $user->brands()
-                ->where('tenant_id', $tenant->id)
-                ->orderBy('name')
-                ->get(['id', 'name']);
+                ->where('brands.tenant_id', $tenant->id)
+                ->orderBy('brands.name')
+                ->get(['brands.id', 'brands.name']);
         }
 
         // Get plan limits and SLA messaging

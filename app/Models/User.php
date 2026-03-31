@@ -221,6 +221,13 @@ class User extends Authenticatable
     protected array $activeBrandMembershipByBrandId = [];
 
     /**
+     * Per-request memoization for {@see getRoleForTenant()} when `tenants` is not eager-loaded.
+     *
+     * @var array<string, string|null>
+     */
+    protected array $tenantRoleForTenantCache = [];
+
+    /**
      * Whether this user has a brand_user row for the given brand.
      * Caches the full id list on first call to fix N+1 in CategoryPolicy::view and similar loops.
      */
@@ -296,10 +303,17 @@ class User extends Authenticatable
      */
     public function getRoleForTenant(Tenant $tenant): ?string
     {
+        $tenantId = (string) $tenant->id;
+        if (array_key_exists($tenantId, $this->tenantRoleForTenantCache)) {
+            return $this->tenantRoleForTenantCache[$tenantId];
+        }
+
         if ($this->relationLoaded('tenants')) {
             $t = $this->tenants->firstWhere('id', $tenant->id);
+            $role = $t?->pivot?->role ?? null;
+            $this->tenantRoleForTenantCache[$tenantId] = $role;
 
-            return $t?->pivot?->role ?? null;
+            return $role;
         }
 
         $pivot = DB::table('tenant_user')
@@ -307,7 +321,10 @@ class User extends Authenticatable
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        return $pivot?->role ?? null;
+        $role = $pivot?->role ?? null;
+        $this->tenantRoleForTenantCache[$tenantId] = $role;
+
+        return $role;
     }
 
     /**
@@ -352,6 +369,8 @@ class User extends Authenticatable
         } else {
             $this->tenants()->attach($tenant->id, ['role' => $role]);
         }
+
+        $this->tenantRoleForTenantCache[(string) $tenant->id] = $role;
     }
 
     /**
