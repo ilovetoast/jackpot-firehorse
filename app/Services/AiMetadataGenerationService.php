@@ -597,7 +597,8 @@ class AiMetadataGenerationService
         $prompt .= "GENERAL TAGS (for search & discovery):\n";
         $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
         $prompt .= "Prefer concrete, searchable terms: subject, setting, style, mood, notable people or objects, production type when visible.\n";
-        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"photo shoot\", \"model\", \"product\"); avoid punctuation.\n";
+        $prompt .= "Do not use the tag \"photo shoot\" or \"photoshoot\" — category already covers photography; tag specific subjects, people, objects, and visible settings instead.\n";
+        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"on location\", \"model\", \"product\"); avoid punctuation.\n";
         $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
 
         $prompt .= "REQUIREMENTS:\n";
@@ -633,6 +634,7 @@ class AiMetadataGenerationService
         $prompt .= $ctx;
 
         $prompt .= "TAGGING RULES (STRICT):\n";
+        $prompt .= "- Never use \"photo shoot\" or \"photoshoot\" as a tag — redundant in photography libraries; use specific visible subjects instead\n";
         $prompt .= "- Only include VISUALLY VERIFIABLE elements present in the image\n";
         $prompt .= "- Do NOT infer intent, meaning, or marketing context\n";
         $prompt .= "- Avoid abstract terms (e.g. \"modern\", \"professional\", \"aesthetic\", \"branding\")\n";
@@ -727,7 +729,7 @@ class AiMetadataGenerationService
         }
         $name = strtolower($category->name);
         if (str_contains($name, 'photo')) {
-            return 'For photography, include search-friendly terms when visible: e.g. shoot type (studio, on location, editorial), roles (model, talent), product, and composition (portrait, full body, product shot).';
+            return 'For photography structured fields, use shoot type (studio, on location, editorial), roles, product, composition where applicable. For free-form tags, do not use \"photo shoot\" — prefer specific subjects, people, and objects visible in the image.';
         }
 
         return 'Include terms users might search for: subject, setting, style, mood, and notable objects or people when clearly visible.';
@@ -866,6 +868,15 @@ class AiMetadataGenerationService
                         continue;
                     }
 
+                    if ($this->isRedundantTag($normalizedTag)) {
+                        Log::debug('[AiMetadataGenerationService] Redundant tag skipped', [
+                            'asset_id' => $asset->id,
+                            'tag' => $normalizedTag,
+                        ]);
+
+                        continue;
+                    }
+
                     $tagParseStats['passed_confidence_count']++;
                     $tags[] = [
                         'value' => $normalizedTag,
@@ -912,6 +923,17 @@ class AiMetadataGenerationService
         $tag = trim($tag);
 
         return $tag;
+    }
+
+    /**
+     * Tags that duplicate category-level concepts and should never be stored (e.g. "photo shoot" in a DAM photography context).
+     */
+    protected function isRedundantTag(string $normalized): bool
+    {
+        $t = preg_replace('/\s+/', ' ', trim($normalized));
+        $compact = str_replace(' ', '', $t);
+
+        return $t === 'photo shoot' || strcasecmp($compact, 'photoshoot') === 0;
     }
 
     /**

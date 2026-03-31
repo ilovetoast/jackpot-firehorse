@@ -4449,9 +4449,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 <span className={`text-sm font-medium ${aiTaggingDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
                                                     Apply AI Tagging
                                                 </span>
-                                                <p className="mt-0.5 text-xs text-gray-500">
-                                                    Suggested tags (Tags field) and auto-apply when policy allows. Uses the same vision pass as metadata when that runs.
-                                                </p>
                                                 {aiTaggingDisabled && (
                                                     <p className="mt-1 text-xs text-gray-500">
                                                         AI tagging is disabled for this tenant or brand.
@@ -4472,9 +4469,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 <span className={`text-sm font-medium ${aiMetadataDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
                                                     Apply AI Metadata
                                                 </span>
-                                                <p className="mt-0.5 text-xs text-gray-500">
-                                                    AI-suggested values for category fields (e.g. Photo Type, Scene) in the review panel.
-                                                </p>
                                                 {aiMetadataDisabled && (
                                                     <p className="mt-1 text-xs text-gray-500">
                                                         AI metadata generation is disabled for this tenant or brand.
@@ -4483,9 +4477,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             </div>
                                         </label>
                                     </div>
-                                    <p className="mt-2 text-xs text-gray-500">
-                                        Each option is independent: uncheck one to skip only that part of the pipeline. Uncheck both to skip all AI vision work for this upload. This only affects the current batch and does not change tenant or brand settings.
-                                    </p>
                                 </div>
                             )}
 
