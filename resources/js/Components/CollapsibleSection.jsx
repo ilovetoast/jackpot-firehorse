@@ -43,9 +43,9 @@ export default function CollapsibleSection({
                 onClick={handleToggle}
                 className={`w-full flex items-center justify-between ${btnPad} text-left focus:outline-none focus:ring-2 focus:ring-inset ${
                     inCard
-                        ? 'border-b border-neutral-800/80 hover:bg-white/[0.04] text-neutral-100 focus:ring-neutral-600'
+                        ? 'border-b border-neutral-800/80 hover:bg-neutral-800/50 text-neutral-100 focus:ring-neutral-600'
                         : isDark
-                          ? 'hover:bg-white/5 text-neutral-100 focus:ring-neutral-600'
+                          ? 'hover:bg-neutral-800/40 text-neutral-100 focus:ring-neutral-600'
                           : 'hover:bg-gray-50 focus:ring-indigo-500'
                 }`}
             >

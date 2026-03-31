@@ -11,8 +11,10 @@ use App\Enums\TicketEnvironment;
 use App\Enums\TicketComponent;
 use App\Models\TicketSLAState;
 use App\Services\TicketAssignmentService;
+use App\Services\TicketNotificationService;
 use App\Services\TicketSLAService;
 use App\Traits\RecordsActivity;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -128,6 +130,14 @@ class Ticket extends Model
             // Assign ticket to team and user
             $assignmentService = app(TicketAssignmentService::class);
             $assignmentService->assignTicket($ticket);
+
+            $ticketId = $ticket->id;
+            DB::afterCommit(function () use ($ticketId) {
+                $committed = Ticket::find($ticketId);
+                if ($committed) {
+                    app(TicketNotificationService::class)->notifyAssignedStaffOfNewTicket($committed);
+                }
+            });
         });
 
         // Handle SLA pause/resume on status changes

@@ -577,6 +577,29 @@ HTML),
                 'variables' => ['tenant_name', 'owner_name', 'owner_email', 'expiration_date', 'app_name', 'app_url', 'billing_url'],
                 'is_active' => true,
             ],
+            [
+                'key' => 'support_ticket_created',
+                'name' => 'Support Ticket Created (assigned staff)',
+                'category' => 'system',
+                'subject' => 'New support ticket {{ticket_number}} — {{ticket_subject}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">New ticket assigned to you</h2>
+<p style="margin:0 0 16px;">Hi {{assignee_name}},</p>
+<p style="margin:0 0 20px;">A new support ticket was created and assigned to you via round-robin or default routing.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border-collapse:collapse;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:14px 16px;font-size:14px;"><strong style="color:#0f172a;">Ticket</strong><br /><span style="color:#334155;">{{ticket_number}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Subject</strong><br /><span style="color:#334155;">{{ticket_subject}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Category</strong><br /><span style="color:#334155;">{{category_label}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Tenant</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
+  <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Created by</strong><br /><span style="color:#334155;">{{creator_name}}</span></td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Open in admin</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+HTML),
+                'body_text' => "New ticket assigned to you\n\nHi {{assignee_name}},\n\nA new support ticket was created and assigned to you.\n\nTicket: {{ticket_number}}\nSubject: {{ticket_subject}}\nCategory: {{category_label}}\nTenant: {{tenant_name}}\nCreated by: {{creator_name}}\n\nOpen: {{ticket_url}}",
+                'variables' => ['assignee_name', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'creator_name', 'ticket_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {

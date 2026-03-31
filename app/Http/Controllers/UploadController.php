@@ -8,7 +8,9 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
+use App\Models\Tenant;
 use App\Models\UploadSession;
+use App\Models\User;
 use App\Services\AbandonedSessionService;
 use App\Services\AssetEligibilityService;
 use App\Services\CollectionAssetService;
@@ -1650,9 +1652,11 @@ class UploadController extends Controller
         ]);
 
         $manifest = $validated['manifest'];
-        // C9.2: Extract upload-time AI skip flags (upload-level, applies to all assets in this batch)
-        $skipAiTagging = $validated['skip_ai_tagging'] ?? false;
-        $skipAiMetadata = $validated['skip_ai_metadata'] ?? false;
+        // C9.2: Extract upload-time AI skip flags (upload-level, applies to all assets in this batch).
+        // Non-privileged users cannot opt out via a forged request (matches UploadAssetDialog visibility).
+        $canSetAiSkip = $this->userCanSetUploadAiSkipFlags($user, $tenant, $brand);
+        $skipAiTagging = $canSetAiSkip ? (bool) ($validated['skip_ai_tagging'] ?? false) : false;
+        $skipAiMetadata = $canSetAiSkip ? (bool) ($validated['skip_ai_metadata'] ?? false) : false;
         $results = [];
 
         // Process each manifest item independently
@@ -2872,5 +2876,20 @@ class UploadController extends Controller
                 'message' => 'An error occurred while loading metadata fields.',
             ], 500);
         }
+    }
+
+    /**
+     * Only Admin, Brand Manager, or tenant Owner/Admin may opt out of upload-time AI (matches UploadAssetDialog).
+     */
+    protected function userCanSetUploadAiSkipFlags(User $user, Tenant $tenant, Brand $brand): bool
+    {
+        $brandRole = strtolower((string) ($user->getRoleForBrand($brand) ?? ''));
+        $tenantRole = strtolower((string) ($user->getRoleForTenant($tenant) ?? ''));
+
+        if (in_array($brandRole, ['admin', 'brand_manager'], true)) {
+            return true;
+        }
+
+        return in_array($tenantRole, ['owner', 'admin'], true);
     }
 }

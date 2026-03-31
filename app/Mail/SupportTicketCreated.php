@@ -1,0 +1,104 @@
+<?php
+
+namespace App\Mail;
+
+use App\Enums\TicketCategory;
+use App\Enums\TicketType;
+use App\Models\NotificationTemplate;
+use App\Models\Ticket;
+use Illuminate\Bus\Queueable;
+use Illuminate\Mail\Mailables\Content;
+use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Queue\SerializesModels;
+
+class SupportTicketCreated extends BaseMailable
+{
+    use Queueable, SerializesModels;
+
+    protected string $emailType = 'system';
+
+    public function __construct(
+        public Ticket $ticket
+    ) {}
+
+    public function envelope(): Envelope
+    {
+        $template = NotificationTemplate::getByKey('support_ticket_created');
+        $vars = $this->templateVariables();
+
+        if ($template) {
+            $rendered = $template->render($vars);
+
+            return new Envelope(
+                subject: $rendered['subject'],
+            );
+        }
+
+        return new Envelope(
+            subject: "New support ticket {$this->ticket->ticket_number}",
+        );
+    }
+
+    public function content(): Content
+    {
+        $template = NotificationTemplate::getByKey('support_ticket_created');
+        $vars = $this->templateVariables();
+
+        if ($template) {
+            $rendered = $template->render($vars);
+
+            return new Content(
+                htmlString: $rendered['body_html'],
+            );
+        }
+
+        $subjectLine = $vars['ticket_subject'];
+
+        return new Content(
+            htmlString: '<p style="margin:0 0 12px;">A new support ticket was assigned to you.</p>'
+                . '<p style="margin:0;"><strong>' . e($subjectLine) . '</strong></p>',
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function templateVariables(): array
+    {
+        $ticket = $this->ticket;
+        $meta = $ticket->metadata ?? [];
+        $subject = is_string($meta['subject'] ?? null) ? $meta['subject'] : '';
+        $subject = $subject !== '' ? $subject : '—';
+
+        $rawCategory = $meta['category'] ?? null;
+        $categoryLabel = '—';
+        if (is_string($rawCategory) && $rawCategory !== '') {
+            $cat = TicketCategory::tryFrom($rawCategory);
+            $categoryLabel = $cat ? $cat->label() : $rawCategory;
+        }
+
+        $tenantName = $ticket->tenant?->name ?? (
+            $ticket->type === TicketType::TENANT_INTERNAL ? 'Internal (tenant hidden)' : '—'
+        );
+
+        $creator = $ticket->createdBy;
+        $creatorName = $creator ? trim("{$creator->first_name} {$creator->last_name}") : '—';
+
+        $assignee = $ticket->assignedTo;
+        $assigneeName = $assignee ? trim("{$assignee->first_name} {$assignee->last_name}") : '—';
+
+        $ticketUrl = route('admin.support.tickets.show', $ticket);
+
+        return [
+            'assignee_name' => $assigneeName,
+            'ticket_number' => $ticket->ticket_number,
+            'ticket_subject' => $subject,
+            'category_label' => $categoryLabel,
+            'tenant_name' => $tenantName,
+            'creator_name' => $creatorName,
+            'ticket_url' => $ticketUrl,
+            'app_name' => config('app.name', 'Jackpot'),
+            'app_url' => rtrim((string) config('app.url', url('/')), '/'),
+        ];
+    }
+}

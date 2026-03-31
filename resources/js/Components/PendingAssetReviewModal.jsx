@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { XMarkIcon, CheckIcon, XCircleIcon, ChevronLeftIcon, ChevronRightIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
@@ -194,6 +195,15 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
     const currentAsset = assets[currentIndex] || null
     const hasMore = currentIndex < assets.length - 1
     const hasPrevious = currentIndex > 0
+
+    useEffect(() => {
+        if (!showZoomModal) return
+        const prev = document.body.style.overflow
+        document.body.style.overflow = 'hidden'
+        return () => {
+            document.body.style.overflow = prev
+        }
+    }, [showZoomModal])
     
     // Debug logging for asset state - log whenever assets change
     useEffect(() => {
@@ -996,16 +1006,17 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                 </div>
             </div>
             
-            {/* Enlarge/Zoom Modal */}
-            {showZoomModal && currentAsset && (
+            {/* Enlarge/Zoom Modal — portaled for Safari fixed/z-index inside nested modals */}
+            {showZoomModal && currentAsset && typeof document !== 'undefined' && createPortal(
                 <div
-                    className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+                    className="fixed inset-0 z-[10050] isolate flex items-center justify-center p-4"
+                    style={{ backgroundColor: 'rgb(0 0 0 / 0.92)' }}
                     onClick={() => setShowZoomModal(false)}
                 >
                     <button
                         type="button"
                         onClick={() => setShowZoomModal(false)}
-                        className="absolute top-4 right-4 z-10 text-white hover:text-gray-300 transition-colors"
+                        className="absolute top-4 right-4 z-20 text-white hover:text-gray-300 transition-colors"
                         aria-label="Close"
                     >
                         <XMarkIcon className="h-8 w-8" />
@@ -1020,7 +1031,8 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                             className="max-w-full max-h-full object-contain"
                         />
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
 
             {/* C9.2: Create Collection Modal */}

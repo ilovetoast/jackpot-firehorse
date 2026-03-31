@@ -43,6 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
@@ -1031,6 +1032,16 @@ export default function AssetDrawer({
     useEffect(() => {
         if (!showZoomModal) {
             setShowLightboxDetails(false)
+        }
+    }, [showZoomModal])
+
+    // Lightbox: lock page scroll; portal renders to document.body (Safari fixes fixed/overflow inside drawer)
+    useEffect(() => {
+        if (!showZoomModal) return
+        const prev = document.body.style.overflow
+        document.body.style.overflow = 'hidden'
+        return () => {
+            document.body.style.overflow = prev
         }
     }, [showZoomModal])
 
@@ -2969,11 +2980,11 @@ export default function AssetDrawer({
 
                 {/* C9.2: Collections Edit Modal (inline in Metadata section, only if field is visible) */}
                 {showCollectionsModal && collectionFieldVisible && (
-                    <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div className="fixed inset-0 z-[10055] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
                         <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity z-[60]" onClick={() => setShowCollectionsModal(false)}></div>
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity z-[10055]" onClick={() => setShowCollectionsModal(false)}></div>
                             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                            <div className="relative inline-block align-bottom bg-white rounded-lg text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full z-[61]">
+                            <div className="relative inline-block align-bottom bg-white rounded-lg text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full z-[10056]">
                                 <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
                                     <div className="sm:flex sm:items-start">
                                         <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
@@ -3711,10 +3722,11 @@ export default function AssetDrawer({
                 
             </div>
 
-            {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) */}
-            {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && (
+            {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) — portaled for Safari fixed/z-index inside overflow ancestors */}
+            {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && typeof document !== 'undefined' && createPortal(
                 <div
-                    className="fixed inset-0 z-[60] flex min-h-0 w-full max-h-[100dvh] flex-col overflow-hidden bg-black/90 md:flex-row md:items-stretch"
+                    className="fixed inset-0 z-[10050] isolate flex min-h-0 w-full max-h-[100dvh] flex-col overflow-hidden md:flex-row md:items-stretch"
+                    style={{ backgroundColor: 'rgb(0 0 0 / 0.92)' }}
                     onClick={() => setShowZoomModal(false)}
                 >
                     <div
@@ -3901,7 +3913,11 @@ export default function AssetDrawer({
                     </div>
 
                     <div className="pointer-events-none absolute bottom-8 left-1/2 z-10 -translate-x-1/2 transform">
-                        <p className="rounded-lg bg-black/40 px-4 py-2 text-center text-sm font-medium text-white/80 backdrop-blur-sm">
+                        {/* Safari: backdrop-blur + translucent bg can make caption text invisible; use solid bar + explicit white */}
+                        <p
+                            className="rounded-lg bg-black/80 px-4 py-2 text-center text-sm font-medium text-white shadow-lg"
+                            style={{ WebkitFontSmoothing: 'antialiased' }}
+                        >
                             {currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Untitled Asset'}
                         </p>
                     </div>
@@ -3973,12 +3989,13 @@ export default function AssetDrawer({
                             )}
                         </div>
                     )}
-                </div>
+                </div>,
+                document.body,
             )}
 
             {/* Retry Confirmation Modal */}
             {showRetryModal && (
-                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-[10060] bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center mb-4">
                             <ExclamationTriangleIcon className="h-6 w-6 text-yellow-600 mr-3" />
@@ -4037,7 +4054,7 @@ export default function AssetDrawer({
 
             {/* Publish & categorize modal - for builder-staged reference materials */}
             {showFinalizeFromBuilderModal && displayAsset?.id && (
-                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-[10060] bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center mb-4">
                             <CloudArrowUpIcon className="h-6 w-6 text-indigo-600 mr-3" />
@@ -4115,7 +4132,7 @@ export default function AssetDrawer({
 
             {/* Publish Confirmation Modal */}
             {showPublishModal && (
-                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-[10060] bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center mb-4">
                             <CheckCircleIcon className="h-6 w-6 text-green-600 mr-3" />

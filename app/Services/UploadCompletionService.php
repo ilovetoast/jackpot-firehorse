@@ -13,8 +13,10 @@ use App\Jobs\ExtractMetadataJob;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\Category;
+use App\Services\AiUsageService;
 use App\Services\AssetPathGenerator;
 use App\Services\SystemCategoryService;
+use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\AssetVersionService;
 use App\Services\MetadataPersistenceService;
@@ -936,27 +938,35 @@ class UploadCompletionService
             }
 
             // C9.2: Upload-time AI skip flags MUST be on the asset row before AssetUploaded / ProcessAssetJob.
-            // UploadController used to merge these after complete() returned — too late: afterCommit already fired
-            // and ProcessAssetJob loaded the asset without _skip_ai_tagging / _skip_ai_metadata.
-            if ($skipAiTagging || $skipAiMetadata) {
-                $meta = $asset->metadata ?? [];
-                if (! is_array($meta)) {
-                    $meta = [];
-                }
-                if ($skipAiTagging) {
-                    $meta['_skip_ai_tagging'] = true;
-                }
-                if ($skipAiMetadata) {
-                    $meta['_skip_ai_metadata'] = true;
-                }
-                $asset->update(['metadata' => $meta]);
-                $asset->refresh();
-                Log::info('[UploadCompletionService] AI skip flags merged before pipeline (same transaction as AssetUploaded)', [
-                    'asset_id' => $asset->id,
-                    'skip_ai_tagging' => $skipAiTagging,
-                    'skip_ai_metadata' => $skipAiMetadata,
-                ]);
+            // Always persist explicit booleans so ProcessAssetJob never sees stale/missing keys after merges.
+            // Plan: AI metadata generation uses the same monthly pool as tagging (see AiMetadataGenerationJob::checkUsage).
+            $meta = $asset->metadata ?? [];
+            if (! is_array($meta)) {
+                $meta = [];
             }
+            $meta['_skip_ai_tagging'] = (bool) $skipAiTagging;
+            $meta['_skip_ai_metadata'] = (bool) $skipAiMetadata;
+
+            $tenant = Tenant::find($uploadSession->tenant_id);
+            if ($tenant) {
+                $usage = app(AiUsageService::class);
+                if (! $meta['_skip_ai_tagging'] && ! $usage->canUseFeature($tenant, 'tagging')) {
+                    $meta['_skip_ai_tagging'] = true;
+                    $meta['_ai_tagging_skipped_reason'] = 'monthly_quota_exceeded';
+                }
+                if (! $meta['_skip_ai_metadata'] && ! $usage->canUseFeature($tenant, 'tagging')) {
+                    $meta['_skip_ai_metadata'] = true;
+                    $meta['_ai_metadata_skipped_reason'] = 'monthly_quota_exceeded';
+                }
+            }
+
+            $asset->update(['metadata' => $meta]);
+            $asset->refresh();
+            Log::info('[UploadCompletionService] AI skip flags merged before pipeline (same transaction as AssetUploaded)', [
+                'asset_id' => $asset->id,
+                'skip_ai_tagging' => $meta['_skip_ai_tagging'],
+                'skip_ai_metadata' => $meta['_skip_ai_metadata'],
+            ]);
 
             // Emit AssetUploaded event after transaction commits so queued listener (ProcessAssetOnUpload)
             // runs only when the asset is visible to workers. Prevents "asset not found" in Redis/staging.

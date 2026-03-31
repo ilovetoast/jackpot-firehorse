@@ -2925,11 +2925,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // C9.2: Include AI skip flags in finalize request (upload-level, applies to all assets)
             const finalizePayload = {
                 manifest,
-                // C9.2: Upload-time AI skip controls (only if user is Admin/Brand Manager)
-                ...(isAdminOrBrandManager && {
-                    skip_ai_tagging: !applyAiTagging,
-                    skip_ai_metadata: !applyAiMetadata,
-                }),
+                // C9.2: Always send explicit booleans so the API never relies on missing keys.
+                // Backend only honors opt-out for Admin / Brand Manager / tenant Owner–Admin (see UploadController).
+                skip_ai_tagging: isAdminOrBrandManager ? !applyAiTagging : false,
+                skip_ai_metadata: isAdminOrBrandManager ? !applyAiMetadata : false,
             }
 
             // Call backend finalize endpoint using fetch

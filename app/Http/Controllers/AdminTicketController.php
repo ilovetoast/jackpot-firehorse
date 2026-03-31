@@ -1121,17 +1121,19 @@ class AdminTicketController extends Controller
 
     /**
      * Remove user from support round-robin bucket.
+     *
+     * The `{user}` route segment must bind to a parameter named `$user` (implicit Eloquent binding).
      */
-    public function removeRoundRobinUser(Request $request, User $roundRobinUser)
+    public function removeRoundRobinUser(Request $request, User $user)
     {
-        $user = Auth::user();
-        if (!$user->hasRole(['site_admin', 'site_owner'])) {
+        $authUser = Auth::user();
+        if (!$authUser->hasRole(['site_admin', 'site_owner'])) {
             abort(403, 'Only Site Admin or Site Owner can manage the round-robin bucket.');
         }
 
-        SupportRoundRobinUser::where('user_id', $roundRobinUser->id)->delete();
+        SupportRoundRobinUser::where('user_id', $user->id)->delete();
 
-        return back()->with('success', "{$roundRobinUser->first_name} {$roundRobinUser->last_name} removed from round-robin bucket.");
+        return back()->with('success', "{$user->first_name} {$user->last_name} removed from round-robin bucket.");
     }
 
     /**

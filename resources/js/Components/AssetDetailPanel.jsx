@@ -1063,7 +1063,7 @@ export default function AssetDetailPanel({
                 </header>
 
                 {/* Scrollable body — min-h-0 required so flex child can shrink and scroll (Chrome/Safari) */}
-                <div className={`flex-1 min-h-0 overflow-y-auto ${lb ? 'bg-neutral-950 text-xs' : ''}`}>
+                <div className={`flex-1 min-h-0 overflow-y-auto ${lb ? 'bg-neutral-950 text-xs text-neutral-100 [color-scheme:dark]' : ''}`}>
                     <div className={lb ? 'space-y-1 px-4 py-4' : 'divide-y divide-gray-200 p-4 sm:p-5'}>
                         {loading && (
                             <div className={`py-8 text-center text-sm ${lb ? 'text-neutral-500' : 'text-gray-500'}`}>
