@@ -585,10 +585,7 @@ class AiMetadataGenerationService
         $minStr = number_format($min, 2, '.', '');
         $ctx = $this->buildPromptContextBlock($asset);
 
-        $isVideo = str_starts_with($asset->mime_type ?? '', 'video/');
-        $prompt = $isVideo
-            ? "This is a frame from a video. Analyze it and describe what the video is likely about (subject, setting, action, mood). Provide both structured metadata field values and searchable tags.\n\n"
-            : "Analyze this image and provide both structured metadata field values and searchable tags.\n\n";
+        $prompt = "Analyze this image and provide both structured metadata field values and searchable tags.\n\n";
 
         $prompt .= $ctx;
 
@@ -631,33 +628,50 @@ class AiMetadataGenerationService
         $minStr = number_format($min, 2, '.', '');
         $ctx = $this->buildPromptContextBlock($asset);
 
-        $isVideo = str_starts_with($asset->mime_type ?? '', 'video/');
-        $prompt = $isVideo
-            ? "This is a frame from a video. Analyze it and provide searchable tags.\n\n"
-            : "Analyze this image and provide searchable tags.\n\n";
+        $prompt = "Analyze this image and generate SEARCHABLE TAGS for a digital asset management system.\n\n";
 
         $prompt .= $ctx;
 
-        $prompt .= "GENERAL TAGS (for search & discovery):\n";
-        $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
-        $prompt .= "Prefer concrete, searchable terms: subject, setting, style, mood, notable people or objects, production type when visible.\n";
-        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"photo shoot\", \"model\", \"product\"); avoid punctuation.\n";
-        $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
+        $prompt .= "TAGGING RULES (STRICT):\n";
+        $prompt .= "- Only include VISUALLY VERIFIABLE elements present in the image\n";
+        $prompt .= "- Do NOT infer intent, meaning, or marketing context\n";
+        $prompt .= "- Avoid abstract terms (e.g. \"modern\", \"professional\", \"aesthetic\", \"branding\")\n";
+        $prompt .= "- Avoid subjective descriptors (e.g. \"beautiful\", \"clean\", \"bold\")\n";
+        $prompt .= "- Prefer concrete nouns and simple descriptors\n";
+        $prompt .= "- Tags should help someone FIND this exact image\n\n";
 
-        $prompt .= "REQUIREMENTS:\n";
-        $prompt .= "- Only return tags where confidence is >= {$minStr}\n";
-        $prompt .= "- Include confidence score for each tag\n";
-        $prompt .= "- Tags must be lowercase; short phrases (spaces allowed) are OK\n";
-        $prompt .= "- Return JSON with a \"tags\" array (and may use an empty \"fields\" object):\n";
+        $prompt .= "ALLOWED TAG TYPES:\n";
+        $prompt .= "- Objects (e.g. \"person\", \"car\", \"fishing rod\")\n";
+        $prompt .= "- People (e.g. \"man\", \"woman\", \"child\", \"group\")\n";
+        $prompt .= "- Setting/location (e.g. \"lake\", \"studio\", \"outdoor\")\n";
+        $prompt .= "- Activity (only if clearly visible, e.g. \"fishing\", \"casting\")\n";
+        $prompt .= "- Asset type (e.g. \"logo\", \"product\", \"catalog page\")\n";
+        $prompt .= "- Composition (e.g. \"close up\", \"wide shot\")\n\n";
+
+        $prompt .= "NORMALIZATION RULES:\n";
+        $prompt .= "- Use lowercase\n";
+        $prompt .= "- 1–3 words max per tag\n";
+        $prompt .= "- Do NOT include synonyms or duplicates (e.g. choose \"man\" OR \"person\", not both)\n";
+        $prompt .= "- Do NOT repeat the category unless it adds specificity\n\n";
+
+        $prompt .= "CONFIDENCE:\n";
+        $prompt .= "- Confidence represents visual certainty (not guess or interpretation)\n";
+        $prompt .= "- Only include tags where confidence >= {$minStr}\n";
+        $prompt .= "- Be conservative — if unsure, exclude the tag\n\n";
+
+        $prompt .= "OUTPUT FORMAT:\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {},\n";
-        $prompt .= "  \"tags\": []\n";
-        $prompt .= "}\n";
-        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}; use [] if none qualify.)\n\n";
-        $prompt .= 'Response:';
+        $prompt .= "  \"tags\": [\n";
+        $prompt .= "    {\"value\": \"example tag\", \"confidence\": 0.95}\n";
+        $prompt .= "  ]\n";
+        $prompt .= "}\n\n";
+
+        $prompt .= "Return ONLY valid JSON. No explanation.\n";
 
         return $prompt;
     }
+
 
     /**
      * Category/brand context and category-specific guidance for vision prompts.
