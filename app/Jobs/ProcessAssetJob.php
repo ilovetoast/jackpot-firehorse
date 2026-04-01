@@ -39,7 +39,7 @@ class ProcessAssetJob implements ShouldQueue
     public $backoff = [60, 300];
 
     /**
-     * Create a new job instance.
+     * Create a new job instance..
      *
      * Accepts either asset ID (legacy) or version ID (version-aware).
      * When version ID: resolves to version, uses version->asset, passes version ID to GenerateThumbnailsJob.
