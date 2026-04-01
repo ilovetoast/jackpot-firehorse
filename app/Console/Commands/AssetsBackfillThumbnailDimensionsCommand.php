@@ -110,7 +110,7 @@ class AssetsBackfillThumbnailDimensionsCommand extends Command
 
                     // Set analysis_status so PopulateAutomaticMetadataJob can run (it expects extracting_metadata)
                     $asset->update(['analysis_status' => 'extracting_metadata']);
-                    PopulateAutomaticMetadataJob::dispatch($asset->id);
+                    PopulateAutomaticMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 }
 
                 $processed++;

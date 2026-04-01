@@ -405,7 +405,7 @@ class BrandWebsiteCrawlerService
             $version = $asset->currentVersion;
             if ($version) {
                 $version->update(['pipeline_status' => 'processing']);
-                \App\Jobs\ProcessAssetJob::dispatch($version->id);
+                \App\Jobs\ProcessAssetJob::dispatch($version->id)->onQueue(config('queue.images_queue', 'images'));
             }
         } catch (\Throwable $e) {
             Log::channel('pipeline')->warning('[BrandWebsiteCrawlerService] Processing dispatch failed', [

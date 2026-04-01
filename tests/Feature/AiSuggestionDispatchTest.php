@@ -112,7 +112,7 @@ class AiSuggestionDispatchTest extends TestCase
         ]);
 
         // Run the job so it builds and dispatches the chain (Bus::fake() records the chain).
-        ProcessAssetJob::dispatchSync($asset->id);
+        ProcessAssetJob::dispatchSync($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         // Laravel stores the chain as PendingChain; get it and assert it contains AI jobs.
         $chains = Bus::dispatched(\Illuminate\Bus\PendingChain::class);

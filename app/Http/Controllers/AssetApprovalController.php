@@ -345,7 +345,7 @@ class AssetApprovalController extends Controller
                     
                     // Only dispatch if not already completed
                     if (!$aiTaggingCompleted) {
-                        \App\Jobs\AITaggingJob::dispatch($asset->id);
+                        \App\Jobs\AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                     }
                     
                     if (! $aiMetadataCompleted) {
@@ -354,7 +354,9 @@ class AssetApprovalController extends Controller
                             new \App\Jobs\AiMetadataGenerationJob($asset->id),
                             new \App\Jobs\AiTagAutoApplyJob($asset->id),
                             new \App\Jobs\AiMetadataSuggestionJob($asset->id),
-                        ])->dispatch();
+                        ])
+                            ->onQueue(config('queue.images_queue', 'images'))
+                            ->dispatch();
                     }
                     
                     Log::info('[AssetApprovalController] AI jobs dispatched after approval', [

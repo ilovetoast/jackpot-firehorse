@@ -129,7 +129,7 @@ class AssetVersionRestoreService
                     'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
                     'metadata' => $meta,
                 ]);
-                dispatch(new \App\Jobs\ProcessAssetJob($newVersion->id));
+                \App\Jobs\ProcessAssetJob::dispatch($newVersion->id)->onQueue(config('queue.images_queue', 'images'));
             } else {
                 // Without rerun: copy thumbnails from source version to new version path
                 // so the UI shows the correct thumbnail for the restored file.
@@ -138,7 +138,7 @@ class AssetVersionRestoreService
                     $asset->id,
                     $sourceVersion->id,
                     $newVersion->id
-                );
+                )->onQueue(config('queue.images_queue', 'images'));
             }
 
             app(AssetVersionService::class)->assertSingleCurrentVersion($asset);

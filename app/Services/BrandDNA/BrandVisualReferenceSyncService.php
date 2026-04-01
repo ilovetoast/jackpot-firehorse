@@ -53,7 +53,7 @@ class BrandVisualReferenceSyncService
                     $create['weight'] = BrandVisualReference::TIER_WEIGHT_DEFAULTS[BrandVisualReference::TIER_GUIDELINE];
                 }
                 $ref = BrandVisualReference::create($create);
-                GenerateAssetEmbeddingJob::dispatch($row->asset_id, $ref->id);
+                GenerateAssetEmbeddingJob::dispatch($row->asset_id, $ref->id)->onQueue(config('queue.images_queue', 'images'));
             }
         });
     }

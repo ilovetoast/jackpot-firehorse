@@ -56,7 +56,7 @@ class ThumbnailRetryStrategy implements RepairStrategyInterface
         $retryCount = (int) ($metadata['retry_count'] ?? 0);
 
         if ($incident->retryable && $retryCount < self::MAX_RETRIES) {
-            GenerateThumbnailsJob::dispatch($asset->id);
+            GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
             $incident->update([
                 'metadata' => array_merge($metadata, [
                     'retried' => true,

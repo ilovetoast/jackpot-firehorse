@@ -1605,7 +1605,7 @@ class UploadCompletionService
             'asset_id' => $asset->id,
             'version_id' => $newVersion->id,
         ]);
-        \App\Jobs\ProcessAssetJob::dispatch($newVersion->id);
+        \App\Jobs\ProcessAssetJob::dispatch($newVersion->id)->onQueue(config('queue.images_queue', 'images'));
 
         return $asset;
     }
@@ -1780,7 +1780,7 @@ class UploadCompletionService
         Log::info('[UploadCompletionService] Dispatching ProcessAssetJob for in-place replace (asset mode)', [
             'asset_id' => $asset->id,
         ]);
-        \App\Jobs\ProcessAssetJob::dispatch($asset->id);
+        \App\Jobs\ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         return $asset;
     }

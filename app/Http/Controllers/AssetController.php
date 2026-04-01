@@ -2036,7 +2036,9 @@ class AssetController extends Controller
             Bus::chain([
                 new AiMetadataGenerationJob($asset->id, true),
                 new AiTagAutoApplyJob($asset->id),
-            ])->dispatch();
+            ])
+                ->onQueue(config('queue.images_queue', 'images'))
+                ->dispatch();
 
             return response()->json([
                 'success' => true,
@@ -2123,7 +2125,7 @@ class AssetController extends Controller
         $asset->update(['metadata' => $metadata]);
 
         try {
-            AITaggingJob::dispatch($asset->id);
+            AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
             return response()->json([
                 'success' => true,
@@ -2189,7 +2191,7 @@ class AssetController extends Controller
 
             // Also regenerate dominant colors via PopulateAutomaticMetadataJob
             // This ensures dominant_colors and dominant_hue_group are regenerated
-            \App\Jobs\PopulateAutomaticMetadataJob::dispatchSync($asset->id);
+            \App\Jobs\PopulateAutomaticMetadataJob::dispatchSync($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
             // Log activity event
             ActivityEvent::create([

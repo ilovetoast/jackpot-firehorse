@@ -153,7 +153,7 @@ class FinalizeAssetJob implements ShouldQueue
             && ImageEmbeddingService::isImageMimeType($mimeForEmbedding, $asset->original_filename);
 
         if ($willDispatchEmbedding) {
-            GenerateAssetEmbeddingJob::dispatch($asset->id);
+            GenerateAssetEmbeddingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         } else {
             // Non-images and image assets without embeddings: embedding job normally dispatches EBI after scoring.
             app(BrandIntelligenceScheduleService::class)->dispatchAfterPipelineComplete($asset->fresh());

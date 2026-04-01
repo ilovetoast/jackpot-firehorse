@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Contracts\ImageEmbeddingServiceInterface;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\BrandVisualReference;
@@ -26,7 +27,7 @@ use Illuminate\Support\Facades\Log;
  */
 class GenerateAssetEmbeddingJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     public $tries = 3;
 
@@ -39,7 +40,9 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId,
         public readonly ?int $brandVisualReferenceId = null
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     public function handle(ImageEmbeddingServiceInterface $embeddingService): void
     {

@@ -96,7 +96,7 @@ class RecoverStuckComplianceCommand extends Command
                 $this->resetToUploadingAndRequeue($asset);
                 break;
             case 'generating_embedding':
-                GenerateAssetEmbeddingJob::dispatch($asset->id);
+                GenerateAssetEmbeddingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 $this->line('    ✓ Requeued GenerateAssetEmbeddingJob');
                 break;
             case 'scoring':
@@ -120,7 +120,7 @@ class RecoverStuckComplianceCommand extends Command
         ]);
         AnalysisStatusLogger::log($asset, $previousStatus, 'uploading', 'RecoverStuckComplianceCommand');
 
-        ProcessAssetJob::dispatch($asset->id);
+        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         $this->line('    ✓ Reset to uploading, requeued ProcessAssetJob');
     }
 }

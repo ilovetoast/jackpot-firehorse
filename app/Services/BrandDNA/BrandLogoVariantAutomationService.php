@@ -533,7 +533,7 @@ final class BrandLogoVariantAutomationService
             $version = $asset->currentVersion;
             if ($version) {
                 $version->update(['pipeline_status' => 'processing']);
-                ProcessAssetJob::dispatch($version->id);
+                ProcessAssetJob::dispatch($version->id)->onQueue(config('queue.images_queue', 'images'));
             }
         } catch (\Throwable $e) {
             Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] ProcessAssetJob dispatch failed', [

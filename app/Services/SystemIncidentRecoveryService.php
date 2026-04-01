@@ -216,12 +216,12 @@ class SystemIncidentRecoveryService
         }
 
         if (($asset->analysis_status ?? '') === 'promotion_failed') {
-            PromoteAssetJob::dispatch($asset->id);
+            PromoteAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         } elseif ($incident->title === 'Expected visual metadata missing') {
             $asset->update(['analysis_status' => 'extracting_metadata']);
-            PopulateAutomaticMetadataJob::dispatch($asset->id);
+            PopulateAutomaticMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         } else {
-            ProcessAssetJob::dispatch($asset->id);
+            ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         }
 
         $metadata = $incident->metadata ?? [];
@@ -319,7 +319,7 @@ class SystemIncidentRecoveryService
         // Job will succeed if dimensions were added by backfill; otherwise incident remains
         if ($incident->title === 'Expected visual metadata missing') {
             $asset->update(['analysis_status' => 'extracting_metadata']);
-            PopulateAutomaticMetadataJob::dispatch($asset->id);
+            PopulateAutomaticMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
             Log::info('[SystemIncidentRecoveryService] Dispatched PopulateAutomaticMetadataJob for visual metadata incident', [
                 'incident_id' => $incident->id,
                 'asset_id' => $asset->id,

@@ -129,6 +129,6 @@ class AssetsFixStuckZipCommand extends Command
             ]);
         }
 
-        FinalizeAssetJob::dispatch($asset->id);
+        FinalizeAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
     }
 }

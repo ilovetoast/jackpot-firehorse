@@ -34,7 +34,7 @@ class VisualMetadataRepairStrategy implements RepairStrategyInterface
         }
 
         $asset->update(['analysis_status' => 'extracting_metadata']);
-        PopulateAutomaticMetadataJob::dispatch($asset->id);
+        PopulateAutomaticMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         $incident->update([
             'metadata' => array_merge($incident->metadata ?? [], [

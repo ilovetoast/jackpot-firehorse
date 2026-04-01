@@ -1291,7 +1291,9 @@ class AssetMetadataController extends Controller
             new GenerateThumbnailsJob($asset->id),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
-        ])->dispatch();
+        ])
+            ->onQueue(config('queue.images_queue', 'images'))
+            ->dispatch();
 
         ActivityEvent::create([
             'tenant_id' => $tenant->id,
@@ -1388,7 +1390,7 @@ class AssetMetadataController extends Controller
 
         // Phase 5: Promotion failed is terminal — retry promotion only, not full pipeline
         if (($asset->analysis_status ?? '') === 'promotion_failed') {
-            PromoteAssetJob::dispatch($asset->id);
+            PromoteAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
             return response()->json(['status' => 'queued']);
         }
@@ -1416,7 +1418,7 @@ class AssetMetadataController extends Controller
             'metadata' => $metadata,
         ]);
 
-        ProcessAssetJob::dispatch($asset->id);
+        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         // P1: Reconcile after retry-processing
         try {
@@ -1475,7 +1477,7 @@ class AssetMetadataController extends Controller
             ]);
         }
 
-        ProcessAssetJob::dispatch($asset->id);
+        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         return response()->json(['status' => 'queued', 'message' => 'Asset reprocessing started']);
     }
@@ -4765,7 +4767,7 @@ class AssetMetadataController extends Controller
         }
 
         // All metadata approved and AI suggestions not yet completed - trigger AI
-        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
+        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
     }
 
     /**

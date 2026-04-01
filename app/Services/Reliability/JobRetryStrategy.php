@@ -58,13 +58,13 @@ class JobRetryStrategy implements RepairStrategyInterface
     protected function dispatchRetry(SystemIncident $incident, Asset $asset): void
     {
         if (($asset->analysis_status ?? '') === 'promotion_failed') {
-            PromoteAssetJob::dispatch($asset->id);
+            PromoteAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
             Log::info('[JobRetryStrategy] Dispatched PromoteAssetJob', [
                 'incident_id' => $incident->id,
                 'asset_id' => $asset->id,
             ]);
         } else {
-            ProcessAssetJob::dispatch($asset->id);
+            ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
             Log::info('[JobRetryStrategy] Dispatched ProcessAssetJob', [
                 'incident_id' => $incident->id,
                 'asset_id' => $asset->id,

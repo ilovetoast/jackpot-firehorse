@@ -20,6 +20,6 @@ class ProcessAssetOnUpload implements ShouldQueue
         \App\Services\UploadDiagnosticLogger::assetSnapshot($asset, 'ProcessAssetOnUpload DISPATCHING ProcessAssetJob', [
             'version_id' => $asset->currentVersion?->id,
         ]);
-        ProcessAssetJob::dispatch($asset->id);
+        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
     }
 }

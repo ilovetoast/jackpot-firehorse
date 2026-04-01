@@ -394,7 +394,9 @@ class ProcessAssetJob implements ShouldQueue
             new PromoteAssetJob($asset->id),
         ]);
         
-        Bus::chain($chainJobs)->dispatch();
+        Bus::chain($chainJobs)
+            ->onQueue(config('queue.images_queue', 'images'))
+            ->dispatch();
 
         // Seed page 1 render for PDFs on dedicated queue.
         if ($fileType === 'pdf') {
@@ -487,7 +489,7 @@ class ProcessAssetJob implements ShouldQueue
             ]);
         }
 
-        FinalizeAssetJob::dispatch($asset->id);
+        FinalizeAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         PipelineLogger::info('[ProcessAssetJob] Short-circuit complete — FinalizeAssetJob dispatched', [
             'asset_id' => $asset->id,

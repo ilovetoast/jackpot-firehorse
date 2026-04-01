@@ -62,6 +62,6 @@ class RetryThumbnailGenerationJob implements ShouldQueue
 
         // Dispatch existing GenerateThumbnailsJob (unchanged, respects locked pipeline)
         // The existing job handles all thumbnail generation logic
-        GenerateThumbnailsJob::dispatch($this->assetId);
+        GenerateThumbnailsJob::dispatch($this->assetId)->onQueue(config('queue.images_queue', 'images'));
     }
 }

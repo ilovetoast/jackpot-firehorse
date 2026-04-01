@@ -208,7 +208,7 @@ class ThumbnailRetryService
         // Dispatch RetryThumbnailGenerationJob which wraps GenerateThumbnailsJob
         // This respects the locked pipeline by not modifying GenerateThumbnailsJob
         $retryNumber = $asset->thumbnail_retry_count + 1;
-        RetryThumbnailGenerationJob::dispatch($asset->id, $userId, $retryNumber);
+        RetryThumbnailGenerationJob::dispatch($asset->id, $userId, $retryNumber)->onQueue(config('queue.images_queue', 'images'));
 
         // Note: Job ID is not available immediately after dispatch
         // The job ID will be available inside the job execution via $this->job->getJobId()

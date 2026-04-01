@@ -860,7 +860,7 @@ class AssetThumbnailController extends Controller
         // The job will handle all thumbnail generation logic
         // Note: Job ID is not available immediately after dispatch
         // The job ID will be available inside the job execution via $this->job->getJobId()
-        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         Log::info('[AssetThumbnailController] Thumbnail generation job dispatched (manual request)', [
             'asset_id' => $asset->id,
@@ -948,7 +948,7 @@ class AssetThumbnailController extends Controller
 
         $version = $asset->currentVersion;
         $payloadId = $version ? (string) $version->id : (string) $asset->id;
-        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, true);
+        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, true)->onQueue(config('queue.images_queue', 'images'));
 
         Log::info('[AssetThumbnailController] Thumbnail regeneration job dispatched (admin)', [
             'asset_id' => $asset->id,
@@ -1420,7 +1420,7 @@ class AssetThumbnailController extends Controller
             ]);
 
             // Dispatch GenerateThumbnailsJob which will handle video thumbnail generation
-            \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+            \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
             Log::info('[AssetThumbnailController] Video thumbnail regeneration job dispatched', [
                 'asset_id' => $asset->id,
@@ -1516,7 +1516,7 @@ class AssetThumbnailController extends Controller
             ]);
 
             // Dispatch GenerateVideoPreviewJob
-            \App\Jobs\GenerateVideoPreviewJob::dispatch($asset->id);
+            \App\Jobs\GenerateVideoPreviewJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
             Log::info('[AssetThumbnailController] Video preview regeneration job dispatched', [
                 'asset_id' => $asset->id,

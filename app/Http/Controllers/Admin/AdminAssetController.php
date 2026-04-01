@@ -586,7 +586,7 @@ class AdminAssetController extends Controller
 
         $asset->update($updateData);
 
-        ProcessAssetJob::dispatch($asset->id);
+        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
 
         return response()->json(['dispatched' => true]);
     }
@@ -619,7 +619,9 @@ class AdminAssetController extends Controller
             new GenerateThumbnailsJob($asset->id),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
-        ])->dispatch();
+        ])
+            ->onQueue(config('queue.images_queue', 'images'))
+            ->dispatch();
 
         ActivityEvent::create([
             'tenant_id' => $asset->tenant_id,
@@ -1074,16 +1076,16 @@ class AdminAssetController extends Controller
                 $asset->restore();
                 break;
             case 'retry_pipeline':
-                ProcessAssetJob::dispatch($asset->id);
+                ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'regenerate_thumbnails':
-                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'rerun_metadata':
-                \App\Jobs\ExtractMetadataJob::dispatch($asset->id);
+                \App\Jobs\ExtractMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'rerun_ai_tagging':
-                \App\Jobs\AITaggingJob::dispatch($asset->id);
+                \App\Jobs\AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'publish':
                 app(\App\Services\AssetPublicationService::class)->publish($asset);
