@@ -28,6 +28,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
 
@@ -71,7 +72,7 @@ use App\Support\Logging\PipelineLogger;
  */
 class GenerateThumbnailsJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -113,6 +114,7 @@ class GenerateThumbnailsJob implements ShouldQueue
         $job = (int) config('assets.thumbnail.job_timeout_seconds', 900);
         $large = (int) config('assets.thumbnail.large_asset_timeout_seconds', 1800);
         $this->timeout = max($job, $large);
+        $this->configureImagesQueue();
     }
 
     /**

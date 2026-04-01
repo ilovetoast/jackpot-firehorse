@@ -8,6 +8,7 @@ use App\Models\AssetEvent;
 use App\Services\AssetCompletionService;
 use App\Services\AssetProcessingFailureService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,7 +29,7 @@ use Illuminate\Support\Facades\Log;
  */
 class FinalizeAssetJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -50,7 +51,9 @@ class FinalizeAssetJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

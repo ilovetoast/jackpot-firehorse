@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetPathGenerator;
@@ -53,7 +54,7 @@ use Illuminate\Support\Facades\Log;
  */
 class PromoteAssetJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -80,7 +81,9 @@ class PromoteAssetJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

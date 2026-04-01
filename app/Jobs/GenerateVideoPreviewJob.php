@@ -6,6 +6,7 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Models\Asset;
 use App\Services\AssetDerivativeFailureService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\VideoPreviewGenerationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,7 +26,7 @@ use Illuminate\Support\Facades\Schema;
  */
 class GenerateVideoPreviewJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -56,6 +57,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
         public readonly string $assetId
     ) {
         $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+        $this->configureImagesQueue();
     }
 
     /**

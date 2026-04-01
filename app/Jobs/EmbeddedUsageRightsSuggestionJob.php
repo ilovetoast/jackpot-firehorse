@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Services\AiMetadataSuggestionService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\EmbeddedUsageRightsSuggestionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -18,7 +19,7 @@ use Illuminate\Queue\SerializesModels;
  */
 class EmbeddedUsageRightsSuggestionJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     public $tries = 3;
 
@@ -26,7 +27,9 @@ class EmbeddedUsageRightsSuggestionJob implements ShouldQueue
 
     public function __construct(
         public string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     public function handle(
         EmbeddedUsageRightsSuggestionService $embeddedService,

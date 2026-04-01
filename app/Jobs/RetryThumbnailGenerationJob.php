@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Jobs\GenerateThumbnailsJob;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,7 +25,7 @@ use Illuminate\Support\Facades\Log;
  */
 class RetryThumbnailGenerationJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * Create a new job instance.
@@ -37,7 +38,9 @@ class RetryThumbnailGenerationJob implements ShouldQueue
         public readonly string $assetId,
         public readonly int $userId,
         public readonly int $retryNumber
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

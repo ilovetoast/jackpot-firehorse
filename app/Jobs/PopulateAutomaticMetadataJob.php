@@ -13,6 +13,7 @@ use App\Services\Automation\ColorAnalysisService;
 use App\Services\Automation\DominantColorsExtractor;
 use App\Services\MetadataSchemaResolver;
 use App\Services\Reliability\ReliabilityEngine;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,7 +41,7 @@ use Illuminate\Support\Facades\Log;
  */
 class PopulateAutomaticMetadataJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -65,7 +66,9 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

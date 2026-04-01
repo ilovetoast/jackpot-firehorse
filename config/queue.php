@@ -29,6 +29,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Images / Asset Pipeline Queue Name
+    |--------------------------------------------------------------------------
+    |
+    | ProcessAssetJob, thumbnails, previews, metadata extraction, and related
+    | pipeline jobs use this queue. Horizon should run a dedicated supervisor
+    | for it (see config/horizon.php) so heavy work does not starve default.
+    |
+    */
+    'images_queue' => env('QUEUE_IMAGES_QUEUE', 'images'),
+
+    /*
+    |--------------------------------------------------------------------------
     | PDF Processing Queue Name
     |--------------------------------------------------------------------------
     |

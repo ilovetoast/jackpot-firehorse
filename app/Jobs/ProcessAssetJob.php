@@ -9,6 +9,7 @@ use App\Models\AssetVersion;
 use App\Services\AnalysisStatusLogger;
 use App\Services\AssetProcessingFailureService;
 use App\Services\FileInspectionService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -22,7 +23,7 @@ use Illuminate\Support\Facades\Redis;
 
 class ProcessAssetJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -47,7 +48,9 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * C9.2: Check if AI tagging should be skipped based on upload-time flag.

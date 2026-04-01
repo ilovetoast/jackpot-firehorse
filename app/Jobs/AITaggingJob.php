@@ -8,6 +8,7 @@ use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 
 class AITaggingJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -40,7 +41,9 @@ class AITaggingJob implements ShouldQueue
      */
     public function __construct(
         public readonly string $assetId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

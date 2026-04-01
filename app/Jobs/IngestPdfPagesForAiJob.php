@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -13,11 +14,12 @@ use Illuminate\Support\Facades\Log;
 
 class IngestPdfPagesForAiJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     public function __construct(
         public readonly string $assetId
     ) {
+        $this->configureImagesQueue();
     }
 
     public function handle(): void
@@ -38,6 +40,6 @@ class IngestPdfPagesForAiJob implements ShouldQueue
         Bus::chain([
             new AiMetadataGenerationJob($asset->id),
             new AiMetadataSuggestionJob($asset->id),
-        ])->dispatch();
+        ])->onQueue(config('queue.images_queue', 'images'))->dispatch();
     }
 }

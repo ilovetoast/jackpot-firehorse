@@ -9,6 +9,7 @@ use App\Models\Category;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataSuggestionService;
 use App\Services\AssetProcessingFailureService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -35,7 +36,7 @@ use Illuminate\Support\Facades\Log;
  */
 class AiMetadataSuggestionJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -57,6 +58,7 @@ class AiMetadataSuggestionJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId
     ) {
+        $this->configureImagesQueue();
     }
 
     /**

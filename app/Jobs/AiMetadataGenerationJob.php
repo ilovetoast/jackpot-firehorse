@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\AITaskType;
 use App\Enums\EventType;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Exceptions\AIQuotaExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\AIAgentRun;
@@ -35,7 +36,7 @@ use Illuminate\Support\Facades\Log;
  */
 class AiMetadataGenerationJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -81,6 +82,7 @@ class AiMetadataGenerationJob implements ShouldQueue
         bool $isManualRerun = false
     ) {
         $this->isManualRerun = $isManualRerun;
+        $this->configureImagesQueue();
     }
 
     /**

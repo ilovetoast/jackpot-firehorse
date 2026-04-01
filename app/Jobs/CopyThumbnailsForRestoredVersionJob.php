@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\AssetVersion;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
@@ -22,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  */
 class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     public $tries = 3;
 
@@ -32,7 +33,9 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
         public string $assetId,
         public string $sourceVersionId,
         public string $newVersionId
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     public function handle(): void
     {

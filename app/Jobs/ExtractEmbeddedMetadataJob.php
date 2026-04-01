@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Assets\Metadata\EmbeddedMetadataExtractionService;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\AssetVersion;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,7 +20,7 @@ use Illuminate\Support\Facades\Log;
  */
 class ExtractEmbeddedMetadataJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     public $tries = 3;
 
@@ -28,7 +29,9 @@ class ExtractEmbeddedMetadataJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId,
         public readonly ?string $versionId = null
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     public function handle(EmbeddedMetadataExtractionService $service): void
     {

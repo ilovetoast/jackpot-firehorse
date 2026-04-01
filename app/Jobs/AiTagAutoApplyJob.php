@@ -6,6 +6,7 @@ use App\Enums\EventType;
 use App\Models\Asset;
 use App\Services\ActivityRecorder;
 use App\Services\AiTagAutoApplyService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -22,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  */
 class AiTagAutoApplyJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -44,6 +45,7 @@ class AiTagAutoApplyJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId
     ) {
+        $this->configureImagesQueue();
     }
 
     /**

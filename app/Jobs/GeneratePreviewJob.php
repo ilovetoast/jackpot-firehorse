@@ -9,6 +9,7 @@ use App\Models\AssetEvent;
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,7 +20,7 @@ use Illuminate\Support\Facades\Log;
 
 class GeneratePreviewJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -51,6 +52,7 @@ class GeneratePreviewJob implements ShouldQueue
         public readonly string $assetId
     ) {
         $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
+        $this->configureImagesQueue();
     }
 
     /**

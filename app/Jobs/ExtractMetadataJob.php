@@ -7,6 +7,7 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetMetadata;
 use App\Models\AssetVersion;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,7 +18,7 @@ use Illuminate\Support\Facades\Log;
 
 class ExtractMetadataJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
      * The number of times the job may be attempted.
@@ -43,7 +44,9 @@ class ExtractMetadataJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId,
         public readonly ?string $versionId = null
-    ) {}
+    ) {
+        $this->configureImagesQueue();
+    }
 
     /**
      * Execute the job.

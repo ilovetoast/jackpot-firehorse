@@ -99,6 +99,7 @@ return [
     'waits' => [
         'redis:default' => 90,
         'redis:downloads' => 300,
+        'redis:images' => 300,
         'redis:pdf-processing' => 300,
     ],
 
@@ -165,8 +166,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | When this option is enabled, Horizon's "terminate" command will not
-    | wait on all of the workers to terminate unless the --wait option
-    | is provided. Fast termination can shorten deployment delay by
+    | wait on all of the workers to terminate unless the --wait option is
+    | provided. Fast termination can shorten deployment delay by
     | allowing a new instance of Horizon to start while the last
     | instance will continue to terminate each of its workers.
     |
@@ -196,21 +197,38 @@ return [
     | in all environments. These supervisors and settings handle all your
     | queued jobs and will be provisioned by Horizon during deployment.
     |
+    | default: light jobs (mail, webhooks, etc.) + optional downloads queue
+    | images:   asset pipeline (ProcessAssetJob, thumbnails, previews, …)
+    | pdf-processing: PDF page render / extraction (see config/queue.php)
+    |
     */
 
     'defaults' => [
         'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'downloads', 'pdf-processing'],
+            'queue' => ['default', 'downloads'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
             'maxTime' => 3600,
-            'maxJobs' => 1000,
-            'memory' => 1024,
+            'maxJobs' => 500,
+            'memory' => 256,
             'tries' => 3,
-            // Must be >= max(job_timeout_seconds, large_asset_timeout_seconds) so thumbnail jobs are not killed early
-            'timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 1800),
+            'timeout' => 120,
+            'nice' => 0,
+        ],
+        'supervisor-images' => [
+            'connection' => 'redis',
+            'queue' => ['images'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 200,
+            'memory' => 128,
+            // Must be >= GenerateThumbnailsJob / large-asset pipeline timeouts (see assets.thumbnail.*)
+            'tries' => 2,
+            'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
         'supervisor-pdf-processing' => [
@@ -220,10 +238,10 @@ return [
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
             'maxTime' => 3600,
-            'maxJobs' => 250,
-            'memory' => 512,
-            'tries' => 3,
-            'timeout' => (int) env('QUEUE_PDF_PROCESSING_TIMEOUT', 600),
+            'maxJobs' => 100,
+            'memory' => 256,
+            'tries' => 2,
+            'timeout' => 600,
             'nice' => 0,
         ],
     ],
@@ -232,6 +250,11 @@ return [
         'production' => [
             'supervisor-default' => [
                 'maxProcesses' => 10,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+            'supervisor-images' => [
+                'maxProcesses' => 4,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
@@ -244,38 +267,21 @@ return [
 
         'staging' => [
             'supervisor-default' => [
-                'connection' => 'redis',
-                'queue' => ['default', 'downloads'],
-                'balance' => 'auto',
-                'maxProcesses' => 2,
-                'tries' => 3,
-                'timeout' => 120,
-                'memory' => 256,
-            ],
-        
-            'supervisor-pdf-processing' => [
-                'connection' => 'redis',
-                'queue' => ['pdf-processing'],
-                'balance' => 'auto',
                 'maxProcesses' => 1,
-                'tries' => 2,
-                'timeout' => 300,
-                'memory' => 256,
             ],
-            // 'supervisor-default' => [
-            //     'maxProcesses' => 3,
-            //     'balanceMaxShift' => 1,
-            //     'balanceCooldown' => 3,
-            // ],
-            // 'supervisor-pdf-processing' => [
-            //     'maxProcesses' => 1,
-            //     'balanceMaxShift' => 1,
-            //     'balanceCooldown' => 3,
-            // ],
+            'supervisor-images' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-pdf-processing' => [
+                'maxProcesses' => 1,
+            ],
         ],
 
         'local' => [
             'supervisor-default' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-images' => [
                 'maxProcesses' => 1,
             ],
             'supervisor-pdf-processing' => [
