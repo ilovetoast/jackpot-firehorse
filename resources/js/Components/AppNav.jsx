@@ -192,7 +192,13 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const suppressWorkspaceChrome = Boolean(hideWorkspaceAppNav && isAppPage && !isCollectionOnlyNav)
     /** Agency strip visible (brand quick-switch lives here); otherwise show workspace bar above main nav */
     const agencyStripVisible = Boolean(isAppPage && showAgencyQuickLink && agencyHomeCompany && !hideAgencyStrip)
-    const showWorkspaceContextBar = isAppPage && !isCollectionOnlyNav && !agencyStripVisible
+    /**
+     * Company/workspace row above the logo: only for users who belong to an agency tenant.
+     * Non-agency (single-company) users should not see the extra "Company" header — the main nav + brand logo are enough.
+     * When the agency strip is hidden but the user is still an agency member, keep the workspace switcher as a fallback.
+     */
+    const showWorkspaceContextBar =
+        isAppPage && !isCollectionOnlyNav && !agencyStripVisible && Boolean(agencyHomeCompany)
     // Check if we're in admin area - never show plan limit banner in admin
     const isAdminPage = currentUrl.startsWith('/app/admin')
     

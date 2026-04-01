@@ -5,6 +5,7 @@ namespace App\Listeners;
 use App\Models\AssetVersion;
 use App\Services\SystemIncidentService;
 use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -28,6 +29,12 @@ class QueueFailureListener
     {
         $jobName = $this->getJobName($event);
         if (!$jobName || !$this->isTrackedJob($jobName)) {
+            return;
+        }
+
+        // Final failure after all retries: job classes handle UX + incident resolution in failed().
+        // Recording again would reopen noise in the reliability timeline.
+        if ($this->isTerminalAttemptExhaustion($event->exception)) {
             return;
         }
 
@@ -94,6 +101,25 @@ class QueueFailureListener
     protected function isTrackedJob(string $jobName): bool
     {
         return in_array($jobName, self::TRACKED_JOBS, true);
+    }
+
+    protected function isTerminalAttemptExhaustion(?\Throwable $e): bool
+    {
+        if (! $e) {
+            return false;
+        }
+        $cur = $e;
+        while ($cur) {
+            if ($cur instanceof MaxAttemptsExceededException) {
+                return true;
+            }
+            $cur = $cur->getPrevious();
+        }
+
+        $msg = strtolower((string) $e->getMessage());
+
+        return str_contains($msg, 'has been attempted too many times')
+            || str_contains($msg, 'attempted too many times');
     }
 
     protected function extractAssetId(?string $command, string $jobName): ?string

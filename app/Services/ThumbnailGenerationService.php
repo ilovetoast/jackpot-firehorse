@@ -5,11 +5,9 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
-use App\Services\AssetPathGenerator;
-use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
+use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -23,7 +21,7 @@ use Illuminate\Support\Str;
  * - TIFF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - AVIF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - PDF: first page extraction (page 1 only, via spatie/pdf-to-image) ✓ IMPLEMENTED
- * 
+ *
  * Thumbnail output format:
  * - Configurable: WebP (default, better compression) or JPEG (maximum compatibility)
  * - WebP offers 25-35% smaller file sizes with similar quality
@@ -65,24 +63,25 @@ class ThumbnailGenerationService
 
     /**
      * Convert technical error messages to user-friendly messages.
-     * 
+     *
      * This sanitizes exception messages and technical details that users shouldn't see,
      * replacing them with clear, actionable error messages.
-     * 
-     * @param string $errorMessage The raw error message
-     * @param string|null $fileType Optional file type for type-specific errors
+     *
+     * @param  string  $errorMessage  The raw error message
+     * @param  string|null  $fileType  Optional file type for type-specific errors
      * @return string User-friendly error message
      */
     protected function sanitizeErrorMessage(string $errorMessage, ?string $fileType = null): string
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
+
         return $fileTypeService->sanitizeErrorMessage($errorMessage, $fileType);
     }
 
     /**
      * Create a new ThumbnailGenerationService instance.
      *
-     * @param S3Client|null $s3Client Optional S3 client for testing
+     * @param  S3Client|null  $s3Client  Optional S3 client for testing
      */
     public function __construct(
         ?S3Client $s3Client = null
@@ -96,30 +95,31 @@ class ThumbnailGenerationService
      * Admin-only method for regenerating specific thumbnail styles.
      * Used for troubleshooting or testing new file types.
      *
-     * @param Asset $asset The asset to regenerate thumbnails for
-     * @param array $styleNames Array of style names to regenerate (e.g., ['thumb', 'medium', 'large'])
-     * @param bool $forceImageMagick If true, bypass file type checks and force ImageMagick usage (admin override for testing)
+     * @param  Asset  $asset  The asset to regenerate thumbnails for
+     * @param  array  $styleNames  Array of style names to regenerate (e.g., ['thumb', 'medium', 'large'])
+     * @param  bool  $forceImageMagick  If true, bypass file type checks and force ImageMagick usage (admin override for testing)
      * @return array Array of regenerated thumbnail metadata
+     *
      * @throws \RuntimeException If regeneration fails
      */
     public function regenerateThumbnailStyles(Asset $asset, array $styleNames, bool $forceImageMagick = false): array
     {
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage path or bucket');
         }
 
         $bucket = $asset->storageBucket;
         $allStyles = config('assets.thumbnail_styles', []);
-        
+
         // Filter to only requested styles
         $styles = [];
         foreach ($styleNames as $styleName) {
-            if (!isset($allStyles[$styleName])) {
+            if (! isset($allStyles[$styleName])) {
                 throw new \RuntimeException("Invalid thumbnail style: {$styleName}");
             }
             $styles[$styleName] = $allStyles[$styleName];
         }
-        
+
         if (empty($styles)) {
             throw new \RuntimeException('No valid thumbnail styles specified');
         }
@@ -128,15 +128,15 @@ class ThumbnailGenerationService
         $sourceS3Path = $asset->storage_root_path;
         $outputBasePath = dirname($sourceS3Path);
         $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
-        
-        if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+
+        if (! file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source file is invalid or empty');
         }
 
         // Admin override: If forceImageMagick is true, bypass file type detection and use ImageMagick
         $fileType = $forceImageMagick ? 'imagick_override' : $this->detectFileType($asset, null);
         $regenerated = [];
-        
+
         try {
             // Generate only requested styles (no version - legacy path)
             foreach ($styles as $styleName => $styleConfig) {
@@ -149,7 +149,7 @@ class ThumbnailGenerationService
                         $fileType,
                         $forceImageMagick
                     );
-                    
+
                     if ($thumbnailPath && file_exists($thumbnailPath)) {
                         // Upload to S3 (no version - uses outputBasePath)
                         $s3ThumbnailPath = $this->uploadThumbnailToS3(
@@ -160,10 +160,10 @@ class ThumbnailGenerationService
                             $outputBasePath,
                             null
                         );
-                        
+
                         // Get metadata
                         $thumbnailInfo = $this->getThumbnailMetadata($thumbnailPath);
-                        
+
                         $regenerated[$styleName] = [
                             'path' => $s3ThumbnailPath,
                             'width' => $thumbnailInfo['width'] ?? null,
@@ -171,7 +171,7 @@ class ThumbnailGenerationService
                             'size_bytes' => $thumbnailInfo['size_bytes'] ?? filesize($thumbnailPath),
                             'generated_at' => now()->toIso8601String(),
                         ];
-                        
+
                         @unlink($thumbnailPath);
                     }
                 } catch (\Exception $e) {
@@ -183,12 +183,12 @@ class ThumbnailGenerationService
                     // Continue with other styles
                 }
             }
-            
+
             // Build structured return (caller persists - no Asset mutation)
             $previewStyles = [];
             $finalStyles = [];
             $thumbnailDimensions = [];
-            
+
             foreach ($regenerated as $styleName => $styleData) {
                 if ($styleName === 'preview') {
                     $previewStyles[$styleName] = $styleData;
@@ -202,7 +202,7 @@ class ThumbnailGenerationService
                     }
                 }
             }
-            
+
             return [
                 'thumbnails' => $finalStyles,
                 'preview_thumbnails' => $previewStyles,
@@ -220,7 +220,7 @@ class ThumbnailGenerationService
     /**
      * Generate thumbnails for a version (Phase 3A). No model mutation.
      *
-     * @param AssetVersion $version The version to generate thumbnails for
+     * @param  AssetVersion  $version  The version to generate thumbnails for
      * @return array Array of thumbnail metadata
      */
     public function generateThumbnailsForVersion(AssetVersion $version): array
@@ -239,11 +239,12 @@ class ThumbnailGenerationService
      * Downloads the asset from S3, generates all configured thumbnail styles,
      * uploads thumbnails to S3, and returns metadata about generated thumbnails.
      *
-     * @param Asset $asset The asset to generate thumbnails for
-     * @param string|null $sourceS3Path Override source path (default: asset->storage_root_path)
-     * @param string|null $outputBasePath Override output base for thumbnails (default: dirname of source)
-     * @param AssetVersion|null $version When provided, use version->mime_type for file type detection (version-aware)
+     * @param  Asset  $asset  The asset to generate thumbnails for
+     * @param  string|null  $sourceS3Path  Override source path (default: asset->storage_root_path)
+     * @param  string|null  $outputBasePath  Override output base for thumbnails (default: dirname of source)
+     * @param  AssetVersion|null  $version  When provided, use version->mime_type for file type detection (version-aware)
      * @return array Array of thumbnail metadata with keys: thumb, medium, large
+     *
      * @throws \RuntimeException If thumbnail generation fails
      */
     public function generateThumbnails(Asset $asset, ?string $sourceS3Path = null, ?string $outputBasePath = null, ?AssetVersion $version = null): array
@@ -251,17 +252,17 @@ class ThumbnailGenerationService
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
 
-        if (!$sourceS3Path || !$asset->storageBucket) {
+        if (! $sourceS3Path || ! $asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage path or bucket');
         }
 
         $bucket = $asset->storageBucket;
         $styles = config('assets.thumbnail_styles', []);
-        
+
         if (empty($styles)) {
             throw new \RuntimeException('No thumbnail styles configured');
         }
-        
+
         Log::info('[ThumbnailGenerationService] Generating thumbnails from source', [
             'asset_id' => $asset->id,
             'source_s3_path' => $sourceS3Path,
@@ -271,24 +272,24 @@ class ThumbnailGenerationService
         // Download original file to temporary location
         // This is the SAME source file used for metadata extraction
         $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
-        
+
         // Verify downloaded file is valid
-        if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+        if (! file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source file is invalid or empty');
         }
-        
+
         $sourceFileSize = filesize($tempPath);
-        
+
         // Detect file type: use version->mime_type when version-aware (from FileInspectionService)
         $fileType = $this->detectFileType($asset, $version);
-        
+
         // Capture source image dimensions ONLY for image file types (not PDFs, videos, or other types)
         // Dimensions are read from the ORIGINAL source file, not from thumbnails
         // Some file types (PDFs, videos, documents) do not have pixel dimensions
         $sourceImageWidth = null;
         $sourceImageHeight = null;
         $pdfPageCount = null;
-        
+
         if ($fileType === 'pdf') {
             // PDF validation: Check file size and basic PDF structure
             // Full PDF validation happens during thumbnail generation
@@ -312,23 +313,23 @@ class ThumbnailGenerationService
         } elseif ($fileType === 'tiff') {
             // TIFF validation: Use Imagick pingImage (headers only, no pixel load) to get dimensions
             // Avoids loading 700MB+ TIFF into memory just to read dimensions
-            if (!extension_loaded('imagick')) {
+            if (! extension_loaded('imagick')) {
                 throw new \RuntimeException('TIFF file processing requires Imagick PHP extension');
             }
-            
+
             try {
-                $imagick = new \Imagick();
+                $imagick = new \Imagick;
                 $imagick->pingImage($tempPath);
                 $imagick->setIteratorIndex(0);
                 $sourceImageWidth = (int) $imagick->getImageWidth();
                 $sourceImageHeight = (int) $imagick->getImageHeight();
                 $imagick->clear();
                 $imagick->destroy();
-                
+
                 if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
                     throw new \RuntimeException("TIFF file has invalid dimensions (size: {$sourceFileSize} bytes)");
                 }
-                
+
                 Log::info('[ThumbnailGenerationService] Source TIFF file downloaded and verified', [
                     'asset_id' => $asset->id,
                     'temp_path' => $tempPath,
@@ -346,7 +347,7 @@ class ThumbnailGenerationService
             }
 
             try {
-                $imagick = new \Imagick();
+                $imagick = new \Imagick;
                 $imagick->pingImage($tempPath.'[0]');
                 $imagick->setIteratorIndex(0);
                 $sourceImageWidth = (int) $imagick->getImageWidth();
@@ -371,23 +372,23 @@ class ThumbnailGenerationService
             }
         } elseif ($fileType === 'avif') {
             // AVIF validation: Use Imagick pingImage (headers only) to get dimensions
-            if (!extension_loaded('imagick')) {
+            if (! extension_loaded('imagick')) {
                 throw new \RuntimeException('AVIF file processing requires Imagick PHP extension');
             }
-            
+
             try {
-                $imagick = new \Imagick();
+                $imagick = new \Imagick;
                 $imagick->pingImage($tempPath);
                 $imagick->setIteratorIndex(0);
                 $sourceImageWidth = (int) $imagick->getImageWidth();
                 $sourceImageHeight = (int) $imagick->getImageHeight();
                 $imagick->clear();
                 $imagick->destroy();
-                
+
                 if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
                     throw new \RuntimeException("AVIF file has invalid dimensions (size: {$sourceFileSize} bytes)");
                 }
-                
+
                 Log::info('[ThumbnailGenerationService] Source AVIF file downloaded and verified', [
                     'asset_id' => $asset->id,
                     'temp_path' => $tempPath,
@@ -402,7 +403,7 @@ class ThumbnailGenerationService
         } elseif ($fileType === 'svg') {
             // SVG validation: Basic XML structure check
             $content = file_get_contents($tempPath, false, null, 0, 500);
-            if ($content === false || !preg_match('/<\s*(svg|\?xml)/i', $content)) {
+            if ($content === false || ! preg_match('/<\s*(svg|\?xml)/i', $content)) {
                 throw new \RuntimeException("Downloaded file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
             }
             Log::info('[ThumbnailGenerationService] Source SVG file downloaded and verified', [
@@ -430,7 +431,7 @@ class ThumbnailGenerationService
                     throw new \RuntimeException("Downloaded file is not a valid image (size: {$sourceFileSize} bytes)");
                 }
             }
-            
+
             // Capture source dimensions from original image file (raster only; SVG has no dimensions here)
             if ($imageInfo !== false) {
                 $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
@@ -453,13 +454,13 @@ class ThumbnailGenerationService
                 'file_type' => $fileType,
             ]);
         }
-        
+
         try {
             // Determine file type and generate thumbnails
             // File type was already detected above, reuse it
             // This ensures consistent file type detection throughout the method
             $thumbnails = [];
-            
+
             // Step 6: Generate preview thumbnail FIRST (before final thumbnails)
             // This provides immediate visual feedback while final thumbnails process
             // Preview is optional but preferred - if it fails, continue with final generation
@@ -474,7 +475,7 @@ class ThumbnailGenerationService
                         'source_file_size' => filesize($tempPath),
                         'file_type' => $fileType,
                     ]);
-                    
+
                     $previewPath = $this->generateThumbnail(
                         $asset,
                         $tempPath, // SAME source as final thumbnails
@@ -483,7 +484,7 @@ class ThumbnailGenerationService
                         $fileType,
                         false // Never force ImageMagick for normal generation
                     );
-                    
+
                     if ($previewPath && file_exists($previewPath)) {
                         $previewFileSize = filesize($previewPath);
                         Log::info('[ThumbnailGenerationService] Preview thumbnail generated', [
@@ -491,7 +492,7 @@ class ThumbnailGenerationService
                             'preview_path' => $previewPath,
                             'preview_file_size' => $previewFileSize,
                         ]);
-                        
+
                         // Upload preview thumbnail to S3
                         $s3PreviewPath = $this->uploadThumbnailToS3(
                             $bucket,
@@ -501,10 +502,10 @@ class ThumbnailGenerationService
                             $outputBasePath,
                             $version
                         );
-                        
+
                         // Get preview thumbnail metadata
                         $previewInfo = $this->getThumbnailMetadata($previewPath);
-                        
+
                         $previewThumbnails['preview'] = [
                             'path' => $s3PreviewPath,
                             'width' => $previewInfo['width'] ?? null,
@@ -512,7 +513,7 @@ class ThumbnailGenerationService
                             'size_bytes' => $previewInfo['size_bytes'] ?? filesize($previewPath),
                             'generated_at' => now()->toIso8601String(),
                         ];
-                        
+
                         Log::info('[ThumbnailGenerationService] Preview thumbnail uploaded to S3', [
                             'asset_id' => $asset->id,
                             's3_path' => $s3PreviewPath,
@@ -525,7 +526,7 @@ class ThumbnailGenerationService
                         // Previously metadata was only written at job completion, so the grid saw no blur
                         // for the entire PROCESSING window (see docs/MEDIA_PIPELINE.md).
                         $this->persistEarlyLqipMetadata($asset, $previewThumbnails, $version);
-                        
+
                         // Clean up local preview thumbnail
                         @unlink($previewPath);
                     } else {
@@ -543,7 +544,7 @@ class ThumbnailGenerationService
                     ]);
                 }
             }
-            
+
             // Degraded mode: skip medium/large for files exceeding pixel cap (prevents OOM on 700MB+ TIFFs)
             $maxPixels = (int) config('assets.thumbnail.max_pixels', 200_000_000);
             $degradedMode = $sourceImageWidth && $sourceImageHeight
@@ -568,6 +569,7 @@ class ThumbnailGenerationService
                         'asset_id' => $asset->id,
                         'style' => $styleName,
                     ]);
+
                     continue;
                 }
                 try {
@@ -579,7 +581,7 @@ class ThumbnailGenerationService
                         $fileType,
                         false // Never force ImageMagick for normal generation
                     );
-                    
+
                     if ($thumbnailPath) {
                         // Upload thumbnail to S3
                         $s3ThumbnailPath = $this->uploadThumbnailToS3(
@@ -590,10 +592,10 @@ class ThumbnailGenerationService
                             $outputBasePath,
                             $version
                         );
-                        
+
                         // Get thumbnail metadata
                         $thumbnailInfo = $this->getThumbnailMetadata($thumbnailPath);
-                        
+
                         $thumbnails[$styleName] = [
                             'path' => $s3ThumbnailPath,
                             'width' => $thumbnailInfo['width'] ?? null,
@@ -601,7 +603,7 @@ class ThumbnailGenerationService
                             'size_bytes' => $thumbnailInfo['size_bytes'] ?? filesize($thumbnailPath),
                             'generated_at' => now()->toIso8601String(),
                         ];
-                        
+
                         // Clean up local thumbnail
                         @unlink($thumbnailPath);
                     }
@@ -614,7 +616,7 @@ class ThumbnailGenerationService
                     // Continue with other styles even if one fails
                 }
             }
-            
+
             // Build thumbnail_dimensions from generated thumbnails
             $thumbnailDimensions = [];
             foreach (['thumb', 'medium', 'large'] as $style) {
@@ -654,7 +656,7 @@ class ThumbnailGenerationService
                     }
                 }
             }
-            
+
             // Source image dimensions (raster types only)
             if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'cr2' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
                 Log::info('[ThumbnailGenerationService] Captured original source image dimensions', [
@@ -726,10 +728,9 @@ class ThumbnailGenerationService
     /**
      * Download file from S3 to temporary location.
      *
-     * @param StorageBucket $bucket
-     * @param string $s3Key
-     * @param int|string|null $assetId Optional asset ID for error context (appears in failed_jobs)
+     * @param  int|string|null  $assetId  Optional asset ID for error context (appears in failed_jobs)
      * @return string Path to temporary file
+     *
      * @throws \RuntimeException If download fails
      */
     protected function downloadFromS3(StorageBucket $bucket, string $s3Key, $assetId = null): string
@@ -741,7 +742,7 @@ class ThumbnailGenerationService
                 'bucket' => $bucket->name,
                 's3_key' => $s3Key,
             ]);
-            
+
             $result = $this->s3Client->getObject([
                 'Bucket' => $bucket->name,
                 'Key' => $s3Key,
@@ -756,7 +757,7 @@ class ThumbnailGenerationService
             $isPdf = str_ends_with(strtolower($s3Key), '.pdf') || str_contains($contentType, 'pdf');
             if ($isPdf) {
                 do {
-                    $tempPath = sys_get_temp_dir() . '/thumb_' . Str::random(32) . '.pdf';
+                    $tempPath = sys_get_temp_dir().'/thumb_'.Str::random(32).'.pdf';
                 } while (file_exists($tempPath));
             } else {
                 $tempPath = tempnam(sys_get_temp_dir(), 'thumb_');
@@ -764,12 +765,12 @@ class ThumbnailGenerationService
 
             // Stream to file to avoid loading large files into memory (e.g. 178MB TIFF in FPM or worker)
             $fp = fopen($tempPath, 'w');
-            if (!$fp) {
+            if (! $fp) {
                 @unlink($tempPath);
                 throw new \RuntimeException("Failed to open temp file for write{$ctx}");
             }
             try {
-                while (!$body->eof()) {
+                while (! $body->eof()) {
                     $chunk = $body->read(65536);
                     if ($chunk === '') {
                         break;
@@ -786,13 +787,13 @@ class ThumbnailGenerationService
                 throw $e;
             }
 
-            if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+            if (! file_exists($tempPath) || filesize($tempPath) === 0) {
                 @unlink($tempPath);
                 throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes){$ctx}");
             }
             if ($contentLength !== null && filesize($tempPath) !== $contentLength) {
                 @unlink($tempPath);
-                throw new \RuntimeException("Downloaded file size mismatch (expected {$contentLength}, got " . filesize($tempPath) . "){$ctx}");
+                throw new \RuntimeException("Downloaded file size mismatch (expected {$contentLength}, got ".filesize($tempPath)."){$ctx}");
             }
 
             Log::info('[ThumbnailGenerationService] Source file streamed from S3 to temp location', [
@@ -820,13 +821,10 @@ class ThumbnailGenerationService
      * Upload thumbnail to S3.
      * Uses AssetPathGenerator for canonical path: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
      *
-     * @param StorageBucket $bucket
-     * @param Asset $asset
-     * @param string $localThumbnailPath
-     * @param string $styleName
-     * @param string|null $outputBasePath Unused; kept for signature compatibility
-     * @param AssetVersion|null $version When provided, version_number used for path
+     * @param  string|null  $outputBasePath  Unused; kept for signature compatibility
+     * @param  AssetVersion|null  $version  When provided, version_number used for path
      * @return string S3 key path for the thumbnail
+     *
      * @throws \RuntimeException If upload fails
      */
     protected function uploadThumbnailToS3(
@@ -842,7 +840,7 @@ class ThumbnailGenerationService
         $thumbnailFilename = "{$styleName}.{$extension}";
         $pathGenerator = app(AssetPathGenerator::class);
         $s3ThumbnailPath = $pathGenerator->generateThumbnailPath($asset->tenant, $asset, $versionNumber, $styleName, $thumbnailFilename);
-        
+
         try {
             $this->s3Client->putObject([
                 'Bucket' => $bucket->name,
@@ -855,7 +853,7 @@ class ThumbnailGenerationService
                     'generated-at' => now()->toIso8601String(),
                 ],
             ]);
-            
+
             return $s3ThumbnailPath;
         } catch (S3Exception $e) {
             Log::error('Failed to upload thumbnail to S3', [
@@ -870,12 +868,12 @@ class ThumbnailGenerationService
     /**
      * Generate a single thumbnail for the given style.
      *
-     * @param Asset $asset
-     * @param string $sourcePath Local path to source file
-     * @param string $styleName Name of the style (thumb, medium, large)
-     * @param array $styleConfig Style configuration from config
-     * @param string $fileType Detected file type
+     * @param  string  $sourcePath  Local path to source file
+     * @param  string  $styleName  Name of the style (thumb, medium, large)
+     * @param  array  $styleConfig  Style configuration from config
+     * @param  string  $fileType  Detected file type
      * @return string|null Path to generated thumbnail file, or null if generation not supported
+     *
      * @throws \RuntimeException If generation fails
      */
     protected function generateThumbnail(
@@ -890,21 +888,23 @@ class ThumbnailGenerationService
         if ($forceImageMagick || $fileType === 'imagick_override') {
             return $this->generateImageMagickThumbnail($sourcePath, $styleConfig, $asset);
         }
-        
+
         // Route to appropriate generator based on file type using FileTypeService
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $handler = $fileTypeService->getHandler($fileType, 'thumbnail');
-        
-        if (!$handler || !method_exists($this, $handler)) {
+
+        if (! $handler || ! method_exists($this, $handler)) {
             Log::info('Thumbnail generation not supported for file type', [
                 'asset_id' => $asset->id,
                 'file_type' => $fileType,
                 'mime_type' => $asset->mime_type,
             ]);
+
             return null;
         }
-        
+
         $styleConfig['_asset_id'] = $asset->id;
+
         return $this->$handler($sourcePath, $styleConfig);
     }
 
@@ -917,29 +917,28 @@ class ThumbnailGenerationService
      * When Imagick is unavailable: Passthrough (copies original SVG). Brand scoring will
      * remain incomplete for SVG in that case.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
      * @return string Path to generated thumbnail (raster or SVG copy)
+     *
      * @throws \RuntimeException If generation fails
      */
     protected function generateSvgThumbnail(string $sourcePath, array $styleConfig): string
     {
-        if (!file_exists($sourcePath)) {
+        if (! file_exists($sourcePath)) {
             throw new \RuntimeException("Source SVG file does not exist: {$sourcePath}");
         }
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source SVG file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source SVG file is empty (size: 0 bytes)');
         }
         // Basic SVG validation - must start with <svg or <?xml
         $content = file_get_contents($sourcePath, false, null, 0, 200);
-        if ($content === false || !preg_match('/<\s*(svg|\?xml)/i', $content)) {
+        if ($content === false || ! preg_match('/<\s*(svg|\?xml)/i', $content)) {
             throw new \RuntimeException("Source file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
         }
 
         // Require Imagick for SVG — raw SVG passthrough produces wrong output (paths end in .svg,
         // getimagesize returns null, grid shows placeholder). Rasterization is mandatory.
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('SVG thumbnail generation requires Imagick extension');
         }
 
@@ -949,18 +948,18 @@ class ThumbnailGenerationService
     /**
      * Render SVG to PNG via rsvg-convert (librsvg).
      *
-     * @param string $sourcePath Path to SVG file
-     * @param int $targetWidth Target pixel width (height auto from aspect ratio)
+     * @param  string  $sourcePath  Path to SVG file
+     * @param  int  $targetWidth  Target pixel width (height auto from aspect ratio)
      * @return string Path to temporary PNG file
      */
     private function renderSvgViaRsvg(string $sourcePath, int $targetWidth): string
     {
         $tmpDir = storage_path('app/tmp');
-        if (!is_dir($tmpDir)) {
+        if (! is_dir($tmpDir)) {
             mkdir($tmpDir, 0755, true);
         }
 
-        $tempPngPath = $tmpDir . '/svg_' . uniqid() . '.png';
+        $tempPngPath = $tmpDir.'/svg_'.uniqid().'.png';
 
         $command = sprintf(
             'rsvg-convert -w %d %s -o %s',
@@ -971,7 +970,7 @@ class ThumbnailGenerationService
 
         exec($command, $output, $exitCode);
 
-        if ($exitCode !== 0 || !file_exists($tempPngPath)) {
+        if ($exitCode !== 0 || ! file_exists($tempPngPath)) {
             throw new \RuntimeException('rsvg-convert failed.');
         }
 
@@ -983,8 +982,6 @@ class ThumbnailGenerationService
      *
      * SVG → PNG via rsvg-convert, then PNG → WebP via Imagick.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
      * @return string Path to generated raster thumbnail
      */
     protected function generateSvgRasterizedThumbnail(string $sourcePath, array $styleConfig): string
@@ -1007,14 +1004,14 @@ class ThumbnailGenerationService
             $imagick->setImageCompressionQuality(92);
             $imagick->stripImage();
 
-            if (!empty($styleConfig['blur'])) {
+            if (! empty($styleConfig['blur'])) {
                 $imagick->blurImage(0, 8);
             }
 
-            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.webp';
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_').'.webp';
             $imagick->writeImage($thumbPath);
 
-            $width  = $imagick->getImageWidth();
+            $width = $imagick->getImageWidth();
             $height = $imagick->getImageHeight();
 
             $imagick->clear();
@@ -1025,7 +1022,7 @@ class ThumbnailGenerationService
             }
         }
 
-        if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+        if (! file_exists($thumbPath) || filesize($thumbPath) === 0) {
             throw new \RuntimeException('SVG rasterization produced empty output');
         }
 
@@ -1043,35 +1040,34 @@ class ThumbnailGenerationService
      *
      * Uses PHP GD library for image processing.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
      * @return string Path to generated thumbnail
+     *
      * @throws \RuntimeException If generation fails
      */
     protected function generateImageThumbnail(string $sourcePath, array $styleConfig): string
     {
-        if (!extension_loaded('gd')) {
+        if (! extension_loaded('gd')) {
             throw new \RuntimeException('GD extension is required for image thumbnail generation');
         }
-        
+
         // Verify source file exists and is readable
-        if (!file_exists($sourcePath)) {
+        if (! file_exists($sourcePath)) {
             throw new \RuntimeException("Source file does not exist: {$sourcePath}");
         }
-        
+
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source file is empty (size: 0 bytes)');
         }
-        
+
         // Load source image
         $sourceInfo = getimagesize($sourcePath);
         if ($sourceInfo === false) {
             throw new \RuntimeException("Unable to read source image: {$sourcePath} (size: {$sourceFileSize} bytes)");
         }
-        
+
         [$sourceWidth, $sourceHeight, $sourceType] = $sourceInfo;
-        
+
         Log::info('[ThumbnailGenerationService] Source image loaded', [
             'source_path' => $sourcePath,
             'source_width' => $sourceWidth,
@@ -1079,7 +1075,7 @@ class ThumbnailGenerationService
             'source_type' => $sourceType,
             'source_file_size' => $sourceFileSize,
         ]);
-        
+
         // Create source image resource
         $sourceImage = match ($sourceType) {
             IMAGETYPE_JPEG => imagecreatefromjpeg($sourcePath),
@@ -1088,17 +1084,17 @@ class ThumbnailGenerationService
             IMAGETYPE_GIF => imagecreatefromgif($sourcePath),
             default => throw new \RuntimeException("Unsupported image type: {$sourceType}"),
         };
-        
+
         if ($sourceImage === false) {
             throw new \RuntimeException('Failed to create source image resource');
         }
-        
+
         try {
             // Calculate thumbnail dimensions (maintain aspect ratio)
             $targetWidth = $styleConfig['width'];
             $targetHeight = $styleConfig['height'];
             $fit = $styleConfig['fit'] ?? 'contain';
-            
+
             [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
                 $sourceWidth,
                 $sourceHeight,
@@ -1106,20 +1102,20 @@ class ThumbnailGenerationService
                 $targetHeight,
                 $fit
             );
-            
+
             // Create thumbnail image
             $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
             if ($thumbImage === false) {
                 throw new \RuntimeException('Failed to create thumbnail image resource');
             }
-            
+
             // Detect if image has white content on transparent background (PNG, GIF, WebP support transparency)
             $needsDarkBackground = false;
-            $preserveTransparency = !empty($styleConfig['preserve_transparency']);
+            $preserveTransparency = ! empty($styleConfig['preserve_transparency']);
             $supportsTransparency = in_array($sourceType, [IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP], true);
             if ($supportsTransparency) {
                 // When preserve_transparency: skip gray fill so logo displays as-is on public pages
-                if (!$preserveTransparency) {
+                if (! $preserveTransparency) {
                     $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
                 }
                 if ($needsDarkBackground) {
@@ -1139,7 +1135,7 @@ class ThumbnailGenerationService
                 $white = imagecolorallocate($thumbImage, 255, 255, 255);
                 imagefill($thumbImage, 0, 0, $white);
             }
-            
+
             // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
             $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
             $resizeFn(
@@ -1151,37 +1147,37 @@ class ThumbnailGenerationService
                 $sourceWidth,
                 $sourceHeight
             );
-            
+
             // Step 6: Apply blur for preview thumbnails (LQIP effect)
             // Preview thumbnails are intentionally blurred to indicate they're temporary
             // BUT: They must still resemble the original image (blurred, not garbage)
             // Use moderate blur (1-2 passes) to maintain image resemblance
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 // Apply moderate blur (2 passes) to create LQIP effect while preserving image resemblance
                 // Too much blur (3+ passes) makes previews look like garbage instead of blurred images
                 for ($i = 0; $i < 2; $i++) {
                     imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
                 }
             }
-            
+
             // Determine output format based on config (default to WebP for better compression)
             $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
             $quality = $styleConfig['quality'] ?? 85;
-            
+
             // Save thumbnail to temporary file
             if ($outputFormat === 'webp' && function_exists('imagewebp')) {
-                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
-                if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
+                if (! imagewebp($thumbImage, $thumbPath, $quality)) {
                     throw new \RuntimeException('Failed to save thumbnail image as WebP');
                 }
             } else {
                 // Fallback to JPEG if WebP not available or not configured
-                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
-                if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.jpg';
+                if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
                     throw new \RuntimeException('Failed to save thumbnail image as JPEG');
                 }
             }
-            
+
             return $thumbPath;
         } finally {
             imagedestroy($sourceImage);
@@ -1197,26 +1193,27 @@ class ThumbnailGenerationService
      * TIFF files require Imagick as GD library does not support TIFF format.
      * This method uses Imagick to read and process TIFF images.
      *
-     * @param string $sourcePath Local path to TIFF file
-     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @param  string  $sourcePath  Local path to TIFF file
+     * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
      * @return string Path to generated thumbnail image (JPEG)
+     *
      * @throws \RuntimeException If TIFF processing fails
      */
     protected function generateTiffThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify Imagick extension is loaded
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('TIFF thumbnail generation requires Imagick PHP extension');
         }
 
         // Verify source file exists and is readable
-        if (!file_exists($sourcePath)) {
+        if (! file_exists($sourcePath)) {
             throw new \RuntimeException("Source TIFF file does not exist: {$sourcePath}");
         }
 
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source TIFF file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source TIFF file is empty (size: 0 bytes)');
         }
 
         Log::info('[ThumbnailGenerationService] Generating TIFF thumbnail using Imagick', [
@@ -1226,20 +1223,20 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            $imagick = new \Imagick();
+            $imagick = new \Imagick;
             // Limit resolution BEFORE reading to avoid loading 700MB+ at full res
             $imagick->setResolution(72, 72);
             $imagick->setOption('tiff:tile-geometry', '256x256');
             $imagick->readImage($sourcePath);
-            
+
             // Get first image if multi-page TIFF
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
-            
+
             // Get source dimensions
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
-            
+
             if ($sourceWidth === 0 || $sourceHeight === 0) {
                 throw new \RuntimeException('TIFF image has invalid dimensions');
             }
@@ -1268,7 +1265,7 @@ class ThumbnailGenerationService
             $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails (LQIP effect)
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2); // Moderate blur
             }
 
@@ -1280,7 +1277,7 @@ class ThumbnailGenerationService
 
             // Create temporary output file
             $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_tiff_') . '.' . $extension;
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_tiff_').'.'.$extension;
 
             // Write to file
             $imagick->writeImage($thumbPath);
@@ -1288,7 +1285,7 @@ class ThumbnailGenerationService
             $imagick->destroy();
 
             // Verify output file was created
-            if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+            if (! file_exists($thumbPath) || filesize($thumbPath) === 0) {
                 throw new \RuntimeException('TIFF thumbnail generation failed - output file is missing or empty');
             }
 
@@ -1327,8 +1324,10 @@ class ThumbnailGenerationService
         $options = [
             'dng:read-thumbnail' => 'true',
             'raw:use-camera-wb' => 'true',
-            'raw:use-auto-wb' => 'true',
         ];
+        if (config('assets.thumbnail.cr2.raw_auto_white_balance', false)) {
+            $options['raw:use-auto-wb'] = 'true';
+        }
         foreach ($options as $key => $value) {
             try {
                 $imagick->setOption($key, $value);
@@ -1350,6 +1349,21 @@ class ThumbnailGenerationService
         } catch (\Throwable) {
         }
 
+        // Drop embedded ICC that some RAW decoders attach incorrectly on certain IM builds (staging vs local).
+        try {
+            if (method_exists($imagick, 'stripImage')) {
+                $imagick->stripImage();
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            if (defined('Imagick::COLORSPACE_SRGB')) {
+                $imagick->setImageColorspace(\Imagick::COLORSPACE_SRGB);
+            }
+        } catch (\Throwable) {
+        }
+
         try {
             $imagick->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
         } catch (\Throwable $e) {
@@ -1360,10 +1374,104 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Pick CR2/LibRaw subimage index. Staging often uses a different ImageMagick build than local: layer
+     * count/format metadata varies, and picking the largest layer triggers full demosaic → green/magenta.
+     *
+     * @return int>=0
+     */
+    protected function pickCr2LayerIndex(\Imagick $reader, int $minArea, bool $preferSmallest): int
+    {
+        $n = max(1, (int) $reader->getNumberImages());
+        if ($n === 1) {
+            return 0;
+        }
+
+        $preferJpeg = (bool) config('assets.thumbnail.cr2.prefer_embedded_jpeg_layer', true);
+        $maxRawPixels = max(1, (int) config('assets.thumbnail.cr2.max_raw_decode_pixels', 25_000_000));
+
+        $layers = [];
+        for ($i = 0; $i < $n; $i++) {
+            $reader->setIteratorIndex($i);
+            $w = (int) $reader->getImageWidth();
+            $h = (int) $reader->getImageHeight();
+            $area = $w * $h;
+            $format = '';
+            try {
+                $format = strtolower((string) $reader->getImageFormat());
+            } catch (\Throwable) {
+            }
+            $isJpegish = in_array($format, ['jpeg', 'jpg', 'mjpeg'], true);
+            $layers[] = ['i' => $i, 'w' => $w, 'h' => $h, 'area' => $area, 'format' => $format, 'is_jpegish' => $isJpegish];
+        }
+
+        $minPick = max(1, min($minArea, 100));
+
+        if ($preferJpeg) {
+            $jpegCandidates = array_values(array_filter(
+                $layers,
+                static fn (array $L): bool => $L['is_jpegish'] && $L['area'] >= $minPick
+            ));
+            if ($jpegCandidates !== []) {
+                usort($jpegCandidates, static fn (array $a, array $b): int => $a['area'] <=> $b['area']);
+
+                return $jpegCandidates[0]['i'];
+            }
+        }
+
+        // Typical embedded preview: ~1–16MP; avoid full ~24–45MP RAW decode when a smaller layer exists.
+        $sweetMin = 320 * 240;
+        $sweetMax = min($maxRawPixels, 6000 * 4000);
+        $sweet = array_values(array_filter(
+            $layers,
+            static fn (array $L): bool => $L['area'] >= $sweetMin && $L['area'] <= $sweetMax
+        ));
+        if ($sweet !== []) {
+            usort($sweet, static fn (array $a, array $b): int => $a['area'] <=> $b['area']);
+
+            return $sweet[0]['i'];
+        }
+
+        $underCap = array_values(array_filter(
+            $layers,
+            static fn (array $L): bool => $L['area'] <= $maxRawPixels && $L['area'] >= $minArea
+        ));
+        if ($underCap !== []) {
+            usort($underCap, static fn (array $a, array $b): int => $a['area'] <=> $b['area']);
+
+            return $underCap[0]['i'];
+        }
+
+        if ($preferSmallest) {
+            $bestIdx = 0;
+            $bestArea = PHP_INT_MAX;
+            $found = false;
+            foreach ($layers as $L) {
+                if ($L['area'] >= $minArea && $L['area'] < $bestArea) {
+                    $bestArea = $L['area'];
+                    $bestIdx = $L['i'];
+                    $found = true;
+                }
+            }
+            if ($found) {
+                return $bestIdx;
+            }
+            foreach ($layers as $L) {
+                if ($L['area'] < $bestArea) {
+                    $bestArea = $L['area'];
+                    $bestIdx = $L['i'];
+                }
+            }
+
+            return $bestIdx;
+        }
+
+        return 0;
+    }
+
+    /**
      * Load a CR2 (or similar RAW) and return a single raster frame best suited for thumbnails.
      *
-     * When multiple subimages exist, prefer the smallest layer above a minimum area — usually the
-     * embedded JPEG — and avoid a full-resolution demosaic that often shows wrong WB/channel layout.
+     * When multiple subimages exist, prefer embedded JPEG / mid-size preview over full RAW demosaic.
      */
     protected function openCr2ThumbnailFrame(string $sourcePath): \Imagick
     {
@@ -1371,42 +1479,20 @@ class ThumbnailGenerationService
         $minArea = max(1, (int) config('assets.thumbnail.cr2.layer_min_area_pixels', 1600));
 
         $tryOpen = function (string $pathToRead) use ($preferSmallest, $minArea): \Imagick {
-            $reader = new \Imagick();
+            $reader = new \Imagick;
             $reader->setResolution(150, 150);
             $this->applyImagickRawDelegateOptions($reader);
             $reader->readImage($pathToRead);
             $n = max(1, (int) $reader->getNumberImages());
+            $bestIdx = $n > 1
+                ? $this->pickCr2LayerIndex($reader, $minArea, $preferSmallest)
+                : 0;
 
-            $bestIdx = 0;
-            $bestArea = PHP_INT_MAX;
-            $found = false;
-
-            if ($preferSmallest && $n > 1) {
-                for ($i = 0; $i < $n; $i++) {
-                    $reader->setIteratorIndex($i);
-                    $w = (int) $reader->getImageWidth();
-                    $h = (int) $reader->getImageHeight();
-                    $area = $w * $h;
-                    if ($area >= $minArea && $area < $bestArea) {
-                        $bestArea = $area;
-                        $bestIdx = $i;
-                        $found = true;
-                    }
-                }
-            }
-
-            if (! $found && $n > 1) {
-                for ($i = 0; $i < $n; $i++) {
-                    $reader->setIteratorIndex($i);
-                    $w = (int) $reader->getImageWidth();
-                    $h = (int) $reader->getImageHeight();
-                    $area = $w * $h;
-                    if ($area < $bestArea) {
-                        $bestArea = $area;
-                        $bestIdx = $i;
-                    }
-                }
-            }
+            Log::debug('[ThumbnailGenerationService] CR2 layer choice', [
+                'path_suffix' => str_contains($pathToRead, '[') ? 'indexed' : 'full',
+                'subimage_count' => $n,
+                'chosen_index' => $bestIdx,
+            ]);
 
             $reader->setIteratorIndex($bestIdx);
             $frame = $reader->getImage();
@@ -1450,7 +1536,7 @@ class ThumbnailGenerationService
 
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source CR2 file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source CR2 file is empty (size: 0 bytes)');
         }
 
         Log::info('[ThumbnailGenerationService] Generating CR2 thumbnail using Imagick', [
@@ -1537,26 +1623,27 @@ class ThumbnailGenerationService
      * AVIF (AV1 Image File Format) files require Imagick as GD library does not support AVIF format.
      * This method uses Imagick to read and process AVIF images.
      *
-     * @param string $sourcePath Local path to AVIF file
-     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @param  string  $sourcePath  Local path to AVIF file
+     * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
      * @return string Path to generated thumbnail image (JPEG or WebP)
+     *
      * @throws \RuntimeException If AVIF processing fails
      */
     protected function generateAvifThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify Imagick extension is loaded
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('AVIF thumbnail generation requires Imagick PHP extension');
         }
 
         // Verify source file exists and is readable
-        if (!file_exists($sourcePath)) {
+        if (! file_exists($sourcePath)) {
             throw new \RuntimeException("Source AVIF file does not exist: {$sourcePath}");
         }
 
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source AVIF file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source AVIF file is empty (size: 0 bytes)');
         }
 
         Log::info('[ThumbnailGenerationService] Generating AVIF thumbnail using Imagick', [
@@ -1566,19 +1653,19 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            $imagick = new \Imagick();
-            
+            $imagick = new \Imagick;
+
             // Read the AVIF file
             $imagick->readImage($sourcePath);
-            
+
             // Get first image if multi-image AVIF
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
-            
+
             // Get source dimensions
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
-            
+
             if ($sourceWidth === 0 || $sourceHeight === 0) {
                 throw new \RuntimeException('AVIF image has invalid dimensions');
             }
@@ -1607,14 +1694,14 @@ class ThumbnailGenerationService
             $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails (LQIP effect)
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2); // Moderate blur
             }
 
             // Determine output format based on config (default to WebP for better compression)
             $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
             $imagick->setImageFormat($outputFormat);
-            
+
             $quality = $styleConfig['quality'] ?? 85;
             if ($outputFormat === 'webp') {
                 $imagick->setImageCompressionQuality($quality);
@@ -1624,7 +1711,7 @@ class ThumbnailGenerationService
 
             // Create temporary output file
             $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_avif_') . '.' . $extension;
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_avif_').'.'.$extension;
 
             // Write to file
             $imagick->writeImage($thumbPath);
@@ -1632,7 +1719,7 @@ class ThumbnailGenerationService
             $imagick->destroy();
 
             // Verify output file was created
-            if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+            if (! file_exists($thumbPath) || filesize($thumbPath) === 0) {
                 throw new \RuntimeException('AVIF thumbnail generation failed - output file is missing or empty');
             }
 
@@ -1668,14 +1755,14 @@ class ThumbnailGenerationService
      */
     protected function detectPdfPageCount(string $sourcePath): int
     {
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('Imagick extension is required for PDF page counting');
         }
-        if (!file_exists($sourcePath) || filesize($sourcePath) === 0) {
+        if (! file_exists($sourcePath) || filesize($sourcePath) === 0) {
             throw new \RuntimeException('PDF file is missing or empty');
         }
 
-        $imagick = new \Imagick();
+        $imagick = new \Imagick;
         try {
             $imagick->pingImage($sourcePath);
             $pageCount = (int) $imagick->getNumberImages();
@@ -1702,26 +1789,27 @@ class ThumbnailGenerationService
      * - Timeout protection (configurable, default 60s)
      * - Graceful failure with clear error messages
      *
-     * @param string $sourcePath Local path to PDF file
-     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @param  string  $sourcePath  Local path to PDF file
+     * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
      * @return string Path to generated thumbnail image (PNG/JPEG)
+     *
      * @throws \RuntimeException If PDF processing fails or safety limits exceeded
      */
     protected function generatePdfThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify spatie/pdf-to-image package is available
-        if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
+        if (! class_exists(\Spatie\PdfToImage\Pdf::class)) {
             throw new \RuntimeException('PDF thumbnail generation requires spatie/pdf-to-image package');
         }
-        
+
         // Verify Imagick extension is loaded (required by spatie/pdf-to-image)
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('PDF thumbnail generation requires Imagick PHP extension');
         }
 
         // Verify ImageMagick can process PDFs (quick check)
         try {
-            $imagick = new \Imagick();
+            $imagick = new \Imagick;
             $imagick->setResolution(72, 72); // Set resolution before reading
         } catch (\Exception $imagickException) {
             Log::error('[ThumbnailGenerationService] Imagick initialization failed', [
@@ -1733,11 +1821,11 @@ class ThumbnailGenerationService
         // Safety guard: Check PDF file size
         $pdfSize = filesize($sourcePath);
         $maxSize = config('assets.thumbnail.pdf.max_size_bytes', 150 * 1024 * 1024); // 150MB default
-        
+
         if ($pdfSize > $maxSize) {
             throw new \RuntimeException(
-                "PDF file size ({$pdfSize} bytes) exceeds maximum allowed size ({$maxSize} bytes). " .
-                "Large PDFs may cause memory exhaustion or processing timeouts."
+                "PDF file size ({$pdfSize} bytes) exceeds maximum allowed size ({$maxSize} bytes). ".
+                'Large PDFs may cause memory exhaustion or processing timeouts.'
             );
         }
 
@@ -1750,7 +1838,7 @@ class ThumbnailGenerationService
 
         try {
             // Verify PDF file is readable before attempting conversion
-            if (!is_readable($sourcePath)) {
+            if (! is_readable($sourcePath)) {
                 throw new \RuntimeException("PDF file is not readable: {$sourcePath}");
             }
 
@@ -1770,7 +1858,7 @@ class ThumbnailGenerationService
             // This is a hard requirement - only first page is used for thumbnails
             $maxPage = config('assets.thumbnail.pdf.max_page', 1);
             $targetPage = min(1, $maxPage); // Always use page 1, never exceed max_page
-            
+
             // Note: spatie/pdf-to-image v3.x does not provide getNumberOfPages() method
             // We rely on the library to handle invalid page numbers gracefully
             // If page 1 doesn't exist, the save() method will fail, which we catch below
@@ -1791,31 +1879,31 @@ class ThumbnailGenerationService
             // Note: spatie/pdf-to-image v3.x uses selectPage() and save() methods
             // IMPORTANT: The output format may be changed by the library (e.g., .png -> .jpg)
             // We must use the ACTUAL path returned by save(), not the requested path
-            $requestedImagePath = tempnam(sys_get_temp_dir(), 'pdf_thumb_') . '.png';
-            
+            $requestedImagePath = tempnam(sys_get_temp_dir(), 'pdf_thumb_').'.png';
+
             // Ensure temp directory is writable
             $tempDir = dirname($requestedImagePath);
-            if (!is_writable($tempDir)) {
+            if (! is_writable($tempDir)) {
                 throw new \RuntimeException("Temporary directory is not writable: {$tempDir}");
             }
-            
+
             Log::info('[ThumbnailGenerationService] Attempting PDF to image conversion', [
                 'source_path' => $sourcePath,
                 'target_page' => $targetPage,
                 'requested_image_path' => $requestedImagePath,
                 'temp_dir_writable' => is_writable($tempDir),
             ]);
-            
+
             $saveResult = null;
             $actualImagePath = null;
-            
+
             try {
                 // Attempt conversion - save() returns path(s) or throws exception
                 // IMPORTANT: save() may return a different path than requested (e.g., .jpg instead of .png)
                 // Always use the ACTUAL returned path, not the requested path
                 $saveResult = $pdf->selectPage($targetPage)
                     ->save($requestedImagePath);
-                
+
                 // CRITICAL: Use the ACTUAL path returned by save(), not the requested path
                 // The library may change the extension (e.g., .png -> .jpg) or return a different path
                 if (is_array($saveResult)) {
@@ -1838,9 +1926,9 @@ class ThumbnailGenerationService
                         ]);
                     }
                 } else {
-                    throw new \RuntimeException('PDF save() returned unexpected type: ' . gettype($saveResult));
+                    throw new \RuntimeException('PDF save() returned unexpected type: '.gettype($saveResult));
                 }
-                
+
                 Log::info('[ThumbnailGenerationService] PDF save() completed', [
                     'source_path' => $sourcePath,
                     'requested_path' => $requestedImagePath,
@@ -1860,7 +1948,7 @@ class ThumbnailGenerationService
 
             // Verify the image was created successfully using the ACTUAL returned path
             // Check immediately after save() call
-            if (!$actualImagePath || !file_exists($actualImagePath)) {
+            if (! $actualImagePath || ! file_exists($actualImagePath)) {
                 Log::error('[ThumbnailGenerationService] PDF conversion output file does not exist at returned path', [
                     'source_path' => $sourcePath,
                     'requested_path' => $requestedImagePath,
@@ -1872,10 +1960,10 @@ class ThumbnailGenerationService
                 ]);
                 throw new \RuntimeException('PDF to image conversion failed - output file was not created at returned path');
             }
-            
+
             // Use the actual path for the rest of the processing
             $tempImagePath = $actualImagePath;
-            
+
             $outputFileSize = filesize($tempImagePath);
             if ($outputFileSize === 0) {
                 Log::error('[ThumbnailGenerationService] PDF conversion output file is empty', [
@@ -1896,7 +1984,7 @@ class ThumbnailGenerationService
 
             // Resize the extracted image to match thumbnail style dimensions
             // Use GD library to resize (same as image thumbnails for consistency)
-            if (!extension_loaded('gd')) {
+            if (! extension_loaded('gd')) {
                 throw new \RuntimeException('GD extension is required for PDF thumbnail resizing');
             }
 
@@ -1904,7 +1992,7 @@ class ThumbnailGenerationService
             // The library may return PNG or JPG, so detect format from file extension
             $imageExtension = strtolower(pathinfo($tempImagePath, PATHINFO_EXTENSION));
             $sourceImage = null;
-            
+
             if ($imageExtension === 'png') {
                 $sourceImage = imagecreatefrompng($tempImagePath);
             } elseif (in_array($imageExtension, ['jpg', 'jpeg'])) {
@@ -1915,7 +2003,7 @@ class ThumbnailGenerationService
                 if ($imageInfo === false) {
                     throw new \RuntimeException("Failed to detect image format for extracted PDF page: {$tempImagePath}");
                 }
-                
+
                 $imageType = $imageInfo[2];
                 if ($imageType === IMAGETYPE_PNG) {
                     $sourceImage = imagecreatefrompng($tempImagePath);
@@ -1925,7 +2013,7 @@ class ThumbnailGenerationService
                     throw new \RuntimeException("Unsupported image format for extracted PDF page (type: {$imageType})");
                 }
             }
-            
+
             if ($sourceImage === false) {
                 throw new \RuntimeException("Failed to load extracted PDF page image from: {$tempImagePath}");
             }
@@ -1960,10 +2048,10 @@ class ThumbnailGenerationService
 
                 // Check if extracted PDF page has white content
                 // When preserve_transparency: skip gray fill for logo display
-                $preserveTransparency = !empty($styleConfig['preserve_transparency']);
-                $needsDarkBackground = !$preserveTransparency
+                $preserveTransparency = ! empty($styleConfig['preserve_transparency']);
+                $needsDarkBackground = ! $preserveTransparency
                     && $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
-                
+
                 // Use darker background if white content detected, otherwise white
                 if ($needsDarkBackground) {
                     // Use gray-400 (#9CA3AF) for strong contrast with white logos
@@ -1988,7 +2076,7 @@ class ThumbnailGenerationService
                 );
 
                 // Apply blur for preview thumbnails (LQIP effect)
-                if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                     for ($i = 0; $i < 2; $i++) {
                         imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
                     }
@@ -2000,14 +2088,14 @@ class ThumbnailGenerationService
 
                 // Save thumbnail to temporary file
                 if ($outputFormat === 'webp' && function_exists('imagewebp')) {
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
-                    if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
+                    if (! imagewebp($thumbImage, $thumbPath, $quality)) {
                         throw new \RuntimeException('Failed to save PDF thumbnail image as WebP');
                     }
                 } else {
                     // Fallback to JPEG if WebP not available or not configured
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
-                    if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.jpg';
+                    if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
                         throw new \RuntimeException('Failed to save PDF thumbnail image as JPEG');
                     }
                 }
@@ -2033,10 +2121,10 @@ class ThumbnailGenerationService
             }
         } catch (\Spatie\PdfToImage\Exceptions\PdfDoesNotExist $e) {
             // User-friendly error message
-            throw new \RuntimeException("The PDF file could not be found or accessed.", 0, $e);
+            throw new \RuntimeException('The PDF file could not be found or accessed.', 0, $e);
         } catch (\Spatie\PdfToImage\Exceptions\InvalidFormat $e) {
             // User-friendly error message
-            throw new \RuntimeException("The PDF file appears to be corrupted or invalid.", 0, $e);
+            throw new \RuntimeException('The PDF file appears to be corrupted or invalid.', 0, $e);
         } catch (\Exception $e) {
             Log::error('[ThumbnailGenerationService] PDF thumbnail generation failed', [
                 'source_path' => $sourcePath,
@@ -2057,15 +2145,16 @@ class ThumbnailGenerationService
      *
      * NOTE: Requires Imagick PHP extension with ImageMagick that supports PSD.
      *
-     * @param string $sourcePath Local path to PSD/PSB file
-     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @param  string  $sourcePath  Local path to PSD/PSB file
+     * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
      * @return string Path to generated thumbnail image
+     *
      * @throws \RuntimeException If PSD processing fails
      */
     protected function generatePsdThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify Imagick extension is loaded
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('PSD thumbnail generation requires Imagick PHP extension');
         }
 
@@ -2077,15 +2166,15 @@ class ThumbnailGenerationService
 
         try {
             // Verify PSD file is readable
-            if (!is_readable($sourcePath)) {
+            if (! is_readable($sourcePath)) {
                 throw new \RuntimeException("PSD file is not readable: {$sourcePath}");
             }
 
             // Create Imagick instance and read PSD file
             // ImageMagick automatically flattens PSD layers when reading
-            $imagick = new \Imagick();
+            $imagick = new \Imagick;
             $imagick->setResolution(72, 72); // Set resolution before reading
-            
+
             try {
                 $imagick->readImage($sourcePath);
             } catch (\ImagickException $e) {
@@ -2132,7 +2221,7 @@ class ThumbnailGenerationService
             $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
             // Apply blur for preview thumbnails if configured
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2); // Moderate blur
             }
 
@@ -2144,7 +2233,7 @@ class ThumbnailGenerationService
 
             // Create temporary output file
             $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-            $outputPath = tempnam(sys_get_temp_dir(), 'psd_thumb_') . '.' . $extension;
+            $outputPath = tempnam(sys_get_temp_dir(), 'psd_thumb_').'.'.$extension;
 
             // Write to file
             $imagick->writeImage($outputPath);
@@ -2152,7 +2241,7 @@ class ThumbnailGenerationService
             $imagick->destroy();
 
             // Verify output file was created
-            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+            if (! file_exists($outputPath) || filesize($outputPath) === 0) {
                 throw new \RuntimeException('PSD thumbnail generation failed - output file is missing or empty');
             }
 
@@ -2185,15 +2274,14 @@ class ThumbnailGenerationService
      * Modern AI files (Illustrator 9+) are PDF-compatible. ImageMagick with Ghostscript
      * can render them. Uses same approach as PSD - Imagick flattens and converts.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
      * @return string Path to generated thumbnail
+     *
      * @throws \RuntimeException If generation fails
      */
     protected function generateAiThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify Imagick extension is loaded
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('Illustrator thumbnail generation requires Imagick PHP extension');
         }
 
@@ -2204,16 +2292,16 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            if (!is_readable($sourcePath)) {
+            if (! is_readable($sourcePath)) {
                 throw new \RuntimeException("Illustrator file is not readable: {$sourcePath}");
             }
 
-            $imagick = new \Imagick();
+            $imagick = new \Imagick;
             $imagick->setResolution(72, 72);
 
             try {
                 // AI files are PDF-compatible; ImageMagick reads first page via Ghostscript
-                $imagick->readImage($sourcePath . '[0]');
+                $imagick->readImage($sourcePath.'[0]');
             } catch (\ImagickException $e) {
                 Log::error('[ThumbnailGenerationService] Failed to read AI file with Imagick', [
                     'source_path' => $sourcePath,
@@ -2248,7 +2336,7 @@ class ThumbnailGenerationService
                 $imagick->clear();
                 $imagick->destroy();
                 throw new \RuntimeException(
-                    'This Illustrator file was saved without PDF compatibility. Re-save it in Adobe Illustrator with ' .
+                    'This Illustrator file was saved without PDF compatibility. Re-save it in Adobe Illustrator with '.
                     '"Create PDF Compatible File" enabled (File → Save As → Illustrator Options) to generate a visual preview.'
                 );
             }
@@ -2275,7 +2363,7 @@ class ThumbnailGenerationService
             $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
             $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
 
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2);
             }
 
@@ -2285,13 +2373,13 @@ class ThumbnailGenerationService
             $imagick->setImageCompressionQuality($quality);
 
             $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-            $outputPath = tempnam(sys_get_temp_dir(), 'ai_thumb_') . '.' . $extension;
+            $outputPath = tempnam(sys_get_temp_dir(), 'ai_thumb_').'.'.$extension;
 
             $imagick->writeImage($outputPath);
             $imagick->clear();
             $imagick->destroy();
 
-            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+            if (! file_exists($outputPath) || filesize($outputPath) === 0) {
                 throw new \RuntimeException('Illustrator thumbnail generation failed - output file is missing or empty');
             }
 
@@ -2324,39 +2412,40 @@ class ThumbnailGenerationService
      * This method attempts to use ImageMagick to convert any file type to an image.
      * Used by admin regeneration to test file types that aren't officially supported.
      *
-     * @param string $sourcePath Path to source file
-     * @param array $styleConfig Style configuration
-     * @param Asset $asset Asset being processed (for logging)
+     * @param  string  $sourcePath  Path to source file
+     * @param  array  $styleConfig  Style configuration
+     * @param  Asset  $asset  Asset being processed (for logging)
      * @return string Path to generated thumbnail
+     *
      * @throws \RuntimeException If generation fails
      */
     protected function generateImageMagickThumbnail(string $sourcePath, array $styleConfig, Asset $asset): string
     {
         // Verify Imagick extension is loaded
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             throw new \RuntimeException('ImageMagick thumbnail generation requires Imagick PHP extension');
         }
 
         try {
-            $imagick = new \Imagick();
+            $imagick = new \Imagick;
             $imagick->setResolution(72, 72); // Set resolution before reading
-            
+
             // Try to read the file with ImageMagick (supports many formats)
             // For multi-page documents, only read first page
-            $imagick->readImage($sourcePath . '[0]'); // [0] = first page/frame
-            
+            $imagick->readImage($sourcePath.'[0]'); // [0] = first page/frame
+
             // Get first image from potential multi-page document
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
-            
+
             // Get dimensions
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
-            
+
             if ($sourceWidth === 0 || $sourceHeight === 0) {
                 throw new \RuntimeException('ImageMagick could not read valid dimensions from file');
             }
-            
+
             Log::info('[ThumbnailGenerationService] ImageMagick read file successfully (admin override)', [
                 'asset_id' => $asset->id,
                 'source_path' => $sourcePath,
@@ -2364,12 +2453,12 @@ class ThumbnailGenerationService
                 'source_height' => $sourceHeight,
                 'mime_type' => $asset->mime_type,
             ]);
-            
+
             // Calculate target dimensions
             $targetWidth = $styleConfig['width'];
             $targetHeight = $styleConfig['height'];
             $fit = $styleConfig['fit'] ?? 'contain';
-            
+
             [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
                 $sourceWidth,
                 $sourceHeight,
@@ -2377,43 +2466,43 @@ class ThumbnailGenerationService
                 $targetHeight,
                 $fit
             );
-            
+
             // Resize — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
             $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
             $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
-            
+
             // Apply blur for preview thumbnails if configured
-            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                 $imagick->blurImage(0, 2); // Moderate blur
             }
-            
+
             // Determine output format based on config (default to WebP for better compression)
             $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
             $quality = $styleConfig['quality'] ?? 85;
             $imagick->setImageFormat($outputFormat);
             $imagick->setImageCompressionQuality($quality);
-            
+
             // Create temporary output file
             $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-            $outputPath = tempnam(sys_get_temp_dir(), 'thumb_imagick_') . '.' . $extension;
-            
+            $outputPath = tempnam(sys_get_temp_dir(), 'thumb_imagick_').'.'.$extension;
+
             // Write to file
             $imagick->writeImage($outputPath);
             $imagick->clear();
             $imagick->destroy();
-            
+
             // Verify output file was created
-            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+            if (! file_exists($outputPath) || filesize($outputPath) === 0) {
                 throw new \RuntimeException('ImageMagick thumbnail generation failed - output file is missing or empty');
             }
-            
+
             Log::info('[ThumbnailGenerationService] ImageMagick thumbnail generated (admin override)', [
                 'asset_id' => $asset->id,
                 'output_path' => $outputPath,
                 'thumb_width' => $thumbWidth,
                 'thumb_height' => $thumbHeight,
             ]);
-            
+
             return $outputPath;
         } catch (\ImagickException $e) {
             Log::error('[ThumbnailGenerationService] ImageMagick thumbnail generation failed', [
@@ -2447,8 +2536,6 @@ class ThumbnailGenerationService
      * NOTE: Requires external tools or libraries to extract preview/icon.
      * This is a placeholder implementation.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
      * @return string|null Path to generated thumbnail, or null if not supported
      */
     protected function generateOfficeThumbnail(string $sourcePath, array $styleConfig): ?string
@@ -2456,7 +2543,7 @@ class ThumbnailGenerationService
         Log::info('Office thumbnail generation not yet implemented', [
             'source_path' => $sourcePath,
         ]);
-        
+
         return null;
     }
 
@@ -2467,21 +2554,22 @@ class ThumbnailGenerationService
      * Frame timestamp: 25-40% of video duration (defaults to 30%).
      * Output format: JPG or WebP (based on config).
      *
-     * @param string $sourcePath Local path to video file
-     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @param  string  $sourcePath  Local path to video file
+     * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
      * @return string Path to generated thumbnail image
+     *
      * @throws \RuntimeException If video processing fails
      */
     protected function generateVideoThumbnail(string $sourcePath, array $styleConfig): string
     {
         // Verify source file exists
-        if (!file_exists($sourcePath)) {
+        if (! file_exists($sourcePath)) {
             throw new \RuntimeException("Source video file does not exist: {$sourcePath}");
         }
 
         $sourceFileSize = filesize($sourcePath);
         if ($sourceFileSize === 0) {
-            throw new \RuntimeException("Source video file is empty (size: 0 bytes)");
+            throw new \RuntimeException('Source video file is empty (size: 0 bytes)');
         }
 
         Log::info('[ThumbnailGenerationService] Generating video thumbnail using FFmpeg', [
@@ -2492,7 +2580,7 @@ class ThumbnailGenerationService
 
         // Check if FFmpeg is available
         $ffmpegPath = $this->findFFmpegPath();
-        if (!$ffmpegPath) {
+        if (! $ffmpegPath) {
             throw new \RuntimeException('FFmpeg is not installed or not found in PATH. Video processing requires FFmpeg.');
         }
 
@@ -2524,8 +2612,8 @@ class ThumbnailGenerationService
             $timestamp = max(0.5, $duration * $timestampPercent); // Minimum 0.5 seconds
 
             // Extract frame at calculated timestamp
-            $tempImagePath = tempnam(sys_get_temp_dir(), 'video_thumb_') . '.jpg';
-            
+            $tempImagePath = tempnam(sys_get_temp_dir(), 'video_thumb_').'.jpg';
+
             // FFmpeg command to extract frame
             // -ss: seek to timestamp
             // -i: input file
@@ -2550,7 +2638,7 @@ class ThumbnailGenerationService
             $returnCode = 0;
             exec($command, $output, $returnCode);
 
-            if ($returnCode !== 0 || !file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
+            if ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
                 $errorOutput = implode("\n", $output);
                 Log::error('[ThumbnailGenerationService] FFmpeg frame extraction failed', [
                     'source_path' => $sourcePath,
@@ -2568,7 +2656,7 @@ class ThumbnailGenerationService
 
             // Resize the extracted frame to match thumbnail style dimensions
             // Use GD library to resize (same as image thumbnails for consistency)
-            if (!extension_loaded('gd')) {
+            if (! extension_loaded('gd')) {
                 throw new \RuntimeException('GD extension is required for video thumbnail resizing');
             }
 
@@ -2623,7 +2711,7 @@ class ThumbnailGenerationService
                 );
 
                 // Apply blur for preview thumbnails (LQIP effect)
-                if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
                     for ($i = 0; $i < 2; $i++) {
                         imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
                     }
@@ -2635,14 +2723,14 @@ class ThumbnailGenerationService
 
                 // Save thumbnail to temporary file
                 if ($outputFormat === 'webp' && function_exists('imagewebp')) {
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
-                    if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
+                    if (! imagewebp($thumbImage, $thumbPath, $quality)) {
                         throw new \RuntimeException('Failed to save video thumbnail image as WebP');
                     }
                 } else {
                     // Fallback to JPEG if WebP not available or not configured
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
-                    if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.jpg';
+                    if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
                         throw new \RuntimeException('Failed to save video thumbnail image as JPEG');
                     }
                 }
@@ -2698,7 +2786,7 @@ class ThumbnailGenerationService
                 $output = [];
                 $returnCode = 0;
                 exec('which ffmpeg 2>&1', $output, $returnCode);
-                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                if ($returnCode === 0 && ! empty($output[0]) && file_exists($output[0])) {
                     return $output[0];
                 }
             } elseif (file_exists($path) && is_executable($path)) {
@@ -2712,16 +2800,17 @@ class ThumbnailGenerationService
     /**
      * Get video information using FFprobe.
      *
-     * @param string $videoPath Path to video file
-     * @param string $ffmpegPath Path to FFmpeg executable
+     * @param  string  $videoPath  Path to video file
+     * @param  string  $ffmpegPath  Path to FFmpeg executable
      * @return array Video information (duration, width, height)
+     *
      * @throws \RuntimeException If FFprobe fails
      */
     protected function getVideoInfo(string $videoPath, string $ffmpegPath): array
     {
         // Try to use ffprobe first (more reliable)
         $ffprobePath = str_replace('ffmpeg', 'ffprobe', $ffmpegPath);
-        if (!file_exists($ffprobePath) || !is_executable($ffprobePath)) {
+        if (! file_exists($ffprobePath) || ! is_executable($ffprobePath)) {
             // Fallback: use ffmpeg to probe
             $ffprobePath = $ffmpegPath;
         }
@@ -2750,7 +2839,7 @@ class ThumbnailGenerationService
         $jsonOutput = implode("\n", $output);
         $videoData = json_decode($jsonOutput, true);
 
-        if (!$videoData || !isset($videoData['format'])) {
+        if (! $videoData || ! isset($videoData['format'])) {
             throw new \RuntimeException('Failed to parse video information from FFprobe output');
         }
 
@@ -2763,7 +2852,7 @@ class ThumbnailGenerationService
             }
         }
 
-        if (!$videoStream) {
+        if (! $videoStream) {
             throw new \RuntimeException('No video stream found in file');
         }
 
@@ -2783,8 +2872,8 @@ class ThumbnailGenerationService
      * Detect file type from mime type and extension.
      * Version-pure: when version is provided, use ONLY version (never asset).
      *
-     * @param Asset $asset Used only when version is null (legacy path)
-     * @param AssetVersion|null $version When provided, use ONLY version->mime_type and version->file_path
+     * @param  Asset  $asset  Used only when version is null (legacy path)
+     * @param  AssetVersion|null  $version  When provided, use ONLY version->mime_type and version->file_path
      * @return string File type: image, pdf, tiff, psd, ai, office, video, or unknown
      */
     protected function detectFileType(Asset $asset, ?AssetVersion $version = null): string
@@ -2842,11 +2931,7 @@ class ThumbnailGenerationService
      * For small images (either dimension < 100px, e.g. icons/favicons), never upscale —
      * output is capped at source to prevent blurriness. Normal images use cover/contain as-is.
      *
-     * @param int $sourceWidth
-     * @param int $sourceHeight
-     * @param int $targetWidth
-     * @param int $targetHeight
-     * @param string $fit Strategy: 'contain' (fit within), 'cover' (fill), 'width', 'height'
+     * @param  string  $fit  Strategy: 'contain' (fit within), 'cover' (fill), 'width', 'height'
      * @return array [width, height]
      */
     protected function calculateDimensions(
@@ -2898,9 +2983,6 @@ class ThumbnailGenerationService
 
     /**
      * Get thumbnail metadata (width, height, size).
-     *
-     * @param string $thumbnailPath
-     * @return array
      */
     protected function getThumbnailMetadata(string $thumbnailPath): array
     {
@@ -2908,6 +2990,7 @@ class ThumbnailGenerationService
         // For SVG and other non-raster formats, getimagesize returns false
         $width = $info !== false ? ($info[0] ?? null) : null;
         $height = $info !== false ? ($info[1] ?? null) : null;
+
         return [
             'width' => $width,
             'height' => $height,
@@ -2918,12 +3001,12 @@ class ThumbnailGenerationService
     /**
      * Get MIME type for file extension.
      *
-     * @param string $extension
      * @return string MIME type
      */
     protected function getMimeTypeForExtension(string $extension): string
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
+
         return $fileTypeService->getMimeTypeForExtension($extension) ?? 'image/jpeg';
     }
 
@@ -2938,9 +3021,9 @@ class ThumbnailGenerationService
      * - At least 8% of pixels are transparent (so it's "content on transparent", not opaque photo).
      * - Among visible (opaque) pixels, at least 55% are white/near-white (relaxed for anti-aliasing).
      *
-     * @param resource $imageResource GD image resource
-     * @param int $width Image width
-     * @param int $height Image height
+     * @param  resource  $imageResource  GD image resource
+     * @param  int  $width  Image width
+     * @param  int  $height  Image height
      * @return bool True only when image appears to be a white logo/graphic on transparent background
      */
     protected function hasWhiteContentOnTransparent($imageResource, int $width, int $height): bool
@@ -2968,6 +3051,7 @@ class ThumbnailGenerationService
                 $isTransparent = $alpha >= 100;
                 if ($isTransparent) {
                     $transparentPixelCount++;
+
                     continue;
                 }
                 $visiblePixelCount++;
@@ -3006,15 +3090,13 @@ class ThumbnailGenerationService
 
     /**
      * Create S3 client instance.
-     *
-     * @return S3Client
      */
     protected function createS3Client(): S3Client
     {
-        if (!class_exists(S3Client::class)) {
+        if (! class_exists(S3Client::class)) {
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
-        
+
         $config = [
             'version' => 'latest',
             'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
@@ -3023,7 +3105,7 @@ class ThumbnailGenerationService
             $config['endpoint'] = config('filesystems.disks.s3.endpoint');
             $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
         }
-        
+
         return new S3Client($config);
     }
 }

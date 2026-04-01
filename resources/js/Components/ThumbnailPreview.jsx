@@ -191,6 +191,40 @@ export default function ThumbnailPreview({
         return getThumbnailState(asset, retryCount)
     }, [asset?.id, retryCount])
 
+    const fileExtForThumb = useMemo(
+        () =>
+            (asset?.file_extension || asset?.original_filename?.split?.('.')?.pop() || '')
+                .toLowerCase()
+                .replace(/^\./, ''),
+        [asset?.file_extension, asset?.original_filename]
+    )
+
+    const showRichPlaceholder = useMemo(() => {
+        if (!supportsThumbnail(asset?.mime_type, fileExtForThumb)) {
+            return false
+        }
+        const ts = (asset?.thumbnail_status?.value || asset?.thumbnail_status || '')
+            .toString()
+            .toLowerCase()
+        if (asset?.preview_unavailable_user_message || asset?.metadata?.preview_unavailable_user_message) {
+            return true
+        }
+        return (
+            state === 'FAILED' ||
+            state === 'SKIPPED' ||
+            ts === 'failed' ||
+            ts === 'skipped'
+        )
+    }, [
+        asset?.id,
+        asset?.mime_type,
+        asset?.thumbnail_status,
+        asset?.preview_unavailable_user_message,
+        asset?.metadata?.preview_unavailable_user_message,
+        state,
+        fileExtForThumb,
+    ])
+
     // Small thumbnails (<100px): center image as-is, don't use cover (avoids blurry upscale in container)
     const isSmallThumbnail = useMemo(() => {
         const dims = asset?.metadata?.thumbnail_dimensions
@@ -307,8 +341,8 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
-                        : `flex items-center justify-center bg-gray-50 ${className}`
+                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
             >
@@ -316,6 +350,7 @@ export default function ThumbnailPreview({
                     asset={asset}
                     primaryColor={brandPrimaryColor}
                     size={size}
+                    rich={showRichPlaceholder}
                 />
             </div>
         )
@@ -334,8 +369,8 @@ export default function ThumbnailPreview({
                 <div
                     className={
                         isMasonryHeight
-                            ? `relative flex w-full min-h-[120px] items-center justify-center bg-gray-50 ${contrastBackdropClass}`
-                            : `flex items-center justify-center bg-gray-50 ${className} ${contrastBackdropClass}`
+                            ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${contrastBackdropClass}`
+                            : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className} ${contrastBackdropClass}`
                     }
                     style={masonryPlaceholderStyle}
                 >
@@ -343,6 +378,7 @@ export default function ThumbnailPreview({
                         asset={asset}
                         primaryColor={brandPrimaryColor}
                         size={size}
+                        rich={showRichPlaceholder}
                     />
                 </div>
             )
@@ -578,8 +614,8 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
-                        : `flex items-center justify-center bg-gray-50 ${className}`
+                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
             >
@@ -587,6 +623,7 @@ export default function ThumbnailPreview({
                     asset={asset}
                     primaryColor={brandPrimaryColor}
                     size={size}
+                    rich={showRichPlaceholder}
                 />
             </div>
         )
@@ -626,8 +663,8 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
-                        : `flex items-center justify-center bg-gray-50 ${className}`
+                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
             >
@@ -635,6 +672,7 @@ export default function ThumbnailPreview({
                     asset={asset}
                     primaryColor={brandPrimaryColor}
                     size={size}
+                    rich={showRichPlaceholder}
                 />
             </div>
         )
@@ -647,8 +685,8 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
-                        : `flex items-center justify-center bg-gray-50 ${className}`
+                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
             >
@@ -656,6 +694,7 @@ export default function ThumbnailPreview({
                     asset={asset}
                     primaryColor={brandPrimaryColor}
                     size={size}
+                    rich={showRichPlaceholder}
                 />
             </div>
         )
@@ -666,8 +705,8 @@ export default function ThumbnailPreview({
         <div
             className={
                 isMasonryHeight
-                    ? 'relative flex w-full min-h-[120px] items-center justify-center bg-gray-50'
-                    : `flex items-center justify-center bg-gray-50 ${className}`
+                    ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                    : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
             }
             style={masonryPlaceholderStyle}
         >
@@ -675,6 +714,7 @@ export default function ThumbnailPreview({
                 asset={asset}
                 primaryColor={brandPrimaryColor}
                 size={size}
+                rich={showRichPlaceholder}
             />
         </div>
     )

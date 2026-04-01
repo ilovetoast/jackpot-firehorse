@@ -78,7 +78,7 @@ return [
          * Step 6: Low-quality preview thumbnail (LQIP).
          * Extremely small, heavily blurred preview shown immediately while final thumbnails process.
          * Generated early in pipeline to provide instant visual feedback.
-         * 
+         *
          * Rules:
          * - Size: ~32x32 (extremely small for fast generation and transfer)
          * - Format: same as final (jpg/webp)
@@ -197,6 +197,13 @@ return [
          */
         'large_asset_timeout_seconds' => (int) env('THUMBNAIL_LARGE_TIMEOUT_SECONDS', 1800),
 
+        /*
+         * Max source file size (bytes) for thumbnail/preview rasterization. When set > 0, larger
+         * files skip thumbnail generation gracefully (SKIPPED) so workers do not OOM or retry forever.
+         * Production: raise if workers have more RAM (e.g. 5368709120 = 5GB). 0 = no limit.
+         */
+        'max_source_bytes' => (int) env('THUMBNAIL_MAX_SOURCE_BYTES', 524_288_000),
+
         'svg_timeout_minutes' => env('THUMBNAIL_SVG_TIMEOUT_MINUTES', 12),
 
         /*
@@ -256,6 +263,20 @@ return [
         'cr2' => [
             'prefer_smallest_sensible_layer' => env('THUMBNAIL_CR2_PREFER_SMALLEST_LAYER', true),
             'layer_min_area_pixels' => (int) env('THUMBNAIL_CR2_LAYER_MIN_AREA', 40 * 40),
+            /*
+             * Prefer subimages that decode as JPEG (embedded preview). Full RAW demosaic layers often
+             * show green/magenta on some ImageMagick/LibRaw builds; staging IM versions differ from dev.
+             */
+            'prefer_embedded_jpeg_layer' => env('THUMBNAIL_CR2_PREFER_EMBEDDED_JPEG', true),
+            /*
+             * Skip choosing a subimage larger than this (pixels) when a smaller layer exists — avoids
+             * full-resolution Bayer decode for thumbnails when an embedded preview is available.
+             */
+            'max_raw_decode_pixels' => (int) env('THUMBNAIL_CR2_MAX_RAW_DECODE_PIXELS', 25_000_000),
+            /*
+             * LibRaw: auto-wb + camera-wb together can disagree on some delegates; default auto-wb off.
+             */
+            'raw_auto_white_balance' => env('THUMBNAIL_CR2_RAW_AUTO_WB', false),
         ],
     ],
 
@@ -278,6 +299,18 @@ return [
         'throttle_max' => (int) env('ASSET_PROCESSING_THROTTLE_MAX', 5),
         'throttle_decay_seconds' => (int) env('ASSET_PROCESSING_THROTTLE_DECAY', 60),
         'throttle_release_seconds' => (int) env('ASSET_PROCESSING_THROTTLE_RELEASE', 10),
+
+        /*
+         * Files at or above this size (bytes) use QUEUE_IMAGES_HEAVY_QUEUE for the processing chain.
+         * Tune per environment; heavy workers should use more memory and longer Horizon timeout.
+         */
+        'heavy_queue_min_bytes' => (int) env('ASSET_PIPELINE_HEAVY_MIN_BYTES', 200 * 1024 * 1024),
+
+        /*
+         * Max attempts for ProcessAssetJob / GenerateThumbnailsJob (after throttle releases each counts).
+         * Keeps reliability timeline from growing without bound when a job will never succeed.
+         */
+        'pipeline_job_max_tries' => (int) env('ASSET_PIPELINE_JOB_MAX_TRIES', 5),
     ],
 
 ];

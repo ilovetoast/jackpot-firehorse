@@ -12,7 +12,7 @@
  * - Permission-based visibility
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { TagIcon } from '@heroicons/react/24/outline'
 import TagInputUnified from './TagInputUnified'
 import TagListUnified from './TagListUnified'
@@ -34,6 +34,23 @@ export default function AssetTagManager({
     const isDark = variant === 'dark'
     const [refreshTrigger, setRefreshTrigger] = useState(0)
     const [tagCount, setTagCount] = useState(0)
+    const prevAnalysisStatusRef = useRef(null)
+
+    useEffect(() => {
+        prevAnalysisStatusRef.current = asset?.analysis_status ?? null
+    }, [asset?.id])
+
+    useEffect(() => {
+        if (!asset?.id) {
+            return
+        }
+        const st = asset?.analysis_status
+        const prev = prevAnalysisStatusRef.current
+        if (prev !== 'complete' && st === 'complete') {
+            setRefreshTrigger((t) => t + 1)
+        }
+        prevAnalysisStatusRef.current = st
+    }, [asset?.id, asset?.analysis_status])
     
     // Permission check - align with existing asset permissions
     // If user can see the asset drawer, they can see tags. Use same pattern as metadata.

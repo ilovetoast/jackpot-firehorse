@@ -8,6 +8,7 @@ use App\Models\Collection;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Download;
 use App\Services\FeatureGate;
+use App\Support\PipelineQueueResolver;
 use Aws\S3\S3Client;
 use Illuminate\Support\Arr;
 use Aws\S3\Exception\S3Exception;
@@ -860,7 +861,8 @@ class AssetThumbnailController extends Controller
         // The job will handle all thumbnail generation logic
         // Note: Job ID is not available immediately after dispatch
         // The job ID will be available inside the job execution via $this->job->getJobId()
-        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+        $asset->loadMissing('currentVersion');
+        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         Log::info('[AssetThumbnailController] Thumbnail generation job dispatched (manual request)', [
             'asset_id' => $asset->id,
@@ -948,7 +950,8 @@ class AssetThumbnailController extends Controller
 
         $version = $asset->currentVersion;
         $payloadId = $version ? (string) $version->id : (string) $asset->id;
-        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, true)->onQueue(config('queue.images_queue', 'images'));
+        $asset->loadMissing('currentVersion');
+        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, true)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         Log::info('[AssetThumbnailController] Thumbnail regeneration job dispatched (admin)', [
             'asset_id' => $asset->id,
@@ -1420,7 +1423,8 @@ class AssetThumbnailController extends Controller
             ]);
 
             // Dispatch GenerateThumbnailsJob which will handle video thumbnail generation
-            \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+            $asset->loadMissing('currentVersion');
+            \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
             Log::info('[AssetThumbnailController] Video thumbnail regeneration job dispatched', [
                 'asset_id' => $asset->id,

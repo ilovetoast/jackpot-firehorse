@@ -540,6 +540,12 @@ export default function AssetDrawer({
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
 
+    const isOwnUpload = useMemo(() => {
+        const uid = auth?.user?.id
+        const aid = displayAsset?.user_id
+        return uid != null && aid != null && String(uid) === String(aid)
+    }, [auth?.user?.id, displayAsset?.user_id])
+
     const isVirtualGoogleFont = Boolean(displayAsset?.is_virtual_google_font)
     const googleFontSpecimenUrl = useMemo(() => {
         if (!displayAsset?.is_virtual_google_font) return null
@@ -2740,14 +2746,19 @@ export default function AssetDrawer({
 
                 {/* Phase B9: Metadata Candidate Review (moved up from bottom) */}
                 {displayAsset?.id && !isVirtualGoogleFont && (
-                    <MetadataCandidateReview assetId={displayAsset.id} primaryColor={brandPrimary} />
+                    <MetadataCandidateReview
+                        assetId={displayAsset.id}
+                        primaryColor={brandPrimary}
+                        uploadedByUserId={displayAsset.user_id}
+                    />
                 )}
 
                 {/* Brand insight stack: AI suggested tags + reference promotion + Brand Intelligence (aligned, shared panel) */}
                 {displayAsset?.id && !isVirtualGoogleFont &&
                     (can('brand_settings.manage') ||
                         displayAsset.category?.ebi_enabled === true ||
-                        can('metadata.suggestions.view')) && (
+                        can('metadata.suggestions.view') ||
+                        (isOwnUpload && can('metadata.edit_post_upload'))) && (
                     <div className="border-t border-gray-200 bg-gradient-to-b from-slate-50/80 to-white">
                         <div className="px-4 md:px-6 py-3 space-y-3">
                             {brandIntelActivityBanner && (
@@ -2766,6 +2777,8 @@ export default function AssetDrawer({
                             <AiTagSuggestionsInline
                                 key={`ai-tags-${displayAsset.id}`}
                                 assetId={displayAsset.id}
+                                uploadedByUserId={displayAsset.user_id}
+                                analysisStatus={displayAsset.analysis_status}
                                 primaryColor={brandPrimary}
                                 drawerInsightGroup
                             />
@@ -2946,7 +2959,7 @@ export default function AssetDrawer({
                             {/* Tags at bottom of metadata */}
                             <div className="mt-4 pt-4 border-t border-gray-100">
                                 <AssetTagManager 
-                                    key={`tag-manager-${asset.id}`} 
+                                    key={`tag-manager-${displayAsset.id}`} 
                                     asset={displayAsset}
                                     showTitle={true}
                                     showInput={true}

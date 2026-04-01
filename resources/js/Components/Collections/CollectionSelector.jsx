@@ -24,7 +24,10 @@ export default function CollectionSelector({
     maxHeight = '200px',
     showCreateButton = false,
     onCreateClick = null,
+    /** Use `dark` in lightbox / dark panels so trigger and portal match the UI (default `light` for upload & modals). */
+    variant = 'light',
 }) {
+    const isDark = variant === 'dark'
     const [isOpen, setIsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const containerRef = useRef(null)
@@ -111,7 +114,11 @@ export default function CollectionSelector({
             />
             <div
                 ref={dropdownRef}
-                className="fixed z-[9999] rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 flex flex-col"
+                className={
+                    isDark
+                        ? 'fixed z-[9999] rounded-md bg-neutral-900 shadow-xl ring-1 ring-neutral-700 flex flex-col'
+                        : 'fixed z-[9999] rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 flex flex-col'
+                }
                 style={{
                     top: dropdownPosition.top,
                     left: dropdownPosition.left,
@@ -119,14 +126,18 @@ export default function CollectionSelector({
                     maxHeight: maxHeight || '300px',
                 }}
             >
-                <div className="p-2 border-b border-gray-200 flex-shrink-0">
+                <div className={`p-2 border-b flex-shrink-0 ${isDark ? 'border-neutral-700' : 'border-gray-200'}`}>
                     <input
                         ref={searchInputRef}
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search collections…"
-                        className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className={
+                            isDark
+                                ? 'block w-full rounded-md border border-neutral-600 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500'
+                                : 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500'
+                        }
                     />
                 </div>
                 <div
@@ -136,7 +147,7 @@ export default function CollectionSelector({
                     style={{ maxHeight: showCreateButton && onCreateClick ? `calc(${maxHeight || '300px'} - 120px)` : `calc(${maxHeight || '300px'} - 60px)` }}
                 >
                     {filteredCollections.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                        <div className={`px-4 py-3 text-sm text-center ${isDark ? 'text-neutral-400' : 'text-gray-500'}`}>
                             {searchQuery ? 'No collections found' : 'No collections available'}
                         </div>
                     ) : (
@@ -150,43 +161,67 @@ export default function CollectionSelector({
                                     tabIndex={0}
                                     onClick={() => handleToggle(collection.id)}
                                     onKeyDown={(e) => handleKeyDown(e, collection.id)}
-                                    className={`relative cursor-pointer select-none px-4 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
-                                        isSelected ? 'bg-indigo-50' : ''
-                                    }`}
+                                    className={
+                                        isDark
+                                            ? `relative cursor-pointer select-none px-4 py-2 text-sm focus:outline-none ${
+                                                  isSelected
+                                                      ? 'bg-neutral-800 text-neutral-100'
+                                                      : 'text-neutral-200 hover:bg-neutral-800/80 focus:bg-neutral-800/80'
+                                              }`
+                                            : `relative cursor-pointer select-none px-4 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
+                                                  isSelected ? 'bg-indigo-50' : ''
+                                              }`
+                                    }
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center flex-1 min-w-0">
                                             <span
                                                 className={`mr-3 flex-shrink-0 ${
-                                                    isSelected ? 'text-indigo-600' : 'text-gray-400'
+                                                    isDark
+                                                        ? isSelected
+                                                            ? 'text-sky-400'
+                                                            : 'text-neutral-500'
+                                                        : isSelected
+                                                          ? 'text-indigo-600'
+                                                          : 'text-gray-400'
                                                 }`}
                                             >
                                                 {isSelected ? (
                                                     <CheckIcon className="h-5 w-5" aria-hidden="true" />
                                                 ) : (
-                                                    <div className="h-5 w-5 border-2 border-gray-300 rounded" />
+                                                    <div
+                                                        className={`h-5 w-5 border-2 rounded ${
+                                                            isDark ? 'border-neutral-600' : 'border-gray-300'
+                                                        }`}
+                                                    />
                                                 )}
                                             </span>
                                             <span
                                                 className={`block truncate ${
-                                                    isSelected ? 'font-medium text-indigo-900' : 'text-gray-900'
+                                                    isDark
+                                                        ? isSelected
+                                                            ? 'font-medium text-neutral-50'
+                                                            : 'text-neutral-200'
+                                                        : isSelected
+                                                          ? 'font-medium text-indigo-900'
+                                                          : 'text-gray-900'
                                                 }`}
                                             >
                                                 {collection.name}
                                             </span>
                                             {collection.is_public && (
                                                 <GlobeAltIcon
-                                                    className="h-4 w-4 flex-shrink-0 text-gray-400 ml-1.5"
+                                                    className={`h-4 w-4 flex-shrink-0 ml-1.5 ${isDark ? 'text-neutral-500' : 'text-gray-400'}`}
                                                     title="Public collection"
                                                     aria-hidden="true"
                                                 />
                                             )}
                                         </div>
                                         {collection.icon && (
-                                            <span className="ml-2 flex-shrink-0 text-gray-400">{collection.icon}</span>
+                                            <span className={`ml-2 flex-shrink-0 ${isDark ? 'text-neutral-500' : 'text-gray-400'}`}>{collection.icon}</span>
                                         )}
                                         {collection.action && (
-                                            <span className="ml-2 flex-shrink-0 text-gray-400">{collection.action}</span>
+                                            <span className={`ml-2 flex-shrink-0 ${isDark ? 'text-neutral-500' : 'text-gray-400'}`}>{collection.action}</span>
                                         )}
                                     </div>
                                 </div>
@@ -195,11 +230,15 @@ export default function CollectionSelector({
                     )}
                 </div>
                 {showCreateButton && onCreateClick && (
-                    <div className="border-t border-gray-200 p-2 flex-shrink-0 bg-white">
+                    <div className={`border-t p-2 flex-shrink-0 ${isDark ? 'border-neutral-700 bg-neutral-900' : 'border-gray-200 bg-white'}`}>
                         <button
                             type="button"
                             onClick={() => { setIsOpen(false); onCreateClick() }}
-                            className="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className={
+                                isDark
+                                    ? 'w-full text-left px-3 py-2 text-sm text-sky-400 hover:bg-neutral-800 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-500'
+                                    : 'w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500'
+                            }
                         >
                             + Create new collection
                         </button>
@@ -218,7 +257,11 @@ export default function CollectionSelector({
                 type="button"
                 onClick={() => !disabled && setIsOpen(!isOpen)}
                 disabled={disabled}
-                className="relative w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-left shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className={
+                    isDark
+                        ? 'relative w-full rounded-md border border-neutral-600 bg-neutral-900 px-3 py-2 text-left text-neutral-100 shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'relative w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed'
+                }
             >
                 <span className="block truncate">
                     {selectedCount === 0
@@ -229,9 +272,9 @@ export default function CollectionSelector({
                 </span>
                 <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                     {isOpen ? (
-                        <ChevronUpIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                        <ChevronUpIcon className={`h-5 w-5 ${isDark ? 'text-neutral-400' : 'text-gray-400'}`} aria-hidden="true" />
                     ) : (
-                        <ChevronDownIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                        <ChevronDownIcon className={`h-5 w-5 ${isDark ? 'text-neutral-400' : 'text-gray-400'}`} aria-hidden="true" />
                     )}
                 </span>
             </button>
@@ -240,7 +283,7 @@ export default function CollectionSelector({
 
             {/* Selected Collections Summary (when multiple selected) */}
             {selectedCount > 1 && (
-                <p className="mt-1 text-xs text-gray-500">
+                <p className={`mt-1 text-xs ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                     {selectedNames.length > 60 ? `${selectedNames.substring(0, 60)}...` : selectedNames}
                 </p>
             )}

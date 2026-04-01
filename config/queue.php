@@ -41,6 +41,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Heavy asset pipeline queue (large originals)
+    |--------------------------------------------------------------------------
+    |
+    | ProcessAssetJob routes Bus::chain() here when the source file is at or above
+    | assets.processing.heavy_queue_min_bytes. Horizon should run a supervisor with
+    | higher memory and timeout than the default images worker (see horizon.php).
+    |
+    */
+    'images_heavy_queue' => env('QUEUE_IMAGES_HEAVY_QUEUE', 'images-heavy'),
+
+    /*
+    |--------------------------------------------------------------------------
     | PDF Processing Queue Name
     |--------------------------------------------------------------------------
     |

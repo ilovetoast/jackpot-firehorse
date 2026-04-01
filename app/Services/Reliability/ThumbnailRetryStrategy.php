@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\SystemIncident;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -56,7 +57,8 @@ class ThumbnailRetryStrategy implements RepairStrategyInterface
         $retryCount = (int) ($metadata['retry_count'] ?? 0);
 
         if ($incident->retryable && $retryCount < self::MAX_RETRIES) {
-            GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+            $asset->loadMissing('currentVersion');
+            GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
             $incident->update([
                 'metadata' => array_merge($metadata, [
                     'retried' => true,

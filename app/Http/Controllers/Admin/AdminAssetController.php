@@ -615,12 +615,15 @@ class AdminAssetController extends Controller
 
         AssetEmbedding::where('asset_id', $asset->id)->delete();
 
+        $asset->loadMissing('currentVersion');
+        $queue = \App\Support\PipelineQueueResolver::imagesQueueForAsset($asset);
+
         Bus::chain([
             new GenerateThumbnailsJob($asset->id),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
         ])
-            ->onQueue(config('queue.images_queue', 'images'))
+            ->onQueue($queue)
             ->dispatch();
 
         ActivityEvent::create([
@@ -1079,7 +1082,8 @@ class AdminAssetController extends Controller
                 ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'regenerate_thumbnails':
-                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+                $asset->loadMissing('currentVersion');
+                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(\App\Support\PipelineQueueResolver::imagesQueueForAsset($asset));
                 break;
             case 'rerun_metadata':
                 \App\Jobs\ExtractMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));

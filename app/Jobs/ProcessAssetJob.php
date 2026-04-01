@@ -9,8 +9,11 @@ use App\Models\AssetVersion;
 use App\Services\AnalysisStatusLogger;
 use App\Services\AssetProcessingFailureService;
 use App\Services\FileInspectionService;
+use App\Services\SystemIncidentService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\Logging\PipelineLogger;
+use App\Support\PipelineQueueResolver;
+use App\Enums\ThumbnailStatus;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -47,6 +50,7 @@ class ProcessAssetJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId
     ) {
+        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 5));
         $this->configureImagesQueue();
     }
 
@@ -399,14 +403,22 @@ class ProcessAssetJob implements ShouldQueue
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
         ]);
-        
+
+        $fileSizeBytes = 0;
+        if ($version) {
+            $fileSizeBytes = (int) ($version->file_size ?? 0);
+        } elseif ($asset->size_bytes) {
+            $fileSizeBytes = (int) $asset->size_bytes;
+        }
+        $pipelineQueue = PipelineQueueResolver::forByteSize($fileSizeBytes);
+
         Bus::chain($chainJobs)
-            ->onQueue(config('queue.images_queue', 'images'))
+            ->onQueue($pipelineQueue)
             ->dispatch();
 
         // Seed page 1 render for PDFs on dedicated queue.
         if ($fileType === 'pdf') {
-            PdfPageRenderJob::dispatch($asset->id, 1);
+            PdfPageRenderJob::dispatch($asset->id, 1)->onQueue($pipelineQueue);
         }
 
         PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
@@ -415,6 +427,7 @@ class ProcessAssetJob implements ShouldQueue
             'attempt' => $this->attempts(),
             'chain_job_count' => count($chainJobs),
             'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
+            'pipeline_queue' => $pipelineQueue,
         ]);
 
         // pipeline_status = 'complete' is set by chain jobs (e.g. GenerateThumbnailsJob) when they finish
@@ -478,7 +491,7 @@ class ProcessAssetJob implements ShouldQueue
         $assetMetadata['ai_tagging_completed'] = true;
 
         $asset->update([
-            'thumbnail_status' => \App\Enums\ThumbnailStatus::SKIPPED,
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
             'thumbnail_error' => $skipMessage,
             'thumbnail_started_at' => null,
             'metadata' => $assetMetadata,
@@ -495,7 +508,8 @@ class ProcessAssetJob implements ShouldQueue
             ]);
         }
 
-        FinalizeAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+        $q = PipelineQueueResolver::imagesQueueForAsset($asset);
+        FinalizeAssetJob::dispatch($asset->id)->onQueue($q);
 
         PipelineLogger::info('[ProcessAssetJob] Short-circuit complete — FinalizeAssetJob dispatched', [
             'asset_id' => $asset->id,
@@ -510,15 +524,51 @@ class ProcessAssetJob implements ShouldQueue
         $version = AssetVersion::find($this->assetId);
         $asset = $version ? $version->asset : Asset::find($this->assetId);
 
-        if ($asset) {
-            // Use centralized failure recording service
-            app(AssetProcessingFailureService::class)->recordFailure(
-                $asset,
-                self::class,
-                $exception,
-                $this->attempts(),
-                true // preserveVisibility: uploaded assets must never disappear from grid
-            );
+        if (! $asset) {
+            return;
         }
+
+        app(SystemIncidentService::class)->resolveOpenQueueJobFailuresForAsset((string) $asset->id);
+
+        $analysis = $asset->analysis_status ?? 'uploading';
+        if (in_array($analysis, ['uploading', 'generating_thumbnails'], true)) {
+            $meta = array_merge($asset->metadata ?? [], [
+                'preview_unavailable_user_message' => 'We could not finish processing this file on the server (for example it may be too large or timed out). You can still download the original.',
+                'thumbnail_skip_reason' => 'pipeline_start_failed',
+                'thumbnail_skip_message' => 'Processing did not complete.',
+                'pipeline_process_asset_exhausted_at' => now()->toIso8601String(),
+            ]);
+            $asset->update([
+                'analysis_status' => 'complete',
+                'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                'thumbnail_error' => null,
+                'thumbnail_started_at' => null,
+                'metadata' => $meta,
+            ]);
+            if ($version) {
+                $version->update([
+                    'pipeline_status' => 'complete',
+                    'metadata' => array_merge($version->metadata ?? [], [
+                        'thumbnails_generated' => false,
+                        'pipeline_aborted_after_process_failure' => true,
+                    ]),
+                ]);
+            }
+            $q = PipelineQueueResolver::imagesQueueForAsset($asset->fresh());
+            Bus::chain([
+                new FinalizeAssetJob($asset->id),
+                new PromoteAssetJob($asset->id),
+            ])->onQueue($q)->dispatch();
+
+            return;
+        }
+
+        app(AssetProcessingFailureService::class)->recordFailure(
+            $asset,
+            self::class,
+            $exception,
+            $this->attempts(),
+            true
+        );
     }
 }

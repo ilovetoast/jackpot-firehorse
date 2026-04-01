@@ -136,4 +136,20 @@ class SystemIncidentService
 
         return $this->record(array_merge($payload, ['metadata' => $meta]));
     }
+
+    /**
+     * Auto-resolve open queue-failure incidents for an asset (stops reliability timeline spam after terminal handling).
+     */
+    public function resolveOpenQueueJobFailuresForAsset(string $assetId): int
+    {
+        return (int) SystemIncident::query()
+            ->whereNull('resolved_at')
+            ->where('source_type', 'job')
+            ->where('source_id', $assetId)
+            ->where('title', 'like', 'Job failed:%')
+            ->update([
+                'resolved_at' => now(),
+                'auto_resolved' => true,
+            ]);
+    }
 }

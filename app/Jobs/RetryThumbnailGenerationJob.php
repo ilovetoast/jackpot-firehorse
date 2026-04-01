@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
+use App\Models\Asset;
+use App\Support\PipelineQueueResolver;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -60,8 +62,11 @@ class RetryThumbnailGenerationJob implements ShouldQueue
             'retry_number' => $this->retryNumber,
         ]);
 
-        // Dispatch existing GenerateThumbnailsJob (unchanged, respects locked pipeline)
-        // The existing job handles all thumbnail generation logic
-        GenerateThumbnailsJob::dispatch($this->assetId)->onQueue(config('queue.images_queue', 'images'));
+        $asset = Asset::query()->with('currentVersion')->find($this->assetId);
+        $queue = $asset
+            ? PipelineQueueResolver::imagesQueueForAsset($asset)
+            : config('queue.images_queue', 'images');
+
+        GenerateThumbnailsJob::dispatch($this->assetId)->onQueue($queue);
     }
 }

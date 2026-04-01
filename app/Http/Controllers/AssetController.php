@@ -868,6 +868,7 @@ class AssetController extends Controller
                         'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
                         'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
                         'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                        'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
                         'pdf_page_count' => $asset->pdf_page_count,
                         'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
                         // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
@@ -1724,9 +1725,11 @@ class AssetController extends Controller
 
                     // Get skip reason from metadata if status is skipped
                     $skipReason = null;
+                    $previewUnavailableMessage = null;
                     if ($verifiedStatus === 'skipped') {
                         $metadata = $asset->metadata ?? [];
                         $skipReason = $metadata['thumbnail_skip_reason'] ?? 'unsupported_file_type';
+                        $previewUnavailableMessage = $metadata['preview_unavailable_user_message'] ?? null;
                     }
 
                     // Preview thumbnail URL - returned even when status is pending or processing
@@ -1740,6 +1743,7 @@ class AssetController extends Controller
                         'final_thumbnail_url' => $finalThumbnailUrl, // Only set if file exists and is valid
                         'thumbnail_error' => $asset->thumbnail_error,
                         'thumbnail_skip_reason' => $skipReason, // Skip reason for skipped assets
+                        'preview_unavailable_user_message' => $previewUnavailableMessage,
                     ];
                 })
                 ->values()
@@ -1846,6 +1850,7 @@ class AssetController extends Controller
                 'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
                 'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
                 'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
                 'pdf_page_count' => $asset->pdf_page_count,
                 'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
             ], 200);
@@ -1883,6 +1888,7 @@ class AssetController extends Controller
             'thumbnail_url' => null,
             'thumbnails_generated_at' => null,
             'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null,
+            'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
             'pdf_page_count' => $asset->pdf_page_count,
             'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
             'degraded' => true,

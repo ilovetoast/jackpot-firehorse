@@ -11,26 +11,43 @@
  * - Styled to match Metadata Candidate Review (brand colors)
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { SparklesIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { usePage } from '@inertiajs/react'
 
-// Global cache to prevent fetching suggestions for the same asset multiple times
+// Cache positive results only — avoids locking in an empty response while AI jobs are still running.
 const tagSuggestionsCache = new Map() // assetId -> { suggestions, timestamp }
 
-export default function AiTagSuggestionsInline({ assetId, primaryColor, drawerInsightGroup = false }) {
+export default function AiTagSuggestionsInline({
+    assetId,
+    uploadedByUserId = null,
+    analysisStatus = null,
+    primaryColor,
+    drawerInsightGroup = false,
+}) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
 
     const [suggestions, setSuggestions] = useState([])
     const [loading, setLoading] = useState(true)
-    const hasFetchedSuggestions = useRef(false) // Prevent multiple fetches per component instance
-    
+    const [fetchNonce, setFetchNonce] = useState(0)
+    const prevAnalysisStatusRef = useRef(null)
+
+    useEffect(() => {
+        prevAnalysisStatusRef.current = analysisStatus
+    }, [assetId])
+
     const { can } = usePermission()
-    const canView = can('metadata.suggestions.view')
-    const canApply = can('metadata.suggestions.apply')
+    const isOwnUpload =
+        uploadedByUserId != null &&
+        auth?.user?.id != null &&
+        String(uploadedByUserId) === String(auth.user.id)
+    const canView =
+        can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
+    const canApply =
+        can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
     const [processing, setProcessing] = useState(new Set())
 
     // Handle accept (create tag in asset_tags) — no confirmation modal
@@ -91,30 +108,53 @@ export default function AiTagSuggestionsInline({ assetId, primaryColor, drawerIn
         }
     }
 
-    // Fetch AI tag suggestions (only once per asset, with caching)
+    const bumpFetch = useCallback(() => {
+        if (assetId) {
+            tagSuggestionsCache.delete(assetId)
+        }
+        setFetchNonce((n) => n + 1)
+    }, [assetId])
+
+    // When pipeline finishes, refetch so we do not keep a pre-AI empty result.
     useEffect(() => {
-        // Reset fetch flag when asset changes
-        hasFetchedSuggestions.current = false
-        
+        const prev = prevAnalysisStatusRef.current
+        prevAnalysisStatusRef.current = analysisStatus
+        if (!assetId || !canView) {
+            return
+        }
+        if (prev !== 'complete' && analysisStatus === 'complete') {
+            bumpFetch()
+        }
+    }, [assetId, canView, analysisStatus, bumpFetch])
+
+    useEffect(() => {
+        const onMetadataUpdated = () => bumpFetch()
+        window.addEventListener('metadata-updated', onMetadataUpdated)
+        return () => window.removeEventListener('metadata-updated', onMetadataUpdated)
+    }, [bumpFetch])
+
+    // Fetch AI tag suggestions (cached when non-empty for 5 minutes)
+    useEffect(() => {
         if (!assetId || !canView) {
             setLoading(false)
             return
         }
 
-        // Check cache first (valid for 5 minutes)
         const cached = tagSuggestionsCache.get(assetId)
-        const cacheValid = cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)
-        
+        const cacheValid =
+            cached &&
+            cached.suggestions?.length > 0 &&
+            Date.now() - cached.timestamp < 5 * 60 * 1000
+
         if (cacheValid) {
             setSuggestions(cached.suggestions)
             setLoading(false)
-            hasFetchedSuggestions.current = true
             return
         }
 
-        hasFetchedSuggestions.current = true
+        let cancelled = false
         setLoading(true)
-        
+
         fetch(`/app/assets/${assetId}/tags/suggestions`, {
             method: 'GET',
             headers: {
@@ -130,22 +170,27 @@ export default function AiTagSuggestionsInline({ assetId, primaryColor, drawerIn
                 return res.json()
             })
             .then((data) => {
+                if (cancelled) return
                 const fetchedSuggestions = data.suggestions || []
                 setSuggestions(fetchedSuggestions)
                 setLoading(false)
-                
-                // Cache the result
-                tagSuggestionsCache.set(assetId, {
-                    suggestions: fetchedSuggestions,
-                    timestamp: Date.now()
-                })
+                if (fetchedSuggestions.length > 0) {
+                    tagSuggestionsCache.set(assetId, {
+                        suggestions: fetchedSuggestions,
+                        timestamp: Date.now(),
+                    })
+                }
             })
             .catch((err) => {
+                if (cancelled) return
                 console.error('[AiTagSuggestionsInline] Failed to fetch tag suggestions', err)
                 setLoading(false)
-                hasFetchedSuggestions.current = false // Allow retry on error
             })
-    }, [assetId, canView])
+
+        return () => {
+            cancelled = true
+        }
+    }, [assetId, canView, fetchNonce])
 
     // Get confidence indicator color
     const getConfidenceColor = (confidence) => {

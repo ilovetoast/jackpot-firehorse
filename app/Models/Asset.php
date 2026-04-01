@@ -1257,6 +1257,12 @@ class Asset extends Model
             ? $this->thumbnail_status->value
             : (string) ($this->thumbnail_status ?? 'pending');
 
+        $meta = $this->metadata ?? [];
+        // Legacy: exhausted preview retries may still show thumbnail_status=failed before backfill
+        if ($ts === 'failed' && ! empty($meta['pipeline_preview_exhausted_at'])) {
+            $ts = 'skipped';
+        }
+
         if ($worstIncidentSeverity === 'critical' || $worstIncidentSeverity === 'error' || $ts === 'failed') {
             return 'critical';
         }

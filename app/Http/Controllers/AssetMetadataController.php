@@ -31,6 +31,7 @@ use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
+use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
@@ -89,8 +90,8 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission - viewers cannot see AI suggestions
-        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
+        // Reviewers, or uploader with metadata.edit_post_upload (see canViewAiSuggestionsOnAsset)
+        if (! $this->canViewAiSuggestionsOnAsset($user, $tenant, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -1299,12 +1300,15 @@ class AssetMetadataController extends Controller
         // Delete existing embedding so GenerateAssetEmbeddingJob will regenerate
         AssetEmbedding::where('asset_id', $asset->id)->delete();
 
+        $asset->loadMissing('currentVersion');
+        $rerunQueue = \App\Support\PipelineQueueResolver::imagesQueueForAsset($asset);
+
         Bus::chain([
             new GenerateThumbnailsJob($asset->id),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
         ])
-            ->onQueue(config('queue.images_queue', 'images'))
+            ->onQueue($rerunQueue)
             ->dispatch();
 
         ActivityEvent::create([
@@ -3403,8 +3407,7 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check if user can view metadata suggestions
-        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
+        if (! $this->canViewAiSuggestionsOnAsset($user, $tenant, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3699,8 +3702,7 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
+        if (! $this->canViewAiSuggestionsOnAsset($user, $tenant, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3746,6 +3748,9 @@ class AssetMetadataController extends Controller
             }
         }
 
+        $canApplyAsset = $this->canApplyAiSuggestionOnAsset($user, $brand, $asset);
+        $canDismissAsset = $this->canDismissAiSuggestionOnAsset($user, $brand, $asset);
+
         // Format suggestions with field metadata
         $formattedSuggestions = [];
         foreach ($suggestions as $fieldKey => $suggestion) {
@@ -3764,10 +3769,6 @@ class AssetMetadataController extends Controller
                 $category->id
             );
 
-            // Check apply permission
-            $canApply = $user->canForContext('metadata.suggestions.apply', $tenant, $brand);
-            $canDismiss = $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand);
-
             $source = $suggestion['source'] ?? 'ai';
             $formattedSuggestions[] = [
                 'field_key' => $fieldKey,
@@ -3784,8 +3785,8 @@ class AssetMetadataController extends Controller
                 'evidence' => $suggestion['evidence'] ?? null,
                 'generated_at' => $suggestion['generated_at'] ?? null,
                 'can_edit' => $canEdit,
-                'can_apply' => $canApply && $canEdit,
-                'can_dismiss' => $canDismiss,
+                'can_apply' => $canApplyAsset && $canEdit,
+                'can_dismiss' => $canDismissAsset,
             ];
         }
 
@@ -3810,8 +3811,7 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->canForContext('metadata.suggestions.apply', $tenant, $brand)) {
+        if (! $this->canApplyAiSuggestionOnAsset($user, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3983,8 +3983,7 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand)) {
+        if (! $this->canDismissAiSuggestionOnAsset($user, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4077,8 +4076,7 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission (reuse metadata suggestions permission)
-        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
+        if (! $this->canViewAiSuggestionsOnAsset($user, $tenant, $brand, $asset)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4091,9 +4089,8 @@ class AssetMetadataController extends Controller
             ->orderBy('confidence', 'desc')
             ->get();
 
-        // Check permissions for apply/dismiss
-        $canApply = $user->canForContext('metadata.suggestions.apply', $tenant, $brand);
-        $canDismiss = $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand);
+        $canApply = $this->canApplyAiSuggestionOnAsset($user, $brand, $asset);
+        $canDismiss = $this->canDismissAiSuggestionOnAsset($user, $brand, $asset);
 
         $suggestions = $tagCandidates->map(function ($candidate) use ($canApply, $canDismiss) {
             return [
@@ -4780,6 +4777,21 @@ class AssetMetadataController extends Controller
 
         // All metadata approved and AI suggestions not yet completed - trigger AI
         \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+    }
+
+    /**
+     * View AI tag + metadata suggestions: global reviewers, or the uploader with post-upload metadata edit.
+     */
+    protected function canViewAiSuggestionsOnAsset(User $user, Tenant $tenant, Brand $brand, Asset $asset): bool
+    {
+        if ($user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
+            return true;
+        }
+        if ((int) $asset->user_id !== (int) $user->id) {
+            return false;
+        }
+
+        return $user->canForContext('metadata.edit_post_upload', $tenant, $brand);
     }
 
     /**

@@ -547,24 +547,48 @@ export default function AssetDetailPanel({
         const dirty = metadataDirty[groupKey]
         if (!dirty || !asset?.id) return
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-        for (const [fieldId, value] of Object.entries(dirty)) {
-            await fetch(`/app/assets/${asset.id}/metadata/edit`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrf || '',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ metadata_field_id: Number(fieldId), value }),
+        const errors = []
+        try {
+            for (const [fieldId, value] of Object.entries(dirty)) {
+                const res = await fetch(`/app/assets/${asset.id}/metadata/edit`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        'X-CSRF-TOKEN': csrf || '',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ metadata_field_id: Number(fieldId), value }),
+                })
+                let data = {}
+                try {
+                    data = await res.json()
+                } catch {
+                    /* non-JSON body */
+                }
+                if (!res.ok) {
+                    const label =
+                        metadata?.fields?.find(
+                            (f) => String(f.metadata_field_id ?? f.field_id) === String(fieldId)
+                        )?.display_label || fieldId
+                    errors.push(data.message ? `${label}: ${data.message}` : `${label}: save failed (${res.status})`)
+                }
+            }
+            if (errors.length > 0) {
+                onToast?.(errors.join(' · '), 'error')
+                return
+            }
+            setMetadataDirty((prev) => {
+                const next = { ...prev }
+                delete next[groupKey]
+                return next
             })
+            setMetadataEditGroup(null)
+            onToast?.('Metadata saved', 'success')
+            fetchMetadata()
+        } catch (e) {
+            onToast?.(e?.message || 'Failed to save metadata', 'error')
         }
-        setMetadataDirty((prev) => {
-            const next = { ...prev }
-            delete next[groupKey]
-            return next
-        })
-        setMetadataEditGroup(null)
-        fetchMetadata()
     }
 
     const displayActivityEvents = externalActivityEvents !== null ? externalActivityEvents : activityEvents
@@ -617,8 +641,8 @@ export default function AssetDetailPanel({
         ? 'w-full text-left px-3 py-2 text-sm font-medium text-neutral-200 hover:bg-neutral-800 rounded-md flex items-center gap-2'
         : 'w-full text-left px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 rounded-md flex items-center gap-2'
     const metaFieldInputClass = lb
-        ? 'mt-1 block w-full max-w-xs rounded-md border-neutral-600 bg-neutral-900 text-neutral-200 text-sm'
-        : 'mt-1 block w-full max-w-xs rounded-md border-gray-300 text-sm'
+        ? 'mt-1 block w-full max-w-xs rounded-md border-neutral-600 bg-neutral-900 text-neutral-100 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 [color-scheme:dark]'
+        : 'mt-1 block w-full max-w-xs rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500'
 
     const versionThumbnailSrc = (v) => (v?.thumbnail_url ? String(v.thumbnail_url) : null)
 
@@ -1093,6 +1117,14 @@ export default function AssetDetailPanel({
                                 )}
                             </button>
                         </div>
+                        {(asset?.preview_unavailable_user_message || asset?.metadata?.preview_unavailable_user_message) && (
+                            <p
+                                className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+                                role="status"
+                            >
+                                {asset.preview_unavailable_user_message || asset.metadata?.preview_unavailable_user_message}
+                            </p>
+                        )}
                         {isVideo && asset?.video_preview_url && (
                             <a
                                 href={asset.video_preview_url}
@@ -1571,6 +1603,7 @@ export default function AssetDetailPanel({
                                                                     <p className={`text-sm ${metaMuted}`}>Loading collections…</p>
                                                                 ) : (
                                                                     <CollectionSelector
+                                                                        variant={lb ? 'dark' : 'light'}
                                                                         collections={dropdownCollections}
                                                                         selectedIds={(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)}
                                                                         onChange={async (newCollectionIds) => {

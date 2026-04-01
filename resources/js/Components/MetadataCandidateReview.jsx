@@ -15,7 +15,7 @@ import {
 import { usePermission } from '../hooks/usePermission'
 import { usePage } from '@inertiajs/react'
 
-export default function MetadataCandidateReview({ assetId, primaryColor }) {
+export default function MetadataCandidateReview({ assetId, primaryColor, uploadedByUserId = null }) {
     const [reviewItems, setReviewItems] = useState([])
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
@@ -26,10 +26,15 @@ export default function MetadataCandidateReview({ assetId, primaryColor }) {
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
 
-    // Check if user can view metadata suggestions
     const { can } = usePermission()
-    const canViewSuggestions = can('metadata.suggestions.view')
-    const canApplySuggestions = can('metadata.suggestions.apply')
+    const isOwnUpload =
+        uploadedByUserId != null &&
+        auth?.user?.id != null &&
+        String(uploadedByUserId) === String(auth.user.id)
+    const canViewSuggestions =
+        can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
+    const canApplySuggestions =
+        can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
 
     // Fetch reviewable candidates
     useEffect(() => {

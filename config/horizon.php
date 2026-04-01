@@ -106,6 +106,7 @@ return [
         'redis:default' => 90,
         'redis:downloads' => 300,
         'redis:images' => 300,
+        'redis:images-heavy' => 600,
         'redis:pdf-processing' => 300,
     ],
 
@@ -240,6 +241,24 @@ return [
             'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
+        /*
+         * Large originals (see ASSET_PIPELINE_HEAVY_MIN_BYTES): same job classes as images queue,
+         * but workers need more RAM and a longer kill timeout. Keep maxProcesses low.
+         */
+        'supervisor-images-heavy' => [
+            'connection' => 'redis',
+            'queue' => [env('QUEUE_IMAGES_HEAVY_QUEUE', 'images-heavy')],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 50,
+            'memory' => (int) env('HORIZON_IMAGES_HEAVY_MEMORY', 2048),
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
+            'nice' => 0,
+        ],
         'supervisor-pdf-processing' => [
             'connection' => 'redis',
             'queue' => ['pdf-processing'],
@@ -267,6 +286,12 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-images-heavy' => [
+                'maxProcesses' => 2,
+                'minProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
+            ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 2,
                 'balanceMaxShift' => 1,
@@ -284,6 +309,11 @@ return [
                 'maxProcesses' => 1,
                 'minProcesses' => 1,
             ],
+            'supervisor-images-heavy' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+                'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
+            ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
                 'tries' => 1,
@@ -296,6 +326,10 @@ return [
             ],
             'supervisor-images' => [
                 'maxProcesses' => 1,
+            ],
+            'supervisor-images-heavy' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
             ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,

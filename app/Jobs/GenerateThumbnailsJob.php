@@ -12,7 +12,6 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetPathGenerator;
-use App\Services\AssetProcessingFailureService;
 use App\Services\PdfPageRenderingService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\ThumbnailGenerationService;
@@ -31,6 +30,10 @@ use Illuminate\Support\Facades\DB;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
+use App\Support\PipelineQueueResolver;
+use App\Services\SystemIncidentService;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Support\Facades\Bus;
 
 /**
  * Generate Asset Thumbnails Job
@@ -103,6 +106,7 @@ class GenerateThumbnailsJob implements ShouldQueue
         $job = (int) config('assets.thumbnail.job_timeout_seconds', 900);
         $large = (int) config('assets.thumbnail.large_asset_timeout_seconds', 1800);
         $this->timeout = max($job, $large);
+        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 5));
         $this->configureImagesQueue();
     }
 
@@ -211,6 +215,16 @@ class GenerateThumbnailsJob implements ShouldQueue
                 Log::info('[GenerateThumbnailsJob] Thumbnail generation skipped - already completed', [
                     'asset_id' => $asset->id,
                 ]);
+                return;
+            }
+
+            $fileSizeBytes = $version
+                ? (int) ($version->file_size ?? $asset->size_bytes ?? 0)
+                : (int) ($asset->size_bytes ?? 0);
+            $maxSourceBytes = (int) config('assets.thumbnail.max_source_bytes', 0);
+            if ($maxSourceBytes > 0 && $fileSizeBytes > $maxSourceBytes) {
+                $this->applyMaxSourceBytesSkip($asset, $version, $fileSizeBytes, $maxSourceBytes);
+
                 return;
             }
 
@@ -1323,67 +1337,131 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
-        // TASK 2: Final safety net - ensure terminal state is set after all retries exhausted
-        // Phase 3A: Resolve asset from version or legacy (asset ID)
         $version = AssetVersion::find($this->assetVersionId);
         $asset = $version ? $version->asset : Asset::find($this->assetVersionId);
 
-        if ($asset) {
-            // Sanitize error message for user display
-            $userFriendlyError = $this->sanitizeErrorMessage($exception->getMessage());
-            
-            // TASK 2: Terminal state guarantee - FAILED
-            // Update thumbnail status to failed (terminal state)
-            // Clear thumbnail_started_at when failed (no longer needed)
-            $asset->update([
-                'thumbnail_status' => ThumbnailStatus::FAILED,
-                'thumbnail_error' => $userFriendlyError,
-                'thumbnail_started_at' => null, // Clear start time on failure
-            ]);
-            
-            PipelineLogger::error('THUMBNAILS: FAILED (after all retries)', [
-                'asset_id' => $asset->id,
-                'error' => $exception->getMessage(),
-                'attempts' => $this->attempts(),
-            ]);
-            
-            Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (failed() method)', [
-                'asset_id' => $asset->id,
-                'error' => $exception->getMessage(),
-                'attempts' => $this->attempts(),
-            ]);
+        if (! $asset) {
+            return;
+        }
 
-            // Use centralized failure recording service for observability
-            // CRITICAL: preserveVisibility=true - thumbnail failure must NEVER hide the asset from the grid.
-            // Asset remains visible; user can retry thumbnail generation or download the original file.
-            app(AssetProcessingFailureService::class)->recordFailure(
-                $asset,
-                self::class,
-                $exception,
-                $this->attempts(),
-                true // preserveVisibility
-            );
+        app(SystemIncidentService::class)->resolveOpenQueueJobFailuresForAsset((string) $asset->id);
 
-            // Log thumbnail failed to activity timeline so users see it (catch block may not run on timeout/kill)
-            try {
-                \App\Services\ActivityRecorder::logAsset(
-                    $asset,
-                    \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
-                    [
-                        'error' => $this->sanitizeErrorMessage($exception->getMessage()),
-                        'attempts' => $this->attempts(),
-                    ]
-                );
-            } catch (\Throwable $e) {
-                Log::warning('[GenerateThumbnailsJob] Failed to log ASSET_THUMBNAIL_FAILED to activity', ['error' => $e->getMessage()]);
-            }
+        $isTimeout = $this->isLikelyTimeoutOrExhaustion($exception);
+        $userLine = $isTimeout
+            ? 'Processing this file took too long, so we stopped trying to build a preview. You can still download the original.'
+            : 'We could not generate a preview for this file after several attempts. You can still download the original.';
 
-            Log::error('Thumbnail generation job failed after all retries', [
-                'asset_id' => $asset->id,
-                'error' => $exception->getMessage(),
-                'attempts' => $this->attempts(),
+        $meta = array_merge($asset->metadata ?? [], [
+            'thumbnail_skip_reason' => 'generation_exhausted',
+            'thumbnail_skip_message' => $userLine,
+            'preview_unavailable_user_message' => $userLine,
+            'pipeline_preview_exhausted_at' => now()->toIso8601String(),
+            'pipeline_preview_last_error' => $this->sanitizeErrorMessage($exception->getMessage()),
+            'thumbnails_generated' => false,
+        ]);
+
+        $analysis = $asset->analysis_status ?? 'uploading';
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'metadata' => $meta,
+            'analysis_status' => in_array($analysis, ['uploading', 'generating_thumbnails'], true) ? 'complete' : $analysis,
+        ]);
+
+        if ($version) {
+            $version->update([
+                'pipeline_status' => 'complete',
+                'metadata' => array_merge($version->metadata ?? [], [
+                    'thumbnail_skip_reason' => 'generation_exhausted',
+                    'thumbnails_generated' => false,
+                ]),
             ]);
         }
+
+        $q = PipelineQueueResolver::imagesQueueForAsset($asset->fresh());
+        Bus::chain([
+            new FinalizeAssetJob($asset->id),
+            new PromoteAssetJob($asset->id),
+        ])->onQueue($q)->dispatch();
+
+        PipelineLogger::error('THUMBNAILS: terminal SKIPPED after retries (preview unavailable)', [
+            'asset_id' => $asset->id,
+            'error' => $exception->getMessage(),
+            'attempts' => $this->attempts(),
+        ]);
+
+        try {
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
+                [
+                    'reason' => 'generation_exhausted',
+                    'attempts' => $this->attempts(),
+                ]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[GenerateThumbnailsJob] Activity log failed', ['error' => $e->getMessage()]);
+        }
+
+        Log::error('Thumbnail generation exhausted retries — marked SKIPPED and resumed finalize', [
+            'asset_id' => $asset->id,
+            'error' => $exception->getMessage(),
+            'attempts' => $this->attempts(),
+        ]);
+    }
+
+    protected function applyMaxSourceBytesSkip(Asset $asset, ?AssetVersion $version, int $fileSizeBytes, int $maxBytes): void
+    {
+        $mb = round($fileSizeBytes / 1024 / 1024, 1);
+        $maxMb = round($maxBytes / 1024 / 1024, 1);
+        $userMsg = "This file is about {$mb} MB, which is above our current preview limit ({$maxMb} MB). You can still download the full original.";
+
+        Log::info('[GenerateThumbnailsJob] Skipping thumbnails — source file over max_source_bytes', [
+            'asset_id' => $asset->id,
+            'file_size_bytes' => $fileSizeBytes,
+            'max_source_bytes' => $maxBytes,
+        ]);
+
+        $metadata = array_merge($asset->metadata ?? [], [
+            'thumbnail_skip_reason' => 'source_file_too_large',
+            'thumbnail_skip_message' => $userMsg,
+            'preview_unavailable_user_message' => $userMsg,
+            'thumbnails_generated' => false,
+        ]);
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'metadata' => $metadata,
+        ]);
+        if ($version) {
+            $version->update([
+                'metadata' => array_merge($version->metadata ?? [], [
+                    'thumbnail_skip_reason' => 'source_file_too_large',
+                    'thumbnails_generated' => false,
+                ]),
+                'pipeline_status' => 'complete',
+            ]);
+        }
+    }
+
+    protected function isLikelyTimeoutOrExhaustion(\Throwable $exception): bool
+    {
+        $cur = $exception;
+        while ($cur) {
+            if ($cur instanceof MaxAttemptsExceededException) {
+                return true;
+            }
+            $cur = $cur->getPrevious();
+        }
+        $msg = strtolower($exception->getMessage());
+
+        return str_contains($msg, 'timeout')
+            || str_contains($msg, 'timed out')
+            || str_contains($msg, 'exceeded the timeout')
+            || str_contains($msg, 'worker timeout')
+            || str_contains($msg, 'has been attempted too many times');
     }
 
     /**
