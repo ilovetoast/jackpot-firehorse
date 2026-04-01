@@ -1,95 +1,31 @@
 /**
  * Phase 3.0C: Shared thumbnail utilities
- * 
- * Provides shared logic for thumbnail state management, file type detection,
- * and thumbnail-supported file type allowlist.
- * 
- * This is UI-only, read-only logic. No backend changes, no polling.
+ *
+ * Thumbnail-capable MIME/extension lists come from the Laravel registry
+ * (`dam_file_types` shared props → {@see ../utils/damFileTypes.js}), so the UI
+ * stays aligned with config/file_types.php.
  */
 
-/**
- * File types that support thumbnail generation.
- * 
- * Includes formats that backend can process:
- * - GD library: JPEG, PNG, WEBP, GIF
- * - Imagick: TIFF, AVIF, PSD/PSB
- * - PDF: via spatie/pdf-to-image
- * 
- * Excluded formats:
- * - BMP: GD library has limited BMP support, not reliable
- * - HEIC/HEIF: backend pipeline may not support these yet
- * 
- * These formats will be marked as SKIPPED with appropriate skip reasons.
- */
-export const THUMBNAIL_SUPPORTED_TYPES = [
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/tiff',
-    'image/tif',
-    'image/avif',
-    'image/vnd.adobe.photoshop', // PSD/PSB files
-    'image/svg+xml', // SVG passthrough - original served as thumbnail
-    'application/pdf',
-    'application/postscript', // Illustrator (.ai) - PDF-compatible
-    'application/vnd.adobe.illustrator',
-    'application/illustrator',
-    // BMP excluded: GD library has limited BMP support, not reliable
-    // 'image/bmp',
-    // HEIC/HEIF excluded: backend pipeline may not support these yet
-    // 'image/heic',
-    // 'image/heif',
-]
-
-/**
- * File extensions that support thumbnail generation.
- * Used as fallback when mime_type is not available.
- * 
- * Includes formats that backend can process:
- * - GD library: jpg, jpeg, png, gif, webp
- * - Imagick: tiff, tif, avif, psd, psb
- * - PDF: pdf
- */
-export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
-    'jpg',
-    'jpeg',
-    'png',
-    'gif',
-    'webp',
-    'tiff',
-    'tif',
-    'avif',
-    'psd',
-    'psb',
-    'svg', // SVG passthrough - original served as thumbnail
-    'pdf',
-    'ai', // Adobe Illustrator - PDF-compatible
-    'eps', // Encapsulated PostScript - same pipeline as AI
-    // BMP excluded: GD library has limited BMP support
-    // 'bmp',
-    // HEIC/HEIF excluded: backend pipeline may not support these yet
-    // 'heic',
-    // 'heif',
-]
+import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes'
 
 /**
  * Check if a file type supports thumbnail generation.
- * 
+ *
  * @param {string} mimeType - MIME type (e.g., 'image/jpeg')
  * @param {string} fileExtension - File extension (e.g., 'jpg')
  * @returns {boolean} True if thumbnail generation is supported
  */
 export function supportsThumbnail(mimeType, fileExtension) {
-    if (mimeType) {
-        return THUMBNAIL_SUPPORTED_TYPES.includes(mimeType.toLowerCase())
+    const mimes = getThumbnailMimeTypes()
+    const exts = getThumbnailExtensions()
+    const m = mimeType ? String(mimeType).toLowerCase() : ''
+    const e = fileExtension ? String(fileExtension).toLowerCase().replace(/^\./, '') : ''
+    if (m && mimes.includes(m)) {
+        return true
     }
-    
-    if (fileExtension) {
-        return THUMBNAIL_SUPPORTED_EXTENSIONS.includes(fileExtension.toLowerCase())
+    if (e && exts.includes(e)) {
+        return true
     }
-    
     return false
 }
 
@@ -176,19 +112,6 @@ export function getThumbnailState(asset, retryCount = 0) {
                          asset?.file?.name?.split('.').pop()?.toLowerCase()
     
     // Phase 3.1E: State A) NOT_SUPPORTED - determined by extension/mime only
-    // AVIF is an image format but not currently supported by the thumbnail pipeline.
-    // Treat as non-thumbnail file until backend support is added.
-    // This prevents the UI from expecting a thumbnail that will never be generated.
-    if (fileExtension === 'avif' || mimeType === 'image/avif') {
-        return {
-            state: 'NOT_SUPPORTED',
-            thumbnailUrl: null,
-            previewThumbnailUrl: null,
-            finalThumbnailUrl: null,
-            canRetry: false,
-        }
-    }
-    
     // Check if file type supports thumbnails
     if (!supportsThumbnail(mimeType, fileExtension)) {
         return {

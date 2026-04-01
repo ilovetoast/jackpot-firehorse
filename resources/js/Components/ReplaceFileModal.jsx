@@ -8,9 +8,11 @@
 import { useState, useRef } from 'react'
 import { XMarkIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
+import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 
 export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) {
-    const { auth } = usePage().props
+    const { auth, dam_file_types: damFileTypesProp } = usePage().props
+    const replaceFileAccept = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const planAllowsVersions = auth?.plan_allows_versions ?? false
     const actionLabel = planAllowsVersions ? 'Upload New Version' : 'Replace File'
     const [selectedFile, setSelectedFile] = useState(null)
@@ -212,6 +214,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
                                     ref={fileInputRef}
                                     id="replace-file-input"
                                     type="file"
+                                    accept={replaceFileAccept}
                                     onChange={handleFileSelect}
                                     disabled={uploading}
                                     className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"

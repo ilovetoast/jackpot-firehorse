@@ -18,6 +18,7 @@ import { useSelectionOptional } from '../contexts/SelectionContext'
 import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
+import { isImageLikeForAssetCard } from '../utils/damFileTypes'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 
 export default function AssetCard({
@@ -104,6 +105,7 @@ export default function AssetCard({
                     'webp': 'WEBP',
                     'svg+xml': 'SVG',
                     'tiff': 'TIF',
+                    'x-canon-cr2': 'CR2',
                     'bmp': 'BMP',
                     'pdf': 'PDF',
                     'zip': 'ZIP',
@@ -130,9 +132,8 @@ export default function AssetCard({
     const fileExtension = getFileExtension()
     
     // Determine if asset is an image based on mime_type or extension
-    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'tif']
     const extLower = fileExtension.toLowerCase()
-    const isImage = asset.mime_type?.startsWith('image/') || imageExtensions.includes(extLower)
+    const isImage = isImageLikeForAssetCard(asset.mime_type, extLower)
     
     // Phase V-1: Detect if asset is a video
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']

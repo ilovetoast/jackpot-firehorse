@@ -540,6 +540,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                       extension_loaded('imagick')) {
                 // PSD files are now supported via Imagick
                 $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:cr2' &&
+                      ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') &&
+                      extension_loaded('imagick')) {
+                $isNowSupported = true;
             } elseif ($skipReason === 'unsupported_format:svg' &&
                       ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                 // SVG is now supported via passthrough (no GD/Imagick needed)
@@ -1525,6 +1529,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                     if ($fileType === 'tiff') {
                         return 'unsupported_format:tiff';
                     }
+                    if ($fileType === 'cr2') {
+                        return 'unsupported_format:cr2';
+                    }
                     if ($fileType === 'avif') {
                         return 'unsupported_format:avif';
                     }
@@ -1535,6 +1542,15 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
         }
         
+        // Canon CR2 — Imagick + ImageMagick RAW delegate required
+        if ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') {
+            if (! extension_loaded('imagick')) {
+                return 'unsupported_format:cr2';
+            }
+
+            return 'unsupported_file_type';
+        }
+
         // TIFF - Check if Imagick is available, otherwise mark as unsupported
         if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
             // If Imagick is not available, mark as unsupported

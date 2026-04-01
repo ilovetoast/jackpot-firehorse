@@ -20,7 +20,7 @@ class ClearOldThumbnailSkipReasons extends Command
      * @var string
      */
     protected $signature = 'thumbnails:clear-skip-reasons 
-                            {--format= : Specific format to clear (tiff, avif, psd, svg, or all)}
+                            {--format= : Specific format to clear (tiff, cr2, avif, psd, svg, or all)}
                             {--dry-run : Show what would be cleared without making changes}
                             {--force : Force regeneration by setting status to PENDING}';
 
@@ -29,7 +29,7 @@ class ClearOldThumbnailSkipReasons extends Command
      *
      * @var string
      */
-    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, AVIF, PSD, SVG)';
+    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, CR2, AVIF, PSD, SVG)';
 
     /**
      * Execute the console command.
@@ -80,6 +80,16 @@ class ClearOldThumbnailSkipReasons extends Command
                 if (extension_loaded('imagick')) {
                     $shouldClear = true;
                     $formatName = 'TIFF';
+                }
+            }
+
+            // Check Canon CR2
+            if (($format === 'all' || $format === 'cr2') &&
+                $skipReason === 'unsupported_format:cr2' &&
+                ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2')) {
+                if (extension_loaded('imagick')) {
+                    $shouldClear = true;
+                    $formatName = 'CR2';
                 }
             }
 

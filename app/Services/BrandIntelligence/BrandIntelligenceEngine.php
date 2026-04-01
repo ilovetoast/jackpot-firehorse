@@ -571,7 +571,7 @@ class BrandIntelligenceEngine
      */
     protected function shouldAbortScoringNoEmbeddingFallback(Asset $asset, array $assetVec, array $signalBreakdown): bool
     {
-        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''))) {
+        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''), $asset->original_filename)) {
             return false;
         }
         if ($assetVec !== []) {

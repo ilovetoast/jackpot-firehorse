@@ -430,4 +430,100 @@ class FileTypeService
             'frontend_hints' => $frontendHints,
         ];
     }
+
+    /**
+     * Unique lowercase MIME types for registry entries with thumbnail capability.
+     *
+     * @return list<string>
+     */
+    public function getThumbnailCapabilityMimeTypes(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+                continue;
+            }
+            foreach ($typeConfig['mime_types'] ?? [] as $m) {
+                $seen[strtolower((string) $m)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * Unique lowercase extensions for registry entries with thumbnail capability.
+     *
+     * @return list<string>
+     */
+    public function getThumbnailCapabilityExtensions(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+                continue;
+            }
+            foreach ($typeConfig['extensions'] ?? [] as $e) {
+                $seen[strtolower((string) $e)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * All MIME types from the registry (DAM-supported uploads).
+     *
+     * @return list<string>
+     */
+    public function getAllRegisteredMimeTypes(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            foreach ($typeConfig['mime_types'] ?? [] as $m) {
+                $seen[strtolower((string) $m)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * All extensions from the registry (DAM-supported uploads).
+     *
+     * @return list<string>
+     */
+    public function getAllRegisteredExtensions(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            foreach ($typeConfig['extensions'] ?? [] as $e) {
+                $seen[strtolower((string) $e)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * HTML `accept` attribute value for file inputs (MIME list + dotted extensions).
+     *
+     * @param  list<string>  $mimeTypes
+     * @param  list<string>  $extensions
+     */
+    public function buildHtmlAcceptAttribute(array $mimeTypes, array $extensions): string
+    {
+        $parts = [];
+        foreach (array_keys(array_flip(array_map('strtolower', $mimeTypes))) as $m) {
+            $parts[] = $m;
+        }
+        foreach (array_keys(array_flip(array_map('strtolower', $extensions))) as $e) {
+            $e = ltrim((string) $e, '.');
+            if ($e !== '') {
+                $parts[] = '.'.$e;
+            }
+        }
+
+        return implode(',', $parts);
+    }
 }

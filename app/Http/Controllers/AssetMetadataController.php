@@ -560,7 +560,7 @@ class AssetMetadataController extends Controller
 
         // Image types (default)
         // Includes: jpg, jpeg, png, gif, webp, bmp, svg, psd, ai, etc.
-        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff'])) {
+        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff', 'cr2'])) {
             return 'image';
         }
 

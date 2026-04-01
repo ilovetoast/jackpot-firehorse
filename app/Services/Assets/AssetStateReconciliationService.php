@@ -231,7 +231,7 @@ class AssetStateReconciliationService
      */
     protected function applyRule5b(Asset $asset): array
     {
-        if (\App\Services\ImageEmbeddingService::isImageMimeType($asset->mime_type ?? '')) {
+        if (\App\Services\ImageEmbeddingService::isImageMimeType($asset->mime_type ?? '', $asset->original_filename)) {
             return [];
         }
         $metadata = $asset->metadata ?? [];

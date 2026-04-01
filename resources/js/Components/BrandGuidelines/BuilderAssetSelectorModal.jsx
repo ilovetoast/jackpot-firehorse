@@ -7,9 +7,10 @@
  * - Drag-and-drop upload zone
  * - Asset grid with thumbnails and selection
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Dialog } from '@headlessui/react'
 import { XMarkIcon, CloudArrowUpIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { getInlineImagePickerAccept } from '../../utils/damFileTypes'
 
 const CONTEXT_CATEGORIES = {
     logo_reference: 'logos',
@@ -38,8 +39,15 @@ export default function BuilderAssetSelectorModal({
     const dropRef = useRef(null)
     const uploading = uploadingFiles.length > 0
 
+    const acceptTypes = useMemo(() => {
+        const images = getInlineImagePickerAccept()
+        if (builderContext === 'guidelines_pdf') {
+            return `${images},application/pdf,.pdf`
+        }
+        return images
+    }, [builderContext])
+
     const contextCategory = CONTEXT_CATEGORIES[builderContext] ?? null
-    const acceptTypes = builderContext === 'guidelines_pdf' ? 'image/*,.pdf' : 'image/*'
 
     const fetchAssets = useCallback(async () => {
         setLoading(true)

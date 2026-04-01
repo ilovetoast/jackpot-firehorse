@@ -105,7 +105,7 @@ class FinalizeAssetJob implements ShouldQueue
                 'height' => $currentVersion->height,
             ];
 
-            if (! ImageEmbeddingService::isImageMimeType($currentVersion->mime_type)) {
+            if (! ImageEmbeddingService::isImageMimeType($currentVersion->mime_type, $asset->original_filename)) {
                 $updates['analysis_status'] = 'complete';
             }
 
@@ -130,7 +130,7 @@ class FinalizeAssetJob implements ShouldQueue
             $metadata = $asset->metadata ?? [];
             $metadata['pipeline_completed_at'] = now()->toIso8601String();
             $updates = ['metadata' => $metadata];
-            if (! ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+            if (! ImageEmbeddingService::isImageMimeType($asset->mime_type, $asset->original_filename)) {
                 $updates['analysis_status'] = 'complete';
             }
             $asset->update($updates);
@@ -158,7 +158,7 @@ class FinalizeAssetJob implements ShouldQueue
             : null;
 
         $willDispatchEmbedding = $thumbnailStatus !== ThumbnailStatus::SKIPPED
-            && ImageEmbeddingService::isImageMimeType($mimeForEmbedding);
+            && ImageEmbeddingService::isImageMimeType($mimeForEmbedding, $asset->original_filename);
 
         if ($willDispatchEmbedding) {
             GenerateAssetEmbeddingJob::dispatch($asset->id);

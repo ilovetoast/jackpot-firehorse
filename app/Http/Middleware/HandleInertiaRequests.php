@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\AgencyBrandAccessService;
 use App\Services\AuthPermissionService;
 use App\Services\FeatureGate;
+use App\Services\FileTypeService;
 use App\Services\PlanService;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use Illuminate\Http\Request;
@@ -374,6 +375,27 @@ class HandleInertiaRequests extends Middleware
             ] : null,
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
+            // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
+            'dam_file_types' => (function () {
+                $svc = app(FileTypeService::class);
+                $thumbMimes = $svc->getThumbnailCapabilityMimeTypes();
+                $thumbExts = $svc->getThumbnailCapabilityExtensions();
+                $uploadMimes = $svc->getAllRegisteredMimeTypes();
+                $uploadExts = $svc->getAllRegisteredExtensions();
+                sort($thumbMimes);
+                sort($thumbExts);
+                sort($uploadMimes);
+                sort($uploadExts);
+
+                return [
+                    'thumbnail_mime_types' => $thumbMimes,
+                    'thumbnail_extensions' => $thumbExts,
+                    'upload_mime_types' => $uploadMimes,
+                    'upload_extensions' => $uploadExts,
+                    'upload_accept' => $svc->buildHtmlAcceptAttribute($uploadMimes, $uploadExts),
+                    'thumbnail_accept' => $svc->buildHtmlAcceptAttribute($thumbMimes, $thumbExts),
+                ];
+            })(),
             // Phase C12.0: Collection-only mode (no brand; user has only collection access)
             'collection_only' => app()->bound('collection_only') && app('collection_only'),
             'collection_only_collection' => app()->bound('collection') ? (function () {

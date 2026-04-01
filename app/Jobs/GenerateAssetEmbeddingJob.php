@@ -50,7 +50,7 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             return;
         }
 
-        if (! \App\Services\ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+        if (! \App\Services\ImageEmbeddingService::isImageMimeType($asset->mime_type, $asset->original_filename)) {
             Log::info('[GenerateAssetEmbeddingJob] Skipping non-image asset', [
                 'asset_id' => $asset->id,
                 'mime_type' => $asset->mime_type,

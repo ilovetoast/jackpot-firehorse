@@ -28,7 +28,7 @@ class ImageMetadataExtractor implements EmbeddedMetadataExtractor
 
         $ext = strtolower($extension);
 
-        if (function_exists('exif_read_data') && in_array($ext, ['jpg', 'jpeg', 'tif', 'tiff', 'heic', 'heif'], true)) {
+        if (function_exists('exif_read_data') && in_array($ext, ['jpg', 'jpeg', 'tif', 'tiff', 'cr2', 'heic', 'heif'], true)) {
             $exif = @exif_read_data($localPath, null, true, false);
             if (is_array($exif)) {
                 $buckets['exif'] = $this->flattenExif($exif);

@@ -340,6 +340,35 @@ class ThumbnailGenerationService
             } catch (\ImagickException $e) {
                 throw new \RuntimeException("Downloaded file is not a valid TIFF image: {$e->getMessage()}");
             }
+        } elseif ($fileType === 'cr2') {
+            if (! extension_loaded('imagick')) {
+                throw new \RuntimeException('Canon CR2 processing requires Imagick PHP extension');
+            }
+
+            try {
+                $imagick = new \Imagick();
+                $imagick->pingImage($tempPath.'[0]');
+                $imagick->setIteratorIndex(0);
+                $sourceImageWidth = (int) $imagick->getImageWidth();
+                $sourceImageHeight = (int) $imagick->getImageHeight();
+                $imagick->clear();
+                $imagick->destroy();
+
+                if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
+                    throw new \RuntimeException("CR2 file has invalid dimensions (size: {$sourceFileSize} bytes)");
+                }
+
+                Log::info('[ThumbnailGenerationService] Source CR2 file downloaded and verified', [
+                    'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
+                    'source_file_size' => $sourceFileSize,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'file_type' => 'cr2',
+                ]);
+            } catch (\ImagickException $e) {
+                throw new \RuntimeException("Downloaded file is not a valid CR2 image: {$e->getMessage()}");
+            }
         } elseif ($fileType === 'avif') {
             // AVIF validation: Use Imagick pingImage (headers only) to get dimensions
             if (!extension_loaded('imagick')) {
@@ -627,7 +656,7 @@ class ThumbnailGenerationService
             }
             
             // Source image dimensions (raster types only)
-            if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
+            if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'cr2' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
                 Log::info('[ThumbnailGenerationService] Captured original source image dimensions', [
                     'asset_id' => $asset->id,
                     'source_image_width' => $sourceImageWidth,
@@ -1287,6 +1316,113 @@ class ThumbnailGenerationService
                 'exception_class' => get_class($e),
             ]);
             throw new \RuntimeException("TIFF thumbnail generation error: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
+     * Generate thumbnail for Canon CR2 (RAW) using Imagick.
+     *
+     * Reads the first subimage ([0]) so ImageMagick uses the embedded preview / sensible default,
+     * avoiding a full RAW decode where possible. Requires ImageMagick with a RAW delegate (LibRaw).
+     *
+     * @param  string  $sourcePath  Local path to CR2 file
+     * @return string Path to generated thumbnail (WebP or JPEG per config)
+     */
+    protected function generateCr2Thumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (! extension_loaded('imagick')) {
+            throw new \RuntimeException('CR2 thumbnail generation requires Imagick PHP extension');
+        }
+
+        if (! file_exists($sourcePath)) {
+            throw new \RuntimeException("Source CR2 file does not exist: {$sourcePath}");
+        }
+
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source CR2 file is empty (size: 0 bytes)");
+        }
+
+        $readPath = $sourcePath.'[0]';
+
+        Log::info('[ThumbnailGenerationService] Generating CR2 thumbnail using Imagick', [
+            'source_path' => $sourcePath,
+            'read_path' => $readPath,
+            'source_file_size' => $sourceFileSize,
+            'style_config' => $styleConfig,
+        ]);
+
+        try {
+            $imagick = new \Imagick();
+            $imagick->setResolution(72, 72);
+            $imagick->readImage($readPath);
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('CR2 image has invalid dimensions');
+            }
+
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
+
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2);
+            }
+
+            $outputFormat = config('assets.thumbnail.output_format', 'webp');
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageFormat($outputFormat);
+            $imagick->setImageCompressionQuality($quality);
+
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_cr2_').'.'.$extension;
+
+            $imagick->writeImage($thumbPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            if (! file_exists($thumbPath) || filesize($thumbPath) === 0) {
+                throw new \RuntimeException('CR2 thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] CR2 thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'thumb_path' => $thumbPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+                'thumb_size_bytes' => filesize($thumbPath),
+                'output_format' => $outputFormat,
+            ]);
+
+            return $thumbPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] CR2 thumbnail generation failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("CR2 thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] CR2 thumbnail generation error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("CR2 thumbnail generation error: {$e->getMessage()}", 0, $e);
         }
     }
 
@@ -2572,6 +2708,10 @@ class ThumbnailGenerationService
         $resolved = $fileType ?? 'unknown';
         if (in_array($ext, ['tif', 'tiff'], true) && in_array($resolved, ['image', 'unknown'], true)) {
             return 'tiff';
+        }
+
+        if ($ext === 'cr2' && in_array($resolved, ['image', 'unknown'], true)) {
+            return 'cr2';
         }
 
         // SVG fallback: SVG is XML, not raster. When MIME is wrong or application/octet-stream,

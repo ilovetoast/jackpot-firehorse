@@ -29,7 +29,7 @@ final class AssetEmbeddingEnsureService
             return $existing;
         }
 
-        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''))) {
+        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''), $asset->original_filename)) {
             Log::info('[EBI] Skipping embedding ensure for non-image asset', [
                 'asset_id' => $asset->id,
                 'mime_type' => $asset->mime_type,

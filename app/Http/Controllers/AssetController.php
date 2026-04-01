@@ -656,6 +656,7 @@ class AssetController extends Controller
                             'video/quicktime' => 'mov',
                             'video/x-msvideo' => 'avi',
                             'image/vnd.adobe.photoshop' => 'psd',
+                            'image/x-canon-cr2' => 'cr2',
                             'application/vnd.adobe.illustrator' => 'ai',
                         ];
                         $mimeTypeLower = strtolower(trim($asset->mime_type));

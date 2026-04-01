@@ -61,7 +61,8 @@ import AssetBrandIntelligenceBlock from './AssetBrandIntelligenceBlock'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
 import PDFViewer from './PDFViewer'
-import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
+import { getUploadAcceptAttribute } from '../utils/damFileTypes'
+import { getThumbnailState, getThumbnailVersion, supportsThumbnail } from '../utils/thumbnailUtils'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
 
@@ -93,6 +94,7 @@ export default function AssetDrawer({
 }) {
     const pageProps = usePage().props
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
+    const damUploadAccept = pageProps.dam_file_types?.upload_accept || getUploadAcceptAttribute()
     const categories = pageProps.categories ?? []
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const { can } = usePermission()
@@ -1248,18 +1250,9 @@ export default function AssetDrawer({
             return false
         }
         
-        // Supported file types (must align with backend /thumbnails/generate)
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        
-        if (mimeType === 'application/pdf' || extension === 'pdf') return true
-        if (mimeType === 'image/svg+xml' || extension === 'svg') return true
-        if (['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)) return true
-        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) return true
-        if (mimeType === 'image/tiff' || mimeType === 'image/tif' || ['tiff', 'tif'].includes(extension)) return true
-        if (mimeType === 'image/avif' || extension === 'avif') return true
-        
-        return false
+        return supportsThumbnail(mimeType, extension)
     }, [displayAsset, thumbnailStatus, canRetryThumbnails, generateLoading])
 
     // Handle manual thumbnail generation (for previously skipped assets)
@@ -1495,18 +1488,10 @@ export default function AssetDrawer({
             return false
         }
         
-        // Check if file type is supported (same logic as backend)
-        // Includes both images (GD), PDFs (ImageMagick/Ghostscript), and TIFF/AVIF (Imagick)
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
-        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
-        
-        // Check if MIME type or extension is supported
-        if (mimeType && !supportedMimeTypes.includes(mimeType)) {
-            if (!extension || !supportedExtensions.includes(extension)) {
-                return false
-            }
+        if (!supportsThumbnail(mimeType, extension)) {
+            return false
         }
         
         // Must not be currently processing
@@ -1530,13 +1515,8 @@ export default function AssetDrawer({
         
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
-        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
-        
-        if (mimeType && !supportedMimeTypes.includes(mimeType)) {
-            if (!extension || !supportedExtensions.includes(extension)) {
-                return 'Thumbnail generation is not supported for this file type'
-            }
+        if (!supportsThumbnail(mimeType, extension)) {
+            return 'Thumbnail generation is not supported for this file type'
         }
         
         if (thumbnailStatus === 'processing') {
@@ -3518,6 +3498,8 @@ export default function AssetDrawer({
                                                     ? 'Unsupported file type (TIFF)' 
                                                     : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
                                                     ? 'Unsupported file type (AVIF)'
+                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2'
+                                                    ? 'Unsupported file type (Canon RAW / CR2)'
                                                     : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
                                                     ? 'Unsupported file type (BMP)'
                                                     : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
@@ -3531,12 +3513,15 @@ export default function AssetDrawer({
                                         {/* Show regeneration option for TIFF/AVIF/SVG if retry is allowed */}
                                         {(displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' || 
                                           displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif' ||
+                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2' ||
                                           displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg') && 
                                          canRetryThumbnail && (
                                             <div className="mt-2">
                                                 <p className="text-xs text-green-700 font-medium">
                                                     💡 {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg' 
                                                         ? 'SVG support is now available (rasterized via Imagick).'
+                                                        : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2'
+                                                            ? 'CR2 support is now available (Imagick + ImageMagick RAW/LibRaw).'
                                                         : 'TIFF/AVIF support is now available via Imagick.'}
                                                 </p>
                                                 <p className="text-xs text-green-600 mt-1">
@@ -4313,6 +4298,7 @@ export default function AssetDrawer({
                                             ref={resubmitFileInputRef}
                                             id="resubmit-file-input"
                                             type="file"
+                                            accept={damUploadAccept}
                                             onChange={(e) => {
                                                 const file = e.target.files?.[0]
                                                 if (file) {

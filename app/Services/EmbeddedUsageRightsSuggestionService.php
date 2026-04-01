@@ -215,7 +215,7 @@ class EmbeddedUsageRightsSuggestionService
             return 'document';
         }
 
-        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff'], true)) {
+        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff', 'cr2'], true)) {
             return 'image';
         }
 

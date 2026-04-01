@@ -109,6 +109,50 @@ return [
             ],
         ],
 
+        /*
+        | Canon RAW (.cr2): decode via Imagick → ImageMagick must be built with a RAW delegate (commonly LibRaw).
+        | Server: php-imagick + imagemagick with libraw (e.g. Ubuntu: imagemagick-6.q16 + libraw; verify: `identify your.cr2`).
+        */
+        'cr2' => [
+            'name' => 'Canon RAW (CR2)',
+            'description' => 'Canon Camera RAW (.cr2); thumbnails via Imagick / ImageMagick RAW delegate',
+
+            'mime_types' => [
+                'image/x-canon-cr2',
+            ],
+            'extensions' => ['cr2'],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => true,
+                'download_only' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateCr2Thumbnail',
+                'metadata' => 'extractTiffMetadata',
+            ],
+
+            'requirements' => [
+                'php_extensions' => ['imagick'],
+            ],
+
+            'errors' => [
+                'processing_failed' => 'CR2 processing requires Imagick and ImageMagick with RAW (LibRaw) support.',
+                'corrupted' => 'Unable to read this CR2 file. It may be corrupted or unsupported by ImageMagick.',
+                'invalid_dimensions' => 'CR2 file has invalid dimensions.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
         'avif' => [
             'name' => 'AVIF',
             'description' => 'AVIF image format (requires Imagick)',
@@ -451,7 +495,7 @@ return [
     |
     */
     'supported_thumbnail_extensions' => [
-        'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'avif', 'pdf',
+        'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'cr2', 'avif', 'pdf',
         'psd', 'psb', 'ai', 'eps', 'svg', 'doc', 'docx', 'xls', 'xlsx',
         'ppt', 'pptx', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
     ],
@@ -531,6 +575,7 @@ return [
         'image/webp' => 'webp',
         'image/tiff' => 'tiff',
         'image/tif' => 'tiff',
+        'image/x-canon-cr2' => 'cr2',
         'image/avif' => 'avif',
     ],
 ];

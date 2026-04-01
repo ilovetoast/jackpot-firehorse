@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { syncDamFileTypesFromPage } from '../utils/damFileTypes'
 
 /**
  * Determines if the current page is a settings/configuration page
@@ -82,6 +83,11 @@ export default function BrandThemeProvider({ children, initialPage }) {
         }
     }
 
+    // DAM file registry (uploader / thumbnail UI) — keep JS helpers in sync with Laravel config
+    useEffect(() => {
+        syncDamFileTypesFromPage(initialPage)
+    }, [initialPage])
+
     // Initial setup
     useEffect(() => {
         const currentUrl = window.location.pathname
@@ -108,7 +114,11 @@ export default function BrandThemeProvider({ children, initialPage }) {
             if (window.$inertia?.page?.props?.auth?.activeBrand) {
                 brand = window.$inertia.page.props.auth.activeBrand
             }
-            
+
+            if (window.$inertia?.page) {
+                syncDamFileTypesFromPage(window.$inertia.page)
+            }
+
             updateBrandColors(brand, currentUrl)
         }
 

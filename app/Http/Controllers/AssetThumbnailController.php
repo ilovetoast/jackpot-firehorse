@@ -797,12 +797,14 @@ class AssetThumbnailController extends Controller
             $supportReason = 'SVG';
         }
 
-        // Check TIFF/AVIF support (Imagick)
+        // Check TIFF/AVIF/CR2 support (Imagick; CR2 also needs ImageMagick RAW/LibRaw on the server)
         if (!$isSupported && extension_loaded('imagick')) {
             if (($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') ||
-                ($mimeType === 'image/avif' || $extension === 'avif')) {
+                ($mimeType === 'image/avif' || $extension === 'avif') ||
+                ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2')) {
                 $isSupported = true;
-                $supportReason = $mimeType === 'image/avif' || $extension === 'avif' ? 'AVIF' : 'TIFF';
+                $supportReason = $mimeType === 'image/avif' || $extension === 'avif' ? 'AVIF'
+                    : (($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') ? 'CR2' : 'TIFF');
             }
         }
 

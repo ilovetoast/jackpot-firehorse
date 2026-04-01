@@ -127,9 +127,16 @@ class ImageEmbeddingService implements \App\Contracts\ImageEmbeddingServiceInter
 
     /**
      * Check if asset has an image mime type suitable for embedding.
+     *
+     * @param  string|null  $originalFilename  Used when MIME is generic (e.g. application/octet-stream) but extension is a known image/RAW type (.cr2).
      */
-    public static function isImageMimeType(?string $mimeType): bool
+    public static function isImageMimeType(?string $mimeType, ?string $originalFilename = null): bool
     {
+        $ext = $originalFilename ? strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION)) : '';
+        if ($ext === 'cr2') {
+            return true;
+        }
+
         if (! $mimeType) {
             return false;
         }

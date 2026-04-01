@@ -17,11 +17,11 @@
  * - category: 'logos' | 'icons' | 'photography' for contextual tab; null for Browse All
  * - Do NOT pass load_more for initial fetch; only when explicitly paginating.
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { usePage } from '@inertiajs/react'
 import { XMarkIcon, PhotoIcon, CloudArrowUpIcon, CheckIcon } from '@heroicons/react/24/outline'
 import ImageCropModal from '../ImageCropModal'
-
-const ACCEPT_IMAGE = 'image/png,image/webp,image/svg+xml,image/avif,image/jpeg,image/jpg'
+import { getInlineImagePickerAccept, syncDamFileTypesFromPage } from '../../utils/damFileTypes'
 
 const CONTEXT_LABELS = {
   logos: 'Logos',
@@ -42,7 +42,7 @@ export default function AssetImagePicker({
   aspectRatio = null,
   minWidth = 100,
   minHeight = 100,
-  acceptFileTypes = ACCEPT_IMAGE,
+  acceptFileTypes = null,
   disabled = false,
   singleSelect = true,
   maxSelection = 1,
@@ -50,6 +50,14 @@ export default function AssetImagePicker({
   getAssetDownloadUrl = null,
   brandId = null, // required for builder-staged uploads
 }) {
+  const page = usePage()
+  const damFileTypes = page.props.dam_file_types
+  useEffect(() => {
+    syncDamFileTypesFromPage({ props: { dam_file_types: damFileTypes } })
+  }, [damFileTypes])
+  const defaultImageAccept = useMemo(() => getInlineImagePickerAccept(), [damFileTypes])
+  const effectiveAccept = acceptFileTypes ?? defaultImageAccept
+
   const isMulti = maxSelection > 1
   const skipCrop = isMulti || contextCategory === 'photography' || contextCategory === 'graphics'
   const hasSourceToggle = !!(fetchAssets && fetchDeliverables)
@@ -690,7 +698,7 @@ export default function AssetImagePicker({
                   >
                     <input
                       type="file"
-                      accept={acceptFileTypes}
+                      accept={effectiveAccept}
                       multiple={isMulti}
                       onChange={handleFileChange}
                       className="absolute inset-0 w-full h-full cursor-pointer opacity-0"

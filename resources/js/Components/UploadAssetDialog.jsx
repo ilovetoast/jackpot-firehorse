@@ -38,6 +38,7 @@ import StorageUpgradeModal from './StorageUpgradeModal'
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
+import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 import BatchNamingBar from './Upload/BatchNamingBar'
 
 /**
@@ -71,7 +72,8 @@ const USE_LEGACY_UPLOADER = false
 export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null, initialFiles = null }) {
     // Phase 2 invariant: This component assumes it is mounted only when visible.
     // Lifecycle (mount/unmount) controls visibility — not internal state.
-    const { auth } = usePage().props
+    const { auth, dam_file_types: damFileTypesProp } = usePage().props
+    const uploadAcceptAttribute = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
 
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
@@ -4248,6 +4250,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         ref={fileInputRef}
                                         type="file"
                                         multiple
+                                        accept={uploadAcceptAttribute}
                                         className="hidden"
                                         onChange={(e) => handleFileSelect(e.target.files)}
                                         disabled={isFinalizeSuccess}
@@ -4282,6 +4285,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             ref={fileInputRef}
                                             type="file"
                                             multiple
+                                            accept={uploadAcceptAttribute}
                                             className="hidden"
                                             onChange={(e) => handleFileSelect(e.target.files)}
                                             disabled={isFinalizeSuccess}
