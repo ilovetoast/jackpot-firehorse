@@ -311,6 +311,21 @@ return [
          * Keeps reliability timeline from growing without bound when a job will never succeed.
          */
         'pipeline_job_max_tries' => (int) env('ASSET_PIPELINE_JOB_MAX_TRIES', 5),
+
+        /*
+         * Objects larger than this skip a full S3 download + Imagick probe in FileInspectionService.
+         * MIME/size come from HEAD (tenant bucket) or disk size + mimeType (default S3 disk); dimensions stay null.
+         * Prevents ProcessAssetJob from timing out before the pipeline chain is dispatched.
+         * Set to 0 to always download (debug / smaller environments only).
+         */
+        'inspect_max_full_download_bytes' => (int) env('ASSET_INSPECT_MAX_FULL_DOWNLOAD_BYTES', 150 * 1024 * 1024),
+
+        /*
+         * Job-level timeouts (seconds) for ProcessAssetJob. Should stay at or slightly below the matching
+         * Horizon supervisor timeout (HORIZON_IMAGES_WORKER_TIMEOUT / HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT).
+         */
+        'process_asset_job_timeout_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_SECONDS', 290),
+        'process_asset_job_timeout_heavy_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_HEAVY_SECONDS', 1780),
     ],
 
 ];

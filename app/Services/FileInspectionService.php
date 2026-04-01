@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\StorageBucket;
 use Illuminate\Support\Facades\Storage;
 use Imagick;
+use Symfony\Component\Mime\MimeTypes;
 
 class FileInspectionService
 {
@@ -35,6 +36,47 @@ class FileInspectionService
                 'is_image' => false,
                 'storage_class' => $storageClass,
             ];
+        }
+
+        $maxInspect = (int) config('assets.processing.inspect_max_full_download_bytes', 150 * 1024 * 1024);
+
+        if ($bucket && $headData && $maxInspect > 0) {
+            $contentLength = (int) ($headData['ContentLength'] ?? 0);
+            if ($contentLength > $maxInspect) {
+                $mime = $this->refineMimeFromPath($s3Path, (string) ($headData['ContentType'] ?? 'application/octet-stream'));
+
+                return [
+                    'mime_type' => $mime,
+                    'file_size' => $contentLength,
+                    'width' => null,
+                    'height' => null,
+                    'is_image' => str_starts_with($mime, 'image/'),
+                    'storage_class' => $storageClass,
+                ];
+            }
+        }
+
+        if (! $bucket && $maxInspect > 0) {
+            $disk = Storage::disk('s3');
+            if ($disk->exists($s3Path)) {
+                $remoteSize = (int) $disk->size($s3Path);
+                if ($remoteSize > $maxInspect) {
+                    try {
+                        $rawMime = $disk->mimeType($s3Path);
+                    } catch (\Throwable) {
+                        $rawMime = null;
+                    }
+                    $mime = $this->refineMimeFromPath($s3Path, (string) ($rawMime ?: 'application/octet-stream'));
+
+                    return [
+                        'mime_type' => $mime,
+                        'file_size' => $remoteSize,
+                        'width' => null,
+                        'height' => null,
+                        'is_image' => str_starts_with($mime, 'image/'),
+                    ];
+                }
+            }
         }
 
         $contents = $bucket
@@ -88,5 +130,16 @@ class FileInspectionService
         }
 
         return $result;
+    }
+
+    private function refineMimeFromPath(string $path, string $mime): string
+    {
+        if ($mime !== 'application/octet-stream' && $mime !== 'binary/octet-stream') {
+            return $mime;
+        }
+
+        $guessed = MimeTypes::getDefault()->guessMimeType($path);
+
+        return $guessed ?: $mime;
     }
 }

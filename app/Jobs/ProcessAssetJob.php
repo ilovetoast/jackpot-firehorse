@@ -38,6 +38,13 @@ class ProcessAssetJob implements ShouldQueue
     /** Stop uncaught-exception retry loops; releases do not count as exceptions. */
     public int $maxExceptions = 1;
 
+    /**
+     * Must stay at or under the Horizon supervisor timeout for the queue this job uses.
+     *
+     * @var int
+     */
+    public $timeout = 290;
+
     /** @var int|array<int, int> */
     public $backoff = [60, 300];
 
@@ -51,7 +58,30 @@ class ProcessAssetJob implements ShouldQueue
         public readonly string $assetId
     ) {
         $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 5));
-        $this->configureImagesQueue();
+
+        $version = AssetVersion::query()->find($this->assetId);
+        $asset = $version?->asset ?? Asset::query()->find($this->assetId);
+
+        if ($asset) {
+            $bytes = (int) ($asset->size_bytes ?? 0);
+            if ($version) {
+                $bytes = max($bytes, (int) ($version->file_size ?? 0));
+            } else {
+                $cv = $asset->currentVersion()->first();
+                if ($cv) {
+                    $bytes = max($bytes, (int) ($cv->file_size ?? 0));
+                }
+            }
+            $queue = PipelineQueueResolver::forByteSize($bytes);
+            $this->onQueue($queue);
+            $heavyName = (string) config('queue.images_heavy_queue', 'images-heavy');
+            $this->timeout = $queue === $heavyName
+                ? (int) config('assets.processing.process_asset_job_timeout_heavy_seconds', 1780)
+                : (int) config('assets.processing.process_asset_job_timeout_seconds', 290);
+        } else {
+            $this->configureImagesQueue();
+            $this->timeout = (int) config('assets.processing.process_asset_job_timeout_seconds', 290);
+        }
     }
 
     /**
