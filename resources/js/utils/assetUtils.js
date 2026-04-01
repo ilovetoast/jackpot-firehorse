@@ -18,6 +18,21 @@ export function getAssetCategoryId(asset) {
 }
 
 /**
+ * Parse 1–5 quality_rating from grid/API asset metadata (root or governed fields bag).
+ *
+ * @param {Object|null} asset
+ * @returns {number|null} Integer 1–5, or null if unset / invalid
+ */
+export function parseAssetQualityRating(asset) {
+    if (!asset?.metadata || typeof asset.metadata !== 'object') return null
+    const raw = asset.metadata.quality_rating ?? asset.metadata.fields?.quality_rating
+    if (raw == null || raw === '') return null
+    const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+    if (!Number.isFinite(n) || n < 1 || n > 5) return null
+    return n
+}
+
+/**
  * Determines if a preview/thumbnail URL can be mutated for an asset.
  * 
  * Single source of truth for the rule: completed thumbnails must never be replaced.

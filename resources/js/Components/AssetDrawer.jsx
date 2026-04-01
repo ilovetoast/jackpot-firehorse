@@ -64,7 +64,7 @@ import PDFViewer from './PDFViewer'
 import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 import { getThumbnailState, getThumbnailVersion, supportsThumbnail } from '../utils/thumbnailUtils'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
-import { getAssetCategoryId } from '../utils/assetUtils'
+import { getAssetCategoryId, parseAssetQualityRating } from '../utils/assetUtils'
 
 const BrandDebugOverlay = lazy(() => import('./BrandDebugOverlay'))
 import { filterActiveCategories } from '../utils/categoryUtils'
@@ -76,6 +76,11 @@ import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/sol
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 import { useSelectionOptional } from '../contexts/SelectionContext'
+
+/** Brand reference CTA thresholds: quality rating must be > this (i.e. 4–5 on 1–5 scale), or starred, or engagement. */
+const BRAND_REFERENCE_PROMPT_MIN_QUALITY_EXCLUSIVE = 3
+const BRAND_REFERENCE_PROMPT_MIN_DOWNLOADS = 8
+const BRAND_REFERENCE_PROMPT_MIN_VIEWS = 35
 
 export default function AssetDrawer({
     asset,
@@ -589,6 +594,41 @@ export default function AssetDrawer({
     }, [categories, displayAsset])
 
     const ebiEnabledForAsset = drawerCategory?.ebi_enabled === true
+
+    /** Show “Use as a brand reference” only for strong signals (curation or usage), or when already promoted */
+    const showBrandReferenceCard = useMemo(() => {
+        if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
+            return false
+        }
+        if (displayAsset.reference_promotion) {
+            return true
+        }
+        const rating = parseAssetQualityRating(displayAsset)
+        const curated =
+            displayAsset.starred === true ||
+            (rating != null && rating > BRAND_REFERENCE_PROMPT_MIN_QUALITY_EXCLUSIVE)
+        if (curated) {
+            return true
+        }
+        if (metricsLoading) {
+            return false
+        }
+        const downloads = downloadCount ?? 0
+        const views = viewCount ?? 0
+        return (
+            downloads >= BRAND_REFERENCE_PROMPT_MIN_DOWNLOADS ||
+            views >= BRAND_REFERENCE_PROMPT_MIN_VIEWS
+        )
+    }, [
+        displayAsset?.id,
+        displayAsset?.is_virtual_google_font,
+        displayAsset?.reference_promotion,
+        displayAsset?.starred,
+        displayAsset?.metadata,
+        metricsLoading,
+        downloadCount,
+        viewCount,
+    ])
 
     const brandDebugPreviewUrl = useMemo(
         () =>
@@ -1122,6 +1162,12 @@ export default function AssetDrawer({
     const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
     const thumbnailsFailed = thumbnailStatus === 'failed'
     const thumbnailsSkipped = thumbnailStatus === 'skipped'
+
+    /** While the upload pipeline is still running, thumbnail_status often stays "pending" — hide manual Generate Preview to avoid duplicate jobs */
+    const isAssetAnalysisPipelineRunning = useMemo(() => {
+        const s = String(displayAsset?.analysis_status ?? '').toLowerCase()
+        return s === 'uploading' || s === 'generating_thumbnails'
+    }, [displayAsset?.analysis_status])
 
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
@@ -2782,7 +2828,7 @@ export default function AssetDrawer({
                                 primaryColor={brandPrimary}
                                 drawerInsightGroup
                             />
-                            {can('brand_settings.manage') && (
+                            {can('brand_settings.manage') && showBrandReferenceCard && (
                                 <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
                                     <div className="flex gap-2.5">
                                         <RectangleStackIcon
@@ -2792,8 +2838,9 @@ export default function AssetDrawer({
                                         <div className="min-w-0 flex-1">
                                             <h3 className="text-xs font-semibold text-gray-900">Use as a brand reference</h3>
                                             <p className="text-xs text-gray-600 mt-1 leading-snug">
-                                                Promote this asset as a reference so Brand Intelligence learns what on-brand looks like
-                                                for your team—especially alongside other assets in the same category.
+                                                We surface this for assets that look like strong references: starred, rated above 3★,
+                                                or with meaningful views or downloads. Promoting one helps Brand Intelligence learn
+                                                what on-brand looks like—especially next to others in this category.
                                             </p>
                                             {displayAsset.reference_promotion ? (
                                                 <div className="flex flex-wrap items-center gap-2 mt-2.5">
@@ -3428,8 +3475,9 @@ export default function AssetDrawer({
                     </dl>
 
                 {/* Processing State - Skipped or Pending (e.g. after Remove Preview) */}
-                {/* Show Regenerate/Generate button when supported; otherwise informational message */}
-                {(thumbnailsSkipped || (thumbnailStatus === 'pending' && canGenerateThumbnail)) && (
+                {/* Show Regenerate/Generate only after pipeline has finished a first pass (not while analysis is still uploading/generating_thumbnails) */}
+                {(thumbnailsSkipped ||
+                    (thumbnailStatus === 'pending' && canGenerateThumbnail && !isAssetAnalysisPipelineRunning)) && (
                     <div className="border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900 mb-2">Preview Status</h3>
                         
