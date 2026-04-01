@@ -1655,8 +1655,27 @@ class UploadController extends Controller
         // C9.2: Extract upload-time AI skip flags (upload-level, applies to all assets in this batch).
         // Non-privileged users cannot opt out via a forged request (matches UploadAssetDialog visibility).
         $canSetAiSkip = $this->userCanSetUploadAiSkipFlags($user, $tenant, $brand);
-        $skipAiTagging = $canSetAiSkip ? (bool) ($validated['skip_ai_tagging'] ?? false) : false;
-        $skipAiMetadata = $canSetAiSkip ? (bool) ($validated['skip_ai_metadata'] ?? false) : false;
+        $requestSkipAiTagging = $validated['skip_ai_tagging'] ?? null;
+        $requestSkipAiMetadata = $validated['skip_ai_metadata'] ?? null;
+        $skipAiTagging = $canSetAiSkip ? (bool) ($requestSkipAiTagging ?? false) : false;
+        $skipAiMetadata = $canSetAiSkip ? (bool) ($requestSkipAiMetadata ?? false) : false;
+
+        Log::info('[UploadController::finalize] AI skip flags resolved for finalize batch', [
+            'user_id' => $user->id,
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'can_set_ai_skip' => $canSetAiSkip,
+            'brand_role' => strtolower((string) ($user->getRoleForBrand($brand) ?? '')),
+            'tenant_role' => strtolower((string) ($user->getRoleForTenant($tenant) ?? '')),
+            'request_skip_ai_tagging' => $requestSkipAiTagging,
+            'request_skip_ai_metadata' => $requestSkipAiMetadata,
+            'effective_skip_ai_tagging' => $skipAiTagging,
+            'effective_skip_ai_metadata' => $skipAiMetadata,
+            'manifest_count' => count($manifest),
+            'tenant_incubated_at' => $tenant->incubated_at?->toIso8601String(),
+            'tenant_incubated_by_agency_id' => $tenant->incubated_by_agency_id,
+        ]);
+
         $results = [];
 
         // Process each manifest item independently

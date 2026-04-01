@@ -1320,10 +1320,120 @@ class ThumbnailGenerationService
     }
 
     /**
+     * ImageMagick/LibRaw options that reduce green/magenta RAW decode artifacts (best-effort per IM build).
+     */
+    protected function applyImagickRawDelegateOptions(\Imagick $imagick): void
+    {
+        $options = [
+            'dng:read-thumbnail' => 'true',
+            'raw:use-camera-wb' => 'true',
+            'raw:use-auto-wb' => 'true',
+        ];
+        foreach ($options as $key => $value) {
+            try {
+                $imagick->setOption($key, $value);
+            } catch (\Throwable) {
+                // Older delegates omit some keys; ignore.
+            }
+        }
+    }
+
+    /**
+     * After decoding a camera RAW frame, normalize orientation and output colorspace for web thumbnails.
+     */
+    protected function normalizeDecodedRawImageColors(\Imagick $imagick): void
+    {
+        try {
+            if (method_exists($imagick, 'autoOrientImage')) {
+                $imagick->autoOrientImage();
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $imagick->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] RAW colorspace normalize skipped', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Load a CR2 (or similar RAW) and return a single raster frame best suited for thumbnails.
+     *
+     * When multiple subimages exist, prefer the smallest layer above a minimum area — usually the
+     * embedded JPEG — and avoid a full-resolution demosaic that often shows wrong WB/channel layout.
+     */
+    protected function openCr2ThumbnailFrame(string $sourcePath): \Imagick
+    {
+        $preferSmallest = (bool) config('assets.thumbnail.cr2.prefer_smallest_sensible_layer', true);
+        $minArea = max(1, (int) config('assets.thumbnail.cr2.layer_min_area_pixels', 1600));
+
+        $tryOpen = function (string $pathToRead) use ($preferSmallest, $minArea): \Imagick {
+            $reader = new \Imagick();
+            $reader->setResolution(150, 150);
+            $this->applyImagickRawDelegateOptions($reader);
+            $reader->readImage($pathToRead);
+            $n = max(1, (int) $reader->getNumberImages());
+
+            $bestIdx = 0;
+            $bestArea = PHP_INT_MAX;
+            $found = false;
+
+            if ($preferSmallest && $n > 1) {
+                for ($i = 0; $i < $n; $i++) {
+                    $reader->setIteratorIndex($i);
+                    $w = (int) $reader->getImageWidth();
+                    $h = (int) $reader->getImageHeight();
+                    $area = $w * $h;
+                    if ($area >= $minArea && $area < $bestArea) {
+                        $bestArea = $area;
+                        $bestIdx = $i;
+                        $found = true;
+                    }
+                }
+            }
+
+            if (! $found && $n > 1) {
+                for ($i = 0; $i < $n; $i++) {
+                    $reader->setIteratorIndex($i);
+                    $w = (int) $reader->getImageWidth();
+                    $h = (int) $reader->getImageHeight();
+                    $area = $w * $h;
+                    if ($area < $bestArea) {
+                        $bestArea = $area;
+                        $bestIdx = $i;
+                    }
+                }
+            }
+
+            $reader->setIteratorIndex($bestIdx);
+            $frame = $reader->getImage();
+            $reader->clear();
+            $reader->destroy();
+            $this->normalizeDecodedRawImageColors($frame);
+
+            return $frame;
+        };
+
+        try {
+            return $tryOpen($sourcePath);
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] CR2 full-path read failed, retrying [0]', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $tryOpen($sourcePath.'[0]');
+    }
+
+    /**
      * Generate thumbnail for Canon CR2 (RAW) using Imagick.
      *
-     * Reads the first subimage ([0]) so ImageMagick uses the embedded preview / sensible default,
-     * avoiding a full RAW decode where possible. Requires ImageMagick with a RAW delegate (LibRaw).
+     * Uses LibRaw-friendly options, prefers embedded preview when multiple layers exist, and
+     * converts to sRGB before resize to avoid green/magenta channel decode artifacts.
      *
      * @param  string  $sourcePath  Local path to CR2 file
      * @return string Path to generated thumbnail (WebP or JPEG per config)
@@ -1343,26 +1453,21 @@ class ThumbnailGenerationService
             throw new \RuntimeException("Source CR2 file is empty (size: 0 bytes)");
         }
 
-        $readPath = $sourcePath.'[0]';
-
         Log::info('[ThumbnailGenerationService] Generating CR2 thumbnail using Imagick', [
             'source_path' => $sourcePath,
-            'read_path' => $readPath,
             'source_file_size' => $sourceFileSize,
             'style_config' => $styleConfig,
         ]);
 
         try {
-            $imagick = new \Imagick();
-            $imagick->setResolution(72, 72);
-            $imagick->readImage($readPath);
-            $imagick->setIteratorIndex(0);
-            $imagick = $imagick->getImage();
+            $imagick = $this->openCr2ThumbnailFrame($sourcePath);
 
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
 
             if ($sourceWidth === 0 || $sourceHeight === 0) {
+                $imagick->clear();
+                $imagick->destroy();
                 throw new \RuntimeException('CR2 image has invalid dimensions');
             }
 

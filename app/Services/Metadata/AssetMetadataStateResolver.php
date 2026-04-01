@@ -3,17 +3,18 @@
 namespace App\Services\Metadata;
 
 use App\Models\Asset;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Canonical Metadata State Resolver
- * 
+ *
  * Provides a single source of truth for metadata state resolution per asset.
  * Resolves approved and pending metadata rows according to business rules.
- * 
+ *
  * Phase 3B: Version-bound metadata. When asset has currentVersion, reads from
  * $asset->currentVersion->metadata (asset_version_id). Legacy assets use asset_id.
- * 
+ *
  * This resolver is read-only and does not apply permissions or visibility rules.
  * It purely resolves the canonical state from asset_metadata rows.
  */
@@ -21,21 +22,54 @@ class AssetMetadataStateResolver
 {
     /**
      * Resolve canonical metadata state for an asset.
-     * 
+     *
      * Returns the effective approved row and pending proposal (if any) for each field.
      * Version-bound: uses currentVersion when available.
-     * 
-     * @param Asset $asset
+     *
      * @return array Shape: [metadata_field_id => ['approved' => ?AssetMetadata, 'pending' => ?AssetMetadata, 'has_pending' => bool]]
      */
     public function resolve(Asset $asset): array
     {
+        $allRows = $this->fetchOrderedMetadataRows($asset);
+
+        // Group by metadata_field_id
+        $groupedByField = $allRows->groupBy('metadata_field_id');
+
+        $resolved = [];
+
+        foreach ($groupedByField as $fieldId => $rows) {
+            // Resolve approved row (priority order):
+            // 1. approved manual_override
+            // 2. approved user
+            // 3. approved automatic/system
+            // 4. approved ai
+            $approved = $this->resolveApproved($rows);
+
+            // Resolve pending row:
+            // - Newest row with approved_at IS NULL
+            // - ONLY IF no approved row exists
+            $pending = null;
+            if (! $approved) {
+                $pending = $this->resolvePending($rows);
+            }
+
+            $resolved[$fieldId] = [
+                'approved' => $approved,
+                'pending' => $pending,
+                'has_pending' => $pending !== null,
+            ];
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * All metadata rows for the asset in resolver order (version-aware), with field key/type joined.
+     */
+    public function fetchOrderedMetadataRows(Asset $asset): Collection
+    {
         $version = $asset->currentVersion;
 
-        // Phase 3B: Version-bound metadata. When currentVersion exists, filter by asset_version_id.
-        // Legacy assets (no versions) fall back to asset_id.
-        // Fallback: when version exists, also include rows with asset_version_id=null (legacy system
-        // metadata written before versioning). Prefer version-bound rows when both exist.
         $query = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
@@ -51,11 +85,11 @@ class AssetMetadataStateResolver
         }
 
         $orderBy = $version
-            ? "CASE WHEN asset_metadata.asset_version_id = ? THEN 0 ELSE 1 END, asset_metadata.created_at DESC"
+            ? 'CASE WHEN asset_metadata.asset_version_id = ? THEN 0 ELSE 1 END, asset_metadata.created_at DESC'
             : 'asset_metadata.created_at DESC';
         $bindings = $version ? [$version->id] : [];
 
-        $allRows = $query
+        return $query
             ->select(
                 'asset_metadata.*',
                 'metadata_fields.key',
@@ -64,48 +98,59 @@ class AssetMetadataStateResolver
             )
             ->orderByRaw($orderBy, $bindings)
             ->get();
+    }
 
-        // Group by metadata_field_id
-        $groupedByField = $allRows->groupBy('metadata_field_id');
+    /**
+     * Union of decoded multiselect values from all approved rows for a field.
+     *
+     * Bulk tag adds persist one tag per asset_metadata row; the single "canonical" approved row
+     * would hide the rest. Readers (drawer, bulk current value) must merge all approved rows.
+     *
+     * @param  callable(object): bool|null  $includeRow  If set, only rows for which this returns true are merged
+     * @return list<mixed>
+     */
+    public function mergedApprovedMultiselectValuesForField(Asset $asset, int $metadataFieldId, ?callable $includeRow = null): array
+    {
+        $rows = $this->fetchOrderedMetadataRows($asset)
+            ->where('metadata_field_id', $metadataFieldId)
+            ->filter(fn ($row) => $row->approved_at !== null);
 
-        $resolved = [];
-
-        foreach ($groupedByField as $fieldId => $rows) {
-            // Resolve approved row (priority order):
-            // 1. approved manual_override
-            // 2. approved user
-            // 3. approved automatic/system
-            // 4. approved ai
-            $approved = $this->resolveApproved($rows);
-            
-            // Resolve pending row:
-            // - Newest row with approved_at IS NULL
-            // - ONLY IF no approved row exists
-            $pending = null;
-            if (!$approved) {
-                $pending = $this->resolvePending($rows);
-            }
-
-            $resolved[$fieldId] = [
-                'approved' => $approved,
-                'pending' => $pending,
-                'has_pending' => $pending !== null,
-            ];
+        if ($includeRow !== null) {
+            $rows = $rows->filter($includeRow);
         }
 
-        return $resolved;
+        return $this->mergeMultiselectValueJsonFromRows($rows);
+    }
+
+    /**
+     * @param  Collection<int, object>  $rows
+     * @return list<mixed>
+     */
+    protected function mergeMultiselectValueJsonFromRows(Collection $rows): array
+    {
+        $allValues = [];
+        foreach ($rows as $row) {
+            $value = json_decode($row->value_json, true);
+            if (is_array($value)) {
+                $allValues = array_merge($allValues, $value);
+            } else {
+                $allValues[] = $value;
+            }
+        }
+
+        return array_values(array_unique($allValues, SORT_REGULAR));
     }
 
     /**
      * Resolve the approved metadata row for a field.
-     * 
+     *
      * Priority order (first match wins):
      * 1. manual_override (highest priority)
      * 2. user
      * 3. automatic/system
      * 4. ai (lowest priority)
-     * 
-     * @param \Illuminate\Support\Collection $rows All rows for this field
+     *
+     * @param  \Illuminate\Support\Collection  $rows  All rows for this field
      * @return object|null The approved row object, or null if none exists
      */
     protected function resolveApproved($rows): ?object
@@ -121,7 +166,7 @@ class AssetMetadataStateResolver
 
         // Priority order: manual_override > user > automatic/system > ai
         $priorityOrder = ['manual_override', 'user', 'automatic', 'system', 'ai'];
-        
+
         foreach ($priorityOrder as $source) {
             $match = $approvedRows->firstWhere('source', $source);
             if ($match) {
@@ -135,11 +180,11 @@ class AssetMetadataStateResolver
 
     /**
      * Resolve the pending metadata row for a field.
-     * 
+     *
      * Returns the newest row with approved_at IS NULL.
      * Only called when no approved row exists.
-     * 
-     * @param \Illuminate\Support\Collection $rows All rows for this field
+     *
+     * @param  \Illuminate\Support\Collection  $rows  All rows for this field
      * @return object|null The pending row object, or null if none exists
      */
     protected function resolvePending($rows): ?object
@@ -159,40 +204,39 @@ class AssetMetadataStateResolver
 
     /**
      * Check if asset has no pending metadata (all metadata is approved or automatic).
-     * 
+     *
      * Used to determine if AI suggestions should be triggered after approval.
-     * 
-     * @param Asset $asset
+     *
      * @return bool True if there's no pending metadata requiring approval
      */
     public function hasNoPendingMetadata(Asset $asset): bool
     {
         $resolved = $this->resolve($asset);
-        
+
         // Check if any field has pending metadata that requires approval
         // (exclude automatic fields as they don't require approval)
         $automaticFieldIds = DB::table('metadata_fields')
             ->where('population_mode', 'automatic')
             ->pluck('id')
             ->toArray();
-        
+
         foreach ($resolved as $fieldId => $state) {
-            if (!$state['has_pending']) {
+            if (! $state['has_pending']) {
                 continue;
             }
-            
+
             // Skip automatic fields (they don't require approval)
             if (in_array($fieldId, $automaticFieldIds)) {
                 continue;
             }
-            
+
             // Check if pending row is from user or AI (requires approval)
             $pendingRow = $state['pending'];
             if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
                 return false; // Has pending metadata requiring approval
             }
         }
-        
+
         return true; // No pending metadata requiring approval
     }
 }

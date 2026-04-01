@@ -40,8 +40,9 @@ class CollectionController extends Controller
     /**
      * Show the collections page (read-only UI).
      * Collections list is scoped to tenant + brand; assets only loaded when a collection is selected.
+     * Returns JSON when `load_more` is set (infinite scroll append).
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');

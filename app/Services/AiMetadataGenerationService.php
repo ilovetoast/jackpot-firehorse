@@ -72,12 +72,11 @@ class AiMetadataGenerationService
     /**
      * Generate AI metadata candidates for an asset.
      *
-     * @param  bool  $isManualRerun  From {@see AiMetadataGenerationJob} — allows tag inference even if Tags were previously approved.
      * @return array Results: candidates_created, tags_created, tag_inference_attempted, ai_tag_inference_status, ai_tag_inference_detail, tag_parse_stats, cost, fields_processed, tokens_in, tokens_out, model
      *
      * @throws \Exception If API call fails (caller should handle gracefully)
      */
-    public function generateMetadata(Asset $asset, bool $isManualRerun = false): array
+    public function generateMetadata(Asset $asset): array
     {
         // Structured fields (select/multiselect with options). Tags field has no options — excluded here.
         $fields = $this->getEligibleFields($asset);
@@ -86,14 +85,20 @@ class AiMetadataGenerationService
         // for this category even if no structured fields qualify — otherwise executions/deliverables often
         // skip the vision call entirely and never get AI tags.
         // Upload-time "Apply AI Tagging" sets _skip_ai_tagging — must not create tag candidates (same vision call can still fill structured fields).
-        // Manual rerun: {@see AiMetadataGenerationJob} clears _skip_ai_tagging and ignores approved Tags so vision can run again.
-        $tagInferenceDesired = $this->tagInferenceDesired($asset, $isManualRerun);
+        // Manual rerun: {@see AiMetadataGenerationJob} clears _skip_ai_tagging so vision can run again.
+        $tagInferenceDesired = $this->tagInferenceDesired($asset);
         $skipAiTaggingUpload = (bool) (($asset->metadata ?? [])['_skip_ai_tagging'] ?? false);
         $tagsInference = $tagInferenceDesired && ! $skipAiTaggingUpload;
 
         if (empty($fields) && ! $tagsInference) {
             Log::info('[AiMetadataGenerationService] No eligible fields and tag inference off', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+                'category_id' => $asset->metadata['category_id'] ?? null,
+                'tag_inference_desired' => $tagInferenceDesired,
+                'skip_ai_tagging_upload' => $skipAiTaggingUpload,
             ]);
 
             return [
@@ -141,7 +146,7 @@ class AiMetadataGenerationService
         // Create candidates in database
         $candidatesCreated = $this->createCandidates($asset, $candidates);
 
-        // Tag candidates only when Tags is AI-eligible for this category, upload did not opt out, and no approved tag yet.
+        // Tag candidates when eligible and not upload-skipped; createTags() skips tags already on the asset.
         $tagsCreated = $tagsInference ? $this->createTags($asset, $tags) : 0;
 
         // Calculate cost using provider's cost calculation
@@ -360,10 +365,8 @@ class AiMetadataGenerationService
 
     /**
      * Whether the Tags field would qualify for AI tag inference (ignores upload-time _skip_ai_tagging).
-     *
-     * @param  bool  $ignoreApprovedTags  Manual rerun: allow new tag candidates even if Tags was previously approved.
      */
-    protected function tagInferenceDesired(Asset $asset, bool $ignoreApprovedTags = false): bool
+    protected function tagInferenceDesired(Asset $asset): bool
     {
         $categoryId = $asset->metadata['category_id'] ?? null;
         if (! $categoryId) {
@@ -391,24 +394,12 @@ class AiMetadataGenerationService
             return false;
         }
 
-        if (! $ignoreApprovedTags) {
-            $hasApprovedValue = DB::table('asset_metadata')
-                ->where('asset_id', $asset->id)
-                ->where('metadata_field_id', $field->id)
-                ->whereNotNull('approved_at')
-                ->exists();
-
-            if ($hasApprovedValue) {
-                return false;
-            }
-        }
-
         return true;
     }
 
     /**
      * Whether to run vision for free-form tags only (asset_tag_candidates).
-     * True when the Tags field is AI-eligible and enabled for the category, with no approved value yet,
+     * True when the Tags field is AI-eligible and enabled for the category
      * and the uploader did not opt out via _skip_ai_tagging.
      */
     protected function shouldRunTagInference(Asset $asset): bool
@@ -417,7 +408,7 @@ class AiMetadataGenerationService
             return false;
         }
 
-        return $this->tagInferenceDesired($asset, false);
+        return $this->tagInferenceDesired($asset);
     }
 
     /**
@@ -614,7 +605,7 @@ class AiMetadataGenerationService
         $prompt .= "  },\n";
         $prompt .= "  \"tags\": []\n";
         $prompt .= "}\n";
-        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}; use [] if none qualify.)\n\n";
+        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}. Use [] only when the image truly has no concrete searchable subjects. If people, products, locations, or objects are clearly visible, include several specific tags rather than leaving \"tags\" empty.)\n\n";
         $prompt .= 'Response:';
 
         return $prompt;
@@ -669,6 +660,7 @@ class AiMetadataGenerationService
         $prompt .= "  ]\n";
         $prompt .= "}\n\n";
 
+        $prompt .= "If the image clearly shows concrete subjects, include multiple specific tags (not an empty array) whenever they meet the confidence rule.\n";
         $prompt .= "Return ONLY valid JSON. No explanation.\n";
 
         return $prompt;
@@ -820,12 +812,11 @@ class AiMetadataGenerationService
                 }
             }
 
-            // Parse general tags
+            // Parse general tags (primary shape: list of {value, confidence})
             $tagsData = $data['tags'] ?? [];
             if (is_array($tagsData)) {
                 foreach ($tagsData as $tagData) {
                     if (! is_array($tagData)) {
-                        // Handle case where tags might be simple strings
                         if (is_string($tagData)) {
                             $tagData = ['value' => $tagData, 'confidence' => $minConf];
                         } else {
@@ -835,54 +826,17 @@ class AiMetadataGenerationService
 
                     $tagValue = $tagData['value'] ?? null;
                     $confidence = $tagData['confidence'] ?? null;
-
                     if (empty($tagValue) || ! is_string($tagValue)) {
                         continue;
                     }
 
-                    $tagParseStats['raw_tag_count']++;
-
-                    if (! is_numeric($confidence)) {
-                        $tagParseStats['rejected_low_confidence_count']++;
-
-                        continue;
-                    }
-
-                    if ((float) $confidence < $minConf) {
-                        Log::debug('[AiMetadataGenerationService] Low confidence tag skipped', [
-                            'asset_id' => $asset->id,
-                            'tag' => $tagValue,
-                            'confidence' => $confidence,
-                            'min_confidence' => $minConf,
-                        ]);
-                        $tagParseStats['rejected_low_confidence_count']++;
-
-                        continue;
-                    }
-
-                    // Normalize tag: lowercase, singular, no punctuation
-                    $normalizedTag = $this->normalizeTag($tagValue);
-                    if (empty($normalizedTag)) {
-                        $tagParseStats['rejected_low_confidence_count']++;
-
-                        continue;
-                    }
-
-                    if ($this->isRedundantTag($normalizedTag)) {
-                        Log::debug('[AiMetadataGenerationService] Redundant tag skipped', [
-                            'asset_id' => $asset->id,
-                            'tag' => $normalizedTag,
-                        ]);
-
-                        continue;
-                    }
-
-                    $tagParseStats['passed_confidence_count']++;
-                    $tags[] = [
-                        'value' => $normalizedTag,
-                        'confidence' => (float) $confidence,
-                    ];
+                    $this->acceptVisionTagCandidate($asset->id, $tagValue, $confidence, $minConf, $tags, $tagParseStats);
                 }
+            }
+
+            // Models often return [] or omit tags under strict confidence rules, or use alternate JSON keys / a map.
+            if (($tagParseStats['raw_tag_count'] ?? 0) === 0) {
+                $this->parseTagsFromAlternateVisionJsonShapes($data, $minConf, $asset->id, $tags, $tagParseStats);
             }
         } catch (\Exception $e) {
             Log::error('[AiMetadataGenerationService] Failed to parse response', [
@@ -897,6 +851,125 @@ class AiMetadataGenerationService
             'tags' => $tags,
             'tag_parse_stats' => $tagParseStats,
         ];
+    }
+
+    /**
+     * @param  array<string, int|float>  $tagParseStats
+     * @param  list<array{value: string, confidence: float}>  $tags
+     */
+    protected function acceptVisionTagCandidate(
+        string $assetId,
+        string $tagValue,
+        mixed $confidence,
+        float $minConf,
+        array &$tags,
+        array &$tagParseStats
+    ): void {
+        $tagParseStats['raw_tag_count']++;
+
+        if (! is_numeric($confidence)) {
+            $tagParseStats['rejected_low_confidence_count']++;
+
+            return;
+        }
+
+        if ((float) $confidence < $minConf) {
+            Log::debug('[AiMetadataGenerationService] Low confidence tag skipped', [
+                'asset_id' => $assetId,
+                'tag' => $tagValue,
+                'confidence' => $confidence,
+                'min_confidence' => $minConf,
+            ]);
+            $tagParseStats['rejected_low_confidence_count']++;
+
+            return;
+        }
+
+        $normalizedTag = $this->normalizeTag($tagValue);
+        if ($normalizedTag === '') {
+            $tagParseStats['rejected_low_confidence_count']++;
+
+            return;
+        }
+
+        if ($this->isRedundantTag($normalizedTag)) {
+            Log::debug('[AiMetadataGenerationService] Redundant tag skipped', [
+                'asset_id' => $assetId,
+                'tag' => $normalizedTag,
+            ]);
+
+            return;
+        }
+
+        $tagParseStats['passed_confidence_count']++;
+        $tags[] = [
+            'value' => $normalizedTag,
+            'confidence' => (float) $confidence,
+        ];
+    }
+
+    /**
+     * When the primary "tags" array is empty, accept common alternate shapes from vision models.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<string, int|float>  $tagParseStats
+     * @param  list<array{value: string, confidence: float}>  $tags
+     */
+    protected function parseTagsFromAlternateVisionJsonShapes(
+        array $data,
+        float $minConf,
+        string $assetId,
+        array &$tags,
+        array &$tagParseStats
+    ): void {
+        $rows = [];
+
+        $tagsNode = $data['tags'] ?? null;
+        if (is_array($tagsNode) && $tagsNode !== [] && $this->isAssociativeArray($tagsNode)) {
+            foreach ($tagsNode as $value => $confidence) {
+                if (is_string($value) && $value !== '' && is_numeric($confidence)) {
+                    $rows[] = ['value' => $value, 'confidence' => (float) $confidence];
+                }
+            }
+        }
+
+        foreach (['keywords', 'suggested_tags', 'descriptive_tags', 'image_tags', 'search_tags'] as $altKey) {
+            $block = $data[$altKey] ?? null;
+            if (! is_array($block)) {
+                continue;
+            }
+            foreach ($block as $item) {
+                if (is_string($item) && $item !== '') {
+                    $rows[] = ['value' => $item, 'confidence' => $minConf];
+
+                    continue;
+                }
+                if (! is_array($item)) {
+                    continue;
+                }
+                $v = $item['value'] ?? $item['tag'] ?? null;
+                $c = $item['confidence'] ?? null;
+                if (is_string($v) && $v !== '') {
+                    $rows[] = [
+                        'value' => $v,
+                        'confidence' => is_numeric($c) ? (float) $c : $minConf,
+                    ];
+                }
+            }
+        }
+
+        foreach ($rows as $row) {
+            $this->acceptVisionTagCandidate($assetId, $row['value'], $row['confidence'], $minConf, $tags, $tagParseStats);
+        }
+    }
+
+    protected function isAssociativeArray(array $arr): bool
+    {
+        if ($arr === []) {
+            return false;
+        }
+
+        return array_keys($arr) !== range(0, count($arr) - 1);
     }
 
     /**
@@ -1037,6 +1110,29 @@ class AiMetadataGenerationService
     }
 
     /**
+     * Canonical tag strings already present on the asset ({@see asset_tags}), for deduping AI candidates.
+     *
+     * @return array<string, true>
+     */
+    protected function existingCanonicalTagsOnAsset(Asset $asset, ?Tenant $tenant): array
+    {
+        if (! $tenant) {
+            return [];
+        }
+
+        $normalizer = app(TagNormalizationService::class);
+        $out = [];
+        foreach (DB::table('asset_tags')->where('asset_id', $asset->id)->pluck('tag') as $raw) {
+            $c = $normalizer->normalize($raw, $tenant);
+            if ($c !== null) {
+                $out[$c] = true;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Create tag candidates in asset_tag_candidates table.
      *
      * Stores AI-generated tags as candidates (not approved data).
@@ -1051,6 +1147,10 @@ class AiMetadataGenerationService
             return 0;
         }
 
+        $tenant = Tenant::find($asset->tenant_id);
+        $tagNormalizationService = app(TagNormalizationService::class);
+        $existingCanonicalOnAsset = $this->existingCanonicalTagsOnAsset($asset, $tenant);
+
         $created = 0;
         $now = now();
 
@@ -1063,12 +1163,15 @@ class AiMetadataGenerationService
             }
 
             // Phase J.2.1: Normalize tag and check if canonical form has been dismissed
-            $tagNormalizationService = app(\App\Services\TagNormalizationService::class);
-            $tenant = Tenant::find($asset->tenant_id);
             $canonicalTag = $tagNormalizationService->normalize($tagValue, $tenant);
 
             // Skip if normalization results in blocked/invalid tag
             if ($canonicalTag === null) {
+                continue;
+            }
+
+            // User (or auto-apply) already has this tag on the asset — skip redundant candidate
+            if (isset($existingCanonicalOnAsset[$canonicalTag])) {
                 continue;
             }
 
@@ -1128,6 +1231,7 @@ class AiMetadataGenerationService
                 'updated_at' => $now,
             ]);
 
+            $existingCanonicalOnAsset[$canonicalTag] = true;
             $created++;
         }
 

@@ -9,6 +9,13 @@
 import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes'
 
 /**
+ * Video types the DAM generates poster/preview for ({@see config/file_types.php} `video`).
+ * Browsers often report `file.type === ''` or non-standard MIME for MP4/MOV; extension
+ * or `video/*` must still count as supported so upload UI and grid state stay accurate.
+ */
+const VIDEO_EXTENSIONS_FALLBACK = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'])
+
+/**
  * Check if a file type supports thumbnail generation.
  *
  * @param {string} mimeType - MIME type (e.g., 'image/jpeg')
@@ -24,6 +31,12 @@ export function supportsThumbnail(mimeType, fileExtension) {
         return true
     }
     if (e && exts.includes(e)) {
+        return true
+    }
+    if (m.startsWith('video/')) {
+        return true
+    }
+    if (e && VIDEO_EXTENSIONS_FALLBACK.has(e)) {
         return true
     }
     return false

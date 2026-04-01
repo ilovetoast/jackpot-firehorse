@@ -10,6 +10,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Assets\Metadata\EmbeddedMetadataPresentation;
 use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Enums\TicketCategory;
@@ -34,15 +35,14 @@ use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Services\ActivityRecorder;
-use App\Assets\Metadata\EmbeddedMetadataPresentation;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
-use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
+use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\MetadataApprovalResolver;
-use App\Services\MetadataPersistenceService;
 use App\Services\MetadataPermissionResolver;
+use App\Services\MetadataPersistenceService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
@@ -90,7 +90,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission - viewers cannot see AI suggestions
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -215,7 +215,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission - only users with metadata.suggestions.apply can approve
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $user->canForContext('metadata.suggestions.apply', $tenant, $brand)) {
             return response()->json([
                 'message' => 'You do not have permission to approve suggestions.',
             ], 403);
@@ -443,7 +443,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission - only users with metadata.suggestions.dismiss can reject
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+        if (! $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand)) {
             return response()->json([
                 'message' => 'You do not have permission to reject suggestions.',
             ], 403);
@@ -782,25 +782,37 @@ class AssetMetadataController extends Controller
             $confidence = $effectiveRow->confidence !== null ? (float) $effectiveRow->confidence : null;
             $isAiField = $populationMode === 'ai';
 
-            // CRITICAL: Confidence suppression applies ONLY to AI fields
-            // Automatic/system fields are never suppressed (they are authoritative)
-            if ($fieldKey && $isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
-                // Suppress low-confidence AI metadata values (PRESENTATION LAYER ONLY)
-                // Treat as if value doesn't exist - skip this field entirely
-                continue;
-            }
+            // Multiselect + approved: merge all approved rows (bulk tags write one row per tag).
+            // Single canonical row would show only the newest tag and looks like "replace".
+            if ($fieldType === 'multiselect' && $state['approved']) {
+                $includeRow = null;
+                if ($fieldKey && $isAiField) {
+                    $includeRow = function ($row) use ($fieldKey) {
+                        $rowConfidence = $row->confidence !== null ? (float) $row->confidence : null;
 
-            if ($fieldType === 'multiselect') {
-                // For multiselect, use value from effective row
-                // Note: Resolver already provides the canonical row, so we use it directly
+                        return ! $this->confidenceService->shouldSuppress($fieldKey, $rowConfidence);
+                    };
+                }
+                $merged = $resolver->mergedApprovedMultiselectValuesForField($asset, (int) $fieldId, $includeRow);
+                if ($merged === []) {
+                    continue;
+                }
+                $fieldValues[$fieldId] = $merged;
+            } elseif ($fieldType === 'multiselect') {
+                // CRITICAL: Confidence suppression applies ONLY to AI fields
+                if ($fieldKey && $isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                    continue;
+                }
                 $value = json_decode($effectiveRow->value_json, true);
                 if (is_array($value)) {
-                    $fieldValues[$fieldId] = array_unique($value, SORT_REGULAR);
+                    $fieldValues[$fieldId] = array_values(array_unique($value, SORT_REGULAR));
                 } else {
                     $fieldValues[$fieldId] = [$value];
                 }
             } else {
-                // For single-value fields, use the effective row value
+                if ($fieldKey && $isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                    continue;
+                }
                 $fieldValues[$fieldId] = json_decode($effectiveRow->value_json, true);
             }
 
@@ -3392,7 +3404,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can view metadata suggestions
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3688,7 +3700,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3753,8 +3765,8 @@ class AssetMetadataController extends Controller
             );
 
             // Check apply permission
-            $canApply = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply');
-            $canDismiss = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss');
+            $canApply = $user->canForContext('metadata.suggestions.apply', $tenant, $brand);
+            $canDismiss = $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand);
 
             $source = $suggestion['source'] ?? 'ai';
             $formattedSuggestions[] = [
@@ -3799,7 +3811,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+        if (! $user->canForContext('metadata.suggestions.apply', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -3972,7 +3984,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+        if (! $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4066,7 +4078,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission (reuse metadata suggestions permission)
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
@@ -4080,8 +4092,8 @@ class AssetMetadataController extends Controller
             ->get();
 
         // Check permissions for apply/dismiss
-        $canApply = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply');
-        $canDismiss = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss');
+        $canApply = $user->canForContext('metadata.suggestions.apply', $tenant, $brand);
+        $canDismiss = $user->canForContext('metadata.suggestions.dismiss', $tenant, $brand);
 
         $suggestions = $tagCandidates->map(function ($candidate) use ($canApply, $canDismiss) {
             return [
@@ -4316,7 +4328,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+        if (! $user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 

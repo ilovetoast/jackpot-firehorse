@@ -432,11 +432,31 @@ class Asset extends Model
      */
     public function isPublic(): bool
     {
+        if ($this->deleted_at !== null) {
+            return false;
+        }
+
         return $this->collections()
             ->where('collections.is_public', true)
             ->whereNotNull('collections.slug')
             ->where('collections.slug', '!=', '')
             ->exists();
+    }
+
+    /**
+     * Resolve implicit {asset} route binding including soft-deleted rows.
+     *
+     * Without this, trash/deleted lifecycle views and the asset drawer return 404 for any
+     * API that uses route model binding, even when the user can legitimately open the asset
+     * (e.g. restore from trash). Access is still enforced per action via {@see \App\Policies\AssetPolicy}.
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        $column = $field ?? $this->getRouteKeyName();
+
+        return static::withTrashed()
+            ->where($column, $value)
+            ->firstOrFail();
     }
 
     /**

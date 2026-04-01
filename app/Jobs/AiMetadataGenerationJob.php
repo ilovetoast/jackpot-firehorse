@@ -97,6 +97,7 @@ class AiMetadataGenerationJob implements ShouldQueue
         if ($alreadyGenerated && ! $this->isManualRerun) {
             Log::info('[AiMetadataGenerationJob] AI Metadata Generation skipped - already generated', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
                 'generated_at' => $metadata['_ai_metadata_generated_at'],
             ]);
             // Ensure status is set even if already generated
@@ -143,6 +144,8 @@ class AiMetadataGenerationJob implements ShouldQueue
         if (! isset($asset->metadata['category_id'])) {
             Log::info('[AiMetadataGenerationJob] AI Metadata Generation skipped - no category', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
+                'brand_id' => $asset->brand_id,
             ]);
             $this->markAsSkipped($asset, 'no_category');
 
@@ -172,7 +175,7 @@ class AiMetadataGenerationJob implements ShouldQueue
 
         // 5. Generate metadata (use thumbnail URL from waitForThumbnail)
         try {
-            // Manual "Regenerate AI analysis": honor current brand intent — drop upload-time opt-out and allow tag inference even if Tags were previously approved.
+            // Manual "Regenerate AI analysis": drop upload-time opt-out so tag inference can run again.
             if ($this->isManualRerun) {
                 $meta = $asset->metadata ?? [];
                 if (array_key_exists('_skip_ai_tagging', $meta)) {
@@ -183,7 +186,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 $asset->refresh();
             }
 
-            $results = $service->generateMetadata($asset, $this->isManualRerun);
+            $results = $service->generateMetadata($asset);
 
             // 6. Mark as generated (prevents silent re-runs)
             // This timestamp is updated even on manual rerun

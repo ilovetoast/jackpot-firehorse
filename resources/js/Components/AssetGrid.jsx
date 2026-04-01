@@ -13,8 +13,9 @@
  * See AssetDrawer for live thumbnail behavior when viewing asset details.
  *
  * Desktop: click-drag (including from card chrome/thumbnail, not on controls) draws a marquee;
- * assets intersecting the rectangle are selected in SelectionContext (Windows-style). Hold Ctrl/Cmd
- * while dragging to add to the current selection instead of replacing it. Touch pointers are ignored.
+ * assets intersecting the rectangle are selected in SelectionContext (desktop-style). Hold Ctrl/Cmd
+ * or Shift anytime during the drag (or on release) to add to the current selection instead of
+ * replacing it — same idea as additive multi-select on the desktop. Touch pointers are ignored.
  *
  * @param {Object} props
  * @param {Array} props.assets - Array of asset objects to display
@@ -42,6 +43,11 @@ export function masonryMaxHeightForCardSize(cardSize) {
 
 function rectsIntersect(a, b) {
     return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)
+}
+
+/** True if pointer event should treat marquee as additive (add intersecting items, do not clear). */
+function isMarqueeAdditivePointerEvent(ev) {
+    return !!(ev.ctrlKey || ev.metaKey || ev.shiftKey)
 }
 
 function assetToSelectionItem(asset, selectionAssetType) {
@@ -182,13 +188,16 @@ export default function AssetGrid({
                 startX,
                 startY,
                 pointerId,
-                additive: e.ctrlKey || e.metaKey,
+                additive: isMarqueeAdditivePointerEvent(e),
                 active: false,
             }
 
             const onMove = (ev) => {
                 const sess = marqueeSessionRef.current
                 if (!sess || ev.pointerId !== sess.pointerId) return
+                if (isMarqueeAdditivePointerEvent(ev)) {
+                    sess.additive = true
+                }
                 const dx = ev.clientX - sess.startX
                 const dy = ev.clientY - sess.startY
                 if (!sess.active) {
@@ -218,9 +227,11 @@ export default function AssetGrid({
                     const top = Math.min(sess.startY, ev.clientY)
                     const right = Math.max(sess.startX, ev.clientX)
                     const bottom = Math.max(sess.startY, ev.clientY)
+                    const additive =
+                        sess.additive || isMarqueeAdditivePointerEvent(ev)
                     applyMarqueeSelection(
                         { left, top, right, bottom },
-                        sess.additive
+                        additive
                     )
                     if (typeof window !== 'undefined') {
                         window.__assetGridMarqueeSuppressClickUntil =

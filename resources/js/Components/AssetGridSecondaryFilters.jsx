@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters, getPrimaryFilters } from '../utils/filterTierResolver'
@@ -36,6 +36,15 @@ import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterPara
 import { FilterFieldInput } from './FilterFieldInput'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
+import Avatar from './Avatar'
+
+function findUploadedByUser(users, rawId) {
+    if (rawId == null || rawId === '' || !Array.isArray(users)) {
+        return null
+    }
+    const sid = String(rawId)
+    return users.find((u) => String(u.id) === sid) ?? null
+}
 
 /**
  * Secondary Filter Bar Component
@@ -192,7 +201,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -216,7 +225,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -240,7 +249,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -260,7 +269,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -280,7 +289,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -418,7 +427,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -431,7 +440,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
         })
     }
     
@@ -543,12 +552,26 @@ export default function AssetGridSecondaryFilters({
                                     <button type="button" onClick={() => handleFileTypeFilterChange('all')} className="text-blue-600 hover:text-blue-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
                                 </span>
                             )}
-                            {userFilter && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
-                                    Created By: {pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.name || pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.email || 'Unknown'}
-                                    <button type="button" onClick={() => handleUserFilterChange(null)} className="text-indigo-600 hover:text-indigo-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
-                                </span>
-                            )}
+                            {userFilter && (() => {
+                                const u = findUploadedByUser(pageProps.uploaded_by_users, userFilter)
+                                const label = u ? (u.name || u.email || 'User') : 'Unknown'
+                                return (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                        {u ? (
+                                            <Avatar
+                                                avatarUrl={u.avatar_url}
+                                                firstName={u.first_name}
+                                                lastName={u.last_name}
+                                                email={u.email}
+                                                size="h-5 w-5 text-[9px]"
+                                                primaryColor={brandPrimary}
+                                            />
+                                        ) : null}
+                                        <span>Uploaded by: {label}</span>
+                                        <button type="button" onClick={() => handleUserFilterChange(null)} className="text-indigo-600 hover:text-indigo-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                    </span>
+                                )
+                            })()}
                             {Object.entries(filters).map(([fieldKey, filter]) => {
                                 if (!filter || filter.value === null || filter.value === '') return null
                                 const field = visibleSecondaryFilters.find((f) => (f.field_key || f.key) === fieldKey)
@@ -749,8 +772,8 @@ export default function AssetGridSecondaryFilters({
                                 users={pageProps.uploaded_by_users}
                                 value={userFilter}
                                 onChange={handleUserFilterChange}
-                                placeholder="All Users"
-                                label="Created By"
+                                placeholder="All uploaders"
+                                label="Uploaded by"
                             />
                         </div>
                     )}
@@ -811,22 +834,32 @@ export default function AssetGridSecondaryFilters({
                                         </button>
                                     </div>
                                 )}
-                                {userFilter && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded">
-                                        <span>
-                                            Created By: {pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.name || 
-                                                         pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.email || 
-                                                         'Unknown User'}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleUserFilterChange(null)}
-                                            className="text-indigo-600 hover:text-indigo-800"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
+                                {userFilter && (() => {
+                                    const u = findUploadedByUser(pageProps.uploaded_by_users, userFilter)
+                                    const label = u ? (u.name || u.email || 'User') : 'Unknown'
+                                    return (
+                                        <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                            {u ? (
+                                                <Avatar
+                                                    avatarUrl={u.avatar_url}
+                                                    firstName={u.first_name}
+                                                    lastName={u.last_name}
+                                                    email={u.email}
+                                                    size="h-5 w-5 text-[9px]"
+                                                    primaryColor={brandPrimary}
+                                                />
+                                            ) : null}
+                                            <span>Uploaded by: {label}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleUserFilterChange(null)}
+                                                className="text-indigo-600 hover:text-indigo-800"
+                                            >
+                                                <XMarkIcon className="h-3 w-3" />
+                                            </button>
+                                        </div>
+                                    )
+                                })()}
                                 {Object.entries(filters).map(([fieldKey, filter]) => {
                                     if (!filter || filter.value === null || filter.value === '') {
                                         return null

@@ -245,6 +245,18 @@ return [
             'viewer_dpi' => (int) env('THUMBNAIL_PDF_VIEWER_DPI', 150),
             'viewer_max_size' => (int) env('THUMBNAIL_PDF_VIEWER_MAX_SIZE', 1600),
         ],
+
+        /*
+         * Canon CR2 / camera RAW thumbnails (Imagick + LibRaw delegate).
+         *
+         * Full RAW demosaic without proper WB/colorspace often shows green/magenta casts.
+         * We prefer embedded preview JPEG when multiple layers exist, apply delegate hints
+         * (camera WB, thumbnail-only), then force sRGB before resize.
+         */
+        'cr2' => [
+            'prefer_smallest_sensible_layer' => env('THUMBNAIL_CR2_PREFER_SMALLEST_LAYER', true),
+            'layer_min_area_pixels' => (int) env('THUMBNAIL_CR2_LAYER_MIN_AREA', 40 * 40),
+        ],
     ],
 
     /*

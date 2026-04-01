@@ -117,6 +117,8 @@ class AppServiceProvider extends ServiceProvider
 
         \App\Models\BrandModelVersion::observe(\App\Observers\BrandModelVersionObserver::class);
 
+        \App\Models\Asset::observe(\App\Observers\AssetObserver::class);
+
         // Record last successful session login (web guard) for admin reporting
         Event::listen(Login::class, function (Login $event): void {
             if ($event->guard !== 'web') {

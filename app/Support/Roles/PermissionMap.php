@@ -164,6 +164,7 @@ class PermissionMap
 
             // Member: Basic company membership (minimal permissions)
             // Asset permissions + basic metadata + tickets
+            // AI suggestions.* so uploaders who are tenant-only members can still see tag/field recommendations in-app
             'member' => array_merge(
                 $assetPermissions,
                 $tagPermissions,
@@ -172,6 +173,9 @@ class PermissionMap
                     'embedded_metadata.view_raw',
                     'metadata.edit_post_upload',
                     'metadata.review_candidates',
+                    'metadata.suggestions.view',
+                    'metadata.suggestions.apply',
+                    'metadata.suggestions.dismiss',
                 ],
                 $ticketPermissions
             ),
@@ -296,6 +300,8 @@ class PermissionMap
             ),
 
             // Contributor: Upload/edit assets (cannot approve)
+            // AI suggestions: same as brand_manager for viewing/applying/dismissing recommendations on their assets
+            // (was tenant-only checks in API, which hid tag suggestions from every contributor)
             'contributor' => array_merge(
                 ['view brand'],
                 $assetPermissions,
@@ -305,6 +311,9 @@ class PermissionMap
                     'embedded_metadata.view_raw',
                     'metadata.edit_post_upload',
                     'metadata.review_candidates',
+                    'metadata.suggestions.view',
+                    'metadata.suggestions.apply',
+                    'metadata.suggestions.dismiss',
                 ],
                 [
                     'tickets.create',

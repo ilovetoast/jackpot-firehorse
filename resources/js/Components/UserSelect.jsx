@@ -153,7 +153,7 @@ export default function UserSelect({
                         >
                             <div className="flex items-center">
                                 <span className="block truncate text-sm text-gray-900">
-                                    All Users
+                                    {placeholder}
                                 </span>
                                 {!selectedUser && (
                                     <span className="absolute inset-y-0 right-0 flex items-center pr-4">

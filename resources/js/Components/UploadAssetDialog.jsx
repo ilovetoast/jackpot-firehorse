@@ -4086,7 +4086,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return () => clearTimeout(t)
     }, [isMinimized, canFinalizeV2, batchStatus, handleFinalizeV2])
 
-    // Files that don't support thumbnails yet (video, SVG, HEIC, etc.) — show info message
+    // Files the client does not treat as thumbnail-capable — show info (avoid false positives for video; see thumbnailUtils)
     const filesWithoutThumbnailSupport = useMemo(() => {
         return v2Files.filter((v2File) => {
             const file = v2File?.file
@@ -4327,8 +4327,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         </svg>
                                         <p className="text-sm text-blue-800">
                                             {filesWithoutThumbnailSupport.length === 1
-                                                ? 'This file type doesn\'t support thumbnails yet. You\'ll see a file-type icon instead of a preview in the grid.'
-                                                : `${filesWithoutThumbnailSupport.length} of your files are types we don't support thumbnails for yet (e.g. video, HEIC). You'll see a file-type icon instead of a preview for those assets.`}
+                                                ? 'This file type may only show a file-type icon in the upload tray until processing finishes. If the format is supported, a preview can still appear in the library after upload.'
+                                                : `${filesWithoutThumbnailSupport.length} of your files may only show a file-type icon in the tray until processing finishes. Supported formats can still get previews in the library after upload.`}
                                         </p>
                                     </div>
                                 )}

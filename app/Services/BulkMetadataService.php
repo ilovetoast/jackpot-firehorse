@@ -27,18 +27,14 @@ class BulkMetadataService
         protected MetadataPermissionResolver $permissionResolver,
         protected MetadataApprovalResolver $approvalResolver,
         protected MetadataPersistenceService $metadataPersistenceService,
-    ) {
-    }
+    ) {}
 
     /**
      * Preview bulk metadata operation.
      *
-     * @param array $assetIds
-     * @param string $operationType 'add' | 'replace' | 'clear'
-     * @param array $metadataValues Keyed by field_key
-     * @param int $tenantId
-     * @param int $brandId
-     * @param string|null $userRole Optional user role for permission checks
+     * @param  string  $operationType  'add' | 'replace' | 'clear'
+     * @param  array  $metadataValues  Keyed by field_key
+     * @param  string|null  $userRole  Optional user role for permission checks
      * @return array Preview results
      */
     public function preview(
@@ -50,7 +46,7 @@ class BulkMetadataService
         ?string $userRole = null
     ): array {
         // Validate operation type
-        if (!in_array($operationType, ['add', 'replace', 'clear'], true)) {
+        if (! in_array($operationType, ['add', 'replace', 'clear'], true)) {
             throw new \InvalidArgumentException("Invalid operation type: {$operationType}");
         }
 
@@ -80,7 +76,7 @@ class BulkMetadataService
                 $brandId
             );
 
-            if (!empty($assetPreview['errors'])) {
+            if (! empty($assetPreview['errors'])) {
                 $preview['errors'][] = [
                     'asset_id' => $asset->id,
                     'asset_title' => $asset->title ?? $asset->original_filename,
@@ -94,7 +90,7 @@ class BulkMetadataService
                 ];
             }
 
-            if (!empty($assetPreview['warnings'])) {
+            if (! empty($assetPreview['warnings'])) {
                 $preview['warnings'][] = [
                     'asset_id' => $asset->id,
                     'asset_title' => $asset->title ?? $asset->original_filename,
@@ -108,13 +104,6 @@ class BulkMetadataService
 
     /**
      * Preview operation for a single asset.
-     *
-     * @param Asset $asset
-     * @param string $operationType
-     * @param array $metadataValues
-     * @param int $tenantId
-     * @param int $brandId
-     * @return array
      */
     protected function previewAsset(
         Asset $asset,
@@ -139,8 +128,9 @@ class BulkMetadataService
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             $result['errors'][] = 'Category not found';
+
             return $result;
         }
 
@@ -166,8 +156,9 @@ class BulkMetadataService
 
         // Process each field in metadataValues
         foreach ($metadataValues as $fieldKey => $newValue) {
-            if (!isset($fieldMap[$fieldKey])) {
+            if (! isset($fieldMap[$fieldKey])) {
                 $result['errors'][] = "Field '{$fieldKey}' not found in schema";
+
                 continue;
             }
 
@@ -178,14 +169,16 @@ class BulkMetadataService
                 ->where('id', $field['field_id'])
                 ->first();
 
-            if (!$fieldDef || !($fieldDef->is_user_editable ?? true)) {
+            if (! $fieldDef || ! ($fieldDef->is_user_editable ?? true)) {
                 $result['errors'][] = "Field '{$fieldKey}' is not editable";
+
                 continue;
             }
 
             // Check if field is internal-only
             if ($field['is_internal_only'] ?? false) {
                 $result['errors'][] = "Field '{$fieldKey}' is internal-only";
+
                 continue;
             }
 
@@ -199,8 +192,9 @@ class BulkMetadataService
                     $category->id
                 );
 
-                if (!$canEdit) {
+                if (! $canEdit) {
                     $result['warnings'][] = "You don't have permission to edit field '{$fieldKey}'";
+
                     continue; // Skip this field
                 }
             }
@@ -221,14 +215,16 @@ class BulkMetadataService
             }
 
             // Validate value
-            if ($newValue !== null && !$this->validateValue($fieldDef, $newValue)) {
+            if ($newValue !== null && ! $this->validateValue($fieldDef, $newValue)) {
                 $result['errors'][] = "Invalid value for field '{$fieldKey}'";
+
                 continue;
             }
 
             // Check if value would change
             if ($this->valuesEqual($oldValue, $newValue, $field['type'])) {
                 $result['warnings'][] = "Field '{$fieldKey}' already has this value";
+
                 continue;
             }
 
@@ -248,13 +244,7 @@ class BulkMetadataService
     /**
      * Execute bulk metadata operation.
      *
-     * @param array $assetIds
-     * @param string $operationType
-     * @param array $metadataValues
-     * @param int $tenantId
-     * @param int $brandId
-     * @param int $userId
-     * @param string|null $userRole Optional user role for permission checks
+     * @param  string|null  $userRole  Optional user role for permission checks
      * @return array Execution results
      */
     public function execute(
@@ -267,7 +257,7 @@ class BulkMetadataService
         ?string $userRole = null
     ): array {
         // Validate operation type
-        if (!in_array($operationType, ['add', 'replace', 'clear'], true)) {
+        if (! in_array($operationType, ['add', 'replace', 'clear'], true)) {
             throw new \InvalidArgumentException("Invalid operation type: {$operationType}");
         }
 
@@ -329,14 +319,7 @@ class BulkMetadataService
     /**
      * Execute operation for a single asset.
      *
-     * @param Asset $asset
-     * @param string $operationType
-     * @param array $metadataValues
-     * @param int $tenantId
-     * @param int $brandId
-     * @param int $userId
-     * @param string|null $userRole Optional user role for permission checks
-     * @return void
+     * @param  string|null  $userRole  Optional user role for permission checks
      */
     protected function executeAsset(
         Asset $asset,
@@ -356,7 +339,7 @@ class BulkMetadataService
                 ->first();
         }
 
-        if (!$category) {
+        if (! $category) {
             throw new \RuntimeException('Category not found');
         }
 
@@ -382,7 +365,7 @@ class BulkMetadataService
 
         // Process each field
         foreach ($metadataValues as $fieldKey => $newValue) {
-            if (!isset($fieldMap[$fieldKey])) {
+            if (! isset($fieldMap[$fieldKey])) {
                 continue; // Skip invalid fields
             }
 
@@ -393,7 +376,7 @@ class BulkMetadataService
                 ->where('id', $field['field_id'])
                 ->first();
 
-            if (!$fieldDef || !($fieldDef->is_user_editable ?? true)) {
+            if (! $fieldDef || ! ($fieldDef->is_user_editable ?? true)) {
                 continue; // Skip non-editable fields
             }
 
@@ -419,7 +402,7 @@ class BulkMetadataService
                     $category->id
                 );
 
-                if (!$canEdit) {
+                if (! $canEdit) {
                     continue; // Skip fields user cannot edit
                 }
             }
@@ -447,7 +430,7 @@ class BulkMetadataService
             }
 
             // Validate value
-            if ($newValue !== null && !$this->validateValue($fieldDef, $newValue)) {
+            if ($newValue !== null && ! $this->validateValue($fieldDef, $newValue)) {
                 continue; // Skip invalid values
             }
 
@@ -503,7 +486,6 @@ class BulkMetadataService
     /**
      * Load current approved metadata for an asset.
      *
-     * @param Asset $asset
      * @return array Keyed by field_key
      */
     protected function loadCurrentMetadata(Asset $asset): array
@@ -543,34 +525,42 @@ class BulkMetadataService
             }
         }
 
+        // Tags grid/search use `asset_tags`; tags may exist only there (no user asset_metadata rows).
+        // Include them so bulk "add" merges against the full set the UI shows.
+        $mirrorTags = DB::table('asset_tags')
+            ->where('asset_id', $asset->id)
+            ->pluck('tag')
+            ->all();
+        if ($mirrorTags !== []) {
+            $existing = $result['tags'] ?? [];
+            $existing = is_array($existing) ? $existing : ($existing !== null ? [$existing] : []);
+            $result['tags'] = array_values(array_unique(array_merge($existing, $mirrorTags), SORT_REGULAR));
+        }
+
         return $result;
     }
 
     /**
      * Determine asset type.
-     *
-     * @param Asset $asset
-     * @return string
      */
     protected function determineAssetType(Asset $asset): string
     {
         $type = $asset->type?->value ?? 'image';
+
         return in_array($type, ['image', 'video', 'document'], true) ? $type : 'image';
     }
 
     /**
      * Validate value against field type.
      *
-     * @param object $field
-     * @param mixed $value
-     * @return bool
+     * @param  mixed  $value
      */
     protected function validateValue(object $field, $value): bool
     {
         $fieldType = $field->type ?? 'text';
 
         if ($fieldType === 'multiselect') {
-            return is_array($value) && !empty($value);
+            return is_array($value) && ! empty($value);
         }
 
         switch ($fieldType) {
@@ -592,17 +582,17 @@ class BulkMetadataService
     /**
      * Check if value is a valid date.
      *
-     * @param mixed $value
-     * @return bool
+     * @param  mixed  $value
      */
     protected function isValidDate($value): bool
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return false;
         }
 
         try {
             new \DateTime($value);
+
             return true;
         } catch (\Exception $e) {
             return false;
@@ -612,9 +602,7 @@ class BulkMetadataService
     /**
      * Normalize value based on field type.
      *
-     * @param object $field
-     * @param mixed $value
-     * @return array
+     * @param  mixed  $value
      */
     protected function normalizeValue(object $field, $value): array
     {
@@ -625,10 +613,11 @@ class BulkMetadataService
         $fieldType = $field->type ?? 'text';
 
         if ($fieldType === 'multiselect') {
-            if (!is_array($value)) {
+            if (! is_array($value)) {
                 return [];
             }
-            return array_map(fn($v) => $v, array_unique($value, SORT_REGULAR));
+
+            return array_map(fn ($v) => $v, array_unique($value, SORT_REGULAR));
         }
 
         return [$value];
@@ -637,10 +626,8 @@ class BulkMetadataService
     /**
      * Check if two values are equal.
      *
-     * @param mixed $oldValue
-     * @param mixed $newValue
-     * @param string $fieldType
-     * @return bool
+     * @param  mixed  $oldValue
+     * @param  mixed  $newValue
      */
     protected function valuesEqual($oldValue, $newValue, string $fieldType): bool
     {
@@ -657,6 +644,7 @@ class BulkMetadataService
             $newArray = is_array($newValue) ? $newValue : [$newValue];
             sort($oldArray);
             sort($newArray);
+
             return $oldArray === $newArray;
         }
 

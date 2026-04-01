@@ -497,6 +497,65 @@ class AssetController extends Controller
             $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, trim($searchQ));
         }
 
+        // Uploaded-by filter: distinct uploaders in current scope (before applying uploaded_by), for avatar dropdown
+        $uploadedByUsersPayload = [];
+        if (! $request->boolean('load_more')) {
+            $uploaderIds = (clone $assetsQuery)
+                ->reorder()
+                ->select('assets.user_id')
+                ->whereNotNull('assets.user_id')
+                ->distinct()
+                ->pluck('assets.user_id')
+                ->filter()
+                ->values();
+            if ($uploaderIds->isNotEmpty()) {
+                $uploadedByUsersPayload = User::whereIn('id', $uploaderIds)
+                    ->orderBy('first_name')
+                    ->orderBy('last_name')
+                    ->orderBy('email')
+                    ->get()
+                    ->map(fn (User $u) => [
+                        'id' => (int) $u->id,
+                        'name' => $u->name,
+                        'first_name' => $u->first_name,
+                        'last_name' => $u->last_name,
+                        'email' => $u->email,
+                        'avatar_url' => $u->avatar_url,
+                    ])
+                    ->values()
+                    ->all();
+            }
+            $selectedUploadedBy = filter_var($request->input('uploaded_by'), FILTER_VALIDATE_INT);
+            if ($selectedUploadedBy && ! collect($uploadedByUsersPayload)->contains(fn (array $row) => (int) $row['id'] === $selectedUploadedBy)) {
+                $extra = User::query()->find($selectedUploadedBy);
+                if ($extra) {
+                    $uploadedByUsersPayload[] = [
+                        'id' => (int) $extra->id,
+                        'name' => $extra->name,
+                        'first_name' => $extra->first_name,
+                        'last_name' => $extra->last_name,
+                        'email' => $extra->email,
+                        'avatar_url' => $extra->avatar_url,
+                    ];
+                    usort($uploadedByUsersPayload, function (array $a, array $b) {
+                        $na = strtolower((string) (($a['name'] ?? '') !== '' ? $a['name'] : ($a['email'] ?? '')));
+                        $nb = strtolower((string) (($b['name'] ?? '') !== '' ? $b['name'] : ($b['email'] ?? '')));
+
+                        return $na <=> $nb;
+                    });
+                }
+            }
+        }
+
+        $uploadedByRequest = $request->input('uploaded_by');
+        if ($uploadedByRequest !== null && $uploadedByRequest !== '') {
+            $uploadedById = filter_var($uploadedByRequest, FILTER_VALIDATE_INT);
+            if ($uploadedById !== false && $uploadedById > 0) {
+                $assetsQuery->where('assets.user_id', $uploadedById);
+                $baseQueryForFilterVisibility->where('assets.user_id', $uploadedById);
+            }
+        }
+
         // Phase L: Centralized sort (after search/filters, before pagination)
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
@@ -1422,6 +1481,7 @@ class AssetController extends Controller
             'source' => $sourceParam, // e.g. 'reference_materials', 'staged'
             'reference_materials_count' => $referenceMaterialsCount,
             'staged_count' => $stagedCount,
+            'uploaded_by_users' => $uploadedByUsersPayload,
         ]);
     }
 

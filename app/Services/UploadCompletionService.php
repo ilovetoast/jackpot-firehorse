@@ -964,8 +964,16 @@ class UploadCompletionService
             $asset->refresh();
             Log::info('[UploadCompletionService] AI skip flags merged before pipeline (same transaction as AssetUploaded)', [
                 'asset_id' => $asset->id,
+                'user_id' => $userId,
+                'tenant_id' => $uploadSession->tenant_id,
+                'brand_id' => $targetBrandId,
+                'category_id' => $meta['category_id'] ?? $categoryId,
                 'skip_ai_tagging' => $meta['_skip_ai_tagging'],
                 'skip_ai_metadata' => $meta['_skip_ai_metadata'],
+                '_ai_tagging_skipped_reason' => $meta['_ai_tagging_skipped_reason'] ?? null,
+                '_ai_metadata_skipped_reason' => $meta['_ai_metadata_skipped_reason'] ?? null,
+                'tenant_incubated_at' => $tenant?->incubated_at?->toIso8601String(),
+                'tenant_incubated_by_agency_id' => $tenant?->incubated_by_agency_id,
             ]);
 
             // Emit AssetUploaded event after transaction commits so queued listener (ProcessAssetOnUpload)

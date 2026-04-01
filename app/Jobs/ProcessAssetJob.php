@@ -81,6 +81,8 @@ class ProcessAssetJob implements ShouldQueue
             // Both skipped - return empty array (no AI jobs)
             Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
+                'brand_id' => $asset->brand_id,
                 'skip_ai_tagging' => true,
                 'skip_ai_metadata' => true,
             ]);
@@ -93,7 +95,9 @@ class ProcessAssetJob implements ShouldQueue
         if (!$policyCheck['should_proceed']) {
             Log::info('[ProcessAssetJob] AI tagging skipped due to policy', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
                 'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
                 'reason' => $policyCheck['reason'] ?? 'policy_denied',
             ]);
             return []; // Skip AI jobs entirely
@@ -121,6 +125,8 @@ class ProcessAssetJob implements ShouldQueue
         if (empty($jobs)) {
             Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
                 'asset_id' => $asset->id,
+                'user_id' => $asset->user_id,
+                'brand_id' => $asset->brand_id,
                 'skip_ai_tagging' => $skipAiTagging,
                 'skip_ai_metadata' => $skipAiMetadata,
             ]);

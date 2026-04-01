@@ -85,4 +85,55 @@ class SystemIncidentService
 
         return $this->record($payload);
     }
+
+    /**
+     * Create a new unresolved incident, or refresh an existing one with the same metadata unique_signature.
+     *
+     * Used for queue job failures so retries do not spawn duplicate rows. Preserves `detected_at` on refresh
+     * so age-based escalation reflects time since first failure.
+     *
+     * @param  array<string, mixed>  $payload  Same shape as {@see record()}, plus top-level unique_signature (string).
+     */
+    public function recordOrRefreshBySignature(array $payload): SystemIncident
+    {
+        $signature = $payload['unique_signature'] ?? null;
+        if ($signature === null || $signature === '') {
+            return $this->record($payload);
+        }
+        unset($payload['unique_signature']);
+
+        $existing = SystemIncident::whereNull('resolved_at')
+            ->where('metadata->unique_signature', $signature)
+            ->first();
+
+        $incomingMeta = $payload['metadata'] ?? [];
+        unset($payload['metadata']);
+
+        if ($existing) {
+            $meta = array_merge($existing->metadata ?? [], $incomingMeta);
+            $meta['unique_signature'] = $signature;
+            $meta['failure_count'] = (int) ($meta['failure_count'] ?? 1) + 1;
+            $meta['last_failed_at'] = now()->toIso8601String();
+
+            $existing->update([
+                'message' => $payload['message'] ?? $existing->message,
+                'severity' => $payload['severity'] ?? $existing->severity,
+                'retryable' => $payload['retryable'] ?? $existing->retryable,
+                'title' => $payload['title'] ?? $existing->title,
+                'metadata' => $meta,
+            ]);
+
+            return $existing->fresh();
+        }
+
+        $nowIso = now()->toIso8601String();
+        $meta = array_merge($incomingMeta, [
+            'unique_signature' => $signature,
+            'failure_count' => 1,
+            'first_failed_at' => $nowIso,
+            'last_failed_at' => $nowIso,
+        ]);
+
+        return $this->record(array_merge($payload, ['metadata' => $meta]));
+    }
 }
