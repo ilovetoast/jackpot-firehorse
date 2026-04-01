@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-LOCK_FILE="/tmp/jackpot-deploy.lock"
-
-if [ -f "$LOCK_FILE" ]; then
-  echo "🚫 Deploy already running. Exiting."
-  exit 1
-fi
-
-touch "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
-
 ############################################
-# CONFIG d
+# CONFIG
 ############################################
 
 APP_DIR="/var/www/jackpot"
@@ -130,11 +120,11 @@ sudo -u "$APP_USER" "$PHP" artisan migrate --force
 ############################################
 # Ensures workers pick up fresh config (e.g. file_types.php unsupported list).
 # Run in release dir BEFORE atomic switch so new workers get correct config.
-# echo "🗑️ Clearing application cache"
-# sudo -u "$APP_USER" "$PHP" artisan optimize:clear
+echo "🗑️ Clearing application cache"
+sudo -u "$APP_USER" "$PHP" artisan optimize:clear
 
-# echo "⚙️ Optimizing (config cache for workers)"
-# sudo -u "$APP_USER" "$PHP" artisan optimize
+echo "⚙️ Optimizing (config cache for workers)"
+sudo -u "$APP_USER" "$PHP" artisan optimize
 
 ############################################
 # DEPLOY METADATA
@@ -157,14 +147,6 @@ EOF
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 echo "🔁 current → $RELEASE_DIR"
 
-cd "$CURRENT_LINK"
-
-echo "🗑️ Clearing application cache"
-sudo -u "$APP_USER" "$PHP" artisan optimize:clear
-
-echo "⚙️ Optimizing (config cache for workers)"
-sudo -u "$APP_USER" "$PHP" artisan optimize
-
 ############################################
 # GRACEFUL WORKER RESTART (NEW CODE)
 ############################################
@@ -175,22 +157,13 @@ sudo -u "$APP_USER" "$PHP" artisan optimize
 # Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
 # See docs/UPLOAD_AND_QUEUE.md (Deploy interruption behavior)
 
-cd "$CURRENT_LINK"
+cd "$RELEASE_DIR"
 if command -v "$PHP" >/dev/null; then
   echo "♻️ Signaling queue workers to restart (finish current job, then exit)"
   sudo -u "$APP_USER" "$PHP" artisan queue:restart || true
-
   if sudo -u "$APP_USER" "$PHP" artisan list 2>/dev/null | grep -q horizon; then
-    echo "♻️ Gracefully terminating Horizon (workers drain and restart)"
+    echo "♻️ Gracefully terminating Horizon (workers drain, then restart)"
     sudo -u "$APP_USER" "$PHP" artisan horizon:terminate || true
-
-    # Give it a second to exit cleanly
-    sleep 2
-
-    echo "🔁 Ensuring Supervisor restarts Horizon"
-    sudo supervisorctl reread || true
-    sudo supervisorctl update || true
-    sudo supervisorctl restart jackpot-horizon || true
   fi
 fi
 
