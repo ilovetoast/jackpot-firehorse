@@ -101,10 +101,17 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
                     'model' => $model,
                 ]
             );
-            // 4. When embedding saved: set analysis_status = 'scoring'
+            // 4. When embedding saved: set analysis_status = 'scoring', then either queue EBI or finish pipeline.
             $asset->update(['analysis_status' => 'scoring']);
             \App\Services\AnalysisStatusLogger::log($asset, 'generating_embedding', 'scoring', 'GenerateAssetEmbeddingJob');
-            ScoreAssetBrandIntelligenceJob::dispatch($asset);
+            $asset->refresh();
+            if ($asset->resolveCategoryForTenant()?->isEbiEnabled()) {
+                ScoreAssetBrandIntelligenceJob::dispatch($asset);
+            } else {
+                // Avoid queuing ScoreAssetBrandIntelligenceJob when category EBI is off; that job would only mark complete anyway.
+                $asset->update(['analysis_status' => 'complete']);
+                \App\Services\AnalysisStatusLogger::log($asset, 'scoring', 'complete', 'GenerateAssetEmbeddingJob');
+            }
         }
 
         if ($this->brandVisualReferenceId) {

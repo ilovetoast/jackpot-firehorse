@@ -27,6 +27,7 @@ use App\Services\Automation\ColorAnalysisService;
 use App\Services\BrandIntelligence\BrandIntelligenceEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -67,6 +68,8 @@ class AnalysisStatusProgressionTest extends TestCase
             'asset_type' => AssetType::ASSET,
             'is_system' => false,
             'requires_approval' => false,
+            // Explicit EBI on so the pipeline test can assert the scoring step without relying on a no-op queued job.
+            'settings' => ['ebi_enabled' => true],
         ]);
         $this->user = User::create([
             'email' => 'user@example.com',
@@ -178,7 +181,9 @@ class AnalysisStatusProgressionTest extends TestCase
         $asset->refresh();
         $this->assertSame('generating_embedding', $asset->analysis_status, 'PopulateAutomaticMetadataJob should set generating_embedding');
 
-        // 4. GenerateAssetEmbeddingJob: embedding saved → scoring
+        // 4. GenerateAssetEmbeddingJob: embedding saved → scoring (Queue::fake prevents sync driver from running scoring inline)
+        Queue::fake();
+
         $mockVector = array_fill(0, 64, 0.5);
         $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $mockVector)));
         $mockVector = array_map(fn ($x) => $x / $norm, $mockVector);
@@ -190,6 +195,7 @@ class AnalysisStatusProgressionTest extends TestCase
         $embedJob->handle(app(ImageEmbeddingServiceInterface::class));
         $asset->refresh();
         $this->assertSame('scoring', $asset->analysis_status, 'GenerateAssetEmbeddingJob should set scoring');
+        Queue::assertPushed(ScoreAssetBrandIntelligenceJob::class);
 
         // 5. ScoreAssetBrandIntelligenceJob: scoring finishes → complete
         // Ensure asset meets completion criteria (thumbnail_status, ai_tagging_completed, metadata_extracted)
@@ -213,6 +219,44 @@ class AnalysisStatusProgressionTest extends TestCase
         $asset->refresh();
 
         $this->assertSame('complete', $asset->analysis_status, 'ScoreAssetBrandIntelligenceJob should set complete when scoring finishes');
+    }
+
+    /**
+     * When category "Enable Brand Intelligence" is off, embedding completion must not queue ScoreAssetBrandIntelligenceJob
+     * (that job only skipped scoring and advanced analysis_status anyway).
+     */
+    public function test_generate_embedding_skips_scoring_job_when_category_ebi_disabled(): void
+    {
+        $ebiOffCategory = Category::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'EBI Off',
+            'slug' => 'ebi-off-cat',
+            'asset_type' => AssetType::ASSET,
+            'is_system' => false,
+            'requires_approval' => false,
+            'settings' => ['ebi_enabled' => false],
+        ]);
+
+        Queue::fake();
+
+        $mockVector = array_fill(0, 64, 0.5);
+        $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $mockVector)));
+        $mockVector = array_map(fn ($x) => $x / $norm, $mockVector);
+        $this->mock(ImageEmbeddingServiceInterface::class, fn ($mock) => $mock->shouldReceive('embedAsset')->once()->andReturn($mockVector));
+
+        $asset = $this->createImageAsset([
+            'analysis_status' => 'generating_embedding',
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'metadata' => ['category_id' => $ebiOffCategory->id],
+        ]);
+
+        $embedJob = new GenerateAssetEmbeddingJob($asset->id);
+        $embedJob->handle(app(ImageEmbeddingServiceInterface::class));
+
+        Queue::assertNotPushed(ScoreAssetBrandIntelligenceJob::class);
+        $asset->refresh();
+        $this->assertSame('complete', $asset->analysis_status);
     }
 
     /**

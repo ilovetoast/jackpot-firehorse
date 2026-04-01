@@ -161,9 +161,16 @@ cd "$RELEASE_DIR"
 if command -v "$PHP" >/dev/null; then
   echo "♻️ Signaling queue workers to restart (finish current job, then exit)"
   sudo -u "$APP_USER" "$PHP" artisan queue:restart || true
+
   if sudo -u "$APP_USER" "$PHP" artisan list 2>/dev/null | grep -q horizon; then
-    echo "♻️ Gracefully terminating Horizon (workers drain, then restart)"
+    echo "♻️ Gracefully terminating Horizon (workers drain and restart)"
     sudo -u "$APP_USER" "$PHP" artisan horizon:terminate || true
+
+    # Give it a second to exit cleanly
+    sleep 2
+
+    echo "🔁 Ensuring Supervisor restarts Horizon"
+    sudo supervisorctl restart jackpot-horizon || true
   fi
 fi
 
