@@ -28,19 +28,9 @@ class ComputedMetadataJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
-    /**
-     * The number of times the job may be attempted.
-     *
-     * @var int
-     */
-    public $tries = 3;
+    public $tries = 32;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900];
+    public int $maxExceptions = 1;
 
     /**
      * Create a new job instance.

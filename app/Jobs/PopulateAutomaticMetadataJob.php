@@ -45,21 +45,17 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
 
     /**
      * The number of times the job may be attempted.
-     * Higher than default because we use release() when thumbnails aren't ready —
-     * each release counts as an attempt. Slow assets (large TIFFs, etc.) may need
-     * several minutes for thumbnail generation.
-     * Capped at 6 to avoid MaxAttemptsExceededException spam when failures are non-transient.
+     * Uses release(60) while thumbnails finish; each pickup counts as an attempt.
      *
      * @var int
      */
-    public $tries = 6;
+    public $tries = 12;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900];
+    /** @var int One uncaught exception → failed job (no crash loop). */
+    public int $maxExceptions = 1;
+
+    /** @var int|array<int, int> */
+    public $backoff = [60, 300];
 
     /**
      * Create a new job instance.

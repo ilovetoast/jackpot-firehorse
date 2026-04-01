@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\BrandPipelineRun;
 use App\Services\BrandDNA\BrandResearchNotificationService;
 use App\Services\BrandDNA\BrandSnapshotService;
@@ -19,9 +20,11 @@ use Illuminate\Support\Facades\Log;
  */
 class BrandPipelineSnapshotJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use AppliesQueueSafeModeMiddleware, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 2;
+    public int $tries = 32;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 120;
 

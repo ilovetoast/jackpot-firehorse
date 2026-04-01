@@ -22,9 +22,9 @@ class ExtractEmbeddedMetadataJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
-    public $tries = 3;
+    public $tries = 32;
 
-    public $backoff = [60, 300, 900];
+    public int $maxExceptions = 1;
 
     public function __construct(
         public readonly string $assetId,

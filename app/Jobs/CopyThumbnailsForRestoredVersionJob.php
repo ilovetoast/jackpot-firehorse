@@ -25,9 +25,9 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
-    public $tries = 3;
+    public $tries = 32;
 
-    public $backoff = [30, 60, 120];
+    public int $maxExceptions = 1;
 
     public function __construct(
         public string $assetId,

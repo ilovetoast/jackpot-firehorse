@@ -21,19 +21,12 @@ class ExtractMetadataJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
-     * The number of times the job may be attempted.
-     * Never retry forever - enforce maximum attempts.
-     *
-     * @var int
+     * @var int Accommodates release() from queue safe mode / Horizon; not “infinite” retries.
      */
-    public $tries = 3; // Maximum retry attempts (enforced by AssetProcessingFailureService)
+    public $tries = 32;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900];
+    /** @var int One uncaught exception → failed job (no crash loop). */
+    public int $maxExceptions = 1;
 
     /**
      * Create a new job instance.

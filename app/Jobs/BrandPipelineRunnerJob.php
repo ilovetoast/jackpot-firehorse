@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandModelVersion;
@@ -30,9 +31,11 @@ use Illuminate\Support\Facades\Log;
  */
 class BrandPipelineRunnerJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use AppliesQueueSafeModeMiddleware, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    public int $tries = 32;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 300;
 

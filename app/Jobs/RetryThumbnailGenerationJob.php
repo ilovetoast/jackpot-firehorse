@@ -27,6 +27,10 @@ class RetryThumbnailGenerationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
+    public $tries = 32;
+
+    public int $maxExceptions = 1;
+
     /**
      * Create a new job instance.
      *

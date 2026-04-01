@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\BrandModelVersionAsset;
@@ -18,9 +19,11 @@ use Illuminate\Support\Facades\Log;
 
 class ExtractPdfTextJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use AppliesQueueSafeModeMiddleware, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 120;
 

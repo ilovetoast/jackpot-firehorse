@@ -22,7 +22,7 @@ class HorizonServiceProvider extends HorizonApplicationServiceProvider
 
     /**
      * Register the Horizon gate.
-     *
+     * a 
      * This gate determines who can access Horizon in non-local environments.
      */
     protected function gate(): void

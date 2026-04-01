@@ -16,6 +16,10 @@ class IngestPdfPagesForAiJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
+    public $tries = 32;
+
+    public int $maxExceptions = 1;
+
     public function __construct(
         public readonly string $assetId
     ) {

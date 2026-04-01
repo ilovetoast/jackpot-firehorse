@@ -2,6 +2,12 @@
 
 use Illuminate\Support\Str;
 
+/**
+ * When QUEUE_WORKERS_ENABLED is false, staging/production environments resolve to
+ * an empty supervisor list: Horizon stays up but runs zero workers (no jobs processed).
+ */
+$horizonQueueWorkersEnabled = filter_var(env('QUEUE_WORKERS_ENABLED', true), FILTER_VALIDATE_BOOL);
+
 return [
 
     /*
@@ -227,7 +233,8 @@ return [
             'maxJobs' => 200,
             'memory' => 128,
             // Must be >= GenerateThumbnailsJob / large-asset pipeline timeouts (see assets.thumbnail.*)
-            'tries' => 2,
+            // Job $tries bounds release() deferrals; $maxExceptions stops crash loops (see heavy jobs).
+            'tries' => 32,
             'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
@@ -240,14 +247,14 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => 256,
-            'tries' => 2,
+            'tries' => 32,
             'timeout' => 600,
             'nice' => 0,
         ],
     ],
 
     'environments' => [
-        'production' => [
+        'production' => $horizonQueueWorkersEnabled ? [
             'supervisor-default' => [
                 'maxProcesses' => 10,
                 'balanceMaxShift' => 1,
@@ -263,9 +270,9 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
-        ],
+        ] : [],
 
-        'staging' => [
+        'staging' => $horizonQueueWorkersEnabled ? [
             'supervisor-default' => [
                 'maxProcesses' => 1,
             ],
@@ -275,7 +282,7 @@ return [
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
             ],
-        ],
+        ] : [],
 
         'local' => [
             'supervisor-default' => [

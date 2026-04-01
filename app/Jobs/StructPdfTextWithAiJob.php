@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\PdfTextExtraction;
 use App\Services\PdfTextAiStructuringService;
 use Illuminate\Bus\Queueable;
@@ -21,9 +22,11 @@ use Illuminate\Support\Facades\Log;
  */
 class StructPdfTextWithAiJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use AppliesQueueSafeModeMiddleware, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 2;
+    public int $tries = 32;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 120;
 

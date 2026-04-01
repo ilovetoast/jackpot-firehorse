@@ -28,12 +28,9 @@ class GenerateVideoPreviewJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
-    /**
-     * The number of times the job may be attempted.
-     *
-     * @var int
-     */
-    public $tries = 2; // Lower retries for preview (non-critical)
+    public $tries = 32;
+
+    public int $maxExceptions = 1;
 
     /**
      * Job timeout in seconds. FFmpeg video preview generation can take 5+ min for large files.
@@ -42,13 +39,6 @@ class GenerateVideoPreviewJob implements ShouldQueue
      * @var int
      */
     public $timeout;
-
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [120, 600]; // 2 minutes, 10 minutes
 
     /**
      * Create a new job instance.

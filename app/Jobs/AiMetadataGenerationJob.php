@@ -38,15 +38,9 @@ class AiMetadataGenerationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
-    /**
-     * The number of times the job may be attempted.
-     */
-    public $tries = 3;
+    public $tries = 32;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     */
-    public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
+    public int $maxExceptions = 1;
 
     /**
      * Determine if the job should be retried when it fails.

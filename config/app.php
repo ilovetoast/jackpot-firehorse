@@ -56,6 +56,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Queue safe mode (circuit breaker)
+    |--------------------------------------------------------------------------
+    |
+    | When true, heavy queue jobs release back onto the queue every 60 seconds
+    | without running handle() — use during incidents (set QUEUE_SAFE_MODE=true).
+    |
+    */
+
+    'queue_safe_mode' => filter_var(env('QUEUE_SAFE_MODE', false), FILTER_VALIDATE_BOOL),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application URL
     |--------------------------------------------------------------------------
     |

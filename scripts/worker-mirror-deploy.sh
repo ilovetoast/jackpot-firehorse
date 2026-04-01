@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+LOCK_FILE="/tmp/jackpot-deploy.lock"
+
+if [ -f "$LOCK_FILE" ]; then
+  echo "🚫 Deploy already running. Exiting."
+  exit 1
+fi
+
+touch "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 ############################################
 # CONFIG
 ############################################
@@ -120,11 +130,11 @@ sudo -u "$APP_USER" "$PHP" artisan migrate --force
 ############################################
 # Ensures workers pick up fresh config (e.g. file_types.php unsupported list).
 # Run in release dir BEFORE atomic switch so new workers get correct config.
-echo "🗑️ Clearing application cache"
-sudo -u "$APP_USER" "$PHP" artisan optimize:clear
+# echo "🗑️ Clearing application cache"
+# sudo -u "$APP_USER" "$PHP" artisan optimize:clear
 
-echo "⚙️ Optimizing (config cache for workers)"
-sudo -u "$APP_USER" "$PHP" artisan optimize
+# echo "⚙️ Optimizing (config cache for workers)"
+# sudo -u "$APP_USER" "$PHP" artisan optimize
 
 ############################################
 # DEPLOY METADATA
@@ -147,6 +157,14 @@ EOF
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 echo "🔁 current → $RELEASE_DIR"
 
+cd "$CURRENT_LINK"
+
+echo "🗑️ Clearing application cache"
+sudo -u "$APP_USER" "$PHP" artisan optimize:clear
+
+echo "⚙️ Optimizing (config cache for workers)"
+sudo -u "$APP_USER" "$PHP" artisan optimize
+
 ############################################
 # GRACEFUL WORKER RESTART (NEW CODE)
 ############################################
@@ -157,7 +175,7 @@ echo "🔁 current → $RELEASE_DIR"
 # Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
 # See docs/UPLOAD_AND_QUEUE.md (Deploy interruption behavior)
 
-cd "$RELEASE_DIR"
+cd "$CURRENT_LINK"
 if command -v "$PHP" >/dev/null; then
   echo "♻️ Signaling queue workers to restart (finish current job, then exit)"
   sudo -u "$APP_USER" "$PHP" artisan queue:restart || true
@@ -170,6 +188,8 @@ if command -v "$PHP" >/dev/null; then
     sleep 2
 
     echo "🔁 Ensuring Supervisor restarts Horizon"
+    sudo supervisorctl reread || true
+    sudo supervisorctl update || true
     sudo supervisorctl restart jackpot-horizon || true
   fi
 fi

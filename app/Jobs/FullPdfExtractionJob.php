@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\Asset;
 use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
@@ -17,9 +18,11 @@ use Illuminate\Support\Facades\Log;
 
 class FullPdfExtractionJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use AppliesQueueSafeModeMiddleware, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 2;
+    public int $tries = 32;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 180;
 

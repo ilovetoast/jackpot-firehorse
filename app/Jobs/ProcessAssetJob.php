@@ -26,19 +26,17 @@ class ProcessAssetJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
-     * The number of times the job may be attempted.
-     * Never retry forever - enforce maximum attempts.
+     * High enough for Redis throttle + queue safe-mode release() cycles (each pickup counts as an attempt).
      *
      * @var int
      */
-    public $tries = 3; // Maximum retry attempts (enforced by AssetProcessingFailureService)
+    public $tries = 32;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
+    /** Stop uncaught-exception retry loops; releases do not count as exceptions. */
+    public int $maxExceptions = 1;
+
+    /** @var int|array<int, int> */
+    public $backoff = [60, 300];
 
     /**
      * Create a new job instance.
