@@ -215,7 +215,8 @@ return [
             'queue' => ['default', 'downloads'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
-            'maxProcesses' => 1,
+            'maxProcesses' => 2,
+            'minProcesses' => 1,
             'maxTime' => 3600,
             'maxJobs' => 500,
             'memory' => 256,
@@ -229,12 +230,13 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
+            'minProcesses' => 1,
             'maxTime' => 3600,
             'maxJobs' => 200,
-            'memory' => 128,
+            'memory' => 256,
             // Must be >= GenerateThumbnailsJob / large-asset pipeline timeouts (see assets.thumbnail.*)
             // Job $tries bounds release() deferrals; $maxExceptions stops crash loops (see heavy jobs).
-            'tries' => 32,
+            'tries' => 1,
             'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
@@ -247,7 +249,7 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => 256,
-            'tries' => 32,
+            'tries' => 1,
             'timeout' => 600,
             'nice' => 0,
         ],
@@ -275,12 +277,16 @@ return [
         'staging' => $horizonQueueWorkersEnabled ? [
             'supervisor-default' => [
                 'maxProcesses' => 1,
+                'minProcesses' => 1,
+                'tries' => 3,
             ],
             'supervisor-images' => [
                 'maxProcesses' => 1,
+                'minProcesses' => 1,
             ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
+                'tries' => 1,
             ],
         ] : [],
 

@@ -19,6 +19,16 @@ APP_USER="ubuntu"
 
 LOG_FILE="$APP_DIR/deploy/deploy.log"
 
+
+############################################
+# LOCK (MATCH WEB DEPLOY)
+############################################
+
+LOCKFILE="$APP_DIR/deploy.lock"
+exec 9>"$LOCKFILE"
+flock -n 9 || { echo "❌ Deploy already running"; exit 1; }
+
+
 ############################################
 # SAFETY: ENSURE KNOWN WORKING DIR
 ############################################
