@@ -18,7 +18,7 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public function __construct(
-        public Asset $asset,
+        public readonly string $assetId,
         public bool $forceRun = false
     ) {}
 
@@ -26,7 +26,7 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
     {
         $asset = Asset::query()
             ->with(['brand'])
-            ->find($this->asset->getKey());
+            ->find($this->assetId);
 
         if (! $asset || ! $asset->brand_id) {
             return;

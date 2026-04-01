@@ -100,7 +100,7 @@ class RecoverStuckComplianceCommand extends Command
                 $this->line('    ✓ Requeued GenerateAssetEmbeddingJob');
                 break;
             case 'scoring':
-                ScoreAssetBrandIntelligenceJob::dispatch($asset);
+                ScoreAssetBrandIntelligenceJob::dispatch($asset->id);
                 $this->line('    ✓ Requeued ScoreAssetBrandIntelligenceJob');
                 break;
             default:

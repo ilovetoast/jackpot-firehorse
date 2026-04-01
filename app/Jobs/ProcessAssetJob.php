@@ -18,6 +18,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 
 class ProcessAssetJob implements ShouldQueue
 {
@@ -161,6 +162,47 @@ class ProcessAssetJob implements ShouldQueue
             'chain_will_dispatch' => true,
         ]);
 
+        if (config('assets.processing.throttle_enabled', true)) {
+            $key = $this->assetProcessingThrottleKey($asset);
+            Redis::throttle($key)
+                ->allow((int) config('assets.processing.throttle_max', 5))
+                ->every((int) config('assets.processing.throttle_decay_seconds', 60))
+                ->then(
+                    fn () => $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId),
+                    function () use ($asset) {
+                        $delay = (int) config('assets.processing.throttle_release_seconds', 10);
+                        Log::info('[ProcessAssetJob] Pipeline throttle saturated; releasing job', [
+                            'asset_id' => $asset->id,
+                            'delay_seconds' => $delay,
+                        ]);
+                        $this->release($delay);
+                    }
+                );
+
+            return;
+        }
+
+        $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId);
+    }
+
+    /**
+     * Redis throttle key. Global by default; optional per-tenant bucket so one tenant cannot exhaust the cluster cap.
+     */
+    protected function assetProcessingThrottleKey(Asset $asset): string
+    {
+        $base = (string) config('assets.processing.throttle_key', 'asset-processing');
+        if (config('assets.processing.throttle_per_tenant')) {
+            return $base.':'.$asset->tenant_id;
+        }
+
+        return $base;
+    }
+
+    /**
+     * Heavy pipeline: storage inspection, guards, and child job chain.
+     */
+    protected function runAssetProcessingPipeline(Asset $asset, ?AssetVersion $version, string $thumbnailJobId): void
+    {
         try {
         // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
         if ($version) {

@@ -247,4 +247,25 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Asset processing pipeline (ProcessAssetJob)
+    |--------------------------------------------------------------------------
+    |
+    | Redis throttle caps how many assets may enter the heavy pipeline (storage
+    | inspection, thumbnail chain, etc.) per time window. Bursts of uploads
+    | otherwise enqueue hundreds of jobs at once and can overload workers and I/O.
+    |
+    | When the limit is hit, the job calls release() and is retried after a short delay.
+    |
+    */
+    'processing' => [
+        'throttle_enabled' => env('ASSET_PROCESSING_THROTTLE_ENABLED', true),
+        'throttle_key' => env('ASSET_PROCESSING_THROTTLE_KEY', 'asset-processing'),
+        'throttle_per_tenant' => env('ASSET_PROCESSING_THROTTLE_PER_TENANT', false),
+        'throttle_max' => (int) env('ASSET_PROCESSING_THROTTLE_MAX', 5),
+        'throttle_decay_seconds' => (int) env('ASSET_PROCESSING_THROTTLE_DECAY', 60),
+        'throttle_release_seconds' => (int) env('ASSET_PROCESSING_THROTTLE_RELEASE', 10),
+    ],
+
 ];

@@ -106,7 +106,7 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             \App\Services\AnalysisStatusLogger::log($asset, 'generating_embedding', 'scoring', 'GenerateAssetEmbeddingJob');
             $asset->refresh();
             if ($asset->resolveCategoryForTenant()?->isEbiEnabled()) {
-                ScoreAssetBrandIntelligenceJob::dispatch($asset);
+                ScoreAssetBrandIntelligenceJob::dispatch($asset->id);
             } else {
                 // Avoid queuing ScoreAssetBrandIntelligenceJob when category EBI is off; that job would only mark complete anyway.
                 $asset->update(['analysis_status' => 'complete']);

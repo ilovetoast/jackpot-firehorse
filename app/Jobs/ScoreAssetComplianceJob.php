@@ -28,6 +28,6 @@ class ScoreAssetComplianceJob implements ShouldQueue
             return;
         }
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset->id);
     }
 }

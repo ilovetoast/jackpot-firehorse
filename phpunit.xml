@@ -35,5 +35,6 @@
         <env name="BRAND_INTELLIGENCE_ONLY_MODE" value="false"/>
         <env name="AWS_BUCKET" value="testing-bucket"/>
         <env name="EDITOR_GENERATIVE_PERSIST" value="false"/>
+        <env name="ASSET_PROCESSING_THROTTLE_ENABLED" value="false"/>
     </php>
 </phpunit>

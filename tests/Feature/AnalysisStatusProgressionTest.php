@@ -214,7 +214,7 @@ class AnalysisStatusProgressionTest extends TestCase
             'type' => BrandVisualReference::TYPE_LOGO,
         ]);
 
-        $job = new ScoreAssetBrandIntelligenceJob($asset, true);
+        $job = new ScoreAssetBrandIntelligenceJob($asset->id, true);
         $job->handle(app(BrandIntelligenceEngine::class));
         $asset->refresh();
 

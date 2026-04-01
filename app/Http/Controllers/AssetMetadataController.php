@@ -1137,7 +1137,7 @@ class AssetMetadataController extends Controller
             ]);
         }
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset, true);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset->id, true);
 
         return response()->json(['status' => 'queued']);
     }
@@ -1214,7 +1214,7 @@ class AssetMetadataController extends Controller
             ]);
         }
 
-        ScoreAssetBrandIntelligenceJob::dispatch($fresh, false);
+        ScoreAssetBrandIntelligenceJob::dispatch($fresh->id, false);
 
         return response()->json([
             'status' => 'queued',

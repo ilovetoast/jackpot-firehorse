@@ -244,15 +244,34 @@ return [
 
         'staging' => [
             'supervisor-default' => [
-                'maxProcesses' => 3,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
+                'connection' => 'redis',
+                'queue' => ['default', 'downloads'],
+                'balance' => 'auto',
+                'maxProcesses' => 2,
+                'tries' => 3,
+                'timeout' => 120,
+                'memory' => 256,
             ],
+        
             'supervisor-pdf-processing' => [
+                'connection' => 'redis',
+                'queue' => ['pdf-processing'],
+                'balance' => 'auto',
                 'maxProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
+                'tries' => 2,
+                'timeout' => 300,
+                'memory' => 256,
             ],
+            // 'supervisor-default' => [
+            //     'maxProcesses' => 3,
+            //     'balanceMaxShift' => 1,
+            //     'balanceCooldown' => 3,
+            // ],
+            // 'supervisor-pdf-processing' => [
+            //     'maxProcesses' => 1,
+            //     'balanceMaxShift' => 1,
+            //     'balanceCooldown' => 3,
+            // ],
         ],
 
         'local' => [

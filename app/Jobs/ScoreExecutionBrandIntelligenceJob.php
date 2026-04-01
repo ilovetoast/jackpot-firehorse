@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\Execution;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -18,7 +17,7 @@ class ScoreExecutionBrandIntelligenceJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public function __construct(
-        public Execution $execution
+        public readonly int $executionId
     ) {}
 
     public function handle(): void

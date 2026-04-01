@@ -36,7 +36,7 @@ class BrandIntelligenceScheduleService
             return;
         }
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset->id);
 
         Log::debug('[EBI] Pipeline-complete score queued', ['asset_id' => $asset->id]);
     }
@@ -76,6 +76,6 @@ class BrandIntelligenceScheduleService
             ->whereNull('execution_id')
             ->delete();
 
-        ScoreAssetBrandIntelligenceJob::dispatch($asset, false);
+        ScoreAssetBrandIntelligenceJob::dispatch($asset->id, false);
     }
 }
