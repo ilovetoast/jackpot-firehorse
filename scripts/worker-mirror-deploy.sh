@@ -12,7 +12,7 @@ touch "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
 ############################################
-# CONFIG
+# CONFIG d
 ############################################
 
 APP_DIR="/var/www/jackpot"
