@@ -6,6 +6,7 @@ import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetFilterChipsBar from '../../Components/AssetFilterChipsBar'
 import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataPrimaryFilters'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
@@ -1031,6 +1032,11 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 </div>
                             )}
                         </div>
+                        <AssetFilterChipsBar
+                            filterable_schema={filterable_schema}
+                            available_values={availableValues}
+                            inertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q']}
+                        />
                     </div>
                     <div 
                         className={`flex-1 min-h-0 overflow-y-auto relative pb-0 ${lifecycle === 'deleted' ? 'bg-gray-100' : ''} ${activeAssetId ? 'md:pr-[480px]' : ''}`}

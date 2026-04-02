@@ -23,7 +23,7 @@ const RESERVED_PARAMS = new Set([
 const SPECIAL_FILTER_KEYS = ['tags', 'collection']
 
 /** Keys that support multiple values in the URL (repeated param or dominant_hue_group[]=X). Backend accepts array for these. */
-const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_hue_group'])
+export const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_hue_group'])
 
 /**
  * Normalize a filter param value to a deduplicated array.
@@ -159,12 +159,49 @@ export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = [
  * @param {URLSearchParams} params
  * @param {string} base
  */
-function deleteParamAndArrayVariants(params, base) {
+export function deleteParamAndArrayVariants(params, base) {
   const toRemove = []
   for (const k of params.keys()) {
     if (k === base || k.startsWith(`${base}[`)) toRemove.push(k)
   }
   for (const k of toRemove) params.delete(k)
+}
+
+/**
+ * Remove one occurrence of a multi-value query key (e.g. tags=x) while preserving other values.
+ * @param {string} searchString
+ * @param {string} key
+ * @param {string} valueToRemove
+ * @returns {URLSearchParams}
+ */
+export function removeOneMultiValueParam(searchString, key, valueToRemove) {
+  const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
+  const next = new URLSearchParams(raw)
+  const want = String(valueToRemove)
+  const all = next.getAll(key)
+  if (all.length === 0) return next
+  deleteParamAndArrayVariants(next, key)
+  for (const v of all) {
+    if (String(v) !== want) {
+      next.append(key, v)
+    }
+  }
+  return next
+}
+
+/**
+ * Strip one or more query keys (including PHP-style array variants).
+ * @param {string} searchString
+ * @param {string[]} keys
+ * @returns {URLSearchParams}
+ */
+export function stripUrlParams(searchString, keys) {
+  const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
+  const next = new URLSearchParams(raw)
+  for (const key of keys) {
+    deleteParamAndArrayVariants(next, key)
+  }
+  return next
 }
 
 /**

@@ -12,6 +12,7 @@ import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetFilterChipsBar from '../../Components/AssetFilterChipsBar'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import BulkActionsModal, { computeSelectionSummary } from '../../Components/BulkActionsModal'
@@ -697,6 +698,19 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 </div>
                             )}
                         </div>
+                        <AssetFilterChipsBar
+                            filterable_schema={filterable_schema}
+                            available_values={available_values}
+                            inertiaOnly={[
+                                'assets',
+                                'next_page_url',
+                                'filters',
+                                'uploaded_by_users',
+                                'q',
+                                'compliance_filter',
+                                'show_compliance_filter',
+                            ]}
+                        />
                     </div>
                     <motion.div
                         className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative pb-0 touch-pan-y ${activeAssetId ? 'md:pr-[480px]' : ''}`}

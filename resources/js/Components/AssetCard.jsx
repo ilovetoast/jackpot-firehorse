@@ -151,7 +151,12 @@ export default function AssetCard({
     const [previewLoaded, setPreviewLoaded] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+    /** Ignore synthetic click after a touch scroll/drag on the card */
+    const TAP_MOVE_THRESHOLD_PX = 14
     const touchStartRef = useRef(null)
+    const touchStartPosRef = useRef(null)
+    const touchScrollCancelledRef = useRef(false)
+    const suppressSyntheticClickUntilRef = useRef(0)
     const touchHandledRef = useRef(false)
     const lastTapRef = useRef(0)
     const lastTapAssetIdRef = useRef(null)
@@ -245,20 +250,46 @@ export default function AssetCard({
     const LONG_PRESS_MS = 400
     const DOUBLE_TAP_MS = 350
     const hasSelection = Boolean(onBulkSelect || (selection || onBucketToggle))
-    const handleTouchStart = () => {
-        if (!isMobile || !hasSelection || !onClick) return
+    const handleTouchStart = (e) => {
+        if (!onClick) return
+        const t = e.touches?.[0]
+        if (t) {
+            touchStartPosRef.current = { x: t.clientX, y: t.clientY }
+            touchScrollCancelledRef.current = false
+        }
+        if (!isMobile || !hasSelection) return
         touchStartRef.current = Date.now()
         touchHandledRef.current = false
     }
+    const handleTouchMove = (e) => {
+        if (!onClick || !touchStartPosRef.current) return
+        const t = e.touches?.[0]
+        if (!t) return
+        const dx = Math.abs(t.clientX - touchStartPosRef.current.x)
+        const dy = Math.abs(t.clientY - touchStartPosRef.current.y)
+        if (dx > TAP_MOVE_THRESHOLD_PX || dy > TAP_MOVE_THRESHOLD_PX) {
+            touchScrollCancelledRef.current = true
+        }
+    }
     const handleTouchCancel = () => {
         touchStartRef.current = null
+        touchStartPosRef.current = null
+        touchScrollCancelledRef.current = false
     }
     const handleTouchEnd = (e) => {
-        if (!isMobile || !touchStartRef.current) return
-        const duration = Date.now() - touchStartRef.current
-        touchStartRef.current = null
+        if (!onClick) return
 
-        // Double-tap: open details (works on mobile regardless of selection mode)
+        if (touchScrollCancelledRef.current) {
+            touchStartPosRef.current = null
+            touchStartRef.current = null
+            touchScrollCancelledRef.current = false
+            suppressSyntheticClickUntilRef.current = Date.now() + 450
+            return
+        }
+        touchStartPosRef.current = null
+
+        if (!isMobile) return
+
         const now = Date.now()
         const isDoubleTap = asset.id === lastTapAssetIdRef.current && (now - lastTapRef.current) <= DOUBLE_TAP_MS
         lastTapRef.current = now
@@ -266,15 +297,23 @@ export default function AssetCard({
 
         if (isDoubleTap) {
             touchHandledRef.current = true
+            touchStartRef.current = null
             if (onDoubleClick) {
                 onDoubleClick(asset, e)
-            } else if (onClick) {
+            } else {
                 onClick(asset, e)
             }
             return
         }
 
-        if (!hasSelection || !onClick) return
+        if (!hasSelection) {
+            return
+        }
+
+        if (!touchStartRef.current) return
+        const duration = Date.now() - touchStartRef.current
+        touchStartRef.current = null
+
         if (duration >= LONG_PRESS_MS) {
             touchHandledRef.current = true
             onClick(asset, e)
@@ -296,6 +335,11 @@ export default function AssetCard({
         }
     }
     const handleClick = (e) => {
+        if (Date.now() < suppressSyntheticClickUntilRef.current) {
+            e.preventDefault()
+            e.stopPropagation()
+            return
+        }
         if (
             typeof window !== 'undefined' &&
             window.__assetGridMarqueeSuppressClickUntil > Date.now()
@@ -406,6 +450,7 @@ export default function AssetCard({
             onClick={handleClick}
             onDoubleClick={handleDoubleClick}
             onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
             onTouchCancel={handleTouchCancel}
             onContextMenu={handleContextMenu}

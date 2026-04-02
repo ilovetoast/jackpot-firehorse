@@ -1477,9 +1477,15 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
+        $download->loadMissing(['tenant', 'brand']);
         $download->increment('access_count');
         app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
-        $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrl($download->zip_path, 1800);
+        $zipFilename = $this->getDownloadZipFilename($download);
+        $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrlForDownload(
+            $download->zip_path,
+            $zipFilename,
+            1800
+        );
         DownloadEventEmitter::emitDownloadZipRequested($download);
         DownloadEventEmitter::emitDownloadZipCompleted($download);
 
@@ -1678,14 +1684,29 @@ class DownloadController extends Controller
     }
 
     /**
-     * Build filename for download ZIP using tenant template (e.g. Brand-download-2026-02-02.zip).
+     * Build filename for download ZIP: explicit title (when set) else tenant template (e.g. Brand-download-2026-02-02.zip).
      */
     protected function getDownloadZipFilename(Download $download): string
     {
+        $download->loadMissing(['tenant', 'brand']);
         $resolver = app(DownloadNameResolver::class);
+
+        $rawTitle = is_string($download->title) ? trim($download->title) : '';
+        if ($rawTitle !== '') {
+            $base = $resolver->sanitizeFilename($rawTitle);
+            $safe = preg_replace('/[\r\n"\\\\]/', '', $base);
+            if ($safe !== null && $safe !== '') {
+                if (! str_ends_with(strtolower($safe), '.zip')) {
+                    $safe .= '.zip';
+                }
+
+                return $safe;
+            }
+        }
+
         $tenant = $download->tenant;
         $brand = $download->brand;
-        $template = ($tenant->settings['download_name_template'] ?? null)
+        $template = ($tenant?->settings['download_name_template'] ?? null)
             ?: DownloadNameResolver::DEFAULT_TEMPLATE;
         $base = $resolver->resolve($template, $tenant, $brand, now());
         $safe = preg_replace('/[\r\n"\\\\]/', '', $base);

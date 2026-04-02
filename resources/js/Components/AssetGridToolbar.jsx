@@ -32,7 +32,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, cloneElement, isVali
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, XMarkIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
@@ -82,6 +82,8 @@ export default function AssetGridToolbar({
     const [searchLoading, setSearchLoading] = useState(false)
     const searchInputRef = useRef(null)
     const searchHadFocusRef = useRef(false)
+    const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+    const mobileSearchInputRef = useRef(null)
 
     const applySearch = useCallback((trimmed, hadFocus = false) => {
         searchHadFocusRef.current = hadFocus
@@ -115,7 +117,32 @@ export default function AssetGridToolbar({
         })
     }, [inertiaSearchOnly])
 
+    const applySearchAndCloseMobile = useCallback(
+        (trimmed, hadFocus = false) => {
+            applySearch(trimmed, hadFocus)
+            setMobileSearchOpen(false)
+        },
+        [applySearch]
+    )
+
     const [toolbarMoreExpanded, setToolbarMoreExpanded] = useState(false)
+
+    useEffect(() => {
+        if (!mobileSearchOpen) return
+        const onKey = (e) => {
+            if (e.key === 'Escape') setMobileSearchOpen(false)
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [mobileSearchOpen])
+
+    useEffect(() => {
+        if (!mobileSearchOpen) return
+        const id = requestAnimationFrame(() => {
+            mobileSearchInputRef.current?.focus?.()
+        })
+        return () => cancelAnimationFrame(id)
+    }, [mobileSearchOpen])
     const [moreFiltersBarMeta, setMoreFiltersBarMeta] = useState(() => ({
         activeFilterCount: 0,
         visibleSecondaryFiltersLength: 0,
@@ -364,12 +391,12 @@ export default function AssetGridToolbar({
                 </div>
             )}
             
-            {/* Primary Toolbar Row — mobile: 1 line (search + controls); desktop: same as before */}
+            {/* Primary Toolbar Row — lg+: inline search; mobile: search icon opens sheet; one compact control line */}
             <div className="px-3 py-2 sm:py-2.5 sm:px-4">
-                <div className="flex flex-row flex-nowrap items-center gap-2 min-w-0 justify-between">
-                    {/* Left: search (shrinks when filters need space) + strip: slot, primary, More, Sort, Clear */}
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <div className="min-h-0 w-0 min-w-[7rem] max-w-xl flex-1 shrink">
+                <div className="flex flex-row flex-nowrap items-center gap-1.5 min-w-0 justify-between lg:gap-2">
+                    {/* Left: desktop search | mobile search button + More filters strip */}
+                    <div className="flex min-w-0 flex-1 items-center gap-1.5 lg:gap-2">
+                        <div className="hidden min-h-0 w-0 min-w-[7rem] max-w-xl flex-1 shrink lg:block">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
@@ -382,8 +409,18 @@ export default function AssetGridToolbar({
                                 primaryColor={primaryColor}
                             />
                         </div>
-                        {/* Scroll only filter chips / More — Sort + Clear stay outside so dropdowns and focus rings are not clipped */}
-                        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-visible py-1.5 pr-0.5 -my-1.5">
+                        <button
+                            type="button"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-600 shadow-sm hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 lg:hidden"
+                            style={{ '--tw-ring-color': primaryColor }}
+                            aria-label="Open search"
+                            title="Search"
+                            onClick={() => setMobileSearchOpen(true)}
+                        >
+                            <MagnifyingGlassIcon className="h-5 w-5 shrink-0" />
+                        </button>
+                        {/* Scroll only: slot, primary (desktop), More — Sort + Clear stay outside so dropdowns are not clipped */}
+                        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible py-1 pr-0.5 -my-1 lg:gap-2 lg:py-1.5">
                             {beforeSearchSlot ? (
                                 <div className="flex max-w-[min(100%,42rem)] shrink-0 flex-nowrap items-center gap-2">
                                     {beforeSearchSlot}
@@ -412,7 +449,7 @@ export default function AssetGridToolbar({
                             )}
                         </div>
                         {onSortChange && (
-                            <div className="flex shrink-0 items-center">
+                            <div className="flex shrink-0 items-center max-lg:ml-0.5">
                                 <SortDropdown
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -562,6 +599,46 @@ export default function AssetGridToolbar({
             {showMoreFilters && renderedMoreFilters && (
                 <div className="border-t border-gray-200">
                     {renderedMoreFilters}
+                </div>
+            )}
+
+            {/* Mobile: full-width search sheet (keeps toolbar to one icon row) */}
+            {mobileSearchOpen && (
+                <div
+                    className="fixed inset-0 z-[260] flex flex-col bg-black/50 lg:hidden"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Search assets"
+                >
+                    <button
+                        type="button"
+                        className="min-h-[25%] w-full flex-1 cursor-default"
+                        aria-label="Close search"
+                        onClick={() => setMobileSearchOpen(false)}
+                    />
+                    <div className="max-h-[75vh] rounded-t-2xl bg-white p-3 shadow-2xl ring-1 ring-black/5">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-gray-900">Search</span>
+                            <button
+                                type="button"
+                                className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                onClick={() => setMobileSearchOpen(false)}
+                            >
+                                Done
+                            </button>
+                        </div>
+                        <AssetGridSearchInput
+                            key="asset-grid-search-mobile"
+                            serverQuery={serverQ}
+                            onSearchApply={applySearchAndCloseMobile}
+                            isSearchPending={searchLoading}
+                            placeholder={searchPlaceholder ?? 'Search items…'}
+                            inputClassName="py-2.5 text-base"
+                            inputRef={mobileSearchInputRef}
+                            tagAutocompleteTenantId={searchTagAutocompleteTenantId}
+                            primaryColor={primaryColor}
+                        />
+                    </div>
                 </div>
             )}
         </div>
