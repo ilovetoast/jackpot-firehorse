@@ -211,7 +211,7 @@ export default function TagPrimaryFilter({
                 )}
 
                 {/* Single border only (no inner outline): one visible box; primary bar: match height of other selects */}
-                <div className={`flex items-center flex-wrap gap-1 px-2 rounded-md bg-white text-xs border border-gray-300 focus-within:border-indigo-500 focus-within:ring-0 transition-colors ${fullWidth ? 'w-full min-w-0 max-w-[220px] py-1' : 'w-[140px] max-w-[140px] min-w-[100px] min-h-[1.75rem] py-1 shadow-sm'}`}>
+                <div className={`flex items-center flex-wrap gap-1 px-2 rounded-md bg-white text-xs border border-gray-300 focus-within:border-indigo-500 focus-within:ring-0 transition-colors ${fullWidth ? 'w-full min-w-0 min-h-[2.375rem] py-1.5' : 'w-[140px] max-w-[140px] min-w-[100px] min-h-[1.75rem] py-1 shadow-sm'}`}>
                     {/* Selected tag pills */}
                     {selectedTags.map((tag, index) => (
                         <div

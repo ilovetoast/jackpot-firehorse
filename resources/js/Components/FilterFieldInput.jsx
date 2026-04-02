@@ -12,7 +12,12 @@ import { usePage } from '@inertiajs/react'
 import TagPrimaryFilter from './TagPrimaryFilter'
 import DominantColorsFilter from './DominantColorsFilter'
 import ColorSwatchFilter from './ColorSwatchFilter'
-import { OptionChipSelect } from './OptionChipSelect'
+import { OptionChipSelect, hasOptionsWithColor } from './OptionChipSelect'
+import {
+    SegmentedPrimaryFilter,
+    CollectionStyleSelect,
+    PRIMARY_FILTER_SEGMENT_MAX,
+} from './PrimaryFilterToolbarControls'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 /**
@@ -46,6 +51,7 @@ export function FilterFieldInput({
     compact = false,
     labelInDropdown = false,
     variant = 'primary', // 'primary' | 'secondary'
+    accentColor = '#6366f1',
 }) {
     const fieldKey = field?.field_key || field?.key
     const widget = resolve(field, CONTEXT.FILTER)
@@ -108,6 +114,7 @@ export function FilterFieldInput({
                     labelInDropdown={labelInDropdown}
                     placeholderLabel={displayLabel}
                     variant={variant}
+                    accentColor={accentColor}
                 />
             </div>
         )
@@ -141,6 +148,7 @@ export function FilterFieldInput({
                         availableValues={availableValues}
                         compact={compact}
                         variant={variant}
+                        accentColor={accentColor}
                     />
                 </div>
             </div>
@@ -175,6 +183,7 @@ export function FilterFieldInput({
                     labelInDropdown={labelInDropdown}
                     placeholderLabel={displayLabel}
                     variant={variant}
+                    accentColor={accentColor}
                 />
             </div>
         </div>
@@ -195,6 +204,7 @@ export function FilterValueInput({
     labelInDropdown = false,
     placeholderLabel = null,
     variant = 'primary',
+    accentColor = '#6366f1',
 }) {
     const widget = resolve(field, CONTEXT.FILTER)
     const fieldKey = field?.field_key || field?.key
@@ -239,7 +249,6 @@ export function FilterValueInput({
                     />
                     <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600" />
                 </div>
-                {variant === 'secondary' && <span className="text-xs text-gray-600">{isOn ? 'Yes' : 'Any'}</span>}
             </label>
         )
     }
@@ -247,11 +256,35 @@ export function FilterValueInput({
     // Collection dropdown (COLLECTION_BADGES in filter context)
     if (widget === WIDGET.COLLECTION_BADGES) {
         const opts = Array.isArray(filteredOptions) ? filteredOptions : field?.options || []
-        const label = (opt) => opt.display_label ?? opt.label ?? opt.value
+        const optLabel = (opt) => opt.display_label ?? opt.label ?? opt.value
         const placeholder = labelInDropdown && placeholderLabel ? placeholderLabel : 'Any'
+        const selectValue = Array.isArray(value) ? value[0] ?? '' : value ?? ''
+        const fieldLabel = labelInDropdown && placeholderLabel ? placeholderLabel : null
+
+        if (variant === 'primary' && compact) {
+            return (
+                <CollectionStyleSelect
+                    label={fieldLabel}
+                    accentColor={accentColor}
+                    value={selectValue}
+                    onChange={(e) => {
+                        const v = e.target.value
+                        onChange(v ? [v] : null)
+                    }}
+                >
+                    <option value="">{placeholder}</option>
+                    {opts.map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {optLabel(option)}
+                        </option>
+                    ))}
+                </CollectionStyleSelect>
+            )
+        }
+
         return (
             <select
-                value={Array.isArray(value) ? value[0] ?? '' : value ?? ''}
+                value={selectValue}
                 onChange={(e) => {
                     const v = e.target.value
                     onChange(v ? [v] : null)
@@ -261,7 +294,7 @@ export function FilterValueInput({
                 <option value="">{placeholder}</option>
                 {opts.map((option) => (
                     <option key={option.value} value={option.value}>
-                        {label(option)}
+                        {optLabel(option)}
                     </option>
                 ))}
             </select>
@@ -296,7 +329,33 @@ export function FilterValueInput({
             else if (end === addDays(60)) currentPreset = 'within_60'
             else if (end === addDays(90)) currentPreset = 'within_90'
         }
-        const placeholder = labelInDropdown && placeholderLabel ? placeholderLabel : 'Any'
+        const fieldLabel = labelInDropdown && placeholderLabel ? placeholderLabel : null
+
+        if (variant === 'primary' && compact) {
+            return (
+                <CollectionStyleSelect
+                    label={fieldLabel}
+                    accentColor={accentColor}
+                    value={currentPreset}
+                    onChange={(e) => {
+                        const key = e.target.value
+                        if (!key) {
+                            onChange('equals', null)
+                            return
+                        }
+                        const presetEntry = presets.find((p) => p.preset === key && p.operator)
+                        if (presetEntry) onChange(presetEntry.operator, presetEntry.value)
+                    }}
+                >
+                    {presets.map((p) => (
+                        <option key={p.preset || 'any'} value={p.preset}>
+                            {p.label}
+                        </option>
+                    ))}
+                </CollectionStyleSelect>
+            )
+        }
+
         return (
             <select
                 value={currentPreset}
@@ -344,6 +403,7 @@ export function FilterValueInput({
                 onChange={onChange}
                 filteredOptions={filteredOptions}
                 compact={compact || variant === 'secondary'}
+                singleRow={variant === 'secondary'}
             />
         )
     }
@@ -395,6 +455,22 @@ export function FilterValueInput({
             )
         case 'boolean': {
             const boolPlaceholder = labelInDropdown && placeholderLabel ? placeholderLabel : 'Any'
+            const boolFieldLabel = labelInDropdown && placeholderLabel ? placeholderLabel : null
+            if (variant === 'primary' && compact) {
+                return (
+                    <SegmentedPrimaryFilter
+                        label={boolFieldLabel}
+                        accentColor={accentColor}
+                        anyLabel="Any"
+                        options={[
+                            { value: true, label: 'Yes' },
+                            { value: false, label: 'No' },
+                        ]}
+                        value={value}
+                        onChange={(v) => onChange(v)}
+                    />
+                )
+            }
             return (
                 <select
                     value={value === null ? '' : String(value)}
@@ -410,6 +486,46 @@ export function FilterValueInput({
         case 'select':
         case 'rating': {
             const selectPlaceholder = labelInDropdown && placeholderLabel ? placeholderLabel : 'Any'
+            const selectFieldLabel = labelInDropdown && placeholderLabel ? placeholderLabel : null
+            const useToolbarChrome = variant === 'primary' && compact
+            const canSegment =
+                useToolbarChrome &&
+                !hasOptionsWithColor(options) &&
+                options.length > 0 &&
+                options.length <= PRIMARY_FILTER_SEGMENT_MAX
+
+            if (canSegment) {
+                return (
+                    <SegmentedPrimaryFilter
+                        label={selectFieldLabel}
+                        accentColor={accentColor}
+                        anyLabel="Any"
+                        options={options.map((o) => ({
+                            value: o.value,
+                            label: o.display_label ?? o.label ?? o.value ?? '',
+                        }))}
+                        value={value}
+                        onChange={(v) => onChange(v)}
+                    />
+                )
+            }
+            if (useToolbarChrome && !hasOptionsWithColor(options)) {
+                return (
+                    <CollectionStyleSelect
+                        label={selectFieldLabel}
+                        accentColor={accentColor}
+                        value={value === null || value === undefined ? '' : value}
+                        onChange={(e) => onChange(e.target.value || null)}
+                    >
+                        <option value="">Any</option>
+                        {options.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                                {opt.display_label ?? opt.label ?? opt.value}
+                            </option>
+                        ))}
+                    </CollectionStyleSelect>
+                )
+            }
             return (
                 <OptionChipSelect
                     options={options}

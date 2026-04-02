@@ -1,0 +1,41 @@
+/**
+ * Funnel control for expanding secondary filters — shared by AssetGridToolbar (inline) and AssetGridSecondaryFilters (legacy bar).
+ */
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon } from '@heroicons/react/24/outline'
+
+export default function MoreFiltersTriggerButton({
+    isExpanded,
+    onToggle,
+    activeFilterCount = 0,
+    brandPrimary = '#6366f1',
+    visibleSecondaryFiltersLength = 0,
+    className = '',
+}) {
+    const hasExpandableFields = visibleSecondaryFiltersLength > 0
+
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            className={`flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/90 ${className}`}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? 'Collapse more filters' : 'Expand more filters'}
+        >
+            <FunnelIcon className="h-4 w-4 text-slate-500 flex-shrink-0" aria-hidden />
+            <span className="text-xs sm:text-sm font-medium text-slate-700 truncate hidden sm:inline">More filters</span>
+            {activeFilterCount > 0 && (
+                <span
+                    className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs"
+                    style={{ backgroundColor: brandPrimary }}
+                >
+                    {activeFilterCount}
+                </span>
+            )}
+            {hasExpandableFields && (
+                <span className="flex-shrink-0 text-slate-400">
+                    {isExpanded ? <ChevronUpIcon className="h-4 w-4" aria-hidden /> : <ChevronDownIcon className="h-4 w-4" aria-hidden />}
+                </span>
+            )}
+        </button>
+    )
+}

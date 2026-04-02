@@ -1081,6 +1081,18 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
+                                searchTagAutocompleteTenantId={auth?.activeCompany?.id}
+                                searchPlaceholder="Search items, titles, tags…"
+                                sortBy={sort}
+                                sortDirection={sort_direction}
+                                onSortChange={(newSort, newDir) => {
+                                    const urlParams = new URLSearchParams(window.location.search)
+                                    urlParams.set('sort', newSort)
+                                    urlParams.set('sort_direction', newDir)
+                                    urlParams.delete('page')
+                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
+                                }}
+                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */

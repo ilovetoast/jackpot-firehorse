@@ -762,6 +762,19 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={available_values}
+                                searchTagAutocompleteTenantId={auth?.activeCompany?.id}
+                                searchPlaceholder="Search items, titles, tags…"
+                                sortBy={sort}
+                                sortDirection={sort_direction}
+                                onSortChange={(newSort, newDir) => {
+                                    const urlParams = new URLSearchParams(window.location.search)
+                                    urlParams.set('sort', newSort)
+                                    urlParams.set('sort_direction', newDir)
+                                    urlParams.delete('page')
+                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction', 'compliance_filter'] })
+                                }}
+                                showComplianceFilter={show_compliance_filter}
+                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'compliance_filter', 'show_compliance_filter']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */

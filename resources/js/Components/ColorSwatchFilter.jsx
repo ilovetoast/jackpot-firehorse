@@ -14,6 +14,8 @@ export default function ColorSwatchFilter({
     onChange,
     filteredOptions = null,
     compact = false,
+    /** One horizontal scroller (More filters panel) — avoids swatches wrapping under the label. */
+    singleRow = false,
 }) {
     const options = useMemo(() => {
         const list = (filteredOptions != null && filteredOptions.length > 0)
@@ -61,55 +63,69 @@ export default function ColorSwatchFilter({
         : 'flex flex-col gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200'
     const rowClass = compact ? 'flex flex-wrap items-center gap-1' : 'flex flex-wrap items-center gap-1.5'
 
+    const renderSwatch = (option) => {
+        const optValue = option.value
+        const hex = option.swatch || option.hex || '#808080'
+        const isSelected = selectedValues.includes(optValue)
+        const label = option.label || optValue
+        const tooltip = option.tooltip || label
+        const count = option.count
+        const focusRing = singleRow
+            ? 'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500'
+            : 'focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1'
+
+        return (
+            <div key={optValue} className={`flex flex-col items-center gap-0.5 ${singleRow ? 'shrink-0' : ''}`}>
+                <button
+                    type="button"
+                    onClick={() => handleToggle(optValue)}
+                    className={`
+                        ${sizeClass} rounded-sm border-2 flex-shrink-0
+                        transition-all hover:scale-110
+                        ${focusRing}
+                        ${isSelected
+                            ? 'border-indigo-600 ring-2 ring-indigo-200 shadow-md'
+                            : 'border-gray-300 hover:border-gray-400'
+                        }
+                    `}
+                    style={{ backgroundColor: hex }}
+                    title={tooltip}
+                    aria-label={`${isSelected ? 'Deselect' : 'Select'} color ${label}`}
+                >
+                    {isSelected && (
+                        <svg
+                            className="w-full h-full text-white drop-shadow-md"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={compact ? 2.5 : 3}
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                    )}
+                </button>
+                {!compact && !singleRow && count != null && count > 0 && (
+                    <span className="text-[10px] text-gray-500 font-medium tabular-nums">
+                        ({count})
+                    </span>
+                )}
+            </div>
+        )
+    }
+
+    if (singleRow) {
+        return (
+            <div className="flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
+                {options.map((option) => renderSwatch(option))}
+            </div>
+        )
+    }
+
     return (
         <div className={containerClass}>
             {groupedOptions.map((rowOpts, rowIdx) => (
                 <div key={rowIdx} className={rowClass}>
-                    {rowOpts.map((option) => {
-                        const optValue = option.value
-                        const hex = option.swatch || option.hex || '#808080'
-                        const isSelected = selectedValues.includes(optValue)
-                        const label = option.label || optValue
-                        const tooltip = option.tooltip || label
-                        const count = option.count
-
-                        return (
-                            <div key={optValue} className="flex flex-col items-center gap-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => handleToggle(optValue)}
-                                    className={`
-                                        ${sizeClass} rounded-sm border-2 flex-shrink-0
-                                        transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
-                                        ${isSelected
-                                            ? 'border-indigo-600 ring-2 ring-indigo-200 shadow-md'
-                                            : 'border-gray-300 hover:border-gray-400'
-                                        }
-                                    `}
-                                    style={{ backgroundColor: hex }}
-                                    title={tooltip}
-                                    aria-label={`${isSelected ? 'Deselect' : 'Select'} color ${label}`}
-                                >
-                                    {isSelected && (
-                                        <svg
-                                            className="w-full h-full text-white drop-shadow-md"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                            strokeWidth={compact ? 2.5 : 3}
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    )}
-                                </button>
-                                {!compact && count != null && count > 0 && (
-                                    <span className="text-[10px] text-gray-500 font-medium tabular-nums">
-                                        ({count})
-                                    </span>
-                                )}
-                            </div>
-                        )
-                    })}
+                    {rowOpts.map((option) => renderSwatch(option))}
                 </div>
             ))}
         </div>

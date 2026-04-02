@@ -153,3 +153,79 @@ export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = [
   const flat = filtersToFlatParams(filters, filterKeys)
   return { ...obj, ...flat }
 }
+
+/**
+ * Remove param keys matching `base` or `base[...]` (PHP-style arrays).
+ * @param {URLSearchParams} params
+ * @param {string} base
+ */
+function deleteParamAndArrayVariants(params, base) {
+  const toRemove = []
+  for (const k of params.keys()) {
+    if (k === base || k.startsWith(`${base}[`)) toRemove.push(k)
+  }
+  for (const k of toRemove) params.delete(k)
+}
+
+/**
+ * Strip search + filter-related query params; keep category/collection/sort/navigation keys.
+ *
+ * @param {string} searchString - `window.location.search` (with or without leading `?`)
+ * @param {{ filterKeys?: string[], collectionsView?: boolean }} options
+ * @returns {URLSearchParams}
+ */
+export function clearToolbarFilterParams(searchString, { filterKeys = [], collectionsView = false } = {}) {
+  const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
+  const next = new URLSearchParams(raw)
+
+  const alwaysClear = ['q', 'page', 'lifecycle', 'uploaded_by', 'file_type', 'compliance_filter', 'filters']
+  for (const p of alwaysClear) {
+    deleteParamAndArrayVariants(next, p)
+  }
+  for (const fk of filterKeys) {
+    deleteParamAndArrayVariants(next, fk)
+  }
+  // On Collections, `collection` is the selected collection id (navigation) — do not strip it.
+  const multiFilterKeys = collectionsView ? ['tags', 'dominant_hue_group'] : ['tags', 'collection', 'dominant_hue_group']
+  for (const k of multiFilterKeys) {
+    deleteParamAndArrayVariants(next, k)
+  }
+
+  if (collectionsView) {
+    deleteParamAndArrayVariants(next, 'category_id')
+    next.set('collection_type', 'all')
+  }
+
+  return next
+}
+
+/**
+ * Whether the URL has any search or filter state the toolbar "clear" action should reset.
+ */
+export function toolbarQueryHasClearableFilters(searchString, filterKeys = [], collectionsView = false) {
+  const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
+  const u = new URLSearchParams(raw)
+  if ((u.get('q') || '').trim()) return true
+  if (u.get('lifecycle')) return true
+  if (u.get('uploaded_by')) return true
+  const ft = u.get('file_type')
+  if (ft && ft !== 'all') return true
+  if (u.get('compliance_filter')) return true
+  if (collectionsView) {
+    if (u.get('category_id')) return true
+    const ct = u.get('collection_type')
+    if (ct && ct !== 'all') return true
+  }
+  for (const fk of filterKeys) {
+    for (const k of u.keys()) {
+      if (k === fk || k.startsWith(`${fk}[`)) return true
+    }
+  }
+  const multiCheckKeys = collectionsView ? ['tags', 'dominant_hue_group'] : ['tags', 'collection', 'dominant_hue_group']
+  for (const k of multiCheckKeys) {
+    for (const key of u.keys()) {
+      if (key === k || key.startsWith(`${k}[`)) return true
+    }
+  }
+  return false
+}

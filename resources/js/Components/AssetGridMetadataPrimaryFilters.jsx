@@ -78,6 +78,8 @@ export default function AssetGridMetadataPrimaryFilters({
     available_values = {},
     assetType = 'asset',
     compact = false, // Compact mode for toolbar placement
+    /** Brand/workspace accent for segmented filters + styled selects (matches AssetGridToolbar). */
+    primaryColor = '#6366f1',
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -264,6 +266,7 @@ export default function AssetGridMetadataPrimaryFilters({
                                 compact={true}
                                 labelInDropdown={true}
                                 variant="primary"
+                                accentColor={primaryColor}
                             />
                         )
                     })}
@@ -332,6 +335,7 @@ export default function AssetGridMetadataPrimaryFilters({
                         onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
                         compact={false}
                         variant="primary"
+                        accentColor={primaryColor}
                     />
                 )
                 })}

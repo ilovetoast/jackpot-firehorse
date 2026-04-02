@@ -590,6 +590,10 @@ export default function CollectionsIndex({
                                             filterable_schema={[]}
                                             selectedCategoryId={null}
                                             available_values={{}}
+                                            searchTagAutocompleteTenantId={auth?.activeCompany?.id}
+                                            searchPlaceholder="Search items, titles, tags…"
+                                            clearFiltersCollectionsView={selectedCollectionId != null}
+                                            clearFiltersInertiaOnly={COLLECTIONS_PARTIAL_RELOAD}
                                             beforeSearchSlot={
                                                 selectedCollectionId != null ? (
                                                     <CollectionFiltersBar

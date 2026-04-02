@@ -11,7 +11,7 @@ import { OptionIcon } from './OptionIconSelector'
 /**
  * Check if any option has a color
  */
-function hasOptionsWithColor(options) {
+export function hasOptionsWithColor(options) {
     return options?.some((o) => o?.color && /^#[0-9A-Fa-f]{6}$/.test(o.color))
 }
 

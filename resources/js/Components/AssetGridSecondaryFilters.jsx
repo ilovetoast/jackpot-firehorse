@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters, getPrimaryFilters } from '../utils/filterTierResolver'
@@ -34,9 +34,11 @@ import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVis
 import { isFilterCompatible } from '../utils/filterScopeRules'
 import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterParam } from '../utils/filterUrlUtils'
 import { FilterFieldInput } from './FilterFieldInput'
+import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 import Avatar from './Avatar'
+import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
 
 function findUploadedByUser(users, rawId) {
     if (rawId == null || rawId === '' || !Array.isArray(users)) {
@@ -68,6 +70,11 @@ function findUploadedByUser(users, rawId) {
  * @param {boolean} [props.showComplianceFilter] - If true, show Brand DNA compliance filter (Deliverables only)
  * @param {string} [props.complianceFilter] - Current compliance filter value
  * @param {Function} [props.onComplianceFilterChange] - (value) => void
+ * @param {boolean} [props.toolbarMoreFiltersExpanded] - When set with onToolbarMoreFiltersExpandedChange + hideInlineMoreFiltersButton, expansion is controlled from AssetGridToolbar.
+ * @param {Function} [props.onToolbarMoreFiltersExpandedChange]
+ * @param {boolean} [props.hideInlineMoreFiltersButton] - Hide funnel in this bar (button lives in toolbar).
+ * @param {Function} [props.onToolbarMoreFiltersMetaReport] - Reports counts for toolbar badge / hints.
+ * @param {boolean} [props.hideSortInSecondaryBar] - When true, Sort lives in AssetGridToolbar (next to More filters).
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -86,6 +93,11 @@ export default function AssetGridSecondaryFilters({
     showComplianceFilter = false,
     complianceFilter = '',
     onComplianceFilterChange = null,
+    toolbarMoreFiltersExpanded,
+    onToolbarMoreFiltersExpandedChange,
+    hideInlineMoreFiltersButton = false,
+    onToolbarMoreFiltersMetaReport,
+    hideSortInSecondaryBar = false,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
@@ -379,7 +391,13 @@ export default function AssetGridSecondaryFilters({
     
     const page = usePage()
     const serverFilters = page.props.filters
-    const [isExpanded, setIsExpanded] = useState(false)
+    const [internalExpanded, setInternalExpanded] = useState(false)
+    const toolbarControlled =
+        hideInlineMoreFiltersButton &&
+        typeof toolbarMoreFiltersExpanded === 'boolean' &&
+        typeof onToolbarMoreFiltersExpandedChange === 'function'
+    const isExpanded = toolbarControlled ? toolbarMoreFiltersExpanded : internalExpanded
+    const setIsExpanded = toolbarControlled ? onToolbarMoreFiltersExpandedChange : setInternalExpanded
 
     function normalizeIncomingFilters(raw) {
         const out = {}
@@ -449,54 +467,43 @@ export default function AssetGridSecondaryFilters({
         (f) => f && f.value !== null && f.value !== '' && (!Array.isArray(f.value) || f.value.length > 0)
     ).length
     const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0) + (fileTypeFilter && fileTypeFilter !== 'all' ? 1 : 0) + (userFilter ? 1 : 0)
+
+    useEffect(() => {
+        if (!hideInlineMoreFiltersButton || !onToolbarMoreFiltersMetaReport) return
+        onToolbarMoreFiltersMetaReport({
+            activeFilterCount,
+            visibleSecondaryFiltersLength: visibleSecondaryFilters.length,
+            brandPrimary,
+        })
+    }, [
+        hideInlineMoreFiltersButton,
+        onToolbarMoreFiltersMetaReport,
+        activeFilterCount,
+        visibleSecondaryFilters.length,
+        brandPrimary,
+    ])
     
     // Always render the "More filters" bar container
     // Content changes based on category, but bar persists
     // Show empty state if no filters available for current category
     return (
         <div>
-            {/* Bar: More filters (left) + active filter pills (center) + Sort (right) — 1 row on mobile */}
+            {/* Bar: optional inline More (when not in toolbar) + pills + Sort — desktop More lives in AssetGridToolbar */}
             <div
                 className="px-3 py-1.5 sm:px-4 flex flex-row flex-wrap items-center gap-2 sm:justify-between text-left border-b border-gray-200 min-h-[2.25rem]"
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 flex-wrap">
-                    <button
-                        type="button"
-                        onClick={() => setIsExpanded(!isExpanded)}
-                        className="flex items-center gap-1.5 sm:gap-2 min-w-0 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
-                        style={{ ['--tw-ring-color']: brandPrimary }}
-                        aria-label={isExpanded ? 'Collapse filters' : 'Expand more filters'}
-                    >
-                        <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" aria-hidden />
-                        <span className="text-sm font-medium text-gray-700 truncate hidden sm:inline">
-                            More filters
-                        </span>
-                        {activeFilterCount > 0 && (
-                            <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium text-white rounded-full flex-shrink-0" style={{ backgroundColor: brandPrimary }}>
-                                {activeFilterCount}
-                            </span>
-                        )}
-                        {visibleSecondaryFilters.length === 0 && selectedCategoryId && (
-                            <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
-                                (No filters available for this category)
-                            </span>
-                        )}
-                        {visibleSecondaryFilters.length === 0 && !selectedCategoryId && (
-                            <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
-                                (No metadata filters for All)
-                            </span>
-                        )}
-                        {visibleSecondaryFilters.length > 0 && (
-                            <span className="flex-shrink-0 text-gray-400">
-                                {isExpanded ? (
-                                    <ChevronUpIcon className="h-4 w-4" aria-hidden />
-                                ) : (
-                                    <ChevronDownIcon className="h-4 w-4" aria-hidden />
-                                )}
-                            </span>
-                        )}
-                    </button>
+                    {!hideInlineMoreFiltersButton && (
+                        <MoreFiltersTriggerButton
+                            isExpanded={isExpanded}
+                            onToggle={() => setIsExpanded(!isExpanded)}
+                            activeFilterCount={activeFilterCount}
+                            brandPrimary={brandPrimary}
+                            visibleSecondaryFiltersLength={visibleSecondaryFilters.length}
+                            className="py-1.5 -my-1.5"
+                        />
+                    )}
                     {/* Active filter pills on the highlighted bar (primary + secondary + lifecycle, etc.) */}
                     {(activeFilterCount > 0 || Array.from(primaryFilterKeys).some(k => filters[k] && (filters[k].value !== null && filters[k].value !== '') && (!Array.isArray(filters[k].value) || filters[k].value.length > 0))) && (
                         <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -623,8 +630,8 @@ export default function AssetGridSecondaryFilters({
                             ].filter(Boolean).join(' · ')}
                         </span>
                     )}
-                    {/* Sort: Tailwind dropdown with criteria + direction at bottom */}
-                    {onSortChange && (
+                    {/* Sort: in toolbar when hideSortInSecondaryBar (Assets / Executions / Collections) */}
+                    {onSortChange && !hideSortInSecondaryBar && (
                     <div className="flex items-center gap-1 flex-shrink-0">
                         <SortDropdown
                             sortBy={sortBy}
@@ -670,113 +677,104 @@ export default function AssetGridSecondaryFilters({
                             </div>
                         </div>
                     )}
-                    {/* Brand DNA Compliance Filter - Deliverables only */}
-                    {showComplianceFilter && onComplianceFilterChange && (
-                        <div className="mb-3 pb-3 border-b border-gray-200">
-                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Brand Alignment</label>
-                            <select
-                                value={complianceFilter || 'all'}
-                                onChange={(e) => onComplianceFilterChange(e.target.value === 'all' ? '' : e.target.value)}
-                                className="rounded border border-gray-300 bg-white py-1.5 pl-2 pr-8 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            >
-                                <option value="all">All</option>
-                                <option value="superb">Superb (≥90)</option>
-                                <option value="strong">Strong (≥75)</option>
-                                <option value="needs_review">Needs Review (&lt;60)</option>
-                                <option value="failing">Failing (&lt;40)</option>
-                                <option value="unscored">Unscored</option>
-                            </select>
-                        </div>
-                    )}
-                    {/* Phase L.5.1: Lifecycle Filters - All three filters */}
-                    {/* SECURITY: Only available to users with appropriate permissions */}
-                    {(canPublish || canBypassApproval || canArchive) && (
-                        <div className="mb-3 pb-3 border-b border-gray-200">
-                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Lifecycle</label>
-                            <div className="flex flex-col gap-2">
-                                {/* Pending Publication filter - requires asset.publish */}
-                                {/* Phase J.3.1: Uses pending_publication (not pending_approval) to match dashboard links and backend */}
-                                {canPublish && (
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={pendingPublicationFilter}
-                                            onChange={handlePendingPublicationFilterToggle}
-                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                        />
-                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
-                                            <ClockIcon className="h-4 w-4 text-gray-400" />
-                                            Pending Publication
-                                        </span>
-                                    </label>
-                                )}
-                                {/* Unpublished filter - requires metadata.bypass_approval */}
-                                {canBypassApproval && (
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={unpublishedFilter}
-                                            onChange={handleUnpublishedFilterToggle}
-                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                        />
-                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
-                                            <ClockIcon className="h-4 w-4 text-gray-400" />
-                                            Unpublished
-                                        </span>
-                                    </label>
-                                )}
-                                {/* Archived filter - requires asset.archive */}
-                                {canArchive && (
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={archivedFilter}
-                                            onChange={handleArchivedFilterToggle}
-                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                        />
-                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
-                                            <ArchiveBoxIcon className="h-4 w-4 text-gray-400" />
-                                            Archived
-                                        </span>
-                                    </label>
-                                )}
+                    {/* Dense top row: lifecycle, brand alignment (Executions), file type, uploader */}
+                    <div className="mb-4 flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-gray-200 pb-4">
+                        {(canPublish || canBypassApproval || canArchive) && (
+                            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Lifecycle</span>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    {canPublish && (
+                                        <label className="flex cursor-pointer items-center gap-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={pendingPublicationFilter}
+                                                onChange={handlePendingPublicationFilterToggle}
+                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-xs text-gray-700 flex items-center gap-1">
+                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                Pending Publication
+                                            </span>
+                                        </label>
+                                    )}
+                                    {canBypassApproval && (
+                                        <label className="flex cursor-pointer items-center gap-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={unpublishedFilter}
+                                                onChange={handleUnpublishedFilterToggle}
+                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-xs text-gray-700 flex items-center gap-1">
+                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                Unpublished
+                                            </span>
+                                        </label>
+                                    )}
+                                    {canArchive && (
+                                        <label className="flex cursor-pointer items-center gap-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={archivedFilter}
+                                                onChange={handleArchivedFilterToggle}
+                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-xs text-gray-700 flex items-center gap-1">
+                                                <ArchiveBoxIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                Archived
+                                            </span>
+                                        </label>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    
-                    {/* File Type Filter */}
-                    {available_file_types && available_file_types.length > 0 && (
-                        <div className="mb-3 pb-3 border-b border-gray-200">
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                                File Type
-                            </label>
-                            <select
-                                value={fileTypeFilter}
-                                onChange={(e) => handleFileTypeFilterChange(e.target.value)}
-                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="all">All</option>
-                                {available_file_types.map((fileType) => (
-                                    <option key={fileType} value={fileType}>
-                                        {fileType.toUpperCase()}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                    
-                    {/* User Filter - Created By */}
-                    {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
-                        <div className="mb-3 pb-3 border-b border-gray-200">
-                            <UserSelect
-                                users={pageProps.uploaded_by_users}
-                                value={userFilter}
-                                onChange={handleUserFilterChange}
-                                placeholder="All uploaders"
-                                label="Uploaded by"
-                            />
-                        </div>
-                    )}
+                        )}
+                        {showComplianceFilter && onComplianceFilterChange && (
+                            <div className="w-44 shrink-0">
+                                <label className="mb-1 block text-xs font-medium text-gray-700">Brand alignment</label>
+                                <select
+                                    value={complianceFilter || 'all'}
+                                    onChange={(e) => onComplianceFilterChange(e.target.value === 'all' ? '' : e.target.value)}
+                                    className="min-h-[2.375rem] w-full rounded-md border border-gray-300 bg-white py-1.5 pl-2 pr-8 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    <option value="all">All</option>
+                                    <option value="superb">Superb (≥90)</option>
+                                    <option value="strong">Strong (≥75)</option>
+                                    <option value="needs_review">Needs Review (&lt;60)</option>
+                                    <option value="failing">Failing (&lt;40)</option>
+                                    <option value="unscored">Unscored</option>
+                                </select>
+                            </div>
+                        )}
+                        {available_file_types && available_file_types.length > 0 && (
+                            <div className="w-36 shrink-0">
+                                <label className="mb-1 block text-xs font-medium text-gray-700">File type</label>
+                                <select
+                                    value={fileTypeFilter}
+                                    onChange={(e) => handleFileTypeFilterChange(e.target.value)}
+                                    className="min-h-[2.375rem] w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+                                >
+                                    <option value="all">All</option>
+                                    {available_file_types.map((fileType) => (
+                                        <option key={fileType} value={fileType}>
+                                            {fileType.toUpperCase()}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                        {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
+                            <div className="shrink-0">
+                                <UserSelect
+                                    users={pageProps.uploaded_by_users}
+                                    value={userFilter}
+                                    onChange={handleUserFilterChange}
+                                    placeholder="All uploaders"
+                                    label="Uploaded by"
+                                    narrow
+                                />
+                            </div>
+                        )}
+                    </div>
                     
                     {/* Active Filters (if any) */}
                     {activeFilterCount > 0 && (
@@ -906,25 +904,31 @@ export default function AssetGridSecondaryFilters({
                         </div>
                     )}
                     
-                    {/* Filter Fields Grid */}
+                    {/* Filter fields — auto-fill min width; hue / dominant color rows get extra span */}
                     {visibleSecondaryFilters.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
                             {visibleSecondaryFilters.map((field) => {
                             const fieldKey = field.field_key || field.key
                             const currentFilter = filters[fieldKey] || {}
                             const currentValue = currentFilter.value ?? null
                             const currentOperator = currentFilter.operator ?? (field.operators?.[0]?.value || 'equals')
-                            
+                            const widget = resolve(field, CONTEXT.FILTER)
+                            const spanWide =
+                                widget === WIDGET.COLOR_SWATCH || widget === WIDGET.DOMINANT_COLORS
+                                    ? 'min-w-0 sm:col-span-2 xl:col-span-2'
+                                    : 'min-w-0'
+
                             return (
-                                <FilterFieldInput
-                                    key={fieldKey}
-                                    field={field}
-                                    value={currentValue}
-                                    operator={currentOperator}
-                                    availableValues={available_values[fieldKey] || []}
-                                    onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
-                                    variant="secondary"
-                                />
+                                <div key={fieldKey} className={spanWide}>
+                                    <FilterFieldInput
+                                        field={field}
+                                        value={currentValue}
+                                        operator={currentOperator}
+                                        availableValues={available_values[fieldKey] || []}
+                                        onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                                        variant="secondary"
+                                    />
+                                </div>
                             )
                             })}
                         </div>

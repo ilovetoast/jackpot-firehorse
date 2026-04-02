@@ -28,14 +28,16 @@
  * @param {boolean} props.showMoreFilters - Whether to show the more filters section
  * @param {React.ReactNode} props.beforeSearchSlot - Optional controls rendered before the search field (e.g. collections type/category)
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, cloneElement, isValidElement } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
+import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
+import { clearToolbarFilterParams, toolbarQueryHasClearableFilters } from '../utils/filterUrlUtils'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -58,8 +60,20 @@ export default function AssetGridToolbar({
     searchQuery = '', // ?q= from server; syncs to URL on debounced change
     /** Partial reload keys for search (e.g. Collections adds group_by_category, filters). */
     inertiaSearchOnly = null,
+    /** When set (e.g. active tenant id), search shows tag autocomplete from `/app/api/tenants/{id}/tags/autocomplete`. */
+    searchTagAutocompleteTenantId = null,
+    /** Override default search placeholder (e.g. mention tags on Collections). */
+    searchPlaceholder = null,
+    /** Deliverables: compliance row inside Sort dropdown. */
+    showComplianceFilter = false,
+    /** Clear-all also resets collection type/category filters (Collections view). */
+    clearFiltersCollectionsView = false,
+    /** Inertia `only` keys for clear-all navigation (must match each page’s partial reload). */
+    clearFiltersInertiaOnly = null,
 }) {
-    const pageProps = usePage().props
+    const inertiaPage = usePage()
+    const pageProps = inertiaPage.props
+    const pageUrl = inertiaPage.url
     const { auth } = pageProps
     const brand = auth?.activeBrand
     const serverQ = (typeof pageProps.q === 'string' ? pageProps.q : searchQuery) || ''
@@ -101,7 +115,72 @@ export default function AssetGridToolbar({
         })
     }, [inertiaSearchOnly])
 
-    
+    const [toolbarMoreExpanded, setToolbarMoreExpanded] = useState(false)
+    const [moreFiltersBarMeta, setMoreFiltersBarMeta] = useState(() => ({
+        activeFilterCount: 0,
+        visibleSecondaryFiltersLength: 0,
+        brandPrimary: primaryColor,
+    }))
+
+    const reportMoreFiltersMeta = useCallback((meta) => {
+        setMoreFiltersBarMeta((prev) => {
+            if (
+                prev &&
+                prev.activeFilterCount === meta.activeFilterCount &&
+                prev.visibleSecondaryFiltersLength === meta.visibleSecondaryFiltersLength &&
+                prev.brandPrimary === meta.brandPrimary
+            ) {
+                return prev
+            }
+            return meta
+        })
+    }, [])
+
+    useEffect(() => {
+        setMoreFiltersBarMeta((prev) => (prev ? { ...prev, brandPrimary: primaryColor } : prev))
+    }, [primaryColor])
+
+    const renderedMoreFilters = useMemo(() => {
+        if (!showMoreFilters || !moreFiltersContent) return null
+        if (!isValidElement(moreFiltersContent)) return moreFiltersContent
+        return cloneElement(moreFiltersContent, {
+            toolbarMoreFiltersExpanded: toolbarMoreExpanded,
+            onToolbarMoreFiltersExpandedChange: setToolbarMoreExpanded,
+            hideInlineMoreFiltersButton: true,
+            onToolbarMoreFiltersMetaReport: reportMoreFiltersMeta,
+            hideSortInSecondaryBar: true,
+        })
+    }, [showMoreFilters, moreFiltersContent, toolbarMoreExpanded, reportMoreFiltersMeta])
+
+    const filterKeysForClear = useMemo(
+        () => (filterable_schema || []).map((f) => f.field_key || f.key).filter(Boolean),
+        [filterable_schema]
+    )
+
+    const showClearAllFilters = useMemo(() => {
+        const searchPart = pageUrl.includes('?') ? `?${pageUrl.split('?')[1]}` : ''
+        return toolbarQueryHasClearableFilters(searchPart, filterKeysForClear, clearFiltersCollectionsView)
+    }, [pageUrl, serverQ, filterKeysForClear, clearFiltersCollectionsView])
+
+    const defaultClearOnly = useMemo(
+        () => ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q'],
+        []
+    )
+
+    const handleClearAllFilters = useCallback(() => {
+        const next = clearToolbarFilterParams(window.location.search, {
+            filterKeys: filterKeysForClear,
+            collectionsView: clearFiltersCollectionsView,
+        })
+        const only = clearFiltersInertiaOnly ?? defaultClearOnly
+        setToolbarMoreExpanded(false)
+        router.get(window.location.pathname, Object.fromEntries(next), {
+            preserveState: true,
+            preserveScroll: true,
+            only,
+        })
+    }, [filterKeysForClear, clearFiltersCollectionsView, clearFiltersInertiaOnly, defaultClearOnly])
+
     // Pending assets callout state
     const [pendingAssetsCount, setPendingAssetsCount] = useState(0)
     const [pendingTagsCount, setPendingTagsCount] = useState(0)
@@ -287,52 +366,73 @@ export default function AssetGridToolbar({
             
             {/* Primary Toolbar Row — mobile: 1 line (search + controls); desktop: same as before */}
             <div className="px-3 py-2 sm:py-2.5 sm:px-4">
-                <div className="flex flex-row flex-wrap items-center gap-2 min-w-0 lg:flex-nowrap lg:justify-between">
-                    {/* Left: Search + primary filters + sort. Mobile: Search + sort; Desktop: + primary filters */}
-                    <div className="flex flex-row items-center gap-2 min-w-0 flex-1 lg:flex-initial lg:flex-wrap">
-                        <div
-                            className={
-                                beforeSearchSlot
-                                    ? 'min-w-0 w-full flex-1 basis-full sm:basis-auto sm:max-w-sm sm:flex-initial lg:min-w-[180px]'
-                                    : 'min-w-0 flex-1 lg:flex-initial lg:min-w-[180px] lg:max-w-sm'
-                            }
-                        >
+                <div className="flex flex-row flex-nowrap items-center gap-2 min-w-0 justify-between">
+                    {/* Left: search (shrinks when filters need space) + strip: slot, primary, More, Sort, Clear */}
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <div className="min-h-0 w-0 min-w-[7rem] max-w-xl flex-1 shrink">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
                                 onSearchApply={applySearch}
                                 isSearchPending={searchLoading}
-                                placeholder="Search items…"
+                                placeholder={searchPlaceholder ?? 'Search items…'}
                                 inputClassName="py-1.5 text-xs sm:text-sm"
                                 inputRef={searchInputRef}
+                                tagAutocompleteTenantId={searchTagAutocompleteTenantId}
+                                primaryColor={primaryColor}
                             />
                         </div>
-                        {beforeSearchSlot ? (
-                            <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
-                                {beforeSearchSlot}
+                        {/* Scroll only filter chips / More — Sort + Clear stay outside so dropdowns and focus rings are not clipped */}
+                        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-visible py-1.5 pr-0.5 -my-1.5">
+                            {beforeSearchSlot ? (
+                                <div className="flex max-w-[min(100%,42rem)] shrink-0 flex-nowrap items-center gap-2">
+                                    {beforeSearchSlot}
+                                </div>
+                            ) : null}
+                            <div className="hidden min-w-0 shrink-0 lg:flex items-center gap-2">
+                                <AssetGridMetadataPrimaryFilters
+                                    filterable_schema={filterable_schema}
+                                    selectedCategoryId={selectedCategoryId}
+                                    available_values={available_values}
+                                    assetType="image"
+                                    compact={true}
+                                    primaryColor={primaryColor}
+                                />
                             </div>
-                        ) : null}
-                        
-                        {/* Primary Metadata Filters — hidden on mobile (saves space), inline on desktop */}
-                        <div className="hidden lg:flex items-center gap-2 min-w-0">
-                            <AssetGridMetadataPrimaryFilters
-                                filterable_schema={filterable_schema}
-                                selectedCategoryId={selectedCategoryId}
-                                available_values={available_values}
-                                assetType="image"
-                                compact={true}
-                            />
+                            {showMoreFilters && isValidElement(moreFiltersContent) && (
+                                <div className="flex shrink-0">
+                                    <MoreFiltersTriggerButton
+                                        isExpanded={toolbarMoreExpanded}
+                                        onToggle={() => setToolbarMoreExpanded((v) => !v)}
+                                        activeFilterCount={moreFiltersBarMeta.activeFilterCount}
+                                        brandPrimary={moreFiltersBarMeta.brandPrimary}
+                                        visibleSecondaryFiltersLength={moreFiltersBarMeta.visibleSecondaryFiltersLength}
+                                    />
+                                </div>
+                            )}
                         </div>
-                        {onSortChange && !showMoreFilters && (
-                            <div className="flex items-center gap-1 flex-shrink-0 md:ml-0">
+                        {onSortChange && (
+                            <div className="flex shrink-0 items-center">
                                 <SortDropdown
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
                                     onSortChange={onSortChange}
-                                    showComplianceFilter={false}
+                                    showComplianceFilter={showComplianceFilter}
                                     primaryColor={primaryColor}
                                 />
                             </div>
+                        )}
+                        {showClearAllFilters && (
+                            <button
+                                type="button"
+                                onClick={handleClearAllFilters}
+                                className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/90 sm:px-2 sm:py-1.5 sm:text-xs sm:normal-case sm:tracking-normal"
+                                title="Clear search and all filters"
+                                aria-label="Clear search and all filters"
+                            >
+                                <XMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                                <span className="hidden sm:inline">Clear</span>
+                            </button>
                         )}
                     </div>
 
@@ -459,9 +559,9 @@ export default function AssetGridToolbar({
             </div>
 
             {/* More Filters Section — More filters stays far left; selection buttons live in bar right (via barTrailingContent from parent) */}
-            {showMoreFilters && moreFiltersContent && (
+            {showMoreFilters && renderedMoreFilters && (
                 <div className="border-t border-gray-200">
-                    {moreFiltersContent}
+                    {renderedMoreFilters}
                 </div>
             )}
         </div>
