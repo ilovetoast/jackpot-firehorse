@@ -89,3 +89,24 @@ export function getContrastTextColor(backgroundColor) {
     // If luminance is 0.5 or greater, it's a light color, use black text
     return luminance < 0.5 ? '#ffffff' : '#000000'
 }
+
+/**
+ * Brand settings tile / selector (same logic as BrandIconUnified).
+ * @param {'gradient'|'solid'|'subtle'} style
+ * @param {string|null|undefined} primary
+ * @param {string|null|undefined} secondary
+ * @returns {string} CSS background (gradient or solid color)
+ */
+export function resolveBrandIconBackground(style, primary, secondary) {
+    const p = primary || '#6366f1'
+    const s = secondary || '#8b5cf6'
+    switch (style) {
+        case 'gradient':
+            return `linear-gradient(135deg, ${s !== p ? s : p}, ${p})`
+        case 'solid':
+            return p
+        case 'subtle':
+        default:
+            return `linear-gradient(135deg, ${p}CC, ${p}55)`
+    }
+}

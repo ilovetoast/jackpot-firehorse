@@ -478,21 +478,27 @@ class HandleInertiaRequests extends Middleware
                 'managed_agency_clients' => $user ? $this->agencyBrandAccessService->managedAgencyClientSummariesForUser($user) : [],
                 /** Agency + linked-client brands the user can open (flat list for agency strip quick switch) */
                 'agency_flat_brands' => $user ? $this->agencyBrandAccessService->flatBrandsForAgencyStrip($user) : [],
-                'activeBrand' => $activeBrand ? [
-                    'id' => $activeBrand->id,
-                    'name' => $activeBrand->name,
-                    'slug' => $activeBrand->slug,
-                    'logo_path' => $activeBrand->logo_path,
-                    'primary_color' => $activeBrand->primary_color,
-                    'secondary_color' => $activeBrand->secondary_color,
-                    'icon_style' => $activeBrand->icon_style ?? 'subtle',
-                    'accent_color' => $activeBrand->accent_color,
-                    'nav_color' => $activeBrand->nav_color,
-                    'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',
-                    'logo_filter' => $activeBrand->logo_filter ?? 'none',
-                    'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
-                    'asset_grid_style' => $activeBrand->settings['asset_grid_style'] ?? 'clean', // clean | impact
-                ] : null,
+                'activeBrand' => $activeBrand ? (function () use ($activeBrand) {
+                    $activeBrand->loadMissing('brandModel');
+
+                    return [
+                        'id' => $activeBrand->id,
+                        'name' => $activeBrand->name,
+                        'slug' => $activeBrand->slug,
+                        'logo_path' => $activeBrand->logo_path,
+                        'primary_color' => $activeBrand->primary_color,
+                        'secondary_color' => $activeBrand->secondary_color,
+                        'icon_style' => $activeBrand->icon_style ?? 'subtle',
+                        'accent_color' => $activeBrand->accent_color,
+                        'nav_color' => $activeBrand->nav_color,
+                        'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',
+                        'logo_filter' => $activeBrand->logo_filter ?? 'none',
+                        'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
+                        'asset_grid_style' => $activeBrand->settings['asset_grid_style'] ?? 'clean', // clean | impact
+                        /** Brand Intelligence / DNA: published guidelines version exists (same check as nav / Insights). */
+                        'has_published_guidelines' => $activeBrand->brandModel?->active_version_id !== null,
+                    ];
+                })() : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
                 // User is in company but has no brand access (removed from all brands)
                 'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && count($brands) === 0,

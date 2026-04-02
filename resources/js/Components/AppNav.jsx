@@ -553,8 +553,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                 aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
             >
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
-                <div className="flex h-20 justify-between">
-                    <div className="flex flex-1 items-center">
+                <div className="flex h-20 min-w-0 justify-between gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
                         {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
                         {isAppPage && isCollectionOnlyNav && (
                             <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
@@ -845,7 +845,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                             </div>
                         )}
                     </div>
-                    <div className="flex items-center gap-2 lg:gap-4">
+                    <div className="flex shrink-0 items-center gap-2 lg:gap-4">
                         {/* C12: Collection access link on the right when in collection-only mode */}
                         {isCollectionOnlyNav && effectiveCollection?.id && (
                             <Link

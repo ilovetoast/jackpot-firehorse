@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -81,6 +81,43 @@ import { useSelectionOptional } from '../contexts/SelectionContext'
 const BRAND_REFERENCE_PROMPT_MIN_QUALITY_EXCLUSIVE = 3
 const BRAND_REFERENCE_PROMPT_MIN_DOWNLOADS = 8
 const BRAND_REFERENCE_PROMPT_MIN_VIEWS = 35
+
+/** Reliability timeline: keep UI readable; full text stays in DB and API (`GET /assets/{id}/incidents?timeline=1`). */
+const RELIABILITY_TIMELINE_MESSAGE_PREVIEW_CHARS = 400
+
+function ReliabilityTimelineIncidentMessage({ message }) {
+    const [expanded, setExpanded] = useState(false)
+    if (!message) {
+        return null
+    }
+    const needsToggle = message.length > RELIABILITY_TIMELINE_MESSAGE_PREVIEW_CHARS
+    const display =
+        !expanded && needsToggle
+            ? `${message.slice(0, RELIABILITY_TIMELINE_MESSAGE_PREVIEW_CHARS).trimEnd()}…`
+            : message
+
+    return (
+        <div className="mt-0.5 min-w-0">
+            <p
+                className={`text-xs text-gray-500 break-words ${
+                    expanded ? 'max-h-48 overflow-y-auto whitespace-pre-wrap' : ''
+                }`}
+                title={!expanded && needsToggle ? message : undefined}
+            >
+                {display}
+            </p>
+            {needsToggle && (
+                <button
+                    type="button"
+                    onClick={() => setExpanded((v) => !v)}
+                    className="mt-1 text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                    {expanded ? 'Show less' : 'Show full message'}
+                </button>
+            )}
+        </div>
+    )
+}
 
 export default function AssetDrawer({
     asset,
@@ -1307,6 +1344,47 @@ export default function AssetDrawer({
         return supportsThumbnail(mimeType, extension)
     }, [displayAsset, thumbnailStatus, canRetryThumbnails, generateLoading])
 
+    const extForThumbnailUtils = useMemo(() => {
+        const raw = (displayAsset?.file_extension || displayAsset?.original_filename?.split?.('.')?.pop() || '')
+            .toLowerCase()
+            .replace(/^\./, '')
+        return raw
+    }, [displayAsset?.file_extension, displayAsset?.original_filename, displayAsset?.id])
+
+    const previewMissingDetailText = useMemo(() => {
+        const meta = displayAsset?.metadata ?? {}
+        return (
+            displayAsset?.preview_unavailable_user_message ||
+            meta.preview_unavailable_user_message ||
+            meta.thumbnail_skip_message ||
+            displayAsset?.thumbnail_error ||
+            ''
+        )
+    }, [displayAsset?.id, displayAsset?.preview_unavailable_user_message, displayAsset?.metadata, displayAsset?.thumbnail_error])
+
+    const showPreviewMissingInfo = useMemo(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont) return false
+        if (isFontFile) return false
+        const mime = (displayAsset?.mime_type || '').toLowerCase()
+        if (!supportsThumbnail(mime, extForThumbnailUtils)) return false
+        if ((displayAsset?.analysis_status ?? '') !== 'complete') return false
+        const hasPath = Boolean(displayAsset?.final_thumbnail_url || displayAsset?.thumbnail_url)
+        if (hasPath) return false
+        if (thumbnailsFailed && displayAsset?.thumbnail_error) return false
+        return true
+    }, [
+        displayAsset?.id,
+        displayAsset?.analysis_status,
+        displayAsset?.final_thumbnail_url,
+        displayAsset?.thumbnail_url,
+        displayAsset?.mime_type,
+        displayAsset?.thumbnail_error,
+        extForThumbnailUtils,
+        isVirtualGoogleFont,
+        isFontFile,
+        thumbnailsFailed,
+    ])
+
     // Handle manual thumbnail generation (for previously skipped assets)
     const handleGenerateThumbnail = async () => {
         if (!displayAsset?.id || !canGenerateThumbnail) return
@@ -2187,6 +2265,21 @@ export default function AssetDrawer({
                             )}
                         </div>
                     </div>
+
+                    {showPreviewMissingInfo && (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                            <div className="flex gap-2">
+                                <InformationCircleIcon className="h-5 w-5 shrink-0 text-slate-500" aria-hidden />
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-slate-800">No preview image</p>
+                                    <p className="mt-1 text-xs text-slate-600">
+                                        {previewMissingDetailText ||
+                                            "We couldn't generate a preview image for this file (for example the file may be too large, unreadable on the server, or processing timed out). You can still download the original."}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {isPdf && (
                         <div className="space-y-2 rounded-md border border-gray-200 bg-white px-3 py-2">
@@ -3729,8 +3822,8 @@ export default function AssetDrawer({
                                             {ev.resolved_at ? 'Resolved' : ev.severity}
                                         </span>
                                         <div className="min-w-0 flex-1">
-                                            <p className="text-sm font-medium text-gray-900">{ev.title}</p>
-                                            {ev.message && <p className="mt-0.5 text-xs text-gray-500">{ev.message}</p>}
+                                            <p className="text-sm font-medium text-gray-900 break-words">{ev.title}</p>
+                                            <ReliabilityTimelineIncidentMessage message={ev.message} />
                                             <p className="mt-1 text-xs text-gray-400">
                                                 {ev.detected_at ? new Date(ev.detected_at).toLocaleString() : ''}
                                                 {ev.resolved_at && (

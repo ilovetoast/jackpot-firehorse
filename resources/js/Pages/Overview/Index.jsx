@@ -86,9 +86,11 @@ export default function Overview({
     const hasAgencyQuickLink = Array.isArray(authFromPage?.companies)
         ? authFromPage.companies.some((company) => company?.is_agency === true)
         : false
+    // Must clear absolute AppNav + optional agency strip (z-50). Do not use lg:pt-12-style overrides here:
+    // a smaller lg:padding-top replaces the whole pt-[] and causes hero (plan badge, links) to sit under the header.
     const mobileTopPaddingClass = hasAgencyQuickLink
-        ? 'pt-[calc(8rem+env(safe-area-inset-top))]'
-        : 'pt-[calc(5.5rem+env(safe-area-inset-top))]'
+        ? 'pt-[calc(9rem+env(safe-area-inset-top))] lg:pt-[calc(9rem+1.5rem+env(safe-area-inset-top))] xl:pt-[calc(9rem+2rem+env(safe-area-inset-top))]'
+        : 'pt-[calc(5.75rem+env(safe-area-inset-top))] lg:pt-[calc(6rem+env(safe-area-inset-top))]'
 
     const isAgencyAccount = authFromPage?.activeCompany?.is_agency === true
     const dashLinksRaw = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
@@ -296,7 +298,7 @@ export default function Overview({
                              * ---------------------------------------------------------------------------
                              */}
                             <motion.div
-                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 ${mobileTopPaddingClass} sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16 lg:pt-12 xl:pt-16`}
+                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 ${mobileTopPaddingClass} sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16`}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.4 }}

@@ -132,14 +132,25 @@ class FileInspectionService
         return $result;
     }
 
+    /**
+     * Refine generic S3 Content-Type using the object key extension only.
+     *
+     * Do not use MimeTypes::guessMimeType($path): it delegates to FileinfoMimeTypeGuesser and
+     * requires a readable local file — S3 keys like tenants/.../original.psd are not filesystem paths.
+     */
     private function refineMimeFromPath(string $path, string $mime): string
     {
         if ($mime !== 'application/octet-stream' && $mime !== 'binary/octet-stream') {
             return $mime;
         }
 
-        $guessed = MimeTypes::getDefault()->guessMimeType($path);
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if ($ext === '') {
+            return $mime;
+        }
 
-        return $guessed ?: $mime;
+        $types = MimeTypes::getDefault()->getMimeTypes($ext);
+
+        return ($types[0] ?? null) ?: $mime;
     }
 }

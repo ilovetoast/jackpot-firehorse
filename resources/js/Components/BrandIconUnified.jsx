@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getContrastTextColor } from '../utils/colorUtils'
+import { resolveBrandIconBackground } from '../utils/colorUtils'
 
 const SIZES = {
     xs: { container: 'h-6 w-6', text: 'text-[10px]', radius: 'rounded-md' },
@@ -8,18 +8,6 @@ const SIZES = {
     lg: { container: 'h-12 w-12', text: 'text-base', radius: 'rounded-xl' },
     xl: { container: 'h-14 w-14', text: 'text-lg', radius: 'rounded-xl' },
     '2xl': { container: 'h-20 w-20', text: 'text-2xl', radius: 'rounded-2xl' },
-}
-
-function resolveBackground(style, primary, secondary) {
-    switch (style) {
-        case 'gradient':
-            return `linear-gradient(135deg, ${secondary !== primary ? secondary : primary}, ${primary})`
-        case 'solid':
-            return primary
-        case 'subtle':
-        default:
-            return `linear-gradient(135deg, ${primary}CC, ${primary}55)`
-    }
 }
 
 /**
@@ -40,7 +28,7 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     const s = SIZES[size] || SIZES.md
     const radius = variant === 'circle' ? 'rounded-full' : s.radius
     const base = `flex items-center justify-center flex-shrink-0 overflow-hidden ${s.container} ${radius} ${className}`
-    const bg = resolveBackground(iconStyle, primary, secondary)
+    const bg = resolveBrandIconBackground(iconStyle, primary, secondary)
 
     if (logoPath && !imgError) {
         return (

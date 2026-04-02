@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
-import { usePage } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import BrandSignalBreakdown from './BrandSignalBreakdown'
 
 const POLL_INTERVAL_MS = 1100
@@ -64,6 +64,7 @@ export default function AssetBrandIntelligenceBlock({
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
+    const hasPublishedGuidelines = auth?.activeBrand?.has_published_guidelines === true
 
     const [localBi, setLocalBi] = useState(null)
     const [rescoreLoading, setRescoreLoading] = useState(false)
@@ -95,7 +96,7 @@ export default function AssetBrandIntelligenceBlock({
         }
     }, [])
 
-    const bi = localBi ?? asset?.brand_intelligence
+    const bi = hasPublishedGuidelines ? (localBi ?? asset?.brand_intelligence) : null
     const breakdown = bi?.breakdown_json
 
     const analysisStatus = asset?.analysis_status ?? ''
@@ -132,6 +133,7 @@ export default function AssetBrandIntelligenceBlock({
     /** When EBI is enabled and analysis is ready but no score exists yet, queue scoring and poll (or show a gate message). */
     useEffect(() => {
         if (!asset?.id) return
+        if (!hasPublishedGuidelines) return
         if (!asset?.category?.ebi_enabled) return
         if (asset.brand_intelligence) return
 
@@ -214,10 +216,10 @@ export default function AssetBrandIntelligenceBlock({
                 ensureAbortRef.current = null
             }
         }
-    }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status])
+    }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status, hasPublishedGuidelines])
 
     const handleRescore = async () => {
-        if (!asset?.id || rescoreLoading) return
+        if (!asset?.id || rescoreLoading || !hasPublishedGuidelines) return
         ensureAbortRef.current?.abort()
         abortRef.current?.abort()
         const controller = new AbortController()
@@ -294,6 +296,33 @@ export default function AssetBrandIntelligenceBlock({
         ) : (
             <div className="px-4 py-3 border-t border-gray-200">{card}</div>
         )
+
+    if (!hasPublishedGuidelines) {
+        return wrapCard(
+            <div
+                className={`rounded-md border border-amber-200/90 bg-amber-50/95 p-3 ${drawerInsightGroup ? 'shadow-sm' : ''}`}
+            >
+                <div className="flex items-center gap-1.5 mb-2">
+                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0 text-amber-800" aria-hidden />
+                    <h3 className="text-xs font-semibold text-amber-950">Brand Intelligence</h3>
+                </div>
+                <p className="text-sm text-amber-950/90">
+                    Scoring is available only after brand guidelines are <strong>published</strong>. We don&apos;t run
+                    Brand Intelligence until then.
+                </p>
+                <p className="mt-2 text-sm text-amber-900/90">
+                    Complete your guidelines workflow (research → review → build), publish a version, then alignment
+                    scoring can start for assets in categories where Brand Intelligence is enabled.
+                </p>
+                <Link
+                    href="/app/brand-guidelines"
+                    className="mt-3 inline-block text-sm font-semibold text-amber-950 underline decoration-amber-700/60 underline-offset-2 hover:text-amber-900"
+                >
+                    Open Brand Guidelines
+                </Link>
+            </div>,
+        )
+    }
 
     if (!bi) {
         return wrapCard(

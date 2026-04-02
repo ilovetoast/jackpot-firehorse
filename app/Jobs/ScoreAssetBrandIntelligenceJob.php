@@ -40,7 +40,14 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
         $category = $asset->resolveCategoryForTenant();
         $ebiEnabled = $this->forceRun || ($category && $category->isEbiEnabled());
 
-        if ($ebiEnabled && ! $this->alreadyScoredForCurrentEngine($asset)) {
+        $brand = $asset->brand;
+        $guidelinesPublished = false;
+        if ($brand) {
+            $brand->loadMissing('brandModel');
+            $guidelinesPublished = $brand->brandModel?->active_version_id !== null;
+        }
+
+        if ($ebiEnabled && $guidelinesPublished && ! $this->alreadyScoredForCurrentEngine($asset)) {
             $payload = $engine->scoreAsset($asset);
             if ($payload !== null) {
                 $this->persistAssetScore($asset, $payload);

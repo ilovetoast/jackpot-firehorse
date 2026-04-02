@@ -48,6 +48,14 @@ import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSett
 import CategorySettingsModal from '../../../Components/Metadata/CategorySettingsModal'
 import UpgradeCategoryModal from '../../../Components/Metadata/UpgradeCategoryModal'
 import CategoryList from '../../../Components/Metadata/CategoryList'
+import {
+    normalizeOptions,
+    prepareOptionsForSubmit,
+    validateSnakeCase,
+    isDuplicateValue,
+    toSnakeCase,
+    snakeToTitleCase,
+} from '../../../utils/optionEditorUtils'
 
 /**
  * By Category View Component
@@ -73,6 +81,19 @@ import CategoryList from '../../../Components/Metadata/CategoryList'
  */
 const METADATA_REGISTRY_URL = typeof route === 'function' ? route('tenant.metadata.registry.index') : '/app/tenant/metadata/registry'
 const CORE_FIELD_KEYS = ['collection', 'tags']
+
+function getCsrfTokenForOptions() {
+    if (typeof document === 'undefined') return ''
+    return document.querySelector('meta[name="csrf-token"]')?.content || ''
+}
+
+/** Select / multiselect fields (not tags) that allow editing options in the registry */
+function fieldSupportsQuickOptions(field) {
+    if (!field || field.option_editing_restricted) return false
+    if (field.key === 'tags') return false
+    const t = field.type ?? field.field_type ?? ''
+    return t === 'select' || t === 'multiselect'
+}
 
 export default function ByCategoryView({ 
     registry, 
@@ -1823,6 +1844,7 @@ export default function ByCategoryView({
                                                             onRequiredToggle={toggleRequired}
                                                             onAiEligibleToggle={toggleAiEligible}
                                                             onEdit={canManageFields ? handleEditField : null}
+                                                            onRegistryRefresh={refreshMetadataRegistry}
                                                             canManage={canManageVisibility && !previewProfileName}
                                                             canManageFields={canManageFields}
                                                             systemFields={systemFields}
@@ -1841,6 +1863,7 @@ export default function ByCategoryView({
                                                             onRequiredToggle={toggleRequired}
                                                             onAiEligibleToggle={toggleAiEligible}
                                                             onEdit={canManageFields ? handleEditField : null}
+                                                            onRegistryRefresh={refreshMetadataRegistry}
                                                             canManage={canManageVisibility && !previewProfileName}
                                                             canManageFields={canManageFields}
                                                             systemFields={systemFields}
@@ -1874,6 +1897,7 @@ export default function ByCategoryView({
                                                                 onRequiredToggle={toggleRequired}
                                                                 onAiEligibleToggle={toggleAiEligible}
                                                                 onEdit={canManageFields ? handleEditField : null}
+                                                                onRegistryRefresh={refreshMetadataRegistry}
                                                                 onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
                                                                 canManage={canManageVisibility && !previewProfileName}
                                                                 canManageFields={canManageFields}
@@ -1970,7 +1994,11 @@ export default function ByCategoryView({
                                             onPrimaryToggle={togglePrimary}
                                             onRequiredToggle={toggleRequired}
                                             onAiEligibleToggle={toggleAiEligible}
+                                            onEdit={canManageFields ? handleEditField : null}
+                                            onRegistryRefresh={refreshMetadataRegistry}
+                                            onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
                                             canManage={canManageVisibility && !previewProfileName}
+                                            canManageFields={canManageFields}
                                             systemFields={systemFields}
                                             fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                             isDraggable={false}
@@ -2313,6 +2341,7 @@ function FieldRow({
     onAiEligibleToggle,
     onEdit,
     onArchive,
+    onRegistryRefresh = null,
     canManage, 
     canManageFields = false,
     systemFields,
@@ -2389,10 +2418,123 @@ function FieldRow({
     // dominant_hue_group: filter-only — user may only control is_filter_hidden
     const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
 
+    const showQuickOptions = fieldSupportsQuickOptions(field) && canManageFields
+    const [quickExpanded, setQuickExpanded] = useState(false)
+    const [quickOptions, setQuickOptions] = useState([])
+    const [quickLoaded, setQuickLoaded] = useState(false)
+    const [quickLoading, setQuickLoading] = useState(false)
+    const [quickSaving, setQuickSaving] = useState(false)
+    const [quickAddInput, setQuickAddInput] = useState('')
+    const [quickError, setQuickError] = useState(null)
+    const [quickLoadVersion, setQuickLoadVersion] = useState(0)
+
+    useEffect(() => {
+        setQuickExpanded(false)
+        setQuickLoaded(false)
+        setQuickOptions([])
+        setQuickAddInput('')
+        setQuickError(null)
+        setQuickLoadVersion(0)
+    }, [field.id])
+
+    useEffect(() => {
+        if (!quickExpanded || quickLoaded || !field?.id || !showQuickOptions) return undefined
+        let cancelled = false
+        ;(async () => {
+            setQuickLoading(true)
+            setQuickError(null)
+            try {
+                const res = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
+                    credentials: 'same-origin',
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                })
+                const data = await res.json().catch(() => ({}))
+                if (cancelled) return
+                if (!res.ok || !data?.field) {
+                    setQuickError(data?.error || 'Could not load options')
+                    return
+                }
+                const raw = data.field.options || data.field.allowed_values || []
+                setQuickOptions(normalizeOptions(raw))
+                setQuickLoaded(true)
+            } catch (e) {
+                if (!cancelled) setQuickError(e?.message || 'Network error')
+            } finally {
+                if (!cancelled) setQuickLoading(false)
+            }
+        })()
+        return () => { cancelled = true }
+    }, [quickExpanded, quickLoaded, field.id, showQuickOptions, quickLoadVersion])
+
+    const handleQuickAddOption = async () => {
+        if (!field?.id || !showQuickOptions) return
+        const trimmed = quickAddInput.trim()
+        if (!trimmed) {
+            setQuickError('Enter a label or value')
+            return
+        }
+        const value = toSnakeCase(trimmed)
+        const v = validateSnakeCase(value)
+        if (!v.valid) {
+            setQuickError(v.message || 'Invalid value')
+            return
+        }
+        if (isDuplicateValue(quickOptions, value)) {
+            setQuickError('That option already exists')
+            return
+        }
+        const systemLabel = snakeToTitleCase(value)
+        const next = [...quickOptions, { value, system_label: systemLabel }]
+        setQuickSaving(true)
+        setQuickError(null)
+        try {
+            const res = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfTokenForOptions(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ options: prepareOptionsForSubmit(next) }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                const errMsg =
+                    typeof data?.errors === 'object' && data.errors !== null
+                        ? Object.values(data.errors)
+                              .flat()
+                              .filter(Boolean)
+                              .join(' ')
+                        : (data?.error || data?.message || 'Failed to save')
+                setQuickError(errMsg)
+                return
+            }
+            setQuickAddInput('')
+            const reload = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            const reloadData = await reload.json().catch(() => ({}))
+            if (reload.ok && reloadData?.field?.options) {
+                setQuickOptions(normalizeOptions(reloadData.field.options))
+            } else {
+                setQuickOptions(normalizeOptions(next))
+            }
+            onRegistryRefresh?.()
+        } catch (e) {
+            setQuickError(e?.message || 'Network error')
+        } finally {
+            setQuickSaving(false)
+        }
+    }
+
     const iconButtonClass = (active) =>
         `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             active ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 opacity-60 hover:opacity-80'
         }`
+
+    const quickPanelId = `field-quick-options-${field.id}`
 
     return (
         <div 
@@ -2419,6 +2561,26 @@ function FieldRow({
                 <div className="flex-1 min-w-0 flex items-center gap-2">
                     {/* Field Name with System dot */}
                     <div className="flex items-center gap-2 min-w-0">
+                        {showQuickOptions && (
+                            <button
+                                type="button"
+                                id={`${quickPanelId}-toggle`}
+                                aria-expanded={quickExpanded}
+                                aria-controls={quickPanelId}
+                                title={quickExpanded ? 'Hide options' : 'Quick edit options'}
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    setQuickExpanded((v) => !v)
+                                }}
+                                className="flex-shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-200/80 hover:text-gray-800"
+                            >
+                                {quickExpanded ? (
+                                    <ChevronDownIcon className="h-4 w-4" aria-hidden />
+                                ) : (
+                                    <ChevronRightIcon className="h-4 w-4" aria-hidden />
+                                )}
+                            </button>
+                        )}
                         {isSystem && (
                             <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field" />
                         )}
@@ -2509,11 +2671,11 @@ function FieldRow({
                     <div className="flex items-center gap-1.5">
                         {onEdit && (canManageFields || !isSystem) && (field.key ?? '') !== 'dominant_hue_group' && (
                             <button
+                                type="button"
                                 onClick={() => onEdit(field)}
-                                className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-gray-600 rounded p-1 transition-opacity"
-                                title="Edit field"
+                                className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-indigo-600 shadow-sm hover:bg-indigo-50 hover:border-indigo-200"
                             >
-                                <PencilIcon className="w-4 h-4" />
+                                Edit
                             </button>
                         )}
                         {onArchive && !isSystem && canManageFields && (
@@ -2543,6 +2705,84 @@ function FieldRow({
                     </div>
                 </div>
             </div>
+
+            {showQuickOptions && quickExpanded && (
+                <div
+                    id={quickPanelId}
+                    role="region"
+                    aria-labelledby={`${quickPanelId}-toggle`}
+                    className="mt-2 border border-gray-200 rounded-lg bg-white px-3 py-2.5 shadow-sm"
+                >
+                    <p className="text-xs font-medium text-gray-700 mb-2">Options for this field</p>
+                    {quickLoading && (
+                        <p className="text-xs text-gray-500">Loading options…</p>
+                    )}
+                    {quickError && (
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <p className="text-xs text-red-600">{quickError}</p>
+                            {!quickLoaded && !quickLoading && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setQuickError(null)
+                                        setQuickLoadVersion((v) => v + 1)
+                                    }}
+                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                >
+                                    Retry
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    {!quickLoading && quickLoaded && (
+                        <>
+                            <div className="flex flex-wrap gap-1.5 mb-2 max-h-36 overflow-y-auto">
+                                {quickOptions.length === 0 ? (
+                                    <span className="text-xs text-gray-500">No options yet — add one below.</span>
+                                ) : (
+                                    quickOptions.map((opt) => (
+                                        <span
+                                            key={opt.value}
+                                            className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-800"
+                                            title={opt.value}
+                                        >
+                                            {opt.system_label || opt.value}
+                                        </span>
+                                    ))
+                                )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={quickAddInput}
+                                    onChange={(e) => { setQuickAddInput(e.target.value); setQuickError(null) }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault()
+                                            handleQuickAddOption()
+                                        }
+                                    }}
+                                    placeholder="e.g. social_display or Social display"
+                                    className="min-w-[12rem] flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                    disabled={quickSaving}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleQuickAddOption}
+                                    disabled={quickSaving}
+                                    className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                >
+                                    <PlusIcon className="h-3.5 w-3.5" />
+                                    Add
+                                </button>
+                            </div>
+                            <p className="mt-1.5 text-[11px] text-gray-500">
+                                Values are saved as lowercase snake_case. Use <span className="font-medium">Edit</span> for full field settings.
+                            </p>
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     )
 }

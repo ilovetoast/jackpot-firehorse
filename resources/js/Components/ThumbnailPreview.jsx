@@ -349,6 +349,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
                 />
@@ -377,6 +378,7 @@ export default function ThumbnailPreview({
                     <AssetPlaceholder
                         asset={asset}
                         primaryColor={brandPrimaryColor}
+                        brand={auth?.activeBrand}
                         size={size}
                         rich={showRichPlaceholder}
                     />
@@ -622,6 +624,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
                 />
@@ -671,6 +674,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
                 />
@@ -693,6 +697,7 @@ export default function ThumbnailPreview({
                 <AssetPlaceholder
                     asset={asset}
                     primaryColor={brandPrimaryColor}
+                    brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
                 />
@@ -713,6 +718,7 @@ export default function ThumbnailPreview({
             <AssetPlaceholder
                 asset={asset}
                 primaryColor={brandPrimaryColor}
+                brand={auth?.activeBrand}
                 size={size}
                 rich={showRichPlaceholder}
             />

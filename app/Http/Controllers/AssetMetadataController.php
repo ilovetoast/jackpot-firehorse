@@ -1116,6 +1116,25 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Brand Intelligence requires a published brand guidelines model (active_version_id).
+     */
+    protected function assertPublishedBrandGuidelinesForBrand(?Brand $brand): ?JsonResponse
+    {
+        if (! $brand) {
+            return response()->json(['message' => 'Brand not found'], 422);
+        }
+        $brand->loadMissing('brandModel');
+        if ($brand->brandModel?->active_version_id === null) {
+            return response()->json([
+                'status' => 'guidelines_not_published',
+                'message' => 'Publish brand guidelines before Brand Intelligence can score assets.',
+            ], 422);
+        }
+
+        return null;
+    }
+
+    /**
      * Manually trigger brand compliance rescore for an asset.
      * POST /assets/{asset}/rescore
      */
@@ -1129,6 +1148,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
+            return $blocked;
+        }
 
         // Clear idempotent rows so re-score always runs; forceRun bypasses category ebi_enabled for manual runs.
         BrandIntelligenceScore::where('asset_id', $asset->id)
@@ -1175,9 +1198,13 @@ class AssetMetadataController extends Controller
             ->with(['latestBrandIntelligenceScore', 'brandReferenceAsset'])
             ->firstOrFail();
 
+        $brand->loadMissing('brandModel');
+        $published = $brand->brandModel?->active_version_id !== null;
+
         return response()->json([
-            'brand_intelligence' => $fresh->brandIntelligencePayloadForFrontend(),
-            'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+            'has_published_guidelines' => $published,
+            'brand_intelligence' => $published ? $fresh->brandIntelligencePayloadForFrontend() : null,
+            'reference_promotion' => $published ? $fresh->brandReferenceAsset?->toFrontendArray() : null,
         ]);
     }
 
@@ -1197,6 +1224,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
+            return $blocked;
+        }
 
         $fresh = Asset::query()
             ->whereKey($asset->id)

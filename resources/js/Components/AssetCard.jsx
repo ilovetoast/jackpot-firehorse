@@ -15,11 +15,11 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
-import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
-import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
+import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
 export default function AssetCard({
     asset,
@@ -183,15 +183,6 @@ export default function AssetCard({
         !isVirtualGoogleFont &&
         (thumbnailState.state === 'PENDING' || (analysisStatus && !analysisComplete))
 
-    // Phase 7: Thumbnail integrity — complete but no thumbnail path = hidden corruption
-    const hasThumbnailPath = Boolean(asset?.final_thumbnail_url || asset?.thumbnail_url)
-    const mimeType = asset?.mime_type || ''
-    const showThumbnailIntegrityBadge =
-        !isVirtualGoogleFont &&
-        supportsThumbnail(mimeType, extLower) &&
-        analysisStatus === 'complete' &&
-        !hasThumbnailPath
-    
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
     // Animation should ONLY trigger on meaningful state changes (e.g., after background reconciliation)
@@ -585,15 +576,6 @@ export default function AssetCard({
                     </div>
                 )}
 
-                {/* Phase 7: Thumbnail integrity warning — complete but thumbnails missing */}
-                {showThumbnailIntegrityBadge && (
-                    <div className="absolute top-2 left-2 z-10">
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Thumbnail integrity issue">
-                            <ExclamationTriangleIcon className="h-3.5 w-3.5" />
-                            Thumbnail integrity issue
-                        </span>
-                    </div>
-                )}
                 {/* Top-right badges: health (when warning/critical) + file type + star + trash + guideline */}
                 <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
                     <div className="inline-flex items-center gap-1.5">

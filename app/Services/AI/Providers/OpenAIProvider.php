@@ -3,6 +3,8 @@
 namespace App\Services\AI\Providers;
 
 use App\Services\AI\Contracts\AIProviderInterface;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -123,12 +125,7 @@ class OpenAIProvider implements AIProviderInterface
         }
 
         try {
-            $response = Http::timeout(60)
-                ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->apiKey,
-                    'Content-Type' => 'application/json',
-                ])
-                ->post("{$this->baseUrl}/chat/completions", $body);
+            $response = $this->sendChatCompletionsRequest($body);
 
             if ($response->failed()) {
                 $error = $response->json();
@@ -182,6 +179,69 @@ class OpenAIProvider implements AIProviderInterface
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * POST /chat/completions with retries for transient TLS / network failures (e.g. cURL 56, errno 104).
+     *
+     * @param  array<string, mixed>  $body
+     */
+    private function sendChatCompletionsRequest(array $body, int $timeoutSeconds = 60): Response
+    {
+        $maxAttempts = 3;
+        $lastException = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                return Http::timeout($timeoutSeconds)
+                    ->connectTimeout(15)
+                    ->withHeaders([
+                        'Authorization' => 'Bearer ' . $this->apiKey,
+                        'Content-Type' => 'application/json',
+                    ])
+                    ->post("{$this->baseUrl}/chat/completions", $body);
+            } catch (\Throwable $e) {
+                $lastException = $e;
+                if ($attempt >= $maxAttempts || ! $this->isTransientOpenAiConnectionFailure($e)) {
+                    throw $e;
+                }
+
+                $sleepMs = (int) (500 * (2 ** ($attempt - 1)));
+                Log::warning('OpenAI chat/completions transient connection failure, retrying', [
+                    'attempt' => $attempt,
+                    'max_attempts' => $maxAttempts,
+                    'sleep_ms' => $sleepMs,
+                    'error' => $e->getMessage(),
+                ]);
+                usleep($sleepMs * 1000);
+            }
+        }
+
+        throw $lastException ?? new \RuntimeException('OpenAI chat/completions request failed after retries.');
+    }
+
+    private function isTransientOpenAiConnectionFailure(\Throwable $e): bool
+    {
+        if ($e instanceof ConnectionException) {
+            return true;
+        }
+
+        $msg = strtolower($e->getMessage());
+        if (str_contains($msg, 'curl error 56')
+            || str_contains($msg, 'errno 104')
+            || str_contains($msg, 'connection reset by peer')
+            || str_contains($msg, 'ssl_read')
+            || str_contains($msg, 'connection timed out')
+            || str_contains($msg, 'operation timed out')) {
+            return true;
+        }
+
+        $prev = $e->getPrevious();
+        if ($prev instanceof \Throwable) {
+            return $this->isTransientOpenAiConnectionFailure($prev);
+        }
+
+        return false;
     }
 
     /**
@@ -586,33 +646,28 @@ class OpenAIProvider implements AIProviderInterface
         }
 
         try {
-            $response = Http::timeout(60)
-                ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->apiKey,
-                    'Content-Type' => 'application/json',
-                ])
-                ->post("{$this->baseUrl}/chat/completions", [
-                    'model' => $model,
-                    'messages' => [
-                        [
-                            'role' => 'user',
-                            'content' => [
-                                [
-                                    'type' => 'text',
-                                    'text' => $prompt,
-                                ],
-                                [
-                                    'type' => 'image_url',
-                                    'image_url' => [
-                                        'url' => $imageBase64DataUrl,
-                                    ],
+            $response = $this->sendChatCompletionsRequest([
+                'model' => $model,
+                'messages' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'text',
+                                'text' => $prompt,
+                            ],
+                            [
+                                'type' => 'image_url',
+                                'image_url' => [
+                                    'url' => $imageBase64DataUrl,
                                 ],
                             ],
                         ],
                     ],
-                    'max_tokens' => $maxTokens,
-                    'response_format' => $responseFormat,
-                ]);
+                ],
+                'max_tokens' => $maxTokens,
+                'response_format' => $responseFormat,
+            ]);
 
             if ($response->failed()) {
                 $error = $response->json();

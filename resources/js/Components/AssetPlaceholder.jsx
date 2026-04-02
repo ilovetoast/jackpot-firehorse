@@ -1,5 +1,6 @@
 import { PhotoIcon } from '@heroicons/react/24/outline'
 import FileTypeIcon from './FileTypeIcon'
+import { getContrastTextColor, hexToRgba, resolveBrandIconBackground } from '../utils/colorUtils'
 
 function isImageAsset(asset) {
   if (!asset) return false
@@ -67,7 +68,7 @@ function richPlaceholderClasses(asset) {
   }
 }
 
-export default function AssetPlaceholder({ asset, primaryColor, size = 'lg', rich = false }) {
+export default function AssetPlaceholder({ asset, primaryColor: _primaryColor, brand = null, size = 'lg', rich = false }) {
   const photoClass = PHOTO_ICON_SIZE[size] || PHOTO_ICON_SIZE.lg
 
   if (isImageAsset(asset) && !rich) {
@@ -79,6 +80,36 @@ export default function AssetPlaceholder({ asset, primaryColor, size = 'lg', ric
   }
 
   if (rich) {
+    const useBrandTile = Boolean(brand?.primary_color)
+    if (useBrandTile) {
+      const primary = brand.primary_color || '#6366f1'
+      const secondary = brand.secondary_color || '#8b5cf6'
+      const iconStyle = brand.icon_style || 'subtle'
+      const bg = resolveBrandIconBackground(iconStyle, primary, secondary)
+      const iconColor = getContrastTextColor(primary)
+      return (
+        <div
+          className="relative flex items-center justify-center w-full h-full rounded-lg overflow-hidden ring-1 ring-inset ring-black/5"
+          style={{
+            background: bg,
+            boxShadow: `inset 0 0 0 1px ${hexToRgba(primary, 0.22)}`,
+          }}
+        >
+          <div
+            className="flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/20 backdrop-blur-[2px] shadow-md"
+            style={{ color: iconColor }}
+          >
+            <FileTypeIcon
+              fileExtension={asset?.file_extension}
+              mimeType={asset?.mime_type}
+              size={size === 'sm' ? 'md' : 'lg'}
+              iconClassName="drop-shadow-sm"
+            />
+          </div>
+        </div>
+      )
+    }
+
     const { wrap, ring, icon } = richPlaceholderClasses(asset)
     return (
       <div

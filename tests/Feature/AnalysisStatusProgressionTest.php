@@ -15,6 +15,7 @@ use App\Jobs\ProcessAssetJob;
 use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\BrandModelVersion;
 use App\Models\BrandVisualReference;
 use App\Models\Category;
 use App\Models\StorageBucket;
@@ -86,6 +87,22 @@ class AnalysisStatusProgressionTest extends TestCase
         ]);
 
         $this->seed(\Database\Seeders\MetadataFieldsSeeder::class);
+
+        // Published brand guidelines (active_version_id) — required for Brand Intelligence scoring in pipeline
+        $brandModel = $this->brand->brandModel;
+        $publishedVersion = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [],
+            'metrics_payload' => null,
+            'status' => 'active',
+            'lifecycle_stage' => BrandModelVersion::LIFECYCLE_PUBLISHED,
+            'research_status' => BrandModelVersion::RESEARCH_COMPLETE,
+            'review_status' => BrandModelVersion::REVIEW_COMPLETE,
+            'created_by' => $this->user->id,
+        ]);
+        $brandModel->update(['active_version_id' => $publishedVersion->id]);
 
         $meta = $this->createMock(AiMetadataGenerationService::class);
         $meta->method('fetchThumbnailForVisionAnalysis')->willReturn(null);
