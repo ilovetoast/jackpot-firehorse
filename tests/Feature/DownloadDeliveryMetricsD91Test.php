@@ -18,9 +18,12 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Services\TenantBucketService;
+use Aws\S3\S3Client;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -99,6 +102,30 @@ class DownloadDeliveryMetricsD91Test extends TestCase
             ->count();
     }
 
+    /**
+     * Ready ZIP delivery streams from S3 via TenantBucketService (not CDN redirect).
+     */
+    protected function bindTenantS3ZipStreamMock(int $headTimes = 1, int $getObjectTimes = 1): void
+    {
+        $s3Mock = Mockery::mock(S3Client::class);
+        $s3Mock->shouldReceive('headObject')
+            ->times($headTimes)
+            ->andReturn([
+                'ContentType' => 'application/zip',
+                'ContentLength' => 4,
+            ]);
+        $s3Mock->shouldReceive('getObject')
+            ->times($getObjectTimes)
+            ->andReturnUsing(static fn () => [
+                'Body' => Utils::streamFor('ZIP!'),
+            ]);
+
+        $bucketSvc = Mockery::mock(TenantBucketService::class);
+        $bucketSvc->shouldReceive('resolveActiveBucketOrFail')->andReturn($this->bucket);
+        $bucketSvc->shouldReceive('getS3Client')->andReturn($s3Mock);
+        $this->app->instance(TenantBucketService::class, $bucketSvc);
+    }
+
     public function test_single_asset_download_increments_asset_count(): void
     {
         Session::put('tenant_id', $this->tenant->id);
@@ -147,13 +174,15 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false], $asset3->id => ['is_primary' => false]]);
 
         // Metrics are recorded when the file is delivered (GET /file), not when viewing the landing page
-        $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
-        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed.zip');
-        $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
+        $this->bindTenantS3ZipStreamMock();
 
         $response = $this->get(route('downloads.public.file', ['download' => $download->id]));
 
-        $response->assertRedirect('https://example.com/signed.zip');
+        $response->assertOk();
+        $expectedName = 'B-download-'.now()->format('Y-m-d').'.zip';
+        $disposition = (string) $response->headers->get('Content-Disposition');
+        $this->assertStringContainsString('attachment', $disposition);
+        $this->assertStringContainsString($expectedName, $disposition);
         $this->assertSame(1, $this->downloadCountForAsset($asset1->id));
         $this->assertSame(1, $this->downloadCountForAsset($asset2->id));
         $this->assertSame(1, $this->downloadCountForAsset($asset3->id));
@@ -182,9 +211,7 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         ]);
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false]]);
 
-        $mockAssetUrl = \Mockery::mock(\App\Services\AssetUrlService::class)->makePartial();
-        $mockAssetUrl->shouldReceive('getSignedCloudFrontUrl')->with(\Mockery::type('string'), 1800)->andReturn('https://example.com/signed.zip');
-        $this->app->instance(\App\Services\AssetUrlService::class, $mockAssetUrl);
+        $this->bindTenantS3ZipStreamMock(2, 2);
 
         $this->get(route('downloads.public.file', ['download' => $download->id]));
         $this->get(route('downloads.public.file', ['download' => $download->id]));

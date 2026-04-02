@@ -110,3 +110,23 @@ export function resolveBrandIconBackground(style, primary, secondary) {
             return `linear-gradient(135deg, ${p}CC, ${p}55)`
     }
 }
+
+/**
+ * Layered radial “cinematic” background for no-preview asset tiles — same language as Overview / Brand Guidelines
+ * (dark base + primary/secondary glow bleeding into the tile).
+ *
+ * @param {string|null|undefined} primary
+ * @param {string|null|undefined} secondary
+ * @returns {string} CSS `background` value (multiple layers, comma-separated)
+ */
+export function buildBrandCinematicTileBackground(primary, secondary) {
+    const p = primary || '#6366f1'
+    const s = secondary || '#8b5cf6'
+    return [
+        'linear-gradient(165deg, rgba(0,0,0,0.34) 0%, transparent 42%, rgba(0,0,0,0.52) 100%)',
+        `radial-gradient(ellipse 95% 75% at 30% 40%, ${hexToRgba(p, 0.14)} 0%, transparent 58%)`,
+        `radial-gradient(circle at 78% 74%, ${hexToRgba(s, 0.19)} 0%, transparent 56%)`,
+        `radial-gradient(circle at 14% 20%, ${hexToRgba(p, 0.24)} 0%, transparent 50%)`,
+        '#0B0B0D',
+    ].join(', ')
+}

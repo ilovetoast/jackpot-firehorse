@@ -1477,19 +1477,10 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        $download->loadMissing(['tenant', 'brand']);
-        $download->increment('access_count');
-        app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
-        $zipFilename = $this->getDownloadZipFilename($download);
-        $signedUrl = app(AssetUrlService::class)->getSignedCloudFrontUrlForDownload(
-            $download->zip_path,
-            $zipFilename,
-            1800
-        );
-        DownloadEventEmitter::emitDownloadZipRequested($download);
-        DownloadEventEmitter::emitDownloadZipCompleted($download);
-
-        return redirect()->away($signedUrl);
+        // ZIP objects are stored as .../download.zip. A CDN redirect without Content-Disposition
+        // makes browsers use that basename ("download (N).zip"). Stream through the app so
+        // Content-Disposition uses the tenant template / title (same idea as ?stream=1 for single assets).
+        return $this->streamReadyZipFromS3($download);
     }
 
     /**
@@ -1595,6 +1586,87 @@ class DownloadController extends Controller
             'Content-Type' => 'application/zip',
             'Content-Disposition' => 'attachment; filename="'.addcslashes($filename, '"\\').'"',
         ]);
+    }
+
+    /**
+     * Stream a ready-built ZIP from tenant S3 with Content-Disposition filename from tenant template (or title).
+     * The stored S3 key always ends in /download.zip; redirecting to CDN without a forwarded disposition
+     * leaves browsers with a generic "download.zip" name.
+     */
+    protected function streamReadyZipFromS3(Download $download): StreamedResponse|RedirectResponse
+    {
+        $download->loadMissing(['tenant', 'brand']);
+        $tenant = $download->tenant;
+        if (! $tenant) {
+            Log::error('[DownloadController] streamReadyZipFromS3: missing tenant', [
+                'download_id' => $download->id,
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $bucketService = app(TenantBucketService::class);
+
+        try {
+            $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
+        } catch (\Throwable $e) {
+            Log::error('[DownloadController] streamReadyZipFromS3: bucket resolution failed', [
+                'download_id' => $download->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $key = ltrim((string) $download->zip_path, '/');
+        $zipFilename = $this->getDownloadZipFilename($download);
+        $safeFilename = preg_replace('/[\r\n"\\\\]/', '', $zipFilename);
+        $safeFilename = ($safeFilename !== null && $safeFilename !== '') ? $safeFilename : 'download.zip';
+
+        $s3Client = $bucketService->getS3Client();
+
+        try {
+            $head = $s3Client->headObject([
+                'Bucket' => $bucket->name,
+                'Key' => $key,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[DownloadController] streamReadyZipFromS3: headObject failed', [
+                'download_id' => $download->id,
+                'bucket' => $bucket->name,
+                'key' => $key,
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $headers = ['Content-Type' => 'application/zip'];
+        if (isset($head['ContentLength'])) {
+            $headers['Content-Length'] = (string) $head['ContentLength'];
+        }
+
+        $download->increment('access_count');
+        app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
+        DownloadEventEmitter::emitDownloadZipRequested($download);
+        DownloadEventEmitter::emitDownloadZipCompleted($download);
+
+        $bucketName = $bucket->name;
+
+        return response()->streamDownload(function () use ($s3Client, $bucketName, $key) {
+            $result = $s3Client->getObject([
+                'Bucket' => $bucketName,
+                'Key' => $key,
+            ]);
+            $body = $result['Body'];
+            if ($body instanceof \Psr\Http\Message\StreamInterface) {
+                while (! $body->eof()) {
+                    echo $body->read(1024 * 1024);
+                }
+            } else {
+                echo (string) $body;
+            }
+        }, $safeFilename, $headers);
     }
 
     /**

@@ -1,6 +1,6 @@
 import { PhotoIcon } from '@heroicons/react/24/outline'
 import FileTypeIcon from './FileTypeIcon'
-import { getContrastTextColor, hexToRgba, resolveBrandIconBackground } from '../utils/colorUtils'
+import { buildBrandCinematicTileBackground, hexToRgba } from '../utils/colorUtils'
 
 function isImageAsset(asset) {
   if (!asset) return false
@@ -80,47 +80,50 @@ export default function AssetPlaceholder({ asset, primaryColor: _primaryColor, b
   }
 
   if (rich) {
+    const primary = brand?.primary_color || '#6366f1'
+    const secondary = brand?.secondary_color || '#8b5cf6'
     const useBrandTile = Boolean(brand?.primary_color)
+    const cinematicBg = buildBrandCinematicTileBackground(primary, secondary)
+
+    const iconChipClass =
+      'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
+
     if (useBrandTile) {
-      const primary = brand.primary_color || '#6366f1'
-      const secondary = brand.secondary_color || '#8b5cf6'
-      const iconStyle = brand.icon_style || 'subtle'
-      const bg = resolveBrandIconBackground(iconStyle, primary, secondary)
-      const iconColor = getContrastTextColor(primary)
       return (
         <div
-          className="relative flex items-center justify-center w-full h-full rounded-lg overflow-hidden ring-1 ring-inset ring-black/5"
+          className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10"
           style={{
-            background: bg,
-            boxShadow: `inset 0 0 0 1px ${hexToRgba(primary, 0.22)}`,
+            background: cinematicBg,
+            boxShadow: `inset 0 0 1px ${hexToRgba(primary, 0.35)}`,
           }}
         >
-          <div
-            className="flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/20 backdrop-blur-[2px] shadow-md"
-            style={{ color: iconColor }}
-          >
+          <div className={`relative z-[1] ${iconChipClass}`}>
             <FileTypeIcon
               fileExtension={asset?.file_extension}
               mimeType={asset?.mime_type}
               size={size === 'sm' ? 'md' : 'lg'}
-              iconClassName="drop-shadow-sm"
+              iconClassName="text-white/90 drop-shadow-md"
             />
           </div>
         </div>
       )
     }
 
-    const { wrap, ring, icon } = richPlaceholderClasses(asset)
+    const { wrap } = richPlaceholderClasses(asset)
     return (
-      <div
-        className={`relative flex items-center justify-center w-full h-full rounded-lg overflow-hidden ${wrap} ${ring}`}
-      >
-        <div className="flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/25 backdrop-blur-[2px] shadow-md">
+      <div className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10">
+        <div
+          className="absolute inset-0"
+          style={{ background: cinematicBg }}
+          aria-hidden
+        />
+        <div className={`absolute inset-0 opacity-[0.5] ${wrap}`} aria-hidden />
+        <div className={`relative z-[1] ${iconChipClass}`}>
           <FileTypeIcon
             fileExtension={asset?.file_extension}
             mimeType={asset?.mime_type}
             size={size === 'sm' ? 'md' : 'lg'}
-            iconClassName={icon}
+            iconClassName="text-white/90 drop-shadow-md"
           />
         </div>
       </div>
