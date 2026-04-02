@@ -31,6 +31,7 @@ import {
     LockOpenIcon,
     PhotoIcon,
     SparklesIcon,
+    SwatchIcon,
     Bars3BottomLeftIcon,
     Bars3Icon,
     Square2StackIcon,
@@ -61,11 +62,14 @@ import {
     createDefaultGenerativeImageLayer,
     buildEditorVisualContext,
     createDefaultTextLayer,
+    createFillLayer,
     createGuidedLayoutLayers,
     createImageLayerFromDamAsset,
     createInitialDocument,
+    fillLayerBackgroundCss,
     isBlankUnsavedCanvas,
     LAYER_BLEND_MODE_OPTIONS,
+    labeledBrandPalette,
     DEFAULT_TEXT_FONT_FAMILY,
     effectivePrimaryFontFamily,
     defaultCompositionName,
@@ -75,9 +79,12 @@ import {
     GENERATIVE_PREVIOUS_RESULTS_MAX,
     nextZIndex,
     normalizeZ,
+    isFillLayer,
     parseDocumentFromApi,
     PLACEHOLDER_IMAGE_SRC,
+    resolvedFillGradientStops,
 } from './documentModel'
+import FillGradientStopField from './FillGradientStopField'
 import {
     confirmDamAssetDimensions,
     fetchEditorAssetById,
@@ -89,7 +96,13 @@ import {
     type EditorPublishCategory,
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
-import { fetchAssetVersions, type EditorAssetVersionRow } from './editorAssetVersionBridge'
+import {
+    assetVersionStripLabel,
+    fetchAssetVersions,
+    isAssetVersionThumbnailActive,
+    orderAssetVersionsForStrip,
+    type EditorAssetVersionRow,
+} from './editorAssetVersionBridge'
 import { captureCompositionThumbnailBase64 } from './editorCompositionThumbnail'
 import {
     ensureCanvasFontLoaded,
@@ -237,6 +250,19 @@ function colorsMatch(a: string, b: string): boolean {
     return normalizeHexColor(a) === normalizeHexColor(b)
 }
 
+/** When toggling fill to solid, prefer an opaque hex from gradient end, then start. */
+function opaqueHexForSolidFromGradientStops(start: string, end: string, prev: string): string {
+    const e = end.trim()
+    const s = start.trim()
+    if (/^#[0-9a-fA-F]{6}$/i.test(e)) {
+        return e
+    }
+    if (/^#[0-9a-fA-F]{6}$/i.test(s)) {
+        return s
+    }
+    return prev
+}
+
 function firstFontFamilyToken(fontFamily: string): string {
     return fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '')
 }
@@ -336,6 +362,12 @@ type DragState =
           aspectRatio: number
           lockAspectResize: boolean
       }
+
+const UNTITLED_DRAFT_NAME = 'Untitled draft'
+
+function isUntitledDraftName(name: string): boolean {
+    return name.trim().toLowerCase() === UNTITLED_DRAFT_NAME.toLowerCase()
+}
 
 function isImageLayer(l: Layer): l is ImageLayer {
     return l.type === 'image'
@@ -814,7 +846,9 @@ function replaceUrlCompositionParam(id: string | null) {
 
 export default function AssetEditor() {
     const page = usePage()
-    const { auth } = page.props as { auth: { activeBrand?: { id?: number; name?: string } } }
+    const { auth } = page.props as {
+        auth: { activeBrand?: { id?: number; name?: string; primary_color?: string | null } }
+    }
     const activeBrandId = auth?.activeBrand?.id
     const compositionIdFromUrl = useMemo(() => {
         try {
@@ -1040,6 +1074,21 @@ export default function AssetEditor() {
             }),
         }))
     }, [])
+
+    const selectedImageLayerVersionStrip = useMemo(() => {
+        if (!selectedImageLayerWithAsset) {
+            return []
+        }
+        const raw = layerVersions[selectedImageLayerWithAsset.id] ?? []
+        return orderAssetVersionsForStrip(raw)
+    }, [selectedImageLayerWithAsset, layerVersions])
+
+    const selectedImageLayerVersionStripMin = useMemo(() => {
+        const nums = selectedImageLayerVersionStrip
+            .map((v) => v.version_number)
+            .filter((n): n is number => typeof n === 'number' && n > 0)
+        return nums.length > 0 ? Math.min(...nums) : 1
+    }, [selectedImageLayerVersionStrip])
 
     const generativeBrandScore = useMemo(() => {
         if (!selectedLayer || !isGenerativeImageLayer(selectedLayer)) {
@@ -1567,27 +1616,42 @@ export default function AssetEditor() {
         setSaveState('saving')
         setSaveError(null)
         try {
-            const name = compositionName.trim() || defaultCompositionName(document)
+            const docSnapshot = documentRef.current
+            let nameToSave = compositionName.trim() || defaultCompositionName(docSnapshot)
+
+            if (!compositionId) {
+                nameToSave = UNTITLED_DRAFT_NAME
+            } else if (isUntitledDraftName(compositionName)) {
+                const suggested = defaultCompositionName(docSnapshot)
+                const entered = window.prompt('Name this composition', suggested)
+                if (entered === null) {
+                    setSaveState('idle')
+                    return
+                }
+                nameToSave = entered.trim() || suggested
+                setCompositionName(nameToSave)
+            }
+
             let thumb: string | null = null
             if (stageRef.current) {
                 thumb = await captureCompositionThumbnailBase64(stageRef.current, documentRef.current)
             }
             if (!compositionId) {
-                const c = await postComposition(name, document, { thumbnailPngBase64: thumb })
+                const c = await postComposition(nameToSave, docSnapshot, { thumbnailPngBase64: thumb })
                 const doc = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
-                setCompositionName(c.name)
+                setCompositionName(c.name?.trim() ? c.name : UNTITLED_DRAFT_NAME)
                 setDocument(doc)
                 setLastSavedSerialized(JSON.stringify(doc))
                 replaceUrlCompositionParam(c.id)
             } else {
-                await putComposition(compositionId, document, {
-                    name,
+                await putComposition(compositionId, docSnapshot, {
+                    name: nameToSave,
                     versionLabel: null,
                     createVersion: true,
                     thumbnailPngBase64: thumb,
                 })
-                setLastSavedSerialized(JSON.stringify(document))
+                setLastSavedSerialized(JSON.stringify(documentRef.current))
             }
             setSaveState('saved')
             setActivityToast('Version saved')
@@ -1597,7 +1661,7 @@ export default function AssetEditor() {
             setSaveState('error')
             setSaveError(handleAIError(e))
         }
-    }, [compositionId, compositionName, document, refreshVersions])
+    }, [compositionId, compositionName, refreshVersions])
 
     const handleSave = useCallback(() => {
         void performManualSave()
@@ -2674,6 +2738,43 @@ export default function AssetEditor() {
                     })
                     return next
                 })
+                const persistedAssetId = res.asset_id ?? layer.assetId ?? null
+                if (persistedAssetId && imageEditSeqRef.current[layerId] === seq) {
+                    try {
+                        const verRes = await fetchAssetVersions(persistedAssetId)
+                        if (imageEditSeqRef.current[layerId] === seq && verRes.versions.length > 0) {
+                            setLayerVersions((prev) => ({ ...prev, [layerId]: verRes.versions }))
+                            const newest = verRes.versions.reduce((best, row) =>
+                                (row.version_number ?? 0) > (best.version_number ?? 0) ? row : best
+                            )
+                            setDocument((prev) => ({
+                                ...prev,
+                                layers: prev.layers.map((l) => {
+                                    if (l.id !== layerId || l.type !== 'image') {
+                                        return l
+                                    }
+                                    return {
+                                        ...l,
+                                        assetId: persistedAssetId,
+                                        assetVersionId: newest.id,
+                                        src: newest.url,
+                                        aiEdit: l.aiEdit
+                                            ? {
+                                                  ...l.aiEdit,
+                                                  prompt: instruction,
+                                                  status: 'done',
+                                                  resultSrc: res.image_url,
+                                              }
+                                            : undefined,
+                                    }
+                                }),
+                                updated_at: new Date().toISOString(),
+                            }))
+                        }
+                    } catch {
+                        /* version strip refresh is optional */
+                    }
+                }
                 finishedOk = true
                 setActivityToast('Image updated')
                 try {
@@ -3179,6 +3280,30 @@ export default function AssetEditor() {
         })
     }, [brandContext])
 
+    const addFillLayer = useCallback(() => {
+        const raw = auth?.activeBrand?.primary_color
+        const brandColor =
+            typeof raw === 'string' && /^#?[0-9a-fA-F]{3,8}$/.test(raw.trim())
+                ? raw.trim().startsWith('#')
+                    ? raw.trim()
+                    : `#${raw.trim()}`
+                : '#6366f1'
+        setDocument((prev) => {
+            const layer = createFillLayer(nextZIndex(prev.layers), prev, {
+                color: brandColor,
+                fillKind: 'gradient',
+                gradientStartColor: 'transparent',
+                gradientEndColor: brandColor,
+            })
+            setSelectedLayerId(layer.id)
+            return {
+                ...prev,
+                layers: normalizeZ([...prev.layers, layer]),
+                updated_at: new Date().toISOString(),
+            }
+        })
+    }, [auth?.activeBrand?.primary_color])
+
     const beginMove = useCallback(
         (layerId: string, e: React.MouseEvent) => {
             const layer = document.layers.find((l) => l.id === layerId)
@@ -3449,12 +3574,21 @@ export default function AssetEditor() {
                             </button>
                             <button
                                 type="button"
+                                onClick={addFillLayer}
+                                title="Solid color or two-stop gradient (full canvas by default; resize as needed)"
+                                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                            >
+                                <SwatchIcon className="h-4 w-4" aria-hidden />
+                                <span className="hidden sm:inline">Fill</span>
+                            </button>
+                            <button
+                                type="button"
                                 disabled={promoteSaving}
                                 onClick={() => void openPublishModal()}
-                                title="Save the canvas as a PNG and publish it to your brand library. Choose a category and details first."
+                                title="Export the canvas as a PNG and publish it to your brand library. Choose a category and details first."
                                 className="inline-flex items-center rounded-md border border-emerald-600 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-900/50"
                             >
-                                {promoteSaving ? 'Publishing…' : 'Save & publish'}
+                                {promoteSaving ? 'Publishing…' : 'Publish'}
                             </button>
                             <button
                                 type="button"
@@ -3643,7 +3777,9 @@ export default function AssetEditor() {
                                                             ? 'Text'
                                                             : layer.type === 'generative_image'
                                                               ? 'AI image'
-                                                              : 'Image')}
+                                                              : layer.type === 'fill'
+                                                                ? 'Fill'
+                                                                : 'Image')}
                                                 </button>
                                                 <button
                                                     type="button"
@@ -3736,6 +3872,14 @@ export default function AssetEditor() {
                                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                                     >
                                         Add text
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={addFillLayer}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                                    >
+                                        <SwatchIcon className="h-4 w-4" aria-hidden />
+                                        Solid / gradient fill
                                     </button>
                                     <button
                                         type="button"
@@ -3910,6 +4054,26 @@ export default function AssetEditor() {
                                                     <button
                                                         type="button"
                                                         title="Prevent this layer from changing"
+                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            updateLayer(layer.id, (l) => ({
+                                                                ...l,
+                                                                locked: !l.locked,
+                                                            }))
+                                                        }}
+                                                    >
+                                                        {layer.locked ? 'Unlock' : 'Lock'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {isFillLayer(layer) && (
+                                            <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+                                                <div className="pointer-events-auto flex gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100">
+                                                    <button
+                                                        type="button"
+                                                        title="Lock this fill layer"
                                                         className="rounded px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
                                                         onClick={(e) => {
                                                             e.stopPropagation()
@@ -4121,6 +4285,14 @@ export default function AssetEditor() {
                                                     </div>
                                                 )}
                                             </div>
+                                        )}
+                                        {isFillLayer(layer) && (
+                                            <div
+                                                className="relative h-full min-h-0 w-full min-w-0"
+                                                style={{
+                                                    background: fillLayerBackgroundCss(layer),
+                                                }}
+                                            />
                                         )}
                                         {isTextLayer(layer) && (
                                             <TextLayerEditable
@@ -4341,7 +4513,9 @@ export default function AssetEditor() {
                                                 ? 'Text'
                                                 : selectedLayer.type === 'generative_image'
                                                   ? 'AI image'
-                                                  : 'Image'
+                                                  : selectedLayer.type === 'fill'
+                                                    ? 'Fill'
+                                                    : 'Image'
                                         }
                                     />
                                 </div>
@@ -4509,6 +4683,189 @@ export default function AssetEditor() {
                                         Lock
                                     </button>
                                 </div>
+
+                                {isFillLayer(selectedLayer) && (
+                                    <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                                        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            Fill
+                                        </h3>
+                                        <div>
+                                            <label className="mb-1 block text-gray-600 dark:text-gray-400">
+                                                Style
+                                            </label>
+                                            <select
+                                                value={selectedLayer.fillKind}
+                                                disabled={selectedLayer.locked}
+                                                onChange={(e) => {
+                                                    const v = e.target.value as 'solid' | 'gradient'
+                                                    updateLayer(selectedLayer.id, (l) => {
+                                                        if (!isFillLayer(l)) {
+                                                            return l
+                                                        }
+                                                        if (v === 'solid') {
+                                                            const { start, end } = resolvedFillGradientStops(l)
+                                                            return {
+                                                                ...l,
+                                                                fillKind: 'solid',
+                                                                name: 'Solid fill',
+                                                                color: opaqueHexForSolidFromGradientStops(
+                                                                    start,
+                                                                    end,
+                                                                    l.color
+                                                                ),
+                                                                gradientStartColor: undefined,
+                                                                gradientEndColor: undefined,
+                                                            }
+                                                        }
+                                                        if (l.fillKind === 'solid') {
+                                                            return {
+                                                                ...l,
+                                                                fillKind: 'gradient',
+                                                                name: 'Gradient fill',
+                                                                gradientStartColor: 'transparent',
+                                                                gradientEndColor: l.color,
+                                                                color: l.color,
+                                                            }
+                                                        }
+                                                        return {
+                                                            ...l,
+                                                            fillKind: v,
+                                                            name: 'Gradient fill',
+                                                        }
+                                                    })
+                                                }}
+                                                className="w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-800"
+                                            >
+                                                <option value="solid">Solid color</option>
+                                                <option value="gradient">Gradient (two colors)</option>
+                                            </select>
+                                        </div>
+                                        {selectedLayer.fillKind === 'solid' && (
+                                            <div>
+                                                <label className="mb-1 block text-gray-600 dark:text-gray-400">
+                                                    Color
+                                                </label>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={
+                                                            /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
+                                                                ? selectedLayer.color
+                                                                : '#6366f1'
+                                                        }
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) =>
+                                                            updateLayer(selectedLayer.id, (l) =>
+                                                                isFillLayer(l)
+                                                                    ? { ...l, color: e.target.value }
+                                                                    : l
+                                                            )
+                                                        }
+                                                        className="h-9 w-12 cursor-pointer rounded border border-gray-300 bg-white dark:border-gray-600"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={selectedLayer.color}
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) =>
+                                                            updateLayer(selectedLayer.id, (l) =>
+                                                                isFillLayer(l)
+                                                                    ? { ...l, color: e.target.value }
+                                                                    : l
+                                                            )
+                                                        }
+                                                        className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 font-mono text-[11px] dark:border-gray-600 dark:bg-gray-800"
+                                                        placeholder="#RRGGBB"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedLayer.fillKind === 'gradient' && (
+                                            <>
+                                                <FillGradientStopField
+                                                    label="Gradient start"
+                                                    value={resolvedFillGradientStops(selectedLayer).start}
+                                                    disabled={selectedLayer.locked}
+                                                    allowTransparent
+                                                    brandContext={brandContext}
+                                                    onChange={(newStart) => {
+                                                        const { end } = resolvedFillGradientStops(selectedLayer)
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isFillLayer(l) || l.fillKind !== 'gradient') {
+                                                                return l
+                                                            }
+                                                            return {
+                                                                ...l,
+                                                                gradientStartColor: newStart,
+                                                                gradientEndColor: end,
+                                                                color: opaqueHexForSolidFromGradientStops(
+                                                                    newStart,
+                                                                    end,
+                                                                    l.color
+                                                                ),
+                                                            }
+                                                        })
+                                                    }}
+                                                />
+                                                <FillGradientStopField
+                                                    label="Gradient end"
+                                                    value={resolvedFillGradientStops(selectedLayer).end}
+                                                    disabled={selectedLayer.locked}
+                                                    allowTransparent
+                                                    brandContext={brandContext}
+                                                    onChange={(newEnd) => {
+                                                        const { start } = resolvedFillGradientStops(selectedLayer)
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isFillLayer(l) || l.fillKind !== 'gradient') {
+                                                                return l
+                                                            }
+                                                            return {
+                                                                ...l,
+                                                                gradientStartColor: start,
+                                                                gradientEndColor: newEnd,
+                                                                color: opaqueHexForSolidFromGradientStops(
+                                                                    start,
+                                                                    newEnd,
+                                                                    l.color
+                                                                ),
+                                                            }
+                                                        })
+                                                    }}
+                                                />
+                                                <p className="text-[9px] text-gray-500 dark:text-gray-400">
+                                                    New gradients default to transparent → brand color. Use angle to
+                                                    place each stop along the line.
+                                                </p>
+                                                <div>
+                                                    <label className="mb-1 block text-gray-600 dark:text-gray-400">
+                                                        Angle (°)
+                                                    </label>
+                                                    <input
+                                                        type="range"
+                                                        min={0}
+                                                        max={360}
+                                                        value={selectedLayer.gradientAngleDeg ?? 180}
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) => {
+                                                            const v = Number(e.target.value)
+                                                            updateLayer(selectedLayer.id, (l) =>
+                                                                isFillLayer(l)
+                                                                    ? { ...l, gradientAngleDeg: v }
+                                                                    : l
+                                                            )
+                                                        }}
+                                                        className="w-full accent-indigo-600"
+                                                    />
+                                                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                                        {selectedLayer.gradientAngleDeg ?? 180}
+                                                        ° — direction of the gradient line (e.g. 180° runs top to
+                                                        bottom).
+                                                    </p>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
 
                                 {isGenerativeImageLayer(selectedLayer) && (
                                     <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-gray-700">
@@ -5071,27 +5428,49 @@ export default function AssetEditor() {
                                                 <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
                                                     Versions
                                                 </div>
-                                                <div className="flex gap-2 overflow-x-auto pb-1">
-                                                    {(layerVersions[selectedLayer.id] ?? []).map((v) => (
-                                                        <button
-                                                            key={v.id}
-                                                            type="button"
-                                                            disabled={selectedLayer.locked}
-                                                            onClick={() => handleSwitchAssetVersion(selectedLayer.id, v)}
-                                                            className={`border rounded overflow-hidden w-16 h-16 flex-shrink-0 hover:ring-2 hover:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 ${
-                                                                selectedLayer.assetVersionId === v.id
-                                                                    ? 'ring-2 ring-indigo-500'
-                                                                    : ''
-                                                            }`}
-                                                            title={v.created_at ?? undefined}
-                                                        >
-                                                            <img
-                                                                src={v.url}
-                                                                alt=""
-                                                                className="w-full h-full object-cover"
-                                                            />
-                                                        </button>
-                                                    ))}
+                                                <p className="mb-2 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                                                    Original first, newest edits next. Click a thumbnail to swap the
+                                                    canvas.
+                                                </p>
+                                                <div className="flex gap-3 overflow-x-auto pb-1 pt-0.5">
+                                                    {selectedImageLayerVersionStrip.map((v) => {
+                                                        const active = isAssetVersionThumbnailActive(
+                                                            selectedLayer,
+                                                            v,
+                                                            selectedImageLayerVersionStrip
+                                                        )
+                                                        const label = assetVersionStripLabel(
+                                                            v,
+                                                            selectedImageLayerVersionStripMin
+                                                        )
+                                                        return (
+                                                            <button
+                                                                key={v.id}
+                                                                type="button"
+                                                                disabled={selectedLayer.locked}
+                                                                onClick={() =>
+                                                                    handleSwitchAssetVersion(selectedLayer.id, v)
+                                                                }
+                                                                title={v.created_at ?? label}
+                                                                className={`flex flex-col items-center gap-1 flex-shrink-0 rounded-lg p-0.5 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                                    active
+                                                                        ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900'
+                                                                        : 'hover:ring-2 hover:ring-indigo-400/60 hover:ring-offset-1 hover:ring-offset-white dark:hover:ring-offset-gray-900'
+                                                                }`}
+                                                            >
+                                                                <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-800">
+                                                                    <img
+                                                                        src={v.url}
+                                                                        alt=""
+                                                                        className="h-full w-full object-cover"
+                                                                    />
+                                                                </div>
+                                                                <span className="max-w-[4.5rem] truncate text-center text-[10px] font-semibold tabular-nums text-gray-600 dark:text-gray-300">
+                                                                    {label}
+                                                                </span>
+                                                            </button>
+                                                        )
+                                                    })}
                                                 </div>
                                             </div>
                                         )}
@@ -5771,28 +6150,7 @@ export default function AssetEditor() {
                                         <div>
                                             <p className="mb-1 font-medium text-gray-700 dark:text-gray-300">Color</p>
                                             {(() => {
-                                                const slots = brandContext?.brand_color_slots
-                                                const labeled: { label: string; color: string }[] = []
-                                                if (slots) {
-                                                    if (slots.primary) {
-                                                        labeled.push({ label: 'Primary', color: slots.primary })
-                                                    }
-                                                    if (slots.secondary) {
-                                                        labeled.push({ label: 'Secondary', color: slots.secondary })
-                                                    }
-                                                    if (slots.accent) {
-                                                        labeled.push({ label: 'Accent', color: slots.accent })
-                                                    }
-                                                }
-                                                if (labeled.length === 0 && brandContext?.colors?.length) {
-                                                    const fallback = ['Primary', 'Secondary', 'Accent']
-                                                    brandContext.colors.forEach((c, idx) => {
-                                                        labeled.push({
-                                                            label: fallback[idx] ?? `Color ${idx + 1}`,
-                                                            color: c,
-                                                        })
-                                                    })
-                                                }
+                                                const labeled = labeledBrandPalette(brandContext)
                                                 if (labeled.length === 0) {
                                                     return null
                                                 }
@@ -6342,11 +6700,11 @@ export default function AssetEditor() {
                     className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
                     role="dialog"
                     aria-modal="true"
-                    aria-label="Save and publish"
+                    aria-label="Publish to library"
                 >
                     <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
                         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Save &amp; publish</h3>
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Publish</h3>
                             <button
                                 type="button"
                                 className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"

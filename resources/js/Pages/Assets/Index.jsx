@@ -1298,7 +1298,6 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         // Clear selection when items leave the view (trash, force delete, or assign category from staged)
                         if (result?.actionId === 'SOFT_DELETE' || result?.actionId === 'FORCE_DELETE' || result?.assignCategory) {
                             setBulkSelectedAssetIds([])
-                            setIsBulkMode(false)
                             clearSelection()
                         }
                     }}
@@ -1321,7 +1320,6 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                     onComplete={() => {
                         router.reload({ only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS] })
                         setBulkSelectedAssetIds([])
-                        setIsBulkMode(false)
                         clearSelection()
                         setShowBulkMetadataModal(false)
                         setBulkMetadataInitialOp(null)

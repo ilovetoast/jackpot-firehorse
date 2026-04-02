@@ -32,12 +32,27 @@ class AssetBulkActionController extends Controller
             return response()->json(['message' => 'Tenant not found.'], 404);
         }
 
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
         $validated = $request->validate([
             'asset_ids' => 'required|array|min:1',
             'asset_ids.*' => 'required|uuid|exists:assets,id',
             'action' => ['required', 'string', Rule::in(array_map(fn ($c) => $c->value, AssetBulkAction::cases()))],
             'payload' => 'nullable|array',
         ]);
+
+        $sitePipelineActions = [
+            AssetBulkAction::SITE_RERUN_THUMBNAILS->value,
+            AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING->value,
+        ];
+        if (in_array($validated['action'], $sitePipelineActions, true) && count($validated['asset_ids']) > 100) {
+            return response()->json([
+                'message' => 'Select at most 100 assets per site pipeline bulk action.',
+                'errors' => ['asset_ids' => ['Maximum 100 assets per request.']],
+            ], 422);
+        }
 
         $action = $validated['action'];
         $payload = $validated['payload'] ?? [];

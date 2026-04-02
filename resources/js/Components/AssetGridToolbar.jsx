@@ -26,6 +26,7 @@
  * @param {Object} props.available_values - Map of field_key to available values
  * @param {React.ReactNode} props.moreFiltersContent - Optional more filters section content
  * @param {boolean} props.showMoreFilters - Whether to show the more filters section
+ * @param {React.ReactNode} props.beforeSearchSlot - Optional controls rendered before the search field (e.g. collections type/category)
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
@@ -50,10 +51,13 @@ export default function AssetGridToolbar({
     available_values = {}, // Available filter values
     moreFiltersContent = null, // More filters section content
     showMoreFilters = false, // Whether to show more filters section
+    beforeSearchSlot = null,
     sortBy = 'created', // used when showMoreFilters is false (e.g. Collections)
     sortDirection = 'desc',
     onSortChange = null,
     searchQuery = '', // ?q= from server; syncs to URL on debounced change
+    /** Partial reload keys for search (e.g. Collections adds group_by_category, filters). */
+    inertiaSearchOnly = null,
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -73,10 +77,13 @@ export default function AssetGridToolbar({
         } else {
             urlParams.delete('q')
         }
+        const onlyKeys = Array.isArray(inertiaSearchOnly) && inertiaSearchOnly.length > 0
+            ? inertiaSearchOnly
+            : ['assets', 'next_page_url', 'q']
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'q'],
+            only: onlyKeys,
             onStart: () => setSearchLoading(true),
             onFinish: () => {
                 setSearchLoading(false)
@@ -92,7 +99,7 @@ export default function AssetGridToolbar({
                 }
             },
         })
-    }, [])
+    }, [inertiaSearchOnly])
 
     
     // Pending assets callout state
@@ -283,7 +290,13 @@ export default function AssetGridToolbar({
                 <div className="flex flex-row flex-wrap items-center gap-2 min-w-0 lg:flex-nowrap lg:justify-between">
                     {/* Left: Search + primary filters + sort. Mobile: Search + sort; Desktop: + primary filters */}
                     <div className="flex flex-row items-center gap-2 min-w-0 flex-1 lg:flex-initial lg:flex-wrap">
-                        <div className="flex-1 min-w-0 lg:flex-initial lg:min-w-[180px] lg:max-w-sm">
+                        <div
+                            className={
+                                beforeSearchSlot
+                                    ? 'min-w-0 w-full flex-1 basis-full sm:basis-auto sm:max-w-sm sm:flex-initial lg:min-w-[180px]'
+                                    : 'min-w-0 flex-1 lg:flex-initial lg:min-w-[180px] lg:max-w-sm'
+                            }
+                        >
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
@@ -294,6 +307,11 @@ export default function AssetGridToolbar({
                                 inputRef={searchInputRef}
                             />
                         </div>
+                        {beforeSearchSlot ? (
+                            <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
+                                {beforeSearchSlot}
+                            </div>
+                        ) : null}
                         
                         {/* Primary Metadata Filters — hidden on mobile (saves space), inline on desktop */}
                         <div className="hidden lg:flex items-center gap-2 min-w-0">

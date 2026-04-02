@@ -72,7 +72,7 @@ export async function fetchEditorCollectionsForPublish(): Promise<EditorCollecti
     return data.collections ?? []
 }
 
-/** GET /app/api/assets/categories — library categories for Save & publish */
+/** GET /app/api/assets/categories — library categories for Publish */
 export async function fetchEditorPublishCategories(): Promise<EditorPublishCategoriesResponse> {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
     const res = await fetch('/app/api/assets/categories', {

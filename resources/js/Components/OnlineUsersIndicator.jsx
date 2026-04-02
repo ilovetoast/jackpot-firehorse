@@ -61,7 +61,7 @@ function lightenHex(hex, amount = 40) {
 export default function OnlineUsersIndicator({ textColor = '#6b7280', primaryColor = '#6366f1', isLightBackground = true, className = '' }) {
   const { can } = usePermission()
   const canSeePresence = can('team.manage') || can('brand_settings.manage')
-  const { online } = usePresencePolling(canSeePresence)
+  const { online } = usePresencePolling(PRESENCE_UI_ENABLED && canSeePresence)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const popoverRef = useRef(null)
   const triggerRef = useRef(null)

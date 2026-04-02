@@ -26,7 +26,7 @@ export default function CollectionsSidebar({
     const buttonText = isLight ? 'text-gray-900' : 'text-white'
 
     const handleSelectCollection = (id) => {
-        router.get('/app/collections', { collection: id }, { preserveState: true })
+        router.get('/app/collections', { collection: id }, { preserveState: false, preserveScroll: true })
     }
 
     return (

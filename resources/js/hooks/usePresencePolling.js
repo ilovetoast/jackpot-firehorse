@@ -1,7 +1,7 @@
 /**
  * usePresencePolling Hook
  *
- * Gated by OnlineUsersIndicator.jsx (PRESENCE_UI_ENABLED). When off, no requests are made.
+ * Caller must pass enabled=false when presence UI is disabled (see OnlineUsersIndicator: PRESENCE_UI_ENABLED && canSeePresence).
  *
  * Polls presence heartbeat and online users. Presence is ambient, not realtime.
  * Only runs when enabled (user has team.manage or brand_settings.manage).

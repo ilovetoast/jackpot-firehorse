@@ -48,6 +48,8 @@ class EditorAssetVersionController extends Controller
                         'assetVersion' => $version->id,
                     ], absolute: true),
                     'created_at' => $version->created_at?->toIso8601String(),
+                    'version_number' => (int) $version->version_number,
+                    'is_current' => (bool) $version->is_current,
                 ];
             });
 

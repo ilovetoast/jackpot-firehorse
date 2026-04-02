@@ -50,8 +50,11 @@ Route::get('/manifest.webmanifest', function () {
     ]);
 })->name('manifest');
 
-// Home route - simple home page (subdomains disabled)
+// Marketing site (subdomains disabled) — pages live in resources/js/Pages/Marketing/
 Route::get('/', fn () => Inertia::render('Home'));
+Route::get('/product', fn () => Inertia::render('Marketing/Product'))->name('marketing.product');
+Route::get('/benefits', fn () => Inertia::render('Marketing/Benefits'))->name('marketing.benefits');
+Route::get('/agency', fn () => Inertia::render('Marketing/Agency'))->name('marketing.agency');
 
 // Contact / sales inquiry (e.g. Enterprise plan)
 Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [

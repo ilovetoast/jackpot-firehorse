@@ -22,6 +22,8 @@ import {
     ArrowUturnLeftIcon,
     PencilSquareIcon,
     ExclamationTriangleIcon,
+    PhotoIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline'
 import axios from 'axios'
 import { usePermission } from '../hooks/usePermission'
@@ -29,6 +31,11 @@ import { usePermission } from '../hooks/usePermission'
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
 const RENAME_ASSETS_ACTION = 'RENAME_ASSETS'
+
+const SITE_RERUN_THUMBNAILS = 'SITE_RERUN_THUMBNAILS'
+const SITE_RERUN_AI_METADATA_TAGGING = 'SITE_RERUN_AI_METADATA_TAGGING'
+const SITE_PIPELINE_ACTIONS = new Set([SITE_RERUN_THUMBNAILS, SITE_RERUN_AI_METADATA_TAGGING])
+const SITE_PIPELINE_ROLES = new Set(['site_owner', 'site_admin', 'site_engineering'])
 
 /** Match upload batch naming slug (see Upload/BatchNamingBar.jsx). */
 function slugifyForRename(str) {
@@ -255,10 +262,18 @@ function getActionLabel(actionId) {
         const a = group.actions.find((x) => x.id === actionId)
         if (a) return a.label
     }
+    if (actionId === SITE_RERUN_THUMBNAILS) return 'Rerun thumbnails'
+    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Rerun AI metadata & tagging'
     return actionId
 }
 
 function getConfirmSummaryText(actionId, count) {
+    if (actionId === SITE_RERUN_THUMBNAILS) {
+        return `This will queue thumbnail regeneration for ${count} selected asset${count !== 1 ? 's' : ''} (background workers).`
+    }
+    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) {
+        return `This will queue AI vision metadata and tag auto-apply for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.`
+    }
     const verb = actionId === 'PUBLISH' ? 'publish' : actionId === 'UNPUBLISH' ? 'unpublish' : actionId === 'ARCHIVE' ? 'archive' : actionId === 'RESTORE_ARCHIVE' ? 'restore from archive' : actionId === 'APPROVE' ? 'mark as approved' : actionId === 'MARK_PENDING' ? 'mark as pending' : actionId === 'REJECT' ? 'reject' : actionId === 'SOFT_DELETE' ? 'move to trash' : actionId === 'RESTORE_TRASH' ? 'restore from trash' : 'update'
     return `This will ${verb} ${count} selected asset${count !== 1 ? 's' : ''}.`
 }
@@ -282,8 +297,15 @@ export default function BulkActionsModal({
     /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution / Generative */
     bulkCategoriesByAssetType = null,
 }) {
+    const { auth } = usePage().props
     const { can } = usePermission()
     const canBulkRename = can('metadata.edit_post_upload')
+    const brandPrimary = auth?.activeBrand?.primary_color || null
+    const canSitePipeline = useMemo(() => {
+        const roles = auth?.user?.site_roles
+        if (!Array.isArray(roles)) return false
+        return roles.some((r) => SITE_PIPELINE_ROLES.has(r))
+    }, [auth?.user?.site_roles])
 
     const [step, setStep] = useState('select')
     const [selectedAction, setSelectedAction] = useState(null)
@@ -361,7 +383,11 @@ export default function BulkActionsModal({
     }, [step])
 
     useEffect(() => {
-        if (step === 'configure' && selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)) {
+        if (
+            step === 'configure' &&
+            selectedAction &&
+            (LIFECYCLE_ACTIONS.has(selectedAction) || SITE_PIPELINE_ACTIONS.has(selectedAction))
+        ) {
             setConfirmPanelEntered(false)
             const id = setTimeout(() => setConfirmPanelEntered(true), 20)
             return () => clearTimeout(id)
@@ -471,6 +497,7 @@ export default function BulkActionsModal({
     const isAssignCategory = selectedAction === ASSIGN_CATEGORY_ACTION
     const isRename = selectedAction === RENAME_ASSETS_ACTION
     const isLifecycle = selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)
+    const isSitePipeline = selectedAction && SITE_PIPELINE_ACTIONS.has(selectedAction)
 
     const summaryEligible = selectedAssetSummary
         ? (selectedAction === 'PUBLISH' ? selectedAssetSummary.filter((a) => !a.is_published).length : selectedAction === 'UNPUBLISH' ? selectedAssetSummary.filter((a) => a.is_published).length : null)
@@ -592,6 +619,60 @@ export default function BulkActionsModal({
                                     <span className="text-sm text-amber-800">
                                         Some selected assets cannot be modified and will be skipped.
                                     </span>
+                                </div>
+                            )}
+
+                            {canSitePipeline && (
+                                <div
+                                    className="mt-8 rounded-2xl border-2 border-indigo-200/90 p-5 shadow-sm"
+                                    style={
+                                        brandPrimary
+                                            ? {
+                                                  borderColor: brandPrimary,
+                                                  background: `linear-gradient(135deg, ${brandPrimary}14 0%, ${brandPrimary}08 50%, rgb(238 242 255) 100%)`,
+                                              }
+                                            : { background: 'linear-gradient(135deg, rgb(238 242 255) 0%, rgb(245 243 255) 100%)' }
+                                    }
+                                >
+                                    <div className="flex items-start gap-2 mb-3">
+                                        <span className="inline-flex items-center rounded-md bg-indigo-600/90 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
+                                            Admin
+                                        </span>
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="text-sm font-semibold text-indigo-950">Pipeline tools</h3>
+                                            <p className="text-xs text-indigo-900/70 mt-0.5 leading-snug">
+                                                Site admin or engineering only. Work runs in the queue (Horizon) — not instant. Max 100 assets per request.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
+                                            className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white/80 border border-indigo-100 shadow-sm hover:shadow-md hover:-translate-y-px transition-all"
+                                        >
+                                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 shrink-0">
+                                                <PhotoIcon className="w-5 h-5 text-indigo-700" />
+                                            </span>
+                                            <div className="min-w-0">
+                                                <span className="block text-sm font-medium text-gray-900">Rerun thumbnails</span>
+                                                <span className="block text-xs text-gray-600 mt-0.5">Regenerate preview images (all styles)</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
+                                            className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white/80 border border-indigo-100 shadow-sm hover:shadow-md hover:-translate-y-px transition-all"
+                                        >
+                                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 shrink-0">
+                                                <SparklesIcon className="w-5 h-5 text-violet-700" />
+                                            </span>
+                                            <div className="min-w-0">
+                                                <span className="block text-sm font-medium text-gray-900">Rerun AI metadata &amp; tagging</span>
+                                                <span className="block text-xs text-gray-600 mt-0.5">Vision + tag auto-apply; needs completed thumbnails</span>
+                                            </div>
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -737,15 +818,21 @@ export default function BulkActionsModal({
                                 </div>
                             )}
 
-                            {isLifecycle && (
+                            {(isLifecycle || isSitePipeline) && (
                                 <div
-                                    className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out"
+                                    className={`rounded-xl border p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out ${
+                                        isSitePipeline
+                                            ? 'border-indigo-200 bg-indigo-50/60'
+                                            : 'border-gray-200 bg-gray-50/50'
+                                    }`}
                                     style={{
                                         opacity: confirmPanelEntered ? 1 : 0,
                                         transform: confirmPanelEntered ? 'translateY(0)' : 'translateY(4px)',
                                     }}
                                 >
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Confirm Bulk Action</h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">
+                                        {isSitePipeline ? 'Confirm site pipeline action' : 'Confirm Bulk Action'}
+                                    </h3>
                                     <p className="text-sm text-gray-700 mb-3">
                                         {getConfirmSummaryText(selectedAction, n)}
                                     </p>
@@ -782,6 +869,8 @@ export default function BulkActionsModal({
                                 >
                                     {submitting
                                         ? `Processing ${n} assets...`
+                                        : isSitePipeline
+                                        ? 'Queue jobs'
                                         : isLifecycle
                                         ? 'Confirm Action'
                                         : isReject

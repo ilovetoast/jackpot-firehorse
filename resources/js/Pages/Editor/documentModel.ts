@@ -54,7 +54,7 @@ export type DocumentModel = {
 
 export type BaseLayer = {
     id: string
-    type: 'image' | 'text' | 'generative_image'
+    type: 'image' | 'text' | 'generative_image' | 'fill'
     name?: string
     visible: boolean
     locked: boolean
@@ -180,6 +180,32 @@ export type BrandContext = {
     archetype?: string
 }
 
+/** Labeled ink for editor color swatches (brain guidelines slots, else {@link BrandContext.colors}). */
+export type LabeledBrandColor = { label: string; color: string }
+
+export function labeledBrandPalette(brand: BrandContext | null | undefined): LabeledBrandColor[] {
+    const slots = brand?.brand_color_slots
+    const labeled: LabeledBrandColor[] = []
+    if (slots) {
+        if (slots.primary) {
+            labeled.push({ label: 'Primary', color: slots.primary })
+        }
+        if (slots.secondary) {
+            labeled.push({ label: 'Secondary', color: slots.secondary })
+        }
+        if (slots.accent) {
+            labeled.push({ label: 'Accent', color: slots.accent })
+        }
+    }
+    if (labeled.length === 0 && brand?.colors?.length) {
+        const fallback = ['Primary', 'Secondary', 'Accent']
+        brand.colors.forEach((c, idx) => {
+            labeled.push({ label: fallback[idx] ?? `Color ${idx + 1}`, color: c })
+        })
+    }
+    return labeled
+}
+
 /** Default stack when no brand primary font is set. */
 export const DEFAULT_TEXT_FONT_FAMILY = 'Inter, system-ui, sans-serif'
 
@@ -251,6 +277,26 @@ export type GenerativePrompt = {
     }
 }
 
+/** Solid color or linear gradient (e.g. brand wash) — no bitmap. */
+export type FillLayer = BaseLayer & {
+    type: 'fill'
+    fillKind: 'solid' | 'gradient'
+    /**
+     * Solid fill color. For gradient, kept aligned with the second stop when using the two-color UI
+     * (used when toggling to solid).
+     */
+    color: string
+    /**
+     * Two-stop gradient: first CSS color (`transparent`, `#rrggbb`, …). When both this and
+     * {@link gradientEndColor} are undefined, legacy rendering uses {@link color} → transparent.
+     */
+    gradientStartColor?: string
+    /** Two-stop gradient: second CSS color. */
+    gradientEndColor?: string
+    /** CSS linear-gradient angle in degrees (0 = to top, 90 = to right, 180 = to bottom). */
+    gradientAngleDeg?: number
+}
+
 export type GenerativeImageLayer = BaseLayer & {
     type: 'generative_image'
     prompt: GenerativePrompt
@@ -281,7 +327,13 @@ export type GenerativeImageLayer = BaseLayer & {
     variationResults?: string[]
 }
 
-export type Layer = ImageLayer | TextLayer | GenerativeImageLayer
+export type Layer = ImageLayer | TextLayer | GenerativeImageLayer | FillLayer
+
+const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill'])
+
+export function isFillLayer(l: Layer): l is FillLayer {
+    return l.type === 'fill'
+}
 
 /** Inline SVG placeholder — no network request. */
 export const PLACEHOLDER_IMAGE_SRC =
@@ -376,8 +428,16 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
     const o = raw as Record<string, unknown>
     const w = typeof o.width === 'number' && o.width > 0 ? o.width : 1080
     const h = typeof o.height === 'number' && o.height > 0 ? o.height : 1080
-    const layersRaw = Array.isArray(o.layers) ? (o.layers as Layer[]) : []
-    const layers = normalizeZ(layersRaw)
+    const layersRaw = Array.isArray(o.layers) ? (o.layers as unknown[]) : []
+    const layers = normalizeZ(
+        layersRaw.filter((raw): raw is Layer => {
+            if (!raw || typeof raw !== 'object') {
+                return false
+            }
+            const t = (raw as { type?: string }).type
+            return typeof t === 'string' && ALLOWED_LAYER_TYPES.has(t)
+        }) as Layer[]
+    )
     return {
         id: typeof o.id === 'string' ? o.id : generateId(),
         width: w,
@@ -996,6 +1056,71 @@ export function computeAutoFitTextFontSize(
     return size
 }
 
+/** CSS `background` for a fill layer (solid or linear gradient, including legacy one-color gradients). */
+export function fillLayerBackgroundCss(layer: FillLayer): string {
+    if (layer.fillKind === 'solid') {
+        return layer.color
+    }
+    const angle = layer.gradientAngleDeg ?? 180
+    const explicit =
+        layer.gradientStartColor !== undefined || layer.gradientEndColor !== undefined
+    if (explicit) {
+        const start = layer.gradientStartColor ?? 'transparent'
+        const end = layer.gradientEndColor ?? layer.color ?? '#6366f1'
+        return `linear-gradient(${angle}deg, ${start}, ${end})`
+    }
+    return `linear-gradient(${angle}deg, ${layer.color}, transparent)`
+}
+
+/** Resolved gradient stops for UI (legacy layers only had {@link FillLayer.color} → transparent). */
+export function resolvedFillGradientStops(layer: FillLayer): { start: string; end: string } {
+    if (layer.fillKind !== 'gradient') {
+        return { start: layer.color, end: layer.color }
+    }
+    if (layer.gradientStartColor === undefined && layer.gradientEndColor === undefined) {
+        return { start: layer.color, end: 'transparent' }
+    }
+    return {
+        start: layer.gradientStartColor ?? 'transparent',
+        end: layer.gradientEndColor ?? layer.color ?? '#6366f1',
+    }
+}
+
+export function createFillLayer(
+    z: number,
+    doc: Pick<DocumentModel, 'width' | 'height'>,
+    opts: {
+        color: string
+        fillKind?: 'solid' | 'gradient'
+        gradientStartColor?: string
+        gradientEndColor?: string
+    }
+): FillLayer {
+    const fillKind = opts.fillKind ?? 'gradient'
+    const base: FillLayer = {
+        id: generateId(),
+        type: 'fill',
+        name: fillKind === 'solid' ? 'Solid fill' : 'Gradient fill',
+        visible: true,
+        locked: false,
+        z,
+        transform: defaultTransform({
+            x: 0,
+            y: 0,
+            width: doc.width,
+            height: doc.height,
+        }),
+        fillKind,
+        color: opts.color,
+        gradientAngleDeg: 180,
+    }
+    if (fillKind === 'gradient') {
+        base.gradientStartColor = opts.gradientStartColor ?? 'transparent'
+        base.gradientEndColor = opts.gradientEndColor ?? opts.color
+    }
+    return base
+}
+
 export function createDefaultTextLayer(
     z: number,
     doc: Pick<DocumentModel, 'width' | 'height'>,
@@ -1058,6 +1183,14 @@ export function cloneLayer(layer: Layer): Layer {
             variationPending: undefined,
             variationBatchSize: undefined,
             variationResults: undefined,
+        }
+    }
+    if (layer.type === 'fill') {
+        return {
+            ...layer,
+            id,
+            name: layer.name ? `${layer.name} copy` : 'Fill copy',
+            transform: { ...layer.transform },
         }
     }
     return {

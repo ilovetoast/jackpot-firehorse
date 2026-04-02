@@ -25,6 +25,12 @@ enum AssetBulkAction: string
     case ASSIGN_CATEGORY = 'ASSIGN_CATEGORY'; // Staged intake: set category_id + intake_state=normal
     case RENAME_ASSETS = 'RENAME_ASSETS'; // Batch rename title + original_filename (base name + index of total)
 
+    /** Site admin / site engineering only — queue thumbnail regeneration (GenerateThumbnailsJob). */
+    case SITE_RERUN_THUMBNAILS = 'SITE_RERUN_THUMBNAILS';
+
+    /** Site admin / site engineering only — queue AI vision metadata + tag auto-apply (same chain as single-asset regenerate). */
+    case SITE_RERUN_AI_METADATA_TAGGING = 'SITE_RERUN_AI_METADATA_TAGGING';
+
     public function isApprovalAction(): bool
     {
         return in_array($this, [
@@ -40,6 +46,14 @@ enum AssetBulkAction: string
             self::METADATA_ADD,
             self::METADATA_REPLACE,
             self::METADATA_CLEAR,
+        ], true);
+    }
+
+    public function isSitePipelineAction(): bool
+    {
+        return in_array($this, [
+            self::SITE_RERUN_THUMBNAILS,
+            self::SITE_RERUN_AI_METADATA_TAGGING,
         ], true);
     }
 

@@ -21,8 +21,23 @@ import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import CollectionFiltersBar from '../../Components/Collections/CollectionFiltersBar'
 import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
 import axios from 'axios'
+
+const COLLECTIONS_PARTIAL_RELOAD = [
+    'assets',
+    'next_page_url',
+    'q',
+    'sort',
+    'sort_direction',
+    'group_by_category',
+    'collection_type',
+    'category_id',
+    'filter_categories',
+    /** Keep current collection when using `only` — otherwise Inertia can clear selection. */
+    'selected_collection',
+]
 
 export default function CollectionsIndex({
     collections = [],
@@ -37,6 +52,10 @@ export default function CollectionsIndex({
     sort = 'created',
     sort_direction = 'desc',
     q: searchQuery = '',
+    collection_type = 'all',
+    category_id: categoryFilterId = null,
+    group_by_category = false,
+    filter_categories = [],
 }) {
     const { auth } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
@@ -120,10 +139,32 @@ export default function CollectionsIndex({
     const safeAssetsList = (assetsList || []).filter(Boolean)
     const activeAsset = activeAssetId ? safeAssetsList.find((a) => a?.id === activeAssetId) : null
 
+    const categorySections = useMemo(() => {
+        if (!group_by_category || !safeAssetsList.length) return null
+        const map = new Map()
+        for (const a of safeAssetsList) {
+            const key = a.category?.id != null ? String(a.category.id) : 'uncategorized'
+            const label = a.category?.name ?? 'Uncategorized'
+            if (!map.has(key)) {
+                map.set(key, { key, label, assets: [] })
+            }
+            map.get(key).assets.push(a)
+        }
+        const sections = Array.from(map.values())
+        sections.sort((x, y) => {
+            const ux = x.key === 'uncategorized' ? 1 : 0
+            const uy = y.key === 'uncategorized' ? 1 : 0
+            if (ux !== uy) return ux - uy
+            return x.label.localeCompare(y.label, undefined, { sensitivity: 'base' })
+        })
+        return sections.length > 0 ? sections : null
+    }, [group_by_category, safeAssetsList])
+
     const navigateToCollection = useCallback((collectionId, options = {}) => {
         const params = collectionId == null ? {} : { collection: collectionId }
         router.get('/app/collections', params, {
-            preserveState: true,
+            /* Same Inertia page component: preserveState kept stale props (selected_collection stayed null). */
+            preserveState: false,
             preserveScroll: true,
             ...options,
         })
@@ -549,14 +590,35 @@ export default function CollectionsIndex({
                                             filterable_schema={[]}
                                             selectedCategoryId={null}
                                             available_values={{}}
+                                            beforeSearchSlot={
+                                                selectedCollectionId != null ? (
+                                                    <CollectionFiltersBar
+                                                        collectionId={selectedCollectionId}
+                                                        collectionType={collection_type}
+                                                        categoryId={categoryFilterId}
+                                                        filterCategories={filter_categories}
+                                                        primaryColor={workspaceAccentColor}
+                                                    />
+                                                ) : null
+                                            }
                                             sortBy={sort}
                                             sortDirection={sort_direction}
-                                            onSortChange={(newSort, newDir) => {
-                                                const urlParams = new URLSearchParams(window.location.search)
-                                                urlParams.set('sort', newSort)
-                                                urlParams.set('sort_direction', newDir)
-                                                router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
-                                            }}
+                                            searchQuery={searchQuery}
+                                            inertiaSearchOnly={COLLECTIONS_PARTIAL_RELOAD}
+                                            onSortChange={
+                                                group_by_category
+                                                    ? null
+                                                    : (newSort, newDir) => {
+                                                          const urlParams = new URLSearchParams(window.location.search)
+                                                          urlParams.set('sort', newSort)
+                                                          urlParams.set('sort_direction', newDir)
+                                                          router.get(window.location.pathname, Object.fromEntries(urlParams), {
+                                                              preserveState: true,
+                                                              preserveScroll: true,
+                                                              only: COLLECTIONS_PARTIAL_RELOAD,
+                                                          })
+                                                      }
+                                            }
                                             showMoreFilters={true}
                                             moreFiltersContent={
                                                 <AssetGridSecondaryFilters
@@ -568,12 +630,20 @@ export default function CollectionsIndex({
                                                     primaryColor={workspaceAccentColor}
                                                     sortBy={sort}
                                                     sortDirection={sort_direction}
-                                                    onSortChange={(newSort, newDir) => {
-                                                        const urlParams = new URLSearchParams(window.location.search)
-                                                        urlParams.set('sort', newSort)
-                                                        urlParams.set('sort_direction', newDir)
-                                                        router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
-                                                    }}
+                                                    onSortChange={
+                                                        group_by_category
+                                                            ? null
+                                                            : (newSort, newDir) => {
+                                                                  const urlParams = new URLSearchParams(window.location.search)
+                                                                  urlParams.set('sort', newSort)
+                                                                  urlParams.set('sort_direction', newDir)
+                                                                  router.get(window.location.pathname, Object.fromEntries(urlParams), {
+                                                                      preserveState: true,
+                                                                      preserveScroll: true,
+                                                                      only: COLLECTIONS_PARTIAL_RELOAD,
+                                                                  })
+                                                              }
+                                                    }
                                                     assetResultCount={assetsList?.length ?? 0}
                                                     totalInCategory={assetsList?.length ?? 0}
                                                     hasMoreAvailable={!!nextPageUrl}
@@ -584,6 +654,30 @@ export default function CollectionsIndex({
 
                                     {hasAssets ? (
                                         <>
+                                        {categorySections ? (
+                                            <div className="space-y-10">
+                                                {categorySections.map((sec) => (
+                                                    <section key={sec.key}>
+                                                        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-4 px-0.5 border-b border-gray-100 pb-2">
+                                                            {sec.label}
+                                                        </h3>
+                                                        <AssetGrid
+                                                            assets={sec.assets}
+                                                            onAssetClick={handleAssetGridClick}
+                                                            onAssetDoubleClick={handleAssetDoubleClick}
+                                                            cardSize={cardSize}
+                                                            layoutMode={layoutMode}
+                                                            cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
+                                                            showInfo={showInfo}
+                                                            selectedAssetId={activeAssetId}
+                                                            primaryColor={workspaceAccentColor}
+                                                            selectedAssetIds={[]}
+                                                            onAssetSelect={null}
+                                                        />
+                                                    </section>
+                                                ))}
+                                            </div>
+                                        ) : (
                                         <AssetGrid
                                             assets={safeAssetsList}
                                             onAssetClick={handleAssetGridClick}
@@ -597,6 +691,7 @@ export default function CollectionsIndex({
                                             selectedAssetIds={[]}
                                             onAssetSelect={null}
                                         />
+                                        )}
                                         {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                                         {loading && (
                                             <div className="flex justify-center py-6">
@@ -725,7 +820,7 @@ export default function CollectionsIndex({
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
-                        router.reload({ only: ['assets', 'next_page_url'] })
+                        router.reload({ only: COLLECTIONS_PARTIAL_RELOAD })
                         if (result?.actionId === 'SOFT_DELETE') {
                             setBulkSelectedAssetIds([])
                             clearSelection()
@@ -748,7 +843,7 @@ export default function CollectionsIndex({
                         setBulkMetadataInitialOp(null)
                     }}
                     onComplete={() => {
-                        router.reload({ only: ['assets', 'next_page_url'] })
+                        router.reload({ only: COLLECTIONS_PARTIAL_RELOAD })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)

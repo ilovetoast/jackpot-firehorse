@@ -6,13 +6,22 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetBulkAction;
 use App\Enums\AssetType;
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
+use App\Exceptions\PlanLimitExceededException;
+use App\Jobs\AiMetadataGenerationJob;
+use App\Jobs\AiTagAutoApplyJob;
+use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Models\Tenant;
+use App\Services\AiTagPolicyService;
+use App\Services\AiUsageService;
 use App\Services\BulkMetadataService;
+use App\Support\PipelineQueueResolver;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -50,6 +59,9 @@ class BulkActionService
         }
         if ($actionEnum === AssetBulkAction::RENAME_ASSETS) {
             return $this->executeRenameAssets($assetIds, $payload, $user, $tenantId, $brandId);
+        }
+        if ($actionEnum->isSitePipelineAction()) {
+            return $this->executeSitePipelineBulk($assetIds, $actionEnum, $user, $tenantId, $brandId);
         }
         if ($actionEnum->isMetadataAction()) {
             $opType = $actionEnum->metadataOperationType();
@@ -155,12 +167,16 @@ class BulkActionService
 
         if ($action->isApprovalAction()) {
             $tenant = $asset->tenant;
-            $tenantRole = $user->getRoleForTenant($tenant);
+            $tenantRole = $tenant ? $user->getRoleForTenant($tenant) : null;
             if (in_array($tenantRole, ['owner', 'admin'], true)) {
                 return true;
             }
             if ($asset->brand_id) {
-                $membership = $user->activeBrandMembership($asset->brand);
+                $brand = $asset->brand;
+                if (! $brand) {
+                    return false;
+                }
+                $membership = $user->activeBrandMembership($brand);
                 $brandRole = $membership['role'] ?? null;
 
                 return $brandRole && PermissionMap::canApproveAssets($brandRole);
@@ -357,6 +373,159 @@ class BulkActionService
             skipped: $skipped,
             errors: $errors,
             perActionSummary: []
+        );
+    }
+
+    /**
+     * Site owner / site admin / site engineering only: queue pipeline jobs per asset.
+     * Jobs run on Horizon-managed queues (images, etc.) — this method only dispatches.
+     *
+     * @throws AuthorizationException When user lacks a site pipeline role.
+     */
+    protected function executeSitePipelineBulk(
+        array $assetIds,
+        AssetBulkAction $action,
+        User $user,
+        int $tenantId,
+        ?int $brandId
+    ): BulkActionResult {
+        if (! $user->hasRole(['site_owner', 'site_admin', 'site_engineering'])) {
+            throw new AuthorizationException('Site admin or site engineering permission is required for this action.');
+        }
+
+        $query = Asset::query()
+            ->with(['storageBucket', 'currentVersion'])
+            ->whereIn('id', $assetIds)
+            ->where('tenant_id', $tenantId)
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->whereNull('deleted_at');
+
+        $assets = $query->get()->keyBy('id');
+        $ordered = [];
+        foreach ($assetIds as $id) {
+            if ($assets->has($id)) {
+                $ordered[] = $assets->get($id);
+            }
+        }
+
+        $processed = 0;
+        $skipped = 0;
+        $errors = [];
+        $perActionSummary = [];
+        $aiPolicy = app(AiTagPolicyService::class);
+        $aiUsage = app(AiUsageService::class);
+        $tenant = Tenant::find($tenantId);
+
+        if ($action === AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING) {
+            $aiEligible = [];
+            foreach ($ordered as $asset) {
+                if (! Gate::forUser($user)->allows('view', $asset)) {
+                    $skipped++;
+                    $perActionSummary['skipped_unauthorized'] = ($perActionSummary['skipped_unauthorized'] ?? 0) + 1;
+
+                    continue;
+                }
+                if (! $asset->storage_root_path || ! $asset->storageBucket) {
+                    $skipped++;
+                    $perActionSummary['skipped_no_storage'] = ($perActionSummary['skipped_no_storage'] ?? 0) + 1;
+
+                    continue;
+                }
+                if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+                    $skipped++;
+                    $perActionSummary['skipped_thumbnails_not_ready'] = ($perActionSummary['skipped_thumbnails_not_ready'] ?? 0) + 1;
+
+                    continue;
+                }
+                $policy = $aiPolicy->shouldProceedWithAiTagging($asset);
+                if (! ($policy['should_proceed'] ?? false)) {
+                    $skipped++;
+                    $perActionSummary['skipped_ai_policy'] = ($perActionSummary['skipped_ai_policy'] ?? 0) + 1;
+
+                    continue;
+                }
+                $aiEligible[] = $asset;
+            }
+
+            if ($tenant && count($aiEligible) > 0) {
+                try {
+                    $aiUsage->checkUsage($tenant, 'tagging', count($aiEligible));
+                } catch (PlanLimitExceededException $e) {
+                    throw new AuthorizationException($e->getMessage());
+                }
+            }
+
+            foreach ($aiEligible as $asset) {
+                try {
+                    $previousState = $this->snapshotState($asset);
+                    Bus::chain([
+                        new AiMetadataGenerationJob($asset->id, true),
+                        new AiTagAutoApplyJob($asset->id),
+                    ])
+                        ->onQueue(config('queue.images_queue', 'images'))
+                        ->dispatch();
+                    $this->emitBulkActionPerformed($asset, $user, $action->value, $previousState, $this->snapshotState($asset));
+                    $processed++;
+                } catch (\Throwable $e) {
+                    Log::warning('[BulkActionService] SITE_RERUN_AI_METADATA_TAGGING dispatch failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $errors[] = ['asset_id' => $asset->id, 'reason' => $e->getMessage()];
+                }
+            }
+
+            return new BulkActionResult(
+                totalSelected: count($assetIds),
+                processed: $processed,
+                skipped: $skipped,
+                errors: $errors,
+                perActionSummary: $perActionSummary
+            );
+        }
+
+        // SITE_RERUN_THUMBNAILS
+        foreach ($ordered as $asset) {
+            if (! Gate::forUser($user)->allows('view', $asset)) {
+                $skipped++;
+                $perActionSummary['skipped_unauthorized'] = ($perActionSummary['skipped_unauthorized'] ?? 0) + 1;
+
+                continue;
+            }
+            if (! $asset->storage_root_path || ! $asset->storageBucket) {
+                $skipped++;
+                $perActionSummary['skipped_no_storage'] = ($perActionSummary['skipped_no_storage'] ?? 0) + 1;
+
+                continue;
+            }
+            try {
+                $previousState = $this->snapshotState($asset);
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::PENDING,
+                    'thumbnail_error' => null,
+                    'thumbnail_started_at' => null,
+                ]);
+                $asset->loadMissing('currentVersion');
+                $payloadId = $asset->currentVersion ? (string) $asset->currentVersion->id : (string) $asset->id;
+                GenerateThumbnailsJob::dispatch($payloadId, true)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+                $asset->refresh();
+                $this->emitBulkActionPerformed($asset, $user, $action->value, $previousState, $this->snapshotState($asset));
+                $processed++;
+            } catch (\Throwable $e) {
+                Log::warning('[BulkActionService] SITE_RERUN_THUMBNAILS failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $errors[] = ['asset_id' => $asset->id, 'reason' => $e->getMessage()];
+            }
+        }
+
+        return new BulkActionResult(
+            totalSelected: count($assetIds),
+            processed: $processed,
+            skipped: $skipped,
+            errors: $errors,
+            perActionSummary: $perActionSummary
         );
     }
 

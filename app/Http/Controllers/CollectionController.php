@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
+use App\Enums\AssetType;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
@@ -20,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -60,6 +62,10 @@ class CollectionController extends Controller
                 'can_remove_from_collection' => false,
                 'public_collections_enabled' => false,
                 'q' => '',
+                'collection_type' => 'all',
+                'category_id' => null,
+                'group_by_category' => false,
+                'filter_categories' => [],
             ]);
         }
 
@@ -156,6 +162,10 @@ class CollectionController extends Controller
         $assets = [];
         $paginator = null;
         $selectedCollection = null;
+        $collectionTypeFilter = 'all';
+        $categoryFilterIdForProps = null;
+        $groupByCategoryEnabled = false;
+        $filterCategories = [];
 
         if ($collectionIdParam !== null && $collectionIdParam !== '') {
             $collection = Collection::query()
@@ -165,33 +175,85 @@ class CollectionController extends Controller
                 ->find($collectionIdParam);
 
             if ($collection && Gate::forUser($user)->allows('view', $collection)) {
+                $collectionBrand = $collection->brand;
+                $selectedCollection = [
+                    'id' => $collection->id,
+                    'name' => $collection->name,
+                    'description' => $collection->description,
+                    'visibility' => $collection->visibility ?? 'brand',
+                    'slug' => $collection->slug,
+                    'brand_slug' => $collectionBrand?->slug,
+                    'is_public' => $collection->is_public,
+                ];
+
                 try {
                     $query = $this->collectionAssetQueryService->query($user, $collection);
+                    $query->select('assets.*');
+
+                    $collectionType = $this->normalizeCollectionTypeFilter($request->query('collection_type'));
+                    $this->applyCollectionAssetTypeFilter($query, $collectionType);
+
+                    $filterCategories = $this->categoriesPresentInCollection(
+                        $user,
+                        $collection,
+                        $collectionType,
+                        $tenant->id,
+                        $brand->id
+                    );
+
+                    $categoryFilterId = $request->query('category_id');
+                    $categoryFilterId = is_numeric($categoryFilterId) ? (int) $categoryFilterId : null;
+                    $allowedCategoryIds = collect($filterCategories)->pluck('id')->map(fn ($id) => (int) $id)->all();
+                    if ($categoryFilterId !== null && $categoryFilterId > 0 && ! in_array($categoryFilterId, $allowedCategoryIds, true)) {
+                        $categoryFilterId = null;
+                    }
+
+                    if ($categoryFilterId !== null && $categoryFilterId > 0) {
+                        $query->where('assets.metadata->category_id', $categoryFilterId);
+                    }
+
                     // Scoped search: only within this collection's assets (query already scoped via asset_collections)
                     $searchQ = $request->input('q');
-                    if (is_string($searchQ) && trim($searchQ) !== '') {
-                        $this->assetSearchService->applyScopedSearch($query, trim($searchQ));
+                    $qTrim = is_string($searchQ) ? trim($searchQ) : '';
+                    if ($qTrim !== '') {
+                        $this->assetSearchService->applyScopedSearch($query, $qTrim);
                     }
+
+                    $hasNarrowingFilters = $qTrim !== ''
+                        || ($categoryFilterId !== null && $categoryFilterId > 0)
+                        || $collectionType !== 'all';
+                    $groupByCategory = ! $hasNarrowingFilters;
+
                     $sort = $this->assetSortService->normalizeSort($request->input('sort'));
                     $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
+                    // Always use standard sort for collections. Category section layout is built client-side
+                    // (aggregated by category) so we avoid LEFT JOIN + JSON cast ordering that can error on PG
+                    // when metadata.category_id is non-numeric and return zero rows from the whole query.
                     $this->assetSortService->applySort($query, $sort, $sortDirection);
+
                     $perPage = 36;
                     $paginator = $query->paginate($perPage)->withQueryString();
                     $items = $paginator->items();
                     $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset(collect($items)->pluck('id')->all());
                     $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
-                    $brand = $collection->brand;
-                    $selectedCollection = [
-                        'id' => $collection->id,
-                        'name' => $collection->name,
-                        'description' => $collection->description,
-                        'visibility' => $collection->visibility ?? 'brand',
-                        'slug' => $collection->slug,
-                        'brand_slug' => $brand?->slug,
-                        'is_public' => $collection->is_public,
-                    ];
-                } catch (\Throwable) {
-                    // Unauthorized or other: leave assets empty, selected_collection null
+                    $collectionTypeFilter = $collectionType;
+                    $categoryFilterIdForProps = ($categoryFilterId !== null && $categoryFilterId > 0) ? $categoryFilterId : null;
+                    $groupByCategoryEnabled = $groupByCategory;
+                } catch (\Throwable $e) {
+                    Log::error('collections.index.asset_grid_failed', [
+                        'collection_id' => $collection->id,
+                        'tenant_id' => $tenant->id,
+                        'brand_id' => $brand->id,
+                        'user_id' => $user->id,
+                        'message' => $e->getMessage(),
+                        'exception' => get_class($e),
+                    ]);
+                    $assets = [];
+                    $paginator = null;
+                    $collectionTypeFilter = $this->normalizeCollectionTypeFilter($request->query('collection_type'));
+                    $categoryFilterIdForProps = null;
+                    $groupByCategoryEnabled = false;
+                    $filterCategories = [];
                 }
             }
         }
@@ -225,8 +287,8 @@ class CollectionController extends Controller
         // C10: Public Collections feature (plan-gated); when disabled, public toggle is hidden/disabled
         $publicCollectionsEnabled = $this->featureGate->publicCollectionsEnabled($tenant);
 
-        $sort = $request->input('sort', 'created');
-        $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $sort = $this->assetSortService->normalizeSort($request->input('sort'));
+        $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
 
         // Load-more: return JSON only so the client can append without Inertia replacing the list
         if ($request->boolean('load_more') && $selectedCollection !== null && isset($paginator)) {
@@ -249,6 +311,10 @@ class CollectionController extends Controller
             'sort' => $sort,
             'sort_direction' => $sortDirection,
             'q' => $request->input('q', ''),
+            'collection_type' => $collectionTypeFilter,
+            'category_id' => $categoryFilterIdForProps,
+            'group_by_category' => $groupByCategoryEnabled,
+            'filter_categories' => $filterCategories,
         ]);
     }
 
@@ -798,7 +864,82 @@ class CollectionController extends Controller
             'preview_url' => null,
             'url' => null,
             'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
+            'type' => $asset->type instanceof AssetType ? $asset->type->value : (string) $asset->type,
         ];
+    }
+
+    /**
+     * Query param: collection_type — all | asset | deliverable | ai_generated
+     */
+    private function normalizeCollectionTypeFilter(mixed $value): string
+    {
+        if ($value === null || $value === '' || (is_array($value) && $value === [])) {
+            return 'all';
+        }
+        if (! is_string($value)) {
+            return 'all';
+        }
+        $v = strtolower(trim($value));
+        if ($v === '') {
+            return 'all';
+        }
+
+        return in_array($v, ['asset', 'deliverable', 'ai_generated', 'all'], true) ? $v : 'all';
+    }
+
+    private function applyCollectionAssetTypeFilter(\Illuminate\Database\Eloquent\Builder $query, string $collectionType): void
+    {
+        if ($collectionType === 'asset') {
+            $query->where('assets.type', AssetType::ASSET);
+        } elseif ($collectionType === 'deliverable') {
+            $query->where('assets.type', AssetType::DELIVERABLE);
+        } elseif ($collectionType === 'ai_generated') {
+            $query->where('assets.type', AssetType::AI_GENERATED);
+        }
+    }
+
+    /**
+     * Category filter options: only categories that appear on at least one asset in this collection,
+     * respecting the current type filter (all / asset / execution / generative).
+     *
+     * @return array<int, array{id: int, name: string, asset_type: string}>
+     */
+    private function categoriesPresentInCollection(
+        User $user,
+        Collection $collection,
+        string $collectionType,
+        int $tenantId,
+        int $brandId
+    ): array {
+        $q = $this->collectionAssetQueryService->query($user, $collection);
+        $this->applyCollectionAssetTypeFilter($q, $collectionType);
+
+        $ids = $q->pluck('metadata')
+            ->map(fn ($m) => is_array($m) ? ($m['category_id'] ?? null) : null)
+            ->filter(fn ($id) => $id !== null && $id !== '' && is_numeric($id))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return Category::query()
+            ->where('tenant_id', $tenantId)
+            ->where('brand_id', $brandId)
+            ->whereIn('id', $ids)
+            ->visible()
+            ->orderBy('name')
+            ->get(['id', 'name', 'asset_type'])
+            ->map(fn (Category $c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'asset_type' => $c->asset_type instanceof AssetType ? $c->asset_type->value : (string) $c->asset_type,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

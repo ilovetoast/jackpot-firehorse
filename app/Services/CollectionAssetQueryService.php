@@ -50,7 +50,7 @@ class CollectionAssetQueryService
         return Asset::query()
             ->where('tenant_id', $collection->tenant_id)
             ->where('brand_id', $collection->brand_id)
-            ->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE])
+            ->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED])
             ->where('status', AssetStatus::VISIBLE)
             ->whereNull('deleted_at')
             ->whereIn('id', function ($q) use ($collection) {
@@ -73,7 +73,7 @@ class CollectionAssetQueryService
         return Asset::query()
             ->where('tenant_id', $collection->tenant_id)
             ->where('brand_id', $collection->brand_id)
-            ->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE])
+            ->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED])
             ->where('status', AssetStatus::VISIBLE)
             ->whereNull('deleted_at')
             ->whereNull('archived_at')

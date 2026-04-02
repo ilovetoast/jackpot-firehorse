@@ -6,8 +6,10 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\StorageBucketStatus;
+use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\StorageBucket;
@@ -15,6 +17,9 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Queue;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class AssetBulkActionTest extends TestCase
@@ -248,5 +253,65 @@ class AssetBulkActionTest extends TestCase
             ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_site_rerun_thumbnails_forbidden_without_site_role(): void
+    {
+        Queue::fake();
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'SITE_RERUN_THUMBNAILS',
+                'payload' => [],
+            ]);
+
+        $response->assertStatus(403);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_site_rerun_thumbnails_queues_jobs_for_site_engineering(): void
+    {
+        Queue::fake();
+        Role::firstOrCreate(['name' => 'site_engineering', 'guard_name' => 'web']);
+        $this->user->assignRole('site_engineering');
+
+        $this->asset1->update(['thumbnail_status' => ThumbnailStatus::COMPLETED]);
+
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'SITE_RERUN_THUMBNAILS',
+                'payload' => [],
+            ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'total_selected' => 1,
+            'processed' => 1,
+            'errors' => [],
+        ]);
+        Queue::assertPushed(GenerateThumbnailsJob::class, 1);
+    }
+
+    public function test_site_rerun_ai_metadata_forbidden_without_site_role(): void
+    {
+        Bus::fake();
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'SITE_RERUN_AI_METADATA_TAGGING',
+                'payload' => [],
+            ]);
+
+        $response->assertStatus(403);
     }
 }
