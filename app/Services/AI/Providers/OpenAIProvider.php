@@ -188,7 +188,9 @@ class OpenAIProvider implements AIProviderInterface
      */
     private function sendChatCompletionsRequest(array $body, int $timeoutSeconds = 60): Response
     {
-        $maxAttempts = 3;
+        $maxAttempts = (int) config('ai.openai.chat_completions_max_retries', 5);
+        $baseMs = (int) config('ai.openai.chat_completions_retry_base_ms', 400);
+        $maxSleepMs = (int) config('ai.openai.chat_completions_retry_max_sleep_ms', 8000);
         $lastException = null;
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
@@ -206,7 +208,8 @@ class OpenAIProvider implements AIProviderInterface
                     throw $e;
                 }
 
-                $sleepMs = (int) (500 * (2 ** ($attempt - 1)));
+                $sleepMs = min($maxSleepMs, (int) ($baseMs * (2 ** ($attempt - 1))));
+                $sleepMs += random_int(0, min(400, (int) ceil($sleepMs * 0.2)));
                 Log::warning('OpenAI chat/completions transient connection failure, retrying', [
                     'attempt' => $attempt,
                     'max_attempts' => $maxAttempts,

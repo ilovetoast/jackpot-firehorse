@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\Category;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Suggests new metadata fields per category from merged signals (tags + metadata + candidates).

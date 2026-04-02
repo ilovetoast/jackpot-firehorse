@@ -53,6 +53,13 @@ return [
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_API_BASE_URL', 'https://api.openai.com/v1'),
+        /*
+         * Transient network/TLS failures (e.g. cURL 56, connection reset by peer) are retried
+         * before surfacing. Tune for staging/production NAT or flaky paths to OpenAI.
+         */
+        'chat_completions_max_retries' => max(1, (int) env('OPENAI_CHAT_COMPLETIONS_MAX_RETRIES', 5)),
+        'chat_completions_retry_base_ms' => max(50, (int) env('OPENAI_CHAT_COMPLETIONS_RETRY_BASE_MS', 400)),
+        'chat_completions_retry_max_sleep_ms' => max(200, (int) env('OPENAI_CHAT_COMPLETIONS_RETRY_MAX_SLEEP_MS', 8000)),
     ],
 
     /*
