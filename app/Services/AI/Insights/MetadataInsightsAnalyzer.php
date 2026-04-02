@@ -626,6 +626,7 @@ class MetadataInsightsAnalyzer
                         ->whereNull('metadata_fields.tenant_id');
                 });
             })
+            ->whereRaw("COALESCE(metadata_fields.population_mode, 'manual') != ?", ['automatic'])
             ->select([
                 'metadata_fields.key as field_key',
                 'metadata_options.value',
@@ -662,6 +663,8 @@ class MetadataInsightsAnalyzer
             return [];
         }
 
+        $minOptInTag = max(3, (int) config('ai_metadata_value_suggestions.min_option_length_for_tag_substring_match', 6));
+
         $matches = [];
         foreach ($fieldKeyToOptionSetLower as $fkLower => $optionSet) {
             if (isset($optionSet[$normTag])) {
@@ -673,7 +676,14 @@ class MetadataInsightsAnalyzer
                 if (strlen($opt) < 3 || strlen($normTag) < 3) {
                     continue;
                 }
-                if (str_contains($opt, $normTag) || str_contains($normTag, $opt)) {
+                // Option text contains the full tag (unusual but valid).
+                if (str_contains($opt, $normTag)) {
+                    $matches[] = $fkLower;
+                    break;
+                }
+                // Tag contains option: only for longer option tokens so short catalog values
+                // (e.g. resolution_class "high", "low") do not match inside unrelated tag slugs.
+                if (strlen($opt) >= $minOptInTag && str_contains($normTag, $opt)) {
                     $matches[] = $fkLower;
                     break;
                 }

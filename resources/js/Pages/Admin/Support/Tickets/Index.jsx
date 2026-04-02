@@ -1,5 +1,5 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AppNav from '../../../../Components/AppNav'
 import AppFooter from '../../../../Components/AppFooter'
 import Avatar from '../../../../Components/Avatar'
@@ -17,7 +17,14 @@ import {
     UserPlusIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminTicketsIndex({ tickets, pagination, filterOptions, filters, roundRobinBucket = [] }) {
+export default function AdminTicketsIndex({
+    tickets,
+    pagination,
+    filterOptions,
+    filters,
+    roundRobinBucket = [],
+    can_bulk_resolve_engineering = false,
+}) {
     const { auth } = usePage().props
     const [showCreateModal, setShowCreateModal] = useState(false)
     
@@ -37,6 +44,69 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
         error_fingerprint: '',
         tenant_id: '',
     })
+
+    const [selectedIds, setSelectedIds] = useState({})
+    const [bulkNote, setBulkNote] = useState('')
+    const [bulkProcessing, setBulkProcessing] = useState(false)
+
+    const engineeringOnlyActive =
+        !!filters?.engineering_only && filters.engineering_only !== '0' && filters.engineering_only !== false
+    const showEngineeringBulkUi = can_bulk_resolve_engineering && engineeringOnlyActive
+
+    const isSelectableTicket = (ticket) =>
+        ticket.is_engineering_queue &&
+        ticket.status !== 'resolved' &&
+        ticket.status !== 'closed'
+
+    const selectableTickets = tickets.filter(isSelectableTicket)
+
+    useEffect(() => {
+        setSelectedIds({})
+    }, [tickets])
+
+    const selectedCount = Object.keys(selectedIds).filter((id) => selectedIds[id]).length
+
+    const toggleTicketSelected = (ticketId) => {
+        setSelectedIds((prev) => ({ ...prev, [ticketId]: !prev[ticketId] }))
+    }
+
+    const toggleSelectAllOnPage = () => {
+        const ids = selectableTickets.map((t) => t.id)
+        const allSelected = ids.length > 0 && ids.every((id) => selectedIds[id])
+        setSelectedIds((prev) => {
+            const next = { ...prev }
+            if (allSelected) {
+                ids.forEach((id) => {
+                    delete next[id]
+                })
+            } else {
+                ids.forEach((id) => {
+                    next[id] = true
+                })
+            }
+            return next
+        })
+    }
+
+    const runBulkResolve = () => {
+        const ticket_ids = Object.keys(selectedIds)
+            .filter((id) => selectedIds[id])
+            .map(Number)
+        if (ticket_ids.length === 0) return
+        router.post(
+            '/app/admin/support/tickets/bulk-resolve-engineering',
+            { ticket_ids, note: bulkNote.trim() },
+            {
+                preserveScroll: true,
+                onStart: () => setBulkProcessing(true),
+                onFinish: () => setBulkProcessing(false),
+                onSuccess: () => {
+                    setSelectedIds({})
+                    setBulkNote('')
+                },
+            }
+        )
+    }
 
     const getStatusBadge = (status) => {
         const statusConfig = {
@@ -165,7 +235,12 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
         })
     }
 
-    const hasActiveFilters = Object.values(filters || {}).some(v => v !== null && v !== undefined && v !== '')
+    const hasActiveFilters =
+        !!(filters?.queue && filters.queue !== '') ||
+        Object.entries(filters || {}).some(([key, v]) => {
+            if (key === 'queue') return false
+            return v !== null && v !== undefined && v !== ''
+        })
 
     return (
         <div className="min-h-full bg-gray-50">
@@ -249,6 +324,19 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                     {/* Compact Horizontal Filters */}
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
                         <div className="flex flex-wrap items-center gap-3">
+                            {/* Workflow queue: customer vs internal */}
+                            <div className="flex-shrink-0">
+                                <select
+                                    value={filters?.queue || ''}
+                                    onChange={(e) => applyFilters({ queue: e.target.value || null })}
+                                    className="block w-full min-w-[160px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
+                                >
+                                    <option value="">All workflows</option>
+                                    <option value="customer">Customer tickets</option>
+                                    <option value="internal">Internal / ops</option>
+                                </select>
+                            </div>
+
                             {/* Status Filter */}
                             <div className="flex-shrink-0">
                                 <select
@@ -436,6 +524,43 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                     </div>
                 </div>
 
+                {showEngineeringBulkUi && selectableTickets.length > 0 && (
+                    <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/80 px-4 py-3 shadow-sm">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-indigo-950">Bulk resolve (engineering queue)</p>
+                                <p className="mt-1 text-xs text-indigo-900/80">
+                                    Select rows below, optionally set a shared internal note, then resolve. Only open engineering tickets on this page are eligible; customer tickets are unchanged.
+                                </p>
+                                <label htmlFor="bulk-resolve-note" className="mt-2 block text-xs font-medium text-indigo-950">
+                                    Internal note for all selected (optional)
+                                </label>
+                                <input
+                                    id="bulk-resolve-note"
+                                    type="text"
+                                    value={bulkNote}
+                                    onChange={(e) => setBulkNote(e.target.value)}
+                                    placeholder="Defaults to “Bulk resolved (engineering queue).” if empty"
+                                    className="mt-1 block w-full max-w-xl rounded-md border-indigo-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                />
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                <span className="text-sm text-indigo-950">
+                                    {selectedCount} selected
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={selectedCount === 0 || bulkProcessing}
+                                    onClick={runBulkResolve}
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {bulkProcessing ? 'Resolving…' : 'Resolve selected'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {tickets.length === 0 ? (
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden">
                         <div className="px-6 py-12 text-center">
@@ -463,6 +588,25 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
+                                        {showEngineeringBulkUi && (
+                                            <th scope="col" className="w-10 px-2 py-3 text-left align-middle">
+                                                <span className="sr-only">Select</span>
+                                                {selectableTickets.length > 0 ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        aria-label="Select all open engineering tickets on this page"
+                                                        checked={
+                                                            selectableTickets.length > 0 &&
+                                                            selectableTickets.every((t) => selectedIds[t.id])
+                                                        }
+                                                        onChange={toggleSelectAllOnPage}
+                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                ) : (
+                                                    <span className="inline-block w-4" />
+                                                )}
+                                            </th>
+                                        )}
                                         <th scope="col" className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[320px] w-[40%]">
                                             Subject
                                         </th>
@@ -503,6 +647,23 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {tickets.map((ticket) => (
                                         <tr key={ticket.id} className="hover:bg-gray-50">
+                                            {showEngineeringBulkUi && (
+                                                <td className="w-10 px-2 py-4 align-top">
+                                                    {isSelectableTicket(ticket) ? (
+                                                        <input
+                                                            type="checkbox"
+                                                            aria-label={`Select ticket ${ticket.ticket_number}`}
+                                                            checked={!!selectedIds[ticket.id]}
+                                                            onChange={() => toggleTicketSelected(ticket.id)}
+                                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+                                                    ) : (
+                                                        <span className="inline-block w-4 text-center text-gray-300 text-xs" title="Not bulk-eligible">
+                                                            —
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            )}
                                             <td className="px-5 py-4 min-w-[320px] w-[40%] align-top">
                                                 <div className="flex items-center gap-2">
                                                     <div className="min-w-0 flex-1">

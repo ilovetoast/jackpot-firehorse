@@ -66,12 +66,16 @@ Phase 7 implements controlled, system-level automation using AI agents to assist
 ### 3. SLA Risk Detection
 
 **Trigger:**
-- Periodic hourly scan of open tickets
+- Periodic hourly scan of open tickets (scheduler); each ticket is throttled separately
 
 **Behavior:**
-- Invokes `sla_risk_analyzer` AI agent
+- Invokes `sla_risk_analyzer` AI agent only when needed (see throttling below)
 - Analyzes message velocity, status churn, historical resolution patterns
 - Flags tickets at risk of SLA breach
+
+**Throttling (cost control):**
+- By default, a ticket is **not** re-analyzed until **24 hours** after its last run (`metadata.sla_risk.detected_at`), **unless** a new **public** (non-internal) message was added since then.
+- Tunes via `AUTOMATION_SLA_RISK_MIN_HOURS` and optional `AUTOMATION_SLA_RISK_HIGH_MIN_HOURS` for high-risk tickets.
 
 **Output:**
 - Internal SLA risk flag stored in ticket metadata
@@ -183,6 +187,8 @@ Each trigger can be individually enabled/disabled:
 - `AUTOMATION_MESSAGE_THRESHOLD`: Message count threshold (default: 5)
 - `AUTOMATION_CLASSIFICATION_ENABLED`: Enable classification (default: true)
 - `AUTOMATION_SLA_RISK_ENABLED`: Enable SLA risk detection (default: true)
+- `AUTOMATION_SLA_RISK_MIN_HOURS`: Minimum hours between SLA risk AI runs per ticket if there is no new public activity (default: 24)
+- `AUTOMATION_SLA_RISK_HIGH_MIN_HOURS`: Optional shorter interval for tickets already flagged `high` (unset = same as `AUTOMATION_SLA_RISK_MIN_HOURS`)
 - `AUTOMATION_ERROR_PATTERNS_ENABLED`: Enable error pattern detection (default: true)
 - `AUTOMATION_ERROR_WINDOW_MINUTES`: Time window for error patterns (default: 60)
 - `AUTOMATION_ERROR_THRESHOLD`: Error count threshold (default: 5)

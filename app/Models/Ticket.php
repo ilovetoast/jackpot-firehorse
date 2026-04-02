@@ -427,4 +427,22 @@ class Ticket extends Model
         // No filtering - staff can see all ticket types
         return $query;
     }
+
+    /**
+     * True when resolving should require a public message to the tenant requester.
+     * Internal and tenant-internal tickets use internal resolution notes only.
+     */
+    public function requiresPublicResolutionMessage(): bool
+    {
+        return $this->type === TicketType::TENANT;
+    }
+
+    /**
+     * Matches the admin "Engineering only" filter (internal + engineering team).
+     */
+    public function isEngineeringQueueTicket(): bool
+    {
+        return $this->type === TicketType::INTERNAL
+            && $this->assigned_team === TicketTeam::ENGINEERING;
+    }
 }

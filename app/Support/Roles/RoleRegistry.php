@@ -64,6 +64,17 @@ class RoleRegistry
     }
 
     /**
+     * Brand roles that may see all team downloads for that brand (Downloads "All" scope, filters).
+     * Aligned with approvers: admin + brand_manager.
+     *
+     * @return array<string>
+     */
+    public static function brandRolesWithTeamDownloadVisibility(): array
+    {
+        return ['admin', 'brand_manager'];
+    }
+
+    /**
      * Check if a role is a valid tenant role.
      *
      * @param  string  $role  Role name to check

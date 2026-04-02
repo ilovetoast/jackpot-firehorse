@@ -145,8 +145,20 @@ class TicketPolicy
      */
     public function assign(User $user, Ticket $ticket): bool
     {
-        return $this->hasSitePermission($user, 'tickets.assign')
-            || $user->hasAnyRole(['site_support', 'site_admin', 'site_owner']);
+        if ($this->hasSitePermission($user, 'tickets.assign')) {
+            return true;
+        }
+
+        if ($user->hasAnyRole(['site_support', 'site_admin', 'site_owner'])) {
+            return true;
+        }
+
+        // Engineers manage the internal engineering queue (resolve, bulk resolve, status).
+        if ($user->hasRole('site_engineering') && $ticket->isEngineeringQueueTicket()) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

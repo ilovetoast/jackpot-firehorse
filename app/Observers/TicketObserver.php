@@ -29,6 +29,10 @@ class TicketObserver
             return;
         }
 
+        if ($this->shouldSkipTicketAiAutomation($ticket)) {
+            return;
+        }
+
         // Trigger classification if enabled
         if (config('automation.triggers.ticket_classification.enabled', true)
             && config('automation.triggers.ticket_classification.on_creation', true)) {
@@ -75,6 +79,10 @@ class TicketObserver
             return;
         }
 
+        if ($this->shouldSkipTicketAiAutomation($ticket)) {
+            return;
+        }
+
         // If status changed to waiting_on_support, trigger summarization
         if ($ticket->isDirty('status') && $ticket->status === TicketStatus::WAITING_ON_SUPPORT) {
             if (config('automation.triggers.ticket_summarization.enabled', true)) {
@@ -101,5 +109,24 @@ class TicketObserver
                 }
             }
         }
+    }
+
+    /**
+     * System-created operations tickets (e.g. asset pipeline incidents) should not
+     * run classification, duplicate detection, or summarization agents by default.
+     */
+    protected function shouldSkipTicketAiAutomation(Ticket $ticket): bool
+    {
+        if ($ticket->metadata['skip_automation_agents'] ?? false) {
+            return true;
+        }
+
+        // Legacy rows: asset pipeline tickets from ops incidents before skip_automation_agents existed
+        $meta = $ticket->metadata ?? [];
+        if (($meta['source'] ?? null) === 'operations_incident' && !empty($meta['asset_id'])) {
+            return true;
+        }
+
+        return false;
     }
 }

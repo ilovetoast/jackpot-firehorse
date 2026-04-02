@@ -9,6 +9,7 @@ import {
 import ConfirmDialog from '../ConfirmDialog'
 
 export default function TicketActionsToolbar({ ticket, permissions, onConvert }) {
+    const requiresPublicResolution = ticket.requires_public_resolution !== false
     const [processing, setProcessing] = useState(false)
     const [action, setAction] = useState(null)
     const [showResolveConfirm, setShowResolveConfirm] = useState(false)
@@ -23,13 +24,15 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
 
     const confirmResolve = () => {
         const body = resolveMessage.trim()
-        if (body.length < 3) {
+        if (requiresPublicResolution && body.length < 3) {
             return
         }
         setShowResolveConfirm(false)
         setProcessing(true)
         setAction('resolve')
-        router.put(`/app/admin/support/tickets/${ticket.id}/resolve`, { resolution_message: body }, {
+        router.put(`/app/admin/support/tickets/${ticket.id}/resolve`, {
+            resolution_message: requiresPublicResolution ? body : (body || ''),
+        }, {
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false)
@@ -136,9 +139,11 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
                     )}
                 </div>
                 <p className="mt-3 text-xs text-gray-500">
-                    {isFinalState 
+                    {isFinalState
                         ? 'This ticket is in a final state. Use Reopen to change the status back to open.'
-                        : 'Resolve requires a short public reply to the requester (e.g. fix summary or “closing — no response”). Close marks the ticket as permanently closed.'}
+                        : requiresPublicResolution
+                            ? 'Resolve requires a short public reply to the requester (e.g. fix summary or “closing — no response”). Close marks the ticket as permanently closed.'
+                            : 'Internal / engineering tickets resolve with an internal note only (no customer email). Leave the note blank to use a default. Close marks the ticket as permanently closed.'}
                 </p>
             </div>
 
@@ -154,10 +159,12 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
                 message={
                     <div className="text-left">
                         <p className="text-sm text-gray-600 mb-2">
-                            Add a public reply visible to the requester. This is required so resolution is always communicated (even briefly, e.g. “Resolved — no further response from requester.”).
+                            {requiresPublicResolution
+                                ? 'Add a public reply visible to the requester. This is required so resolution is always communicated (even briefly, e.g. “Resolved — no further response from requester.”).'
+                                : 'Optional internal note for staff only. If you leave this empty, a default internal resolution line will be recorded. No email is sent to a customer.'}
                         </p>
                         <label htmlFor="resolve-message" className="block text-xs font-medium text-gray-700 mb-1">
-                            Resolution message
+                            {requiresPublicResolution ? 'Resolution message' : 'Internal note (optional)'}
                         </label>
                         <textarea
                             id="resolve-message"
@@ -165,7 +172,7 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
                             value={resolveMessage}
                             onChange={(e) => setResolveMessage(e.target.value)}
                             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            placeholder="Brief public summary for the requester…"
+                            placeholder={requiresPublicResolution ? 'Brief public summary for the requester…' : 'Optional — visible to staff only…'}
                             autoFocus
                         />
                     </div>
@@ -173,7 +180,7 @@ export default function TicketActionsToolbar({ ticket, permissions, onConvert })
                 variant="info"
                 confirmText="Resolve"
                 loading={processing && action === 'resolve'}
-                confirmDisabled={resolveMessage.trim().length < 3}
+                confirmDisabled={requiresPublicResolution && resolveMessage.trim().length < 3}
                 panelClassName="sm:max-w-lg"
             />
             <ConfirmDialog

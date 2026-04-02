@@ -171,6 +171,7 @@ class ReliabilityEngineTest extends TestCase
             'retryable' => true,
             'resolved_at' => null,
             'detected_at' => now(),
+            'metadata' => ['repair_attempts' => 3],
         ]);
 
         $engine = app(ReliabilityEngine::class);
@@ -180,6 +181,34 @@ class ReliabilityEngineTest extends TestCase
         $this->assertNotNull($ticket);
         $this->assertSame('operations_incident', $ticket->metadata['source'] ?? null);
         $this->assertSame($asset->id, $ticket->metadata['asset_id'] ?? null);
+        $this->assertTrue($ticket->metadata['skip_automation_agents'] ?? false);
+    }
+
+    public function test_asset_incident_defers_ticket_until_min_repair_attempts(): void
+    {
+        $asset = $this->createAsset(['analysis_status' => 'uploading',
+            'metadata' => ['processing_started' => true],
+        ]);
+
+        SystemIncident::create([
+            'id' => (string) Str::uuid(),
+            'source_type' => 'asset',
+            'source_id' => $asset->id,
+            'tenant_id' => $this->tenant->id,
+            'severity' => 'critical',
+            'title' => 'Asset stuck in uploading state',
+            'message' => 'Test',
+            'retryable' => true,
+            'resolved_at' => null,
+            'detected_at' => now(),
+            'metadata' => ['repair_attempts' => 1],
+        ]);
+
+        $engine = app(ReliabilityEngine::class);
+        $incident = SystemIncident::whereNull('resolved_at')->first();
+        $ticket = $engine->escalate($incident);
+
+        $this->assertNull($ticket);
     }
 
     public function test_repeated_attempts_trigger_escalation(): void

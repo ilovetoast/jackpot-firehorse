@@ -18,9 +18,10 @@ use Tests\TestCase;
 /**
  * Phase D12.2 — Downloads visibility and brand scoping.
  *
- * - Brand manager cannot see other brands' downloads
- * - Tenant admin sees all brands' downloads
- * - Contributor sees only own downloads
+ * - Brand manager cannot see other brands' downloads (scope=all)
+ * - Brand admin sees all downloads on their brand (scope=all)
+ * - Tenant admin / agency_admin sees all brands' downloads
+ * - Contributor sees only own downloads; scope=all does not expand to others
  * - Collection-only user cannot access downloads index
  */
 class DownloadVisibilityByBrandTest extends TestCase
@@ -107,6 +108,44 @@ class DownloadVisibilityByBrandTest extends TestCase
         $ids = array_column($downloads, 'id');
         $this->assertContains($downloadBrandA->id, $ids, 'Brand manager should see Brand A download');
         $this->assertNotContains($downloadBrandB->id, $ids, 'Brand manager should not see Brand B download');
+        $this->assertTrue($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? false);
+        $this->assertFalse($response->inertiaPage()['props']['can_manage'] ?? true);
+    }
+
+    public function test_brand_admin_sees_all_downloads_on_their_brand(): void
+    {
+        $brandAdmin = User::create([
+            'email' => 'badmin@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Brand',
+            'last_name' => 'Admin',
+        ]);
+        $brandAdmin->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $brandAdmin->brands()->attach($this->brandA->id, ['role' => 'admin', 'removed_at' => null]);
+
+        $otherUser = User::create([
+            'email' => 'other2@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Other',
+            'last_name' => 'User',
+        ]);
+        $otherUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $otherUser->brands()->attach($this->brandA->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $downloadByOther = $this->createDownload($this->tenant->id, $this->brandA->id, $otherUser->id);
+
+        Session::put('tenant_id', $this->tenant->id);
+        Session::put('brand_id', $this->brandA->id);
+        $this->actingAs($brandAdmin);
+
+        $response = $this->get(route('downloads.index', ['scope' => 'all']));
+
+        $response->assertOk();
+        $downloads = $response->inertiaPage()['props']['downloads'] ?? [];
+        $ids = array_column($downloads, 'id');
+        $this->assertContains($downloadByOther->id, $ids, 'Brand admin should see other users\' downloads on the same brand');
+        $this->assertTrue($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? false);
+        $this->assertFalse($response->inertiaPage()['props']['can_manage'] ?? true);
     }
 
     public function test_tenant_admin_sees_all_brands_downloads(): void
@@ -145,6 +184,8 @@ class DownloadVisibilityByBrandTest extends TestCase
         $ids = array_column($downloads, 'id');
         $this->assertContains($downloadBrandA->id, $ids);
         $this->assertContains($downloadBrandB->id, $ids);
+        $this->assertTrue($response->inertiaPage()['props']['can_manage'] ?? false);
+        $this->assertTrue($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? false);
     }
 
     public function test_contributor_sees_only_own_downloads(): void
@@ -182,6 +223,43 @@ class DownloadVisibilityByBrandTest extends TestCase
         $ids = array_column($downloads, 'id');
         $this->assertContains($downloadByContributor->id, $ids, 'Contributor should see own download');
         $this->assertNotContains($downloadByOther->id, $ids, 'Contributor should not see other user download');
+    }
+
+    public function test_contributor_scope_all_still_sees_only_own_downloads(): void
+    {
+        $contributor = User::create([
+            'email' => 'contrib2@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Contrib',
+            'last_name' => 'Two',
+        ]);
+        $contributor->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $contributor->brands()->attach($this->brandA->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $otherUser = User::create([
+            'email' => 'other3@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Other',
+            'last_name' => 'Three',
+        ]);
+        $otherUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $otherUser->brands()->attach($this->brandA->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $downloadByContributor = $this->createDownload($this->tenant->id, $this->brandA->id, $contributor->id);
+        $downloadByOther = $this->createDownload($this->tenant->id, $this->brandA->id, $otherUser->id);
+
+        Session::put('tenant_id', $this->tenant->id);
+        Session::put('brand_id', $this->brandA->id);
+        $this->actingAs($contributor);
+
+        $response = $this->get(route('downloads.index', ['scope' => 'all']));
+
+        $response->assertOk();
+        $downloads = $response->inertiaPage()['props']['downloads'] ?? [];
+        $ids = array_column($downloads, 'id');
+        $this->assertContains($downloadByContributor->id, $ids);
+        $this->assertNotContains($downloadByOther->id, $ids);
+        $this->assertFalse($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? true);
     }
 
     public function test_collection_only_user_cannot_access_downloads_index(): void

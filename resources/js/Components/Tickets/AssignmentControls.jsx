@@ -10,6 +10,7 @@ import { useForm } from '@inertiajs/react'
  * @param {Array} props.staffUsers - Array of staff users available for assignment
  */
 export default function AssignmentControls({ ticket, staffUsers = [] }) {
+    const requiresPublicResolution = ticket.requires_public_resolution !== false
     const { data, setData, put, processing } = useForm({
         assigned_to_user_id: ticket.assigned_to?.id || '',
         assigned_team: ticket.assigned_team || '',
@@ -113,10 +114,12 @@ export default function AssignmentControls({ ticket, staffUsers = [] }) {
                     {data.status === 'resolved' && (
                         <div>
                             <label htmlFor="resolution_message" className="block text-sm font-medium text-gray-700 mb-1">
-                                Public resolution message (required)
+                                {requiresPublicResolution ? 'Public resolution message (required)' : 'Internal resolution note (optional)'}
                             </label>
                             <p className="text-xs text-gray-500 mb-2">
-                                Shown to the requester when resolving this ticket.
+                                {requiresPublicResolution
+                                    ? 'Shown to the requester when resolving this ticket.'
+                                    : 'Staff-only. Leave blank to record a default internal resolution; no customer email.'}
                             </p>
                             <textarea
                                 id="resolution_message"
@@ -124,9 +127,9 @@ export default function AssignmentControls({ ticket, staffUsers = [] }) {
                                 onChange={(e) => setData('resolution_message', e.target.value)}
                                 rows={3}
                                 className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                placeholder="e.g. Issue fixed, or closing due to no response…"
-                                required
-                                minLength={3}
+                                placeholder={requiresPublicResolution ? 'e.g. Issue fixed, or closing due to no response…' : 'Optional internal note…'}
+                                required={requiresPublicResolution}
+                                minLength={requiresPublicResolution ? 3 : undefined}
                             />
                         </div>
                     )}

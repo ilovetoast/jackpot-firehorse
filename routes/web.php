@@ -409,6 +409,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::put('/admin/support/tickets/{ticket}/assignment', [\App\Http\Controllers\AdminTicketController::class, 'updateAssignment'])->name('admin.support.tickets.assignment');
     Route::put('/admin/support/tickets/{ticket}/status', [\App\Http\Controllers\AdminTicketController::class, 'updateStatus'])->name('admin.support.tickets.status');
     Route::put('/admin/support/tickets/{ticket}/resolve', [\App\Http\Controllers\AdminTicketController::class, 'resolve'])->name('admin.support.tickets.resolve');
+    Route::post('/admin/support/tickets/bulk-resolve-engineering', [\App\Http\Controllers\AdminTicketController::class, 'bulkResolveEngineering'])->name('admin.support.tickets.bulk-resolve-engineering');
     Route::put('/admin/support/tickets/{ticket}/close', [\App\Http\Controllers\AdminTicketController::class, 'close'])->name('admin.support.tickets.close');
     Route::put('/admin/support/tickets/{ticket}/reopen', [\App\Http\Controllers\AdminTicketController::class, 'reopen'])->name('admin.support.tickets.reopen');
     Route::post('/admin/support/tickets/{ticket}/reply', [\App\Http\Controllers\AdminTicketController::class, 'publicReply'])->name('admin.support.tickets.reply');

@@ -99,6 +99,7 @@ export default function DownloadsIndex({
   downloads = [],
   bucket_count: bucketCount = 0,
   can_manage: canManage = false,
+  can_view_all_brand_downloads: canViewAllBrandDownloads = false,
   filters: initialFilters = {},
   download_features: features = {},
   pagination: paginationMeta = null,
@@ -107,6 +108,10 @@ export default function DownloadsIndex({
 }) {
   const { auth, flash = {}, errors: pageErrors = {} } = usePage().props
   const { bannerMessage: downloadActionError } = useDownloadErrors(['message'])
+
+  const showAllDownloadsTab = canManage || canViewAllBrandDownloads
+  const showFullFilterRow = showAllDownloadsTab
+  const showCreatorInLists = showAllDownloadsTab
 
   const [expandedId, setExpandedId] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
@@ -351,7 +356,7 @@ export default function DownloadsIndex({
               >
                 My Downloads
               </button>
-              {canManage && (
+              {showAllDownloadsTab && (
                 <button
                   type="button"
                   onClick={() => applyFilters({ ...filters, scope: 'all' })}
@@ -370,7 +375,7 @@ export default function DownloadsIndex({
 
           {/* Filters: full line(s) inside tab context */}
           <div className="space-y-4 mb-6">
-            {canManage && (
+            {showFullFilterRow && (
               <div className="flex flex-wrap items-center gap-6">
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-slate-600">Status</span>
@@ -633,7 +638,7 @@ export default function DownloadsIndex({
                 </div>
               </div>
             )}
-            {!canManage && (
+            {!showFullFilterRow && (
               <div className="flex items-center gap-2">
                 <label htmlFor="downloads-sort-own" className="text-sm font-medium text-slate-600">Sort</label>
                 <select
@@ -829,7 +834,7 @@ export default function DownloadsIndex({
                         </div>
                         <span className="text-sm font-medium text-slate-900 truncate">{displayTitle}</span>
                         <span className="text-sm text-slate-500">Expires {formatDate(d.expires_at)}</span>
-                        {filters.scope === 'all' && d.created_by?.name && (
+                        {showCreatorInLists && filters.scope === 'all' && d.created_by?.name && (
                           <span className="text-sm text-slate-500" title="Who created this download">
                             Created by {d.created_by.name}
                           </span>
@@ -1161,7 +1166,7 @@ export default function DownloadsIndex({
                             <li key={d.id} className="flex items-center gap-3 py-1.5 text-sm text-slate-600">
                               {thumbUrl ? (
                                 <img src={thumbUrl} alt="" className="h-8 w-8 rounded object-cover flex-shrink-0 bg-slate-100" />
-                              ) : canManage && d.created_by ? (
+                              ) : showCreatorInLists && d.created_by ? (
                                 d.created_by.avatar_url ? (
                                   <img src={d.created_by.avatar_url} alt="" className="h-8 w-8 rounded-full object-cover flex-shrink-0" />
                                 ) : (
@@ -1173,7 +1178,7 @@ export default function DownloadsIndex({
                                 <span className="h-8 w-8 rounded bg-slate-200 flex-shrink-0 flex items-center justify-center text-xs text-slate-500">—</span>
                               )}
                               <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="truncate font-medium text-slate-900">{canManage && d.created_by ? (d.created_by.name || '—') : 'Download'}</span>
+                                <span className="truncate font-medium text-slate-900">{showCreatorInLists && d.created_by ? (d.created_by.name || '—') : 'Download'}</span>
                                 <span className="text-slate-500 text-xs">Expires {formatDate(d.expires_at)}</span>
                                 <span className="text-slate-500 text-xs" title="Number of times this download was accessed">
                                   {d.access_count != null && d.access_count > 0

@@ -179,6 +179,7 @@ class DownloadD2Test extends TestCase
             ->has('downloads')
             ->has('bucket_count')
             ->has('can_manage')
+            ->has('can_view_all_brand_downloads')
             ->has('download_features')
         );
     }

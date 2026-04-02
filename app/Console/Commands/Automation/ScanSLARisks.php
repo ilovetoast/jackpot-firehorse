@@ -47,17 +47,23 @@ class ScanSLARisks extends Command
         ])
             ->get();
 
-        $this->info("Found {$tickets->count()} open tickets to scan.");
+        $openCount = $tickets->count();
+        $this->info("Found {$openCount} open tickets.");
+
+        $service = app(\App\Services\Automation\SLARiskDetectionService::class);
 
         $dispatched = 0;
+        $skipped = 0;
         foreach ($tickets as $ticket) {
+            if (!$service->shouldReanalyzeTicket($ticket)) {
+                $skipped++;
+                continue;
+            }
             if (config('automation.triggers.sla_risk_detection.async', true)) {
                 DetectSLARiskJob::dispatch($ticket->id);
                 $dispatched++;
             } else {
-                // Process inline
                 try {
-                    $service = app(\App\Services\Automation\SLARiskDetectionService::class);
                     $service->analyzeTicketRisk($ticket);
                     $dispatched++;
                 } catch (\Exception $e) {
@@ -69,7 +75,7 @@ class ScanSLARisks extends Command
             }
         }
 
-        $this->info("Processed {$dispatched} tickets.");
+        $this->info("Queued/processed {$dispatched} ticket(s); skipped {$skipped} (within cooldown, no new public activity).");
 
         return Command::SUCCESS;
     }

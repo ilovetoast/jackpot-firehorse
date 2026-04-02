@@ -650,7 +650,7 @@ export default function AssetGridSecondaryFilters({
                 className="grid transition-[grid-template-rows] duration-200 ease-out"
                 style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
             >
-                <div className="min-h-0 overflow-hidden">
+                <div className={isExpanded ? 'min-h-0 overflow-visible' : 'min-h-0 overflow-hidden'}>
                     <div className="px-3 py-3 sm:px-4 border-t border-gray-200">
                     {/* Primary metadata filters (e.g. Logo Type) — mobile only; desktop shows them in toolbar */}
                     {visiblePrimaryFilters.length > 0 && (

@@ -29,10 +29,12 @@ use App\Services\EnterpriseDownloadPolicy;
 use App\Services\PlanService;
 use App\Services\StreamingZipService;
 use App\Services\TenantBucketService;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -63,9 +65,14 @@ class DownloadController extends Controller
         $bucketService = app(DownloadBucketService::class);
         $bucketCount = $user && $tenant ? $bucketService->count() : 0;
 
-        // Same role source as ResolveTenant: tenant admin/owner can see "All Downloads" (all tenant downloads).
-        $tenantRole = $user && $tenant ? $user->getRoleForTenant($tenant) : null;
-        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
+        $isTenantDownloadsAdmin = false;
+        $canViewAllBrandDownloads = false;
+        if ($user && $tenant) {
+            // Tenant admin / owner / agency_admin: full tenant downloads + management UI.
+            $isTenantDownloadsAdmin = $this->isTenantDownloadsAdmin($user, $tenant);
+            // Brand admin/manager, agency_partner, or tenant downloads admin: "All Downloads" for accessible brand(s).
+            $canViewAllBrandDownloads = $this->canViewAllBrandDownloads($user, $tenant);
+        }
 
         $scope = strtolower((string) ($request->input('scope', 'mine'))) === 'all' ? 'all' : 'mine';
         $statusFilter = $request->input('status', '');
@@ -102,7 +109,10 @@ class DownloadController extends Controller
             if ($scope === 'mine') {
                 $query->where('created_by_user_id', $user->id);
             } else {
-                if (! $canManage) {
+                // scope=all: only elevated roles see others' downloads; contributors stay on "mine" data.
+                if (! $canViewAllBrandDownloads) {
+                    $query->where('created_by_user_id', $user->id);
+                } elseif (! $isTenantDownloadsAdmin) {
                     $brandIds = $user->brands()->pluck('brands.id')->all();
                     $query->whereIn('brand_id', $brandIds);
                 }
@@ -152,7 +162,7 @@ class DownloadController extends Controller
             $features = $planService->getDownloadManagementFeatures($tenant);
 
             foreach ($paginator->items() as $download) {
-                $downloads[] = $this->buildDownloadPayload($download, $features, $canManage);
+                $downloads[] = $this->buildDownloadPayload($download, $features, $isTenantDownloadsAdmin);
             }
 
             $paginationMeta = [
@@ -162,11 +172,15 @@ class DownloadController extends Controller
                 'total' => $paginator->total(),
             ];
 
-            if ($scope === 'all' && $canManage) {
-                $creatorIds = Download::query()
+            if ($scope === 'all' && $canViewAllBrandDownloads) {
+                $creatorScope = Download::query()
                     ->where('tenant_id', $tenant->id)
-                    ->whereNull('deleted_at')
-                    ->distinct()
+                    ->whereNull('deleted_at');
+                if (! $isTenantDownloadsAdmin) {
+                    $brandIds = $user->brands()->pluck('brands.id')->all();
+                    $creatorScope->whereIn('brand_id', $brandIds);
+                }
+                $creatorIds = $creatorScope->distinct()
                     ->pluck('created_by_user_id')
                     ->filter()
                     ->all();
@@ -224,7 +238,8 @@ class DownloadController extends Controller
         return Inertia::render('Downloads/Index', [
             'downloads' => $downloads,
             'bucket_count' => $bucketCount,
-            'can_manage' => $canManage,
+            'can_manage' => $isTenantDownloadsAdmin,
+            'can_view_all_brand_downloads' => $canViewAllBrandDownloads,
             'filters' => $filters,
             'pagination' => $paginationMeta,
             'download_users' => $downloadUsers,
@@ -235,7 +250,7 @@ class DownloadController extends Controller
     /**
      * Build a single download payload for the index list.
      */
-    protected function buildDownloadPayload(Download $download, array $planFeatures, bool $canManage = false): array
+    protected function buildDownloadPayload(Download $download, array $planFeatures, bool $isTenantDownloadsAdmin = false): array
     {
         $state = $download->getState();
         $thumbnails = [];
@@ -325,14 +340,14 @@ class DownloadController extends Controller
             'expires_at' => $download->expires_at?->toIso8601String(),
             'asset_count' => $download->assets->count(),
             'zip_size_bytes' => $download->zip_size_bytes,
-            'can_revoke' => (bool) ($planFeatures['revoke'] ?? false) && ($canManage || ($createdBy && $createdBy['id'] === auth()->id())),
+            'can_revoke' => (bool) ($planFeatures['revoke'] ?? false) && auth()->user() && app()->bound('tenant') && (int) $download->tenant_id === (int) app('tenant')->id && $this->canManageDownload($download, auth()->user(), app('tenant')),
             'can_regenerate' => (bool) ($planFeatures['regenerate'] ?? false) && $download->canRegenerateZip(),
             'is_escalated_to_support' => $download->isEscalatedToSupport(),
             'can_extend' => (bool) ($planFeatures['extend_expiration'] ?? false),
             'public_url' => route('downloads.public', ['download' => $download->id]),
             'access_mode' => $accessMode,
             'password_protected' => $download->requiresPassword(),
-            'password_plain' => $this->resolvePasswordPlain($download, $canManage),
+            'password_plain' => $this->resolvePasswordPlain($download, $isTenantDownloadsAdmin),
             'allowed_user_ids' => $download->allowedUsers()->pluck('users.id')->all(),
             'brand' => $brandPayload,
             'brands' => $brandPayload ? [$brandPayload] : [],
@@ -366,13 +381,18 @@ class DownloadController extends Controller
         }
 
         $ids = array_slice(array_unique($ids), 0, 50);
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
+        $isTenantDownloadsAdmin = $this->isTenantDownloadsAdmin($user, $tenant);
+        $canViewAllBrandDownloads = $this->canViewAllBrandDownloads($user, $tenant);
         $query = Download::query()
             ->where('tenant_id', $tenant->id)
             ->whereIn('id', $ids)
             ->whereNull('deleted_at');
-        if (! $canManage) {
+        if ($isTenantDownloadsAdmin) {
+            // no extra filter
+        } elseif ($canViewAllBrandDownloads) {
+            $brandIds = $user->brands()->pluck('brands.id')->all();
+            $query->whereIn('brand_id', $brandIds);
+        } else {
             $query->where('created_by_user_id', $user->id);
         }
         $downloads = $query->get();
@@ -680,10 +700,7 @@ class DownloadController extends Controller
             return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
         }
 
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
-        $isCreator = $download->created_by_user_id === $user->id;
-        if (! $canManage && ! $isCreator) {
+        if (! $this->canManageDownload($download, $user, $tenant)) {
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'You cannot manage downloads.'], 403);
             }
@@ -755,10 +772,7 @@ class DownloadController extends Controller
             return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
         }
 
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
-        $isCreator = $download->created_by_user_id === $user->id;
-        if (! $canManage && ! $isCreator) {
+        if (! $this->canManageDownload($download, $user, $tenant)) {
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'You cannot revoke this download.'], 403);
             }
@@ -981,7 +995,40 @@ class DownloadController extends Controller
     }
 
     /**
-     * Check if a user can manage a specific download (creator, tenant admin/owner, or brand manager).
+     * Tenant-level roles that see and manage all downloads for the whole tenant.
+     */
+    protected function isTenantDownloadsAdmin(User $user, Tenant $tenant): bool
+    {
+        $r = strtolower((string) ($user->getRoleForTenant($tenant) ?? ''));
+
+        return in_array($r, ['admin', 'owner', 'agency_admin'], true);
+    }
+
+    /**
+     * May use "All Downloads" (team scope): tenant downloads admin, agency_partner, or brand admin/manager on any brand.
+     */
+    protected function canViewAllBrandDownloads(User $user, Tenant $tenant): bool
+    {
+        if ($this->isTenantDownloadsAdmin($user, $tenant)) {
+            return true;
+        }
+
+        $tr = strtolower((string) ($user->getRoleForTenant($tenant) ?? ''));
+        if ($tr === 'agency_partner') {
+            return true;
+        }
+
+        return DB::table('brand_user')
+            ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
+            ->where('brand_user.user_id', $user->id)
+            ->whereNull('brand_user.removed_at')
+            ->where('brands.tenant_id', $tenant->id)
+            ->whereIn('brand_user.role', RoleRegistry::brandRolesWithTeamDownloadVisibility())
+            ->exists();
+    }
+
+    /**
+     * Check if a user can manage a specific download (creator, tenant admin/owner/agency_admin, or brand admin/manager on that brand).
      */
     protected function canManageDownload(Download $download, User $user, Tenant $tenant): bool
     {
@@ -989,15 +1036,19 @@ class DownloadController extends Controller
             return true;
         }
 
-        $tenantRole = $user->getRoleForTenant($tenant);
-        if ($tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true)) {
+        if ($this->isTenantDownloadsAdmin($user, $tenant)) {
             return true;
         }
 
         if ($download->brand_id) {
-            $brandRole = $user->getRoleForBrand($download->brand);
-            if ($brandRole && in_array(strtolower((string) $brandRole), ['brand_manager', 'manager'], true)) {
-                return true;
+            $brand = $download->relationLoaded('brand') && $download->brand
+                ? $download->brand
+                : Brand::query()->find($download->brand_id);
+            if ($brand) {
+                $brandRole = strtolower((string) ($user->getRoleForBrand($brand) ?? ''));
+                if (in_array($brandRole, RoleRegistry::brandRolesWithTeamDownloadVisibility(), true)) {
+                    return true;
+                }
             }
         }
 
@@ -1007,7 +1058,7 @@ class DownloadController extends Controller
     /**
      * Decrypt the stored password for authorized users. Returns null if not authorized or not set.
      */
-    protected function resolvePasswordPlain(Download $download, bool $canManage): ?string
+    protected function resolvePasswordPlain(Download $download, bool $isTenantDownloadsAdmin): ?string
     {
         if (! $download->requiresPassword() || ! $download->password_encrypted) {
             return null;
@@ -1019,15 +1070,19 @@ class DownloadController extends Controller
         }
 
         $isCreator = $download->created_by_user_id === $user->id;
-        if (! $canManage && ! $isCreator) {
-            $tenant = app()->bound('tenant') ? app('tenant') : null;
-            if ($tenant && $download->brand_id) {
-                $brandRole = $user->getRoleForBrand($download->brand);
-                $canManage = $brandRole && in_array(strtolower((string) $brandRole), ['brand_manager', 'manager'], true);
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        $canSeePassword = $isTenantDownloadsAdmin || $isCreator;
+        if (! $canSeePassword && $tenant && $download->brand_id) {
+            $brand = $download->relationLoaded('brand') && $download->brand
+                ? $download->brand
+                : Brand::query()->find($download->brand_id);
+            if ($brand) {
+                $brandRole = strtolower((string) ($user->getRoleForBrand($brand) ?? ''));
+                $canSeePassword = in_array($brandRole, RoleRegistry::brandRolesWithTeamDownloadVisibility(), true);
             }
         }
 
-        if (! $canManage && ! $isCreator) {
+        if (! $canSeePassword) {
             return null;
         }
 

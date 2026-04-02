@@ -134,6 +134,8 @@ class SystemIncidentRecoveryService
                         'analysis_status' => $asset?->analysis_status ?? 'unknown',
                         'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
                         'severity' => $severityValue->value,
+                        // Skip ticket_classifier, duplicate_detector, sla_risk_analyzer, etc.
+                        'skip_automation_agents' => true,
                     ],
                 ];
 

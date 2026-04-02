@@ -40,6 +40,10 @@ class DetectSLARiskJob implements ShouldQueue
             return;
         }
 
+        if (!$service->shouldReanalyzeTicket($ticket)) {
+            return;
+        }
+
         try {
             $service->analyzeTicketRisk($ticket);
         } catch (\Exception $e) {

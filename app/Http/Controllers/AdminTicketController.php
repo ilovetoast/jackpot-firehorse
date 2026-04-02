@@ -27,6 +27,7 @@ use App\Services\TicketNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -160,6 +161,15 @@ class AdminTicketController extends Controller
                 ->where('assigned_team', TicketTeam::ENGINEERING);
         }
 
+        // Workflow queue: customer-facing vs internal/ops
+        if ($request->filled('queue')) {
+            if ($request->queue === 'customer') {
+                $query->where('type', TicketType::TENANT);
+            } elseif ($request->queue === 'internal') {
+                $query->where('type', '!=', TicketType::TENANT);
+            }
+        }
+
         // SLA state filters
         if ($request->filled('sla_state')) {
             if ($request->sla_state === 'approaching_breach') {
@@ -228,13 +238,19 @@ class AdminTicketController extends Controller
             ->values()
             ->toArray();
 
+        $dummyEngineeringTicket = new Ticket([
+            'type' => TicketType::INTERNAL,
+            'assigned_team' => TicketTeam::ENGINEERING,
+        ]);
+
         return Inertia::render('Admin/Support/Tickets/Index', [
             'tickets' => $formattedTickets,
             'pagination' => $tickets->toArray(),
             'filterOptions' => $filterOptions,
             'roundRobinBucket' => $roundRobinBucket,
+            'can_bulk_resolve_engineering' => Gate::forUser($user)->allows('assign', $dummyEngineeringTicket),
             'filters' => array_merge(
-                $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only']),
+                $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only', 'queue']),
                 $request->get('type') === 'engineering' ? ['engineering_only' => '1'] : []
             ),
         ]);
@@ -400,8 +416,8 @@ class AdminTicketController extends Controller
 
     /**
      * Resolve a ticket.
-     * Sets status to resolved and records resolution time for SLA tracking.
-     * A public reply is required so the requester always sees resolution context (even if brief).
+     * Tenant tickets require a public resolution message for the requester.
+     * Internal / tenant-internal tickets use an internal note (optional body; default text if empty).
      */
     public function resolve(Request $request, Ticket $ticket)
     {
@@ -416,19 +432,111 @@ class AdminTicketController extends Controller
             return redirect()->back()->withErrors(['status' => 'Cannot resolve a closed ticket. Please reopen it first.']);
         }
 
+        $requiresPublic = $ticket->requiresPublicResolutionMessage();
+        $validated = $request->validate(
+            $requiresPublic
+                ? ['resolution_message' => 'required|string|min:3|max:10000']
+                : ['resolution_message' => 'nullable|string|max:10000']
+        );
+
+        $this->performTicketResolution(
+            $ticket,
+            $user,
+            $validated['resolution_message'] ?? '',
+            'resolve',
+        );
+
+        return redirect()->back()->with('success', 'Ticket resolved. Resolution time has been recorded for SLA tracking.');
+    }
+
+    /**
+     * Bulk-resolve internal engineering tickets on the current queue (internal note, no tenant emails).
+     */
+    public function bulkResolveEngineering(Request $request)
+    {
+        $user = Auth::user();
+        $this->authorize('viewAnyForStaff', Ticket::class);
+
         $validated = $request->validate([
-            'resolution_message' => 'required|string|min:3|max:10000',
+            'ticket_ids' => 'required|array|max:100',
+            'ticket_ids.*' => 'integer|exists:tickets,id',
+            'note' => 'nullable|string|max:10000',
         ]);
+
+        $note = trim($validated['note'] ?? '');
+        if ($note === '') {
+            $note = 'Bulk resolved (engineering queue).';
+        }
+
+        $tickets = Ticket::whereIn('id', $validated['ticket_ids'])->get()->keyBy('id');
+
+        $resolved = 0;
+        $skipped = 0;
+
+        foreach ($validated['ticket_ids'] as $id) {
+            $ticket = $tickets->get($id);
+            if (! $ticket) {
+                $skipped++;
+
+                continue;
+            }
+
+            if (! Gate::forUser($user)->allows('assign', $ticket)) {
+                $skipped++;
+
+                continue;
+            }
+
+            if (! $ticket->isEngineeringQueueTicket()) {
+                $skipped++;
+
+                continue;
+            }
+
+            if (in_array($ticket->status, [TicketStatus::RESOLVED, TicketStatus::CLOSED], true)) {
+                $skipped++;
+
+                continue;
+            }
+
+            $this->performTicketResolution($ticket, $user, $note, 'bulk_resolve_engineering');
+            $resolved++;
+        }
+
+        $message = $resolved > 0
+            ? "Resolved {$resolved} engineering ticket(s)."
+            : 'No tickets were resolved.';
+        if ($skipped > 0) {
+            $message .= " {$skipped} skipped (already final, not in engineering queue, or not permitted).";
+        }
+
+        return redirect()->back()->with($resolved > 0 ? 'success' : 'info', $message);
+    }
+
+    /**
+     * Set status to resolved with appropriate message visibility and optional creator email (tenant + public only).
+     */
+    protected function performTicketResolution(Ticket $ticket, User $user, string $resolutionBody, string $activityContext): void
+    {
+        $requiresPublic = $ticket->requiresPublicResolutionMessage();
+        $trimmed = trim($resolutionBody);
+        if ($requiresPublic) {
+            $body = $trimmed;
+            $isInternal = false;
+        } else {
+            $body = $trimmed !== '' ? $trimmed : 'Resolved (internal / engineering queue).';
+            $isInternal = true;
+        }
 
         $oldStatus = $ticket->status->value;
         $createdMessageId = null;
 
-        DB::transaction(function () use ($ticket, $user, $validated, $oldStatus, &$createdMessageId) {
+        DB::transaction(function () use ($ticket, $user, $body, $isInternal, $oldStatus, $activityContext, &$createdMessageId) {
             $message = TicketMessage::create([
                 'ticket_id' => $ticket->id,
                 'user_id' => $user->id,
-                'body' => $validated['resolution_message'],
-                'is_internal' => false,
+                'body' => $body,
+                'is_internal' => $isInternal,
             ]);
             $createdMessageId = $message->id;
 
@@ -442,8 +550,8 @@ class AdminTicketController extends Controller
                 brand: null,
                 metadata: [
                     'message_id' => $message->id,
-                    'is_internal' => false,
-                    'context' => 'resolve',
+                    'is_internal' => $isInternal,
+                    'context' => $activityContext,
                 ]
             );
 
@@ -456,13 +564,13 @@ class AdminTicketController extends Controller
                 metadata: [
                     'old_status' => $oldStatus,
                     'new_status' => 'resolved',
-                    'action' => 'resolve',
+                    'action' => $activityContext,
                 ]
             );
         });
 
-        $ticketId = $ticket->id;
-        if ($createdMessageId) {
+        if ($createdMessageId && ! $isInternal && $ticket->type === TicketType::TENANT) {
+            $ticketId = $ticket->id;
             DB::afterCommit(function () use ($ticketId, $createdMessageId) {
                 $t = Ticket::find($ticketId);
                 $m = TicketMessage::find($createdMessageId);
@@ -471,8 +579,6 @@ class AdminTicketController extends Controller
                 }
             });
         }
-
-        return redirect()->back()->with('success', 'Ticket resolved. Resolution time has been recorded for SLA tracking.');
     }
 
     /**
@@ -560,63 +666,23 @@ class AdminTicketController extends Controller
 
         $validated = $request->validate([
             'status' => 'required|string|in:' . implode(',', array_column(TicketStatus::cases(), 'value')),
-            'resolution_message' => 'exclude_unless:status,resolved|required|string|min:3|max:10000',
         ]);
 
         $newStatus = TicketStatus::from($validated['status']);
 
         if ($newStatus === TicketStatus::RESOLVED) {
-            $oldStatus = $ticket->status->value;
-            $createdMessageId = null;
+            $msgValidated = $request->validate(
+                $ticket->requiresPublicResolutionMessage()
+                    ? ['resolution_message' => 'required|string|min:3|max:10000']
+                    : ['resolution_message' => 'nullable|string|max:10000']
+            );
 
-            DB::transaction(function () use ($ticket, $user, $validated, $oldStatus, &$createdMessageId) {
-                $message = TicketMessage::create([
-                    'ticket_id' => $ticket->id,
-                    'user_id' => $user->id,
-                    'body' => $validated['resolution_message'],
-                    'is_internal' => false,
-                ]);
-                $createdMessageId = $message->id;
-
-                $ticket->update(['status' => TicketStatus::RESOLVED]);
-
-                ActivityRecorder::record(
-                    tenant: $ticket->tenant_id ?? 1,
-                    eventType: EventType::TICKET_MESSAGE_CREATED,
-                    subject: $ticket,
-                    actor: $user,
-                    brand: null,
-                    metadata: [
-                        'message_id' => $message->id,
-                        'is_internal' => false,
-                        'context' => 'status_resolved',
-                    ]
-                );
-
-                ActivityRecorder::record(
-                    tenant: $ticket->tenant_id ?? 1,
-                    eventType: EventType::TICKET_STATUS_CHANGED,
-                    subject: $ticket->fresh(),
-                    actor: $user,
-                    brand: null,
-                    metadata: [
-                        'old_status' => $oldStatus,
-                        'new_status' => 'resolved',
-                        'action' => 'update_status',
-                    ]
-                );
-            });
-
-            $ticketId = $ticket->id;
-            if ($createdMessageId) {
-                DB::afterCommit(function () use ($ticketId, $createdMessageId) {
-                    $t = Ticket::find($ticketId);
-                    $m = TicketMessage::find($createdMessageId);
-                    if ($t && $m) {
-                        app(TicketNotificationService::class)->notifyCreatorOfReplyFromOtherUser($t, $m);
-                    }
-                });
-            }
+            $this->performTicketResolution(
+                $ticket,
+                $user,
+                $msgValidated['resolution_message'] ?? '',
+                'update_status',
+            );
 
             return redirect()->back()->with('success', 'Ticket status updated.');
         }
@@ -981,6 +1047,8 @@ class AdminTicketController extends Controller
                 : AITicketSuggestion::where('ticket_id', $ticket->id)->pending()->exists(),
             'created_at' => $ticket->created_at->toISOString(),
             'updated_at' => $ticket->updated_at->toISOString(),
+            'requires_public_resolution' => $ticket->requiresPublicResolutionMessage(),
+            'is_engineering_queue' => $ticket->isEngineeringQueueTicket(),
         ];
     }
 

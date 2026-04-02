@@ -7,13 +7,14 @@ use App\Enums\TicketStatus;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Services\AIService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
 /**
  * SLA Risk Detection Service
  *
  * Handles AI-powered SLA risk detection for tickets.
- * Scheduled hourly scan of open tickets.
+ * Scheduled scan of open tickets (throttled: see shouldReanalyzeTicket).
  *
  * Outputs:
  * - Risk flag stored in ticket metadata (internal only)
@@ -50,6 +51,9 @@ class SLARiskDetectionService
 
         $scanned = 0;
         foreach ($tickets as $ticket) {
+            if (!$this->shouldReanalyzeTicket($ticket)) {
+                continue;
+            }
             try {
                 $this->analyzeTicketRisk($ticket);
                 $scanned++;
@@ -62,6 +66,58 @@ class SLARiskDetectionService
         }
 
         return $scanned;
+    }
+
+    /**
+     * Whether this ticket should run the SLA risk AI agent now.
+     *
+     * Avoids hourly re-runs for every open ticket: re-analyze only if the cooldown
+     * has passed, or a new public (non-internal) message arrived since the last run.
+     */
+    public function shouldReanalyzeTicket(Ticket $ticket): bool
+    {
+        if (!config('automation.enabled', true) || !config('automation.triggers.sla_risk_detection.enabled', true)) {
+            return false;
+        }
+
+        $metadata = $ticket->metadata ?? [];
+        if (!empty($metadata['skip_automation_agents'])) {
+            return false;
+        }
+        if (($metadata['source'] ?? null) === 'operations_incident' && !empty($metadata['asset_id'])) {
+            return false;
+        }
+        $slaRisk = $metadata['sla_risk'] ?? null;
+        $detectedAtRaw = is_array($slaRisk) ? ($slaRisk['detected_at'] ?? null) : null;
+
+        if (!$detectedAtRaw) {
+            return true;
+        }
+
+        try {
+            $lastAt = Carbon::parse($detectedAtRaw);
+        } catch (\Throwable) {
+            return true;
+        }
+
+        $level = is_array($slaRisk) ? ($slaRisk['level'] ?? 'low') : 'low';
+        $baseMin = (int) config('automation.triggers.sla_risk_detection.min_hours_between_analysis', 24);
+        $highConfigured = config('automation.triggers.sla_risk_detection.high_risk_min_hours');
+        $minHours = ($level === 'high' && $highConfigured !== null)
+            ? (int) $highConfigured
+            : $baseMin;
+
+        $hasNewPublicActivity = TicketMessage::query()
+            ->where('ticket_id', $ticket->id)
+            ->public()
+            ->where('created_at', '>', $lastAt)
+            ->exists();
+
+        if ($hasNewPublicActivity) {
+            return true;
+        }
+
+        return $lastAt->lte(now()->subHours($minHours));
     }
 
     /**

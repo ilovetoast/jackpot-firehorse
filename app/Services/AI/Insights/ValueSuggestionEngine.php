@@ -200,10 +200,13 @@ class ValueSuggestionEngine
      */
     protected function loadFieldsWithOptions(int $tenantId)
     {
+        $excluded = array_map('strtolower', config('ai_metadata_value_suggestions.excluded_field_keys', []));
+
         return DB::table('metadata_fields')
             ->join('metadata_options', 'metadata_fields.id', '=', 'metadata_options.metadata_field_id')
             ->whereNull('metadata_fields.deprecated_at')
             ->whereIn('metadata_fields.type', ['select', 'multiselect'])
+            ->whereRaw("COALESCE(metadata_fields.population_mode, 'manual') != ?", ['automatic'])
             ->where(function ($q) use ($tenantId) {
                 $q->where(function ($q2) use ($tenantId) {
                     $q2->where('metadata_fields.scope', 'tenant')
@@ -216,7 +219,9 @@ class ValueSuggestionEngine
             ->select('metadata_fields.id', 'metadata_fields.key')
             ->groupBy('metadata_fields.id', 'metadata_fields.key')
             ->orderBy('metadata_fields.key')
-            ->get();
+            ->get()
+            ->filter(fn ($row) => ! in_array(strtolower((string) $row->key), $excluded, true))
+            ->values();
     }
 
     /**

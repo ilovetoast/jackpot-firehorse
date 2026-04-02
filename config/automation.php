@@ -57,6 +57,12 @@ return [
             'enabled' => env('AUTOMATION_SLA_RISK_ENABLED', true),
             'scan_interval' => 'hourly',
             'async' => true,
+            // Skip re-running the AI agent if analyzed within this many hours, unless a new public message arrived.
+            'min_hours_between_analysis' => (int) env('AUTOMATION_SLA_RISK_MIN_HOURS', 24),
+            // If set, high-risk tickets may be re-checked sooner (hours). Null = same as min_hours_between_analysis.
+            'high_risk_min_hours' => env('AUTOMATION_SLA_RISK_HIGH_MIN_HOURS') !== null
+                ? (int) env('AUTOMATION_SLA_RISK_HIGH_MIN_HOURS')
+                : null,
         ],
 
         'error_pattern_detection' => [

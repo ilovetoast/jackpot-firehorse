@@ -24,6 +24,17 @@ class EscalationPolicy
     public function shouldCreateTicket(SystemIncident $incident): bool
     {
         $repairAttempts = (int) ($incident->metadata['repair_attempts'] ?? $incident->metadata['recovery_attempt_count'] ?? 0);
+
+        if ($this->isAssetBackedPipelineIncident($incident)) {
+            if (!config('reliability.asset_incident.auto_ticket_enabled', true)) {
+                return false;
+            }
+            $minAttempts = (int) config('reliability.asset_incident.min_repair_attempts_before_ticket', 3);
+            if ($repairAttempts < $minAttempts) {
+                return false;
+            }
+        }
+
         $effectiveSeverity = $this->effectiveSeverity($incident);
 
         if ($effectiveSeverity === 'critical') {
@@ -39,6 +50,15 @@ class EscalationPolicy
         }
 
         return false;
+    }
+
+    /**
+     * Incidents tied to asset processing (stuck uploads, thumbnails, queue jobs).
+     * These are high-volume; ticket + AI escalation is gated separately in shouldCreateTicket().
+     */
+    protected function isAssetBackedPipelineIncident(SystemIncident $incident): bool
+    {
+        return in_array($incident->source_type, ['asset', 'job'], true);
     }
 
     /**
