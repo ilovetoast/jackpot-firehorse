@@ -7,6 +7,7 @@ use App\Enums\TicketStatus;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Services\AIService;
+use App\Services\TicketSLAService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -182,7 +183,7 @@ class SLARiskDetectionService
      */
     protected function buildPrompt(Ticket $ticket): string
     {
-        $slaState = $ticket->slaState;
+        $slaState = app(TicketSLAService::class)->slaStateForTicket($ticket);
         $messages = $ticket->messages()->public()->orderBy('created_at', 'desc')->get();
         $messageVelocity = $this->calculateMessageVelocity($messages);
         $statusHistory = $this->getStatusHistory($ticket);

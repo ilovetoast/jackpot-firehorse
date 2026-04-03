@@ -25,6 +25,7 @@ use App\Services\TicketAttachmentService;
 use App\Services\TicketAuditService;
 use App\Services\TicketConversionService;
 use App\Services\TicketNotificationService;
+use App\Services\TicketSLAService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -1023,6 +1024,8 @@ class AdminTicketController extends Controller
      */
     protected function formatTicketForList(Ticket $ticket): array
     {
+        $slaForList = app(TicketSLAService::class)->slaStateForTicket($ticket);
+
         return [
             'id' => $ticket->id,
             'ticket_number' => $ticket->ticket_number,
@@ -1056,11 +1059,11 @@ class AdminTicketController extends Controller
                 'icon_bg_color' => $b->icon_bg_color,
                 'icon_style' => $b->icon_style ?? 'subtle',
             ]),
-            'sla_state' => $ticket->slaState ? [
-                'breached_first_response' => $ticket->slaState->breached_first_response,
-                'breached_resolution' => $ticket->slaState->breached_resolution,
-                'first_response_deadline' => $ticket->slaState->first_response_deadline?->toISOString(),
-                'resolution_deadline' => $ticket->slaState->resolution_deadline?->toISOString(),
+            'sla_state' => $slaForList ? [
+                'breached_first_response' => $slaForList->breached_first_response,
+                'breached_resolution' => $slaForList->breached_resolution,
+                'first_response_deadline' => $slaForList->first_response_deadline?->toISOString(),
+                'resolution_deadline' => $slaForList->resolution_deadline?->toISOString(),
             ] : null,
             // Engineering fields (only for internal engineering tickets)
             'severity' => $ticket->severity?->value,
@@ -1117,12 +1120,12 @@ class AdminTicketController extends Controller
      */
     protected function formatSLAData(Ticket $ticket): ?array
     {
-        if (!$ticket->slaState) {
+        $sla = app(TicketSLAService::class)->slaStateForTicket($ticket);
+        if (! $sla) {
             return null;
         }
 
         $now = now();
-        $sla = $ticket->slaState;
 
         return [
             'first_response_target_minutes' => $sla->first_response_target_minutes,

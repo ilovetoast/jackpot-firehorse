@@ -36,6 +36,21 @@ class TicketSLAService
     }
 
     /**
+     * Resolve SLA state without touching lazy-loaded relations (Ticket observers run with lazy loading disabled).
+     */
+    public function slaStateForTicket(Ticket $ticket): ?TicketSLAState
+    {
+        if ($ticket->relationLoaded('slaState')) {
+            return $ticket->getRelation('slaState');
+        }
+
+        $state = TicketSLAState::where('ticket_id', $ticket->id)->first();
+        $ticket->setRelation('slaState', $state);
+
+        return $state;
+    }
+
+    /**
      * Assign SLA plan to ticket on creation.
      * Resolves tenant's subscription plan and assigns corresponding SLA plan.
      *
@@ -134,7 +149,7 @@ class TicketSLAService
      */
     public function pauseSLA(Ticket $ticket): void
     {
-        $slaState = $ticket->slaState;
+        $slaState = $this->slaStateForTicket($ticket);
         if (!$slaState) {
             return;
         }
@@ -154,7 +169,7 @@ class TicketSLAService
      */
     public function resumeSLA(Ticket $ticket): void
     {
-        $slaState = $ticket->slaState;
+        $slaState = $this->slaStateForTicket($ticket);
         if (!$slaState || $slaState->paused_at === null) {
             return;
         }
@@ -174,7 +189,7 @@ class TicketSLAService
      */
     public function checkBreaches(Ticket $ticket): array
     {
-        $slaState = $ticket->slaState;
+        $slaState = $this->slaStateForTicket($ticket);
         if (!$slaState) {
             return [
                 'breached_first_response' => false,
@@ -199,7 +214,7 @@ class TicketSLAService
      */
     public function updateResponseTime(Ticket $ticket): void
     {
-        $slaState = $ticket->slaState;
+        $slaState = $this->slaStateForTicket($ticket);
         if (!$slaState) {
             return;
         }
@@ -221,7 +236,7 @@ class TicketSLAService
      */
     public function updateResolutionTime(Ticket $ticket): void
     {
-        $slaState = $ticket->slaState;
+        $slaState = $this->slaStateForTicket($ticket);
         if (!$slaState) {
             return;
         }
