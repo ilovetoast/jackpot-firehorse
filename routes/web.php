@@ -528,6 +528,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
             Route::get('/overview/assets', [\App\Http\Controllers\DashboardController::class, 'overviewAssetsJson'])->name('overview.assets');
             Route::get('/api/overview/metrics', [\App\Http\Controllers\DashboardController::class, 'overviewMetricsJson'])->name('overview.api.metrics');
+            Route::get('/api/overview/hero', [\App\Http\Controllers\DashboardController::class, 'overviewHeroJson'])->name('overview.api.hero');
+            Route::get('/api/overview/stats', [\App\Http\Controllers\DashboardController::class, 'overviewStatsJson'])->name('overview.api.stats');
             Route::get('/api/overview/assets', [\App\Http\Controllers\DashboardController::class, 'overviewAssetsJson'])->name('overview.api.assets');
             Route::get('/api/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.api.insights');
             Route::get('/dashboard', fn () => redirect()->route('insights.overview'))->name('dashboard'); // Deprecated: redirect to Insights

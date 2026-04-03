@@ -87,9 +87,11 @@ function parsePhpArrayKey(key, keySet) {
 /**
  * @param {URLSearchParams|Record<string, string>} params - URL params or object
  * @param {string[]} filterKeys - Allowed filter keys (e.g. from filterable_schema); only these are read
+ * @param {{ navigationKeys?: string[] }} [options] - Query keys that are page navigation (e.g. Collections `collection`, `category_id`) — never treated as metadata filters
  * @returns {Record<string, { operator: string, value: string | string[] }>} filters object (multi-value keys get value as string[])
  */
-export function flatParamsToFilters(params, filterKeys = []) {
+export function flatParamsToFilters(params, filterKeys = [], options = {}) {
+  const navigationKeys = new Set(options.navigationKeys || [])
   const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS, 'dominant_hue_group'])
   if (keySet.size === 0) return {}
   const entries = params instanceof URLSearchParams
@@ -97,7 +99,7 @@ export function flatParamsToFilters(params, filterKeys = []) {
     : Object.entries(params || {})
   const rawByKey = {}
   for (const [key, value] of entries) {
-    if (RESERVED_PARAMS.has(key)) continue
+    if (RESERVED_PARAMS.has(key) || navigationKeys.has(key)) continue
     if (value === '' || value === null || value === undefined) continue
     const baseKey = parsePhpArrayKey(key, keySet) ?? (keySet.has(key) ? key : null)
     if (!baseKey) continue
@@ -118,9 +120,10 @@ export function flatParamsToFilters(params, filterKeys = []) {
  *
  * @param {URLSearchParams} urlParams
  * @param {string[]} filterKeys - From filterable_schema (field_key)
+ * @param {{ navigationKeys?: string[] }} [options] - Passed to flatParamsToFilters
  * @returns {Record<string, { operator: string, value: unknown }>}
  */
-export function parseFiltersFromUrl(urlParams, filterKeys = []) {
+export function parseFiltersFromUrl(urlParams, filterKeys = [], options = {}) {
   const filtersParam = urlParams.get('filters')
   if (filtersParam) {
     try {
@@ -129,7 +132,7 @@ export function parseFiltersFromUrl(urlParams, filterKeys = []) {
       if (parsed && typeof parsed === 'object') return parsed
     } catch (e) { /* ignore */ }
   }
-  return flatParamsToFilters(urlParams, filterKeys)
+  return flatParamsToFilters(urlParams, filterKeys, options)
 }
 
 /**
@@ -139,16 +142,21 @@ export function parseFiltersFromUrl(urlParams, filterKeys = []) {
  * @param {URLSearchParams} urlParams - Current URL params (for category, sort, etc.)
  * @param {Record<string, { operator?: string, value?: unknown }>} filters
  * @param {string[]} filterKeys
+ * @param {{ preserveQueryKeys?: string[] }} [options] - Query keys to keep when stripping SPECIAL_FILTER_KEYS (e.g. Collections `collection` is navigation, not metadata)
  * @returns {Record<string, string | string[]>} All query params (values may be string[] for multi-value filters)
  */
-export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = []) {
+export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = [], options = {}) {
+  const preserve = new Set(options.preserveQueryKeys || [])
   const obj = Object.fromEntries(urlParams.entries())
   delete obj.filters
   const keysToRemove = new Set([...filterKeys, ...SPECIAL_FILTER_KEYS, 'dominant_hue_group'])
-  keysToRemove.forEach(k => delete obj[k])
-  Object.keys(obj).forEach(k => {
+  keysToRemove.forEach((k) => {
+    if (preserve.has(k)) return
+    delete obj[k]
+  })
+  Object.keys(obj).forEach((k) => {
     const m = k.match(/^(.+)\[\d*\]$/)
-    if (m && keysToRemove.has(m[1])) delete obj[k]
+    if (m && keysToRemove.has(m[1]) && !preserve.has(m[1])) delete obj[k]
   })
   const flat = filtersToFlatParams(filters, filterKeys)
   return { ...obj, ...flat }

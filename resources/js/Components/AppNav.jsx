@@ -183,8 +183,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         return {}
     }
     const baseLogoFilterStyle = computeLogoFilterStyle(logoFilter, activeBrand?.primary_color)
-    /** Cinematic (transparent) header: show primary logo as uploaded — no luminance auto-invert (brand supplies on-light mark). */
-    const logoFilterStyle = { ...baseLogoFilterStyle, transition: 'filter 0.3s ease' }
+    /** No filter transition: animating filter on every nav remount reads as logo flicker. */
+    const logoFilterStyle = baseLogoFilterStyle
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')
@@ -572,7 +572,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                             </div>
                         )}
                         {/* Brand Logo Component — max width keeps main nav from overlapping wide wordmarks */}
-                        <div className="flex min-w-0 max-w-[200px] sm:max-w-[220px] md:max-w-[240px] shrink-0 items-center">
+                        <div className="flex min-h-12 min-w-0 max-w-[200px] sm:max-w-[220px] md:max-w-[240px] shrink-0 items-center">
                             {isAppPage ? (isCollectionOnlyNav && effectiveCollection?.brand ? (
                                 <AppBrandLogo
                                     activeBrand={effectiveCollection.brand}

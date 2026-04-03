@@ -35,7 +35,7 @@ class MetadataAnalyticsController extends Controller
         }
 
         $user = Auth::user();
-        if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             abort(403, 'You do not have permission to view insights.');
         }
         $userRole = $user->getRoleForTenant($tenant);
@@ -97,7 +97,7 @@ class MetadataAnalyticsController extends Controller
         }
 
         $user = Auth::user();
-        if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             return response()->json(['error' => 'You do not have permission to view insights.'], 403);
         }
         $userRole = $user->getRoleForTenant($tenant);

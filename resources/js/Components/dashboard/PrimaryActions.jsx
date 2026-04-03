@@ -6,6 +6,7 @@ import {
     PhotoIcon,
     RectangleStackIcon,
 } from '@heroicons/react/24/outline'
+import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
 const ICON_MAP = {
     portal: GlobeAltIcon,
@@ -54,7 +55,7 @@ function brandDisplayName(brand) {
     return typeof n === 'string' && n.trim() !== '' ? n.trim() : 'Brand'
 }
 
-function ActionCardLink({ href, Icon, title, description, brandColor, delayIndex }) {
+function ActionCardLink({ href, Icon, title, description, brandColor, iconFill, delayIndex }) {
     const wellBg = `${brandColor}1a`
     const hoverGlow = `${brandColor}33`
     return (
@@ -90,7 +91,7 @@ function ActionCardLink({ href, Icon, title, description, brandColor, delayIndex
                         className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl transition-colors duration-200 group-hover:brightness-110"
                         style={{ backgroundColor: wellBg }}
                     >
-                        <Icon className="h-[18px] w-[18px]" style={{ color: brandColor }} />
+                        <Icon className="h-[18px] w-[18px]" style={{ color: iconFill }} />
                     </div>
                 )}
                 <div className="min-w-0 flex-1">
@@ -111,7 +112,14 @@ function ActionCardLink({ href, Icon, title, description, brandColor, delayIndex
     )
 }
 
-export default function PrimaryActions({ permissions = {}, brand = null, brandColor = '#6366f1' }) {
+export default function PrimaryActions({
+    permissions = {},
+    brand = null,
+    brandColor = '#6366f1',
+    iconAccentColor = null,
+}) {
+    const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
+
     const actions = ALL_ACTIONS.filter((action) => {
         if (action.always) return true
         if (action.permission) return permissions[action.permission] === true
@@ -144,6 +152,7 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
                             title={a.title}
                             description={a.description}
                             brandColor={brandColor}
+                            iconFill={iconFill}
                             delayIndex={i}
                         />
                     )
@@ -164,6 +173,7 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
                         title={a.title}
                         description={a.description}
                         brandColor={brandColor}
+                        iconFill={iconFill}
                         delayIndex={i}
                     />
                 )

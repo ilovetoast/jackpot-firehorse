@@ -409,8 +409,8 @@ class DashboardController extends Controller
         $permissions = [
             'canManageBrand' => $user->hasPermissionForTenant($tenant, 'brand_settings.manage'),
             'canManageTeam' => $user->hasPermissionForTenant($tenant, 'team.manage'),
-            // Insights routes (AnalyticsOverviewController, etc.) require brand_settings.manage — keep tile in sync
-            'canViewAnalytics' => $user->hasPermissionForTenant($tenant, 'brand_settings.manage'),
+            // Insights routes: {@see User::canViewBrandWorkspaceInsights()} — keep tile in sync
+            'canViewAnalytics' => $user->canViewBrandWorkspaceInsights($tenant, $brand),
         ];
 
         if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
@@ -885,6 +885,145 @@ class DashboardController extends Controller
             'most_downloaded_assets' => $mostDownloadedAssets,
             'most_trending_assets' => $mostTrendingAssets,
         ];
+    }
+
+    /**
+     * Fast first-paint payload for cinematic overview: brand snapshot, headline counts, small-thumb collage only.
+     * No theme builder, no activity feed, no insights.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildOverviewHeroPayload(Tenant $tenant, Brand $brand, User $user): array
+    {
+        $totalAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)->count();
+
+        $executionsCount = Asset::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::DELIVERABLE)
+            ->whereNull('deleted_at')
+            ->count();
+
+        return [
+            'brand' => [
+                'id' => $brand->id,
+                'name' => $brand->name,
+                'slug' => $brand->slug,
+                'primary_color' => $brand->primary_color,
+                'secondary_color' => $brand->secondary_color,
+                'accent_color' => $brand->accent_color,
+            ],
+            'headline' => [
+                'total_assets' => $totalAssets,
+                'executions_count' => $executionsCount,
+            ],
+            'collage_assets' => $this->buildOverviewHeroCollageAssets($tenant, $brand, $user),
+        ];
+    }
+
+    /**
+     * Lightweight collage for hero tier: recent published assets, THUMB_SMALL (thumb) only, category-respecting.
+     *
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    protected function buildOverviewHeroCollageAssets(Tenant $tenant, Brand $brand, User $user): \Illuminate\Support\Collection
+    {
+        $candidates = Asset::where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.status', AssetStatus::VISIBLE)
+            ->where('assets.thumbnail_status', ThumbnailStatus::COMPLETED)
+            ->whereNull('assets.deleted_at')
+            ->whereNotNull('assets.published_at')
+            ->whereNull('assets.archived_at')
+            ->where(function ($q) {
+                $q->where('assets.builder_staged', false)->orWhereNull('assets.builder_staged');
+            })
+            ->where(function ($q) {
+                $q->where('assets.intake_state', 'normal')->orWhereNull('assets.intake_state');
+            })
+            ->where('assets.type', AssetType::ASSET->value)
+            ->orderByDesc('assets.created_at')
+            ->limit(48)
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        $categoryIds = $candidates->map(function ($asset) {
+            $metadata = $asset->metadata;
+            if (! is_array($metadata)) {
+                return null;
+            }
+
+            return $metadata['category_id'] ?? null;
+        })->filter()->unique()->values()->all();
+
+        $categories = collect();
+        if (! empty($categoryIds)) {
+            $categories = Category::with(['tenant', 'brand'])->whereIn('id', $categoryIds)
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->get()
+                ->keyBy('id');
+        }
+
+        $out = collect();
+        foreach ($candidates as $asset) {
+            if ($out->count() >= 10) {
+                break;
+            }
+
+            $metadata = $asset->metadata ?? [];
+            $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
+            $category = $categoryId ? $categories->get($categoryId) : null;
+            if ($category && ! $user->can('view', $category)) {
+                continue;
+            }
+
+            $smallUrl = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+            if ($smallUrl === '') {
+                continue;
+            }
+
+            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+            if ($thumbnailVersion && ! str_contains($smallUrl, 'X-Amz-Signature')) {
+                $smallUrl .= (str_contains($smallUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
+            }
+
+            $out->push([
+                'id' => $asset->id,
+                'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
+                'thumbnail_url' => $smallUrl,
+                'final_thumbnail_url' => $smallUrl,
+            ]);
+        }
+
+        return $out->values();
+    }
+
+    /**
+     * JSON: fast hero tier (brand + headline counts + small-thumb collage). No insights or heavy metrics.
+     */
+    public function overviewHeroJson(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $tenant || ! $brand || ! $user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        return response()->json($this->buildOverviewHeroPayload($tenant, $brand, $user))
+            ->header('Cache-Control', 'private, no-store, must-revalidate');
+    }
+
+    /**
+     * JSON: stats tier (same payload as /api/overview/metrics). Alias route for progressive overview loading.
+     */
+    public function overviewStatsJson(Request $request): JsonResponse
+    {
+        return $this->overviewMetricsJson($request);
     }
 
     /**

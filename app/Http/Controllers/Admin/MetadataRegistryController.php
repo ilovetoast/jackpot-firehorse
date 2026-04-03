@@ -37,6 +37,8 @@ class MetadataRegistryController extends Controller
         return Inertia::render('Admin/MetadataRegistry/Index', [
             'fields' => $fields,
             'latestSystemTemplates' => $latestSystemTemplates,
+            /** Gate/Spatie — not derived from Inertia effective_permissions (site-only perm can be missing when tenant context is active). */
+            'can_manage_system_fields' => Auth::user()->can('metadata.system.fields.manage'),
         ]);
     }
 

@@ -69,7 +69,7 @@ class AnalyticsOverviewController extends Controller
             abort(403, 'Tenant and brand must be selected.');
         }
         $user = Auth::user();
-        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             abort(403, 'You do not have permission to view insights.');
         }
 
@@ -103,15 +103,40 @@ class AnalyticsOverviewController extends Controller
             abort(403, 'Tenant and brand must be selected.');
         }
         $user = Auth::user();
-        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             abort(403, 'You do not have permission to view insights.');
         }
 
-        $feed = app(BrandActivityFeedService::class)->getRecentActivity($tenant, $brand, $user, 100);
+        $filters = [
+            'actor_id' => $request->filled('actor_id') ? max(0, (int) $request->input('actor_id')) : null,
+            'event_type' => $request->filled('event_type') ? trim((string) $request->input('event_type')) : null,
+            'subject_id' => $request->filled('subject_id') ? trim((string) $request->input('subject_id')) : null,
+        ];
+        if (($filters['actor_id'] ?? 0) <= 0) {
+            $filters['actor_id'] = null;
+        }
+        if (($filters['event_type'] ?? '') !== '' && ! preg_match('/^[a-z0-9._-]{1,120}$/i', (string) $filters['event_type'])) {
+            $filters['event_type'] = null;
+        }
+        if (($filters['subject_id'] ?? '') !== '' && strlen((string) $filters['subject_id']) > 64) {
+            $filters['subject_id'] = substr((string) $filters['subject_id'], 0, 64);
+        }
+        if (($filters['subject_id'] ?? '') === '') {
+            $filters['subject_id'] = null;
+        }
+
+        $service = app(BrandActivityFeedService::class);
+        $feed = $service->getRecentActivity($tenant, $brand, $user, 200, array_filter($filters, fn ($v) => $v !== null && $v !== ''));
 
         return Inertia::render('Insights/Activity', [
             'activity' => $feed?->values()->all() ?? [],
             'can_view_activity_logs' => $feed !== null,
+            'filters' => [
+                'actor_id' => $filters['actor_id'],
+                'event_type' => $filters['event_type'],
+                'subject_id' => $filters['subject_id'],
+            ],
+            'filter_options' => $feed !== null ? $service->getFilterOptions($tenant, $brand, $user) : ['actors' => [], 'event_types' => []],
         ]);
     }
 
@@ -148,7 +173,7 @@ class AnalyticsOverviewController extends Controller
             abort(403, 'Tenant and brand must be selected.');
         }
         $user = Auth::user();
-        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if (! $user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             abort(403, 'You do not have permission to view insights.');
         }
         $planName = $this->planService->getCurrentPlan($tenant);
@@ -186,9 +211,9 @@ class AnalyticsOverviewController extends Controller
             $aiUsageData = ['tagging' => $usageStatusFull['tagging'] ?? [], 'suggestions' => $usageStatusFull['suggestions'] ?? []];
         }
 
-        /** Shown for brand admins / brand managers (brand_settings.manage) when AI tagging or suggestions monthly cap is reached. */
+        /** Shown when AI tagging or suggestions monthly cap is reached (same audience as insights overview). */
         $aiMonthlyCapAlert = null;
-        if ($user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+        if ($user->canViewBrandWorkspaceInsights($tenant, $brand)) {
             $exceeded = [];
             foreach (['tagging', 'suggestions'] as $feature) {
                 $row = $usageStatusFull[$feature] ?? [];

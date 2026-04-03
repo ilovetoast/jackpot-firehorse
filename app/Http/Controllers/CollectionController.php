@@ -15,7 +15,9 @@ use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
+use App\Services\Collections\CollectionGridMetadataFilterService;
 use App\Services\FeatureGate;
+use App\Services\MetadataFilterService;
 use App\Services\MetadataVisibilityResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,7 +37,9 @@ class CollectionController extends Controller
         protected FeatureGate $featureGate,
         protected AssetEligibilityService $assetEligibilityService,
         protected AssetSearchService $assetSearchService,
-        protected AssetSortService $assetSortService
+        protected AssetSortService $assetSortService,
+        protected MetadataFilterService $metadataFilterService,
+        protected CollectionGridMetadataFilterService $collectionGridMetadataFilterService,
     ) {
     }
 
@@ -67,6 +71,10 @@ class CollectionController extends Controller
                 'category_id' => null,
                 'group_by_category' => false,
                 'filter_categories' => [],
+                'filterable_schema' => [],
+                'available_values' => [],
+                'filters' => [],
+                'grid_folder_total' => 0,
             ]);
         }
 
@@ -167,6 +175,10 @@ class CollectionController extends Controller
         $categoryFilterIdForProps = null;
         $groupByCategoryEnabled = false;
         $filterCategories = [];
+        $filterable_schema = [];
+        $available_values = [];
+        $filters = [];
+        $gridFolderTotal = 0;
 
         if ($collectionIdParam !== null && $collectionIdParam !== '') {
             $collection = Collection::query()
@@ -213,24 +225,44 @@ class CollectionController extends Controller
                         $query->where('assets.metadata->category_id', $categoryFilterId);
                     }
 
-                    // Scoped search: only within this collection's assets (query already scoped via asset_collections)
+                    $categoryModel = null;
+                    if ($categoryFilterId !== null && $categoryFilterId > 0) {
+                        $categoryModel = Category::query()
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->find($categoryFilterId);
+                    }
+
+                    $fileType = $this->collectionGridMetadataFilterService->resolveSchemaFileType($collectionType);
+                    $schema = $this->collectionGridMetadataFilterService->resolveSchema($tenant, $brand, $categoryModel?->id, $fileType);
+
+                    $baseQueryForFilterVisibility = clone $query;
+                    $parsedMetadataFilters = $this->collectionGridMetadataFilterService->parseFiltersFromRequest($request, $schema);
+                    if (! empty($parsedMetadataFilters) && is_array($parsedMetadataFilters)) {
+                        $this->metadataFilterService->applyFilters($query, $parsedMetadataFilters, $schema);
+                    }
+
                     $searchQ = $request->input('q');
                     $qTrim = is_string($searchQ) ? trim($searchQ) : '';
                     if ($qTrim !== '') {
                         $this->assetSearchService->applyScopedSearch($query, $qTrim);
+                        $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, $qTrim);
                     }
+
+                    // Library scope for "filtered of folder" (collection + type + category + q; excludes metadata filters)
+                    $gridFolderTotal = (int) (clone $baseQueryForFilterVisibility)->reorder()->count();
 
                     $hasNarrowingFilters = $qTrim !== ''
                         || ($categoryFilterId !== null && $categoryFilterId > 0)
-                        || $collectionType !== 'all';
+                        || $collectionType !== 'all'
+                        || ! empty($parsedMetadataFilters);
                     $groupByCategory = ! $hasNarrowingFilters;
 
                     $sort = $this->assetSortService->normalizeSort($request->input('sort'));
                     $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
-                    // Always use standard sort for collections. Category section layout is built client-side
-                    // (aggregated by category) so we avoid LEFT JOIN + JSON cast ordering that can error on PG
-                    // when metadata.category_id is non-numeric and return zero rows from the whole query.
                     $this->assetSortService->applySort($query, $sort, $sortDirection);
+
+                    $hueClusterCounts = $this->collectionGridMetadataFilterService->buildHueClusterCounts($query);
 
                     $perPage = 36;
                     $paginator = $query->paginate($perPage)->withQueryString();
@@ -240,6 +272,21 @@ class CollectionController extends Controller
                     $collectionTypeFilter = $collectionType;
                     $categoryFilterIdForProps = ($categoryFilterId !== null && $categoryFilterId > 0) ? $categoryFilterId : null;
                     $groupByCategoryEnabled = $groupByCategory;
+
+                    $filters = $parsedMetadataFilters;
+                    if (! $request->boolean('load_more')) {
+                        $built = $this->collectionGridMetadataFilterService->buildFilterableSchemaAndAvailableValues(
+                            $schema,
+                            $categoryModel,
+                            $tenant,
+                            $baseQueryForFilterVisibility,
+                            $hueClusterCounts,
+                            collect($items),
+                            $assets
+                        );
+                        $filterable_schema = $built['filterable_schema'];
+                        $available_values = $built['available_values'];
+                    }
                 } catch (\Throwable $e) {
                     Log::error('collections.index.asset_grid_failed', [
                         'collection_id' => $collection->id,
@@ -255,6 +302,10 @@ class CollectionController extends Controller
                     $categoryFilterIdForProps = null;
                     $groupByCategoryEnabled = false;
                     $filterCategories = [];
+                    $filterable_schema = [];
+                    $available_values = [];
+                    $filters = [];
+                    $gridFolderTotal = 0;
                 }
             }
         }
@@ -304,6 +355,7 @@ class CollectionController extends Controller
             'assets' => $assets,
             'next_page_url' => isset($paginator) ? $paginator->nextPageUrl() : null,
             'filtered_grid_total' => isset($paginator) ? (int) $paginator->total() : 0,
+            'grid_folder_total' => $gridFolderTotal,
             'selected_collection' => $selectedCollection,
             'can_update_collection' => $canUpdateCollection,
             'can_create_collection' => Gate::forUser($user)->allows('create', $brand),
@@ -317,6 +369,9 @@ class CollectionController extends Controller
             'category_id' => $categoryFilterIdForProps,
             'group_by_category' => $groupByCategoryEnabled,
             'filter_categories' => $filterCategories,
+            'filterable_schema' => $filterable_schema,
+            'available_values' => $available_values,
+            'filters' => $filters,
         ]);
     }
 

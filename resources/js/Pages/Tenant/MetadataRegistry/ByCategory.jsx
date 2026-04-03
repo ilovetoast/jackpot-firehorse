@@ -2759,7 +2759,7 @@ function FieldRow({
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); effectiveFilter && canManage && categoryId && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary) }}
                                     disabled={!canManage || !effectiveFilter || !categoryId}
-                                    title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under More filters'}
+                                    title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under Filters'}
                                     className={iconButtonClass(effectiveFilter && effectiveIsPrimary)}
                                 >
                                     {effectiveIsPrimary ? (

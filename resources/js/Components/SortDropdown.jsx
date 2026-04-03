@@ -11,14 +11,17 @@
  * @param {Array} props.options - [{ value, label }] - sort criteria
  * @param {boolean} [props.showComplianceFilter] - If true, include compliance options
  * @param {string} [props.className] - Additional classes for container
+ * @param {'icon'|'pill'|'compact'|'block'} [props.variant] - Trigger style (default icon)
  */
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { usePage } from '@inertiajs/react'
 import { BarsArrowUpIcon, BarsArrowDownIcon } from '@heroicons/react/24/outline'
 
 const MENU_WIDTH_PX = 224 // matches w-56
 const MENU_VIEWPORT_PAD = 8
+/** Must sit above mobile Filters sheet (z-[250]) and other app chrome (z-50–z-260). */
+const MENU_Z_CLASS = 'z-[280]'
 
 const SORT_OPTIONS = [
     { value: 'featured', label: 'Featured', tooltip: 'Starred items first, then by upload date' },
@@ -43,6 +46,7 @@ export default function SortDropdown({
     showComplianceFilter = false,
     primaryColor,
     className = '',
+    variant = 'icon',
 }) {
     const { auth } = usePage().props
     const accent = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -52,21 +56,39 @@ export default function SortDropdown({
     const triggerRef = useRef(null)
     const menuRef = useRef(null)
 
-    const allOptions = [...SORT_OPTIONS]
-    if (showComplianceFilter) {
-        allOptions.push(...COMPLIANCE_OPTIONS)
-    }
+    const allOptions = useMemo(() => {
+        const o = [...SORT_OPTIONS]
+        if (showComplianceFilter) {
+            o.push(...COMPLIANCE_OPTIONS)
+        }
+        return o
+    }, [showComplianceFilter])
+
+    const currentCriteriaLabel = useMemo(() => {
+        const o = allOptions.find((x) => x.value === sortBy)
+        return o?.label ?? sortBy
+    }, [allOptions, sortBy])
 
     const updateMenuPosition = () => {
         const el = triggerRef.current
         if (!el) return
         const rect = el.getBoundingClientRect()
+        if (variant === 'block') {
+            const w = Math.min(Math.max(rect.width, 200), window.innerWidth - MENU_VIEWPORT_PAD * 2)
+            let left = rect.left
+            left = Math.max(
+                MENU_VIEWPORT_PAD,
+                Math.min(left, window.innerWidth - w - MENU_VIEWPORT_PAD)
+            )
+            setMenuPos({ top: rect.bottom + 4, left, width: w })
+            return
+        }
         let left = rect.right - MENU_WIDTH_PX
         left = Math.max(
             MENU_VIEWPORT_PAD,
             Math.min(left, window.innerWidth - MENU_WIDTH_PX - MENU_VIEWPORT_PAD)
         )
-        setMenuPos({ top: rect.bottom + 4, left })
+        setMenuPos({ top: rect.bottom + 4, left, width: MENU_WIDTH_PX })
     }
 
     useLayoutEffect(() => {
@@ -91,7 +113,7 @@ export default function SortDropdown({
             document.addEventListener('click', handleClickOutside)
         }
         return () => document.removeEventListener('click', handleClickOutside)
-    }, [isOpen])
+    }, [isOpen, variant])
 
     const handleCriteriaSelect = (value) => {
         onSortChange(value, sortDirection)
@@ -101,11 +123,13 @@ export default function SortDropdown({
         onSortChange(sortBy, dir)
     }
 
+    const menuWidth = menuPos.width ?? MENU_WIDTH_PX
+
     const menu = isOpen && (
         <div
             ref={menuRef}
-            className="fixed z-[200] w-56 rounded-lg border border-gray-200 bg-white py-1 shadow-lg max-h-[min(70vh,28rem)] overflow-y-auto"
-            style={{ top: menuPos.top, left: menuPos.left }}
+            className={`fixed ${MENU_Z_CLASS} rounded-lg border border-gray-200 bg-white py-1 shadow-lg max-h-[min(70vh,28rem)] overflow-y-auto`}
+            style={{ top: menuPos.top, left: menuPos.left, width: menuWidth }}
             role="listbox"
         >
                     <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -166,20 +190,74 @@ export default function SortDropdown({
         </div>
     )
 
-    return (
-        <div ref={containerRef} className={`relative ${className}`} style={{ '--sort-accent': accent }}>
+    const triggerBaseRing =
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sort-accent)] motion-safe:transition-colors motion-safe:duration-200 motion-reduce:transition-none'
+
+    const triggerButton =
+        variant === 'pill' ? (
             <button
                 ref={triggerRef}
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
-                className="inline-flex h-9 min-h-[2.25rem] min-w-9 items-center justify-center rounded border border-gray-300 bg-white p-1.5 text-gray-600 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sort-accent)]"
-                aria-label="Sort"
+                className={`inline-flex h-9 min-h-[2.25rem] max-w-full min-w-0 items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm hover:bg-gray-50 ${triggerBaseRing}`}
+                aria-label={`Sort by ${currentCriteriaLabel}`}
                 aria-expanded={isOpen}
                 aria-haspopup="listbox"
-                title="Sort"
+                title={`Sort by ${currentCriteriaLabel}`}
+            >
+                <span className="shrink-0 text-gray-600">Sort by</span>
+                <span className="min-w-0 truncate font-medium" style={{ color: accent }}>
+                    {currentCriteriaLabel}
+                </span>
+            </button>
+        ) : variant === 'compact' ? (
+            <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className={`inline-flex h-9 min-h-[2.25rem] items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-600 hover:bg-gray-50 ${triggerBaseRing}`}
+                aria-label={`Sort by ${currentCriteriaLabel}`}
+                aria-expanded={isOpen}
+                aria-haspopup="listbox"
+                title={`Sort by ${currentCriteriaLabel}`}
+            >
+                <BarsArrowDownIcon className="h-4 w-4 shrink-0" />
+                <span className="hidden text-sm text-gray-700 sm:inline">Sort</span>
+            </button>
+        ) : variant === 'block' ? (
+            <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm hover:bg-gray-50 ${triggerBaseRing}`}
+                aria-label={`Sort by ${currentCriteriaLabel}`}
+                aria-expanded={isOpen}
+                aria-haspopup="listbox"
+            >
+                <span className="text-gray-500">Sort by</span>
+                <span className="min-w-0 truncate font-medium" style={{ color: accent }}>
+                    {currentCriteriaLabel}
+                </span>
+                <BarsArrowDownIcon className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+            </button>
+        ) : (
+            <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className={`inline-flex h-9 min-h-[2.25rem] min-w-9 items-center justify-center rounded border border-gray-300 bg-white p-1.5 text-gray-600 hover:bg-gray-50 ${triggerBaseRing}`}
+                aria-label={`Sort by ${currentCriteriaLabel}`}
+                aria-expanded={isOpen}
+                aria-haspopup="listbox"
+                title={`Sort by ${currentCriteriaLabel}`}
             >
                 <BarsArrowDownIcon className="h-4 w-4 shrink-0" />
             </button>
+        )
+
+    return (
+        <div ref={containerRef} className={`relative ${className}`} style={{ '--sort-accent': accent }}>
+            {triggerButton}
 
             {typeof document !== 'undefined' && menu ? createPortal(menu, document.body) : null}
         </div>

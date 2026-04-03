@@ -10,7 +10,7 @@
  * - "Show Info" toggle (controls asset card metadata visibility)
  * - Grid size controls (card size control)
  * - Bulk selection toggle (if applicable)
- * - More filters section (optional)
+ * - Secondary filters / Filters panel (optional)
  * - Responsive layout (mobile-first)
  * 
  * @param {Object} props
@@ -32,12 +32,18 @@ import { useState, useEffect, useRef, useCallback, useMemo, cloneElement, isVali
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon, XMarkIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { Popover, PopoverButton, PopoverPanel } from '@headlessui/react'
+import { ClockIcon, TagIcon, XMarkIcon, MagnifyingGlassIcon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
+import AssetGridViewMenu from './AssetGridViewMenu'
+import AssetGridViewOptionsDropdown from './AssetGridViewOptionsDropdown'
 import { clearToolbarFilterParams, toolbarQueryHasClearableFilters } from '../utils/filterUrlUtils'
+
+const TOOLBAR_OVERFLOW_DEBOUNCE_MS = 200
+const MORE_FILTERS_PANEL_ID = 'asset-grid-more-filters-panel'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -70,6 +76,8 @@ export default function AssetGridToolbar({
     clearFiltersCollectionsView = false,
     /** Inertia `only` keys for clear-all navigation (must match each page’s partial reload). */
     clearFiltersInertiaOnly = null,
+    /** Preserve these query keys when primary metadata filters rebuild the URL (Collections: `collection`, etc.). */
+    filterUrlNavigationKeys = [],
 }) {
     const inertiaPage = usePage()
     const pageProps = inertiaPage.props
@@ -126,6 +134,122 @@ export default function AssetGridToolbar({
     )
 
     const [toolbarMoreExpanded, setToolbarMoreExpanded] = useState(false)
+    const toolbarRowRef = useRef(null)
+    /** Search + inline filters row; overflow ⇒ hide primary filters into Filters panel (lg+). */
+    const queryClusterRef = useRef(null)
+    const collapseInlinePrimaryRef = useRef(false)
+    const [collapseInlinePrimaryFilters, setCollapseInlinePrimaryFilters] = useState(false)
+    const [displayInPopover, setDisplayInPopover] = useState(false)
+    const displayInPopoverRef = useRef(false)
+    displayInPopoverRef.current = displayInPopover
+
+    const [viewportReady, setViewportReady] = useState(false)
+    const [isLgViewport, setIsLgViewport] = useState(false)
+    const [isXlViewport, setIsXlViewport] = useState(false)
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 1024px)')
+        const sync = () => setIsLgViewport(mq.matches)
+        sync()
+        setViewportReady(true)
+        mq.addEventListener('change', sync)
+        return () => mq.removeEventListener('change', sync)
+    }, [])
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 1280px)')
+        const sync = () => setIsXlViewport(mq.matches)
+        sync()
+        mq.addEventListener('change', sync)
+        return () => mq.removeEventListener('change', sync)
+    }, [])
+
+    useEffect(() => {
+        collapseInlinePrimaryRef.current = false
+        setCollapseInlinePrimaryFilters(false)
+    }, [filterable_schema, selectedCategoryId])
+
+    useEffect(() => {
+        const row = toolbarRowRef.current
+        if (!row || typeof ResizeObserver === 'undefined') return
+        const mq = window.matchMedia('(min-width: 1024px)')
+        let debounceId = null
+
+        const measureToolbarRowOverflow = () => {
+            if (!mq.matches) {
+                setDisplayInPopover(false)
+                return
+            }
+            if (displayInPopoverRef.current) return
+            if (row.scrollWidth > row.clientWidth + 4) {
+                setDisplayInPopover(true)
+            }
+        }
+
+        const measureQueryClusterOverflow = () => {
+            if (!mq.matches) {
+                collapseInlinePrimaryRef.current = false
+                setCollapseInlinePrimaryFilters(false)
+                return
+            }
+            if (!showMoreFilters) {
+                collapseInlinePrimaryRef.current = false
+                setCollapseInlinePrimaryFilters(false)
+                return
+            }
+            const cluster = queryClusterRef.current
+            if (!cluster) return
+            if (collapseInlinePrimaryRef.current) return
+            if (cluster.scrollWidth > cluster.clientWidth + 2) {
+                collapseInlinePrimaryRef.current = true
+                setCollapseInlinePrimaryFilters(true)
+            }
+        }
+
+        const runMeasures = () => {
+            measureQueryClusterOverflow()
+            requestAnimationFrame(() => {
+                measureToolbarRowOverflow()
+            })
+        }
+
+        const ro = new ResizeObserver(() => runMeasures())
+        ro.observe(row)
+        const clusterEl = queryClusterRef.current
+        if (clusterEl) {
+            ro.observe(clusterEl)
+        }
+
+        const onWinResize = () => {
+            clearTimeout(debounceId)
+            debounceId = window.setTimeout(() => {
+                if (!mq.matches) return
+                collapseInlinePrimaryRef.current = false
+                setCollapseInlinePrimaryFilters(false)
+                setDisplayInPopover(false)
+                requestAnimationFrame(() => runMeasures())
+            }, TOOLBAR_OVERFLOW_DEBOUNCE_MS)
+        }
+        window.addEventListener('resize', onWinResize)
+        runMeasures()
+        return () => {
+            ro.disconnect()
+            window.removeEventListener('resize', onWinResize)
+            clearTimeout(debounceId)
+        }
+    }, [showMoreFilters])
+
+    useEffect(() => {
+        if (!toolbarMoreExpanded || !showMoreFilters || isLgViewport) return
+        const prevOverflow = document.body.style.overflow
+        document.body.style.overflow = 'hidden'
+        const onKey = (e) => {
+            if (e.key === 'Escape') setToolbarMoreExpanded(false)
+        }
+        window.addEventListener('keydown', onKey)
+        return () => {
+            document.body.style.overflow = prevOverflow
+            window.removeEventListener('keydown', onKey)
+        }
+    }, [toolbarMoreExpanded, showMoreFilters, isLgViewport])
 
     useEffect(() => {
         if (!mobileSearchOpen) return
@@ -275,93 +399,99 @@ export default function AssetGridToolbar({
         })
     }
     
-    // Grid size button group - 4 discrete settings (compact to spacious)
-    const SIZE_PRESETS = [160, 220, 280, 360]
-    
-    // Snap cardSize to nearest preset
-    const snapToPreset = (value) => {
-        return SIZE_PRESETS.reduce((prev, curr) => 
-            Math.abs(curr - value) < Math.abs(prev - value) ? curr : prev
-        )
-    }
-    
-    // Get current preset index (0-3)
-    const currentPresetIndex = SIZE_PRESETS.indexOf(snapToPreset(cardSize))
-    
-    // Grid size icons - representing different grid densities
-    const SizeIcon = ({ size, className = "h-4 w-4" }) => {
-        // Different grid patterns for each size
-        const gridPatterns = {
-            small: (
-                <svg className={className} fill="none" viewBox="0 0 28 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="4" height="6" rx="0.5" />
-                    <rect x="6" y="1" width="4" height="6" rx="0.5" />
-                    <rect x="11" y="1" width="4" height="6" rx="0.5" />
-                    <rect x="16" y="1" width="4" height="6" rx="0.5" />
-                    <rect x="21" y="1" width="4" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="4" height="6" rx="0.5" />
-                    <rect x="6" y="9" width="4" height="6" rx="0.5" />
-                    <rect x="11" y="9" width="4" height="6" rx="0.5" />
-                    <rect x="16" y="9" width="4" height="6" rx="0.5" />
-                    <rect x="21" y="9" width="4" height="6" rx="0.5" />
-                </svg>                
-            ),
-            medium: (
-                <svg className={className} fill="none" viewBox="0 0 24 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="6.5" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="12" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="17.5" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="6.5" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="12" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="17.5" y="9" width="4.5" height="6" rx="0.5" />
-                </svg>
-            ),
-            large: (
-                <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="7.5" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="14" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="5" height="6" rx="0.5" />
-                    <rect x="7.5" y="9" width="5" height="6" rx="0.5" />
-                    <rect x="14" y="9" width="5" height="6" rx="0.5" />
-                </svg>
-                
-            ),
-            xlarge: (
-                <svg className={className} fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="6" height="6" rx="0.5" />
-                    <rect x="9" y="1" width="6" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="6" height="6" rx="0.5" />
-                    <rect x="9" y="9" width="6" height="6" rx="0.5" />
-                </svg>                
-            ),
-        }
-        
-        return gridPatterns[size] || gridPatterns.medium
+    const viewOptionsProps = {
+        cardSize,
+        onCardSizeChange,
+        layoutMode,
+        onLayoutModeChange,
+        showInfo,
+        onToggleInfo,
+        primaryColor,
     }
 
-    /** Uniform grid vs masonry — icon-only radios beside tile size */
-    const LayoutUniformIcon = ({ className = 'h-4 w-4' }) => (
-        <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-            <rect x="1" y="1" width="5" height="6" rx="0.5" />
-            <rect x="7.5" y="1" width="5" height="6" rx="0.5" />
-            <rect x="14" y="1" width="5" height="6" rx="0.5" />
-            <rect x="1" y="9" width="5" height="6" rx="0.5" />
-            <rect x="7.5" y="9" width="5" height="6" rx="0.5" />
-            <rect x="14" y="9" width="5" height="6" rx="0.5" />
-        </svg>
-    )
-    const LayoutMasonryIcon = ({ className = 'h-4 w-4' }) => (
-        <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-            <rect x="1" y="1" width="5.5" height="4" rx="0.5" />
-            <rect x="8" y="1" width="5.5" height="7" rx="0.5" />
-            <rect x="14.5" y="1" width="4.5" height="5" rx="0.5" />
-            <rect x="1" y="6" width="5.5" height="9" rx="0.5" />
-            <rect x="8" y="9" width="5.5" height="6" rx="0.5" />
-            <rect x="14.5" y="7" width="4.5" height="8" rx="0.5" />
-        </svg>
+    const mobileResultPanelClass =
+        'z-[210] w-[min(calc(100vw-1.5rem),16rem)] [--anchor-gap:6px] rounded-xl border border-gray-200 bg-white/95 p-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md motion-safe:transition motion-safe:duration-200 motion-safe:ease-out data-[closed]:opacity-0 motion-reduce:transition-none motion-reduce:data-[closed]:opacity-100'
+
+    const mobileResultSummaryPopover =
+        moreFiltersBarMeta.desktopResultSummary ? (
+            <Popover className="relative shrink-0 lg:hidden">
+                <PopoverButton
+                    type="button"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-600 shadow-sm hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset motion-safe:transition-colors motion-reduce:transition-none"
+                    style={{ '--tw-ring-color': primaryColor }}
+                    aria-label="Results summary"
+                    title="Results summary"
+                >
+                    <ClipboardDocumentListIcon className="h-4 w-4 shrink-0" aria-hidden />
+                </PopoverButton>
+                <PopoverPanel transition anchor="bottom end" className={mobileResultPanelClass}>
+                    <p className="text-sm leading-snug text-gray-700">{moreFiltersBarMeta.desktopResultSummary}</p>
+                </PopoverPanel>
+            </Popover>
+        ) : null
+
+    const clearFiltersButton = showClearAllFilters ? (
+        <button
+            type="button"
+            onClick={handleClearAllFilters}
+            className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/90 sm:px-2 sm:py-1.5 sm:text-xs sm:normal-case sm:tracking-normal"
+            title="Clear search and all filters"
+            aria-label="Clear search and all filters"
+        >
+            <XMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+            <span className="hidden sm:inline">Clear</span>
+        </button>
+    ) : null
+
+    const resultSummaryEl = moreFiltersBarMeta.desktopResultSummary ? (
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500" aria-live="polite">
+            {moreFiltersBarMeta.desktopResultSummary}
+        </span>
+    ) : null
+
+    const sortDesktopVariant = displayInPopover ? 'pill' : isXlViewport ? 'pill' : 'compact'
+
+    const sortDesktopControl = onSortChange ? (
+        <SortDropdown
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            showComplianceFilter={showComplianceFilter}
+            primaryColor={primaryColor}
+            variant={sortDesktopVariant}
+            className={
+                sortDesktopVariant === 'pill'
+                    ? 'max-w-[min(100%,11rem)] min-w-0 shrink'
+                    : 'shrink-0'
+            }
+        />
+    ) : null
+
+    const sortPopoverControl = onSortChange ? (
+        <SortDropdown
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            showComplianceFilter={showComplianceFilter}
+            primaryColor={primaryColor}
+            variant="pill"
+            className="max-w-full min-w-0"
+        />
+    ) : null
+
+    const viewPopoverSections = (
+        <>
+            {onSortChange ? (
+                <div className="flex flex-col gap-2 border-b border-gray-100 pb-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Sort</p>
+                    {sortPopoverControl}
+                </div>
+            ) : null}
+            <div className="flex flex-col gap-2 rounded-lg bg-gray-50/80 px-2 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">View</p>
+                <AssetGridViewOptionsDropdown mode="panel" {...viewOptionsProps} />
+            </div>
+        </>
     )
 
     return (
@@ -393,12 +523,19 @@ export default function AssetGridToolbar({
                 </div>
             )}
             
-            {/* Primary Toolbar Row — lg+: inline search; mobile: search icon opens sheet; one compact control line */}
+            {/* Primary toolbar: Query | Results | Display; mobile keeps Sort + View on the bar; Filters sheet is metadata filters only */}
             <div className="px-3 py-2 sm:py-2.5 sm:px-4">
-                <div className="flex flex-row flex-nowrap items-center gap-1.5 min-w-0 justify-between lg:gap-2">
-                    {/* Left: desktop search | mobile search button + More filters strip */}
-                    <div className="flex min-w-0 flex-1 items-center gap-1.5 lg:gap-2">
-                        <div className="hidden min-h-0 w-0 min-w-[7rem] max-w-xl flex-1 shrink lg:block">
+                <div
+                    ref={toolbarRowRef}
+                    className="flex flex-row flex-nowrap items-center gap-1.5 min-w-0 justify-between lg:gap-3"
+                >
+                    {/* Query cluster — scrollWidth vs clientWidth detects overflow; primary filters then move into Filters panel */}
+                    <div
+                        ref={queryClusterRef}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-visible lg:gap-2 lg:rounded-xl lg:border lg:border-gray-100 lg:bg-gray-50/80 lg:px-2 lg:py-1"
+                    >
+                        {/* flex-1 + basis-0: search shrinks when the row is tight; filter cluster uses shrink-0 so TYPE/category stay full width */}
+                        <div className="hidden min-h-0 min-w-[7rem] max-w-full flex-1 basis-0 lg:block [&_.asset-grid-search-root]:min-w-0">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
@@ -421,23 +558,29 @@ export default function AssetGridToolbar({
                         >
                             <MagnifyingGlassIcon className="h-5 w-5 shrink-0" />
                         </button>
-                        {/* Scroll only: slot, primary (desktop), More — Sort + Clear stay outside so dropdowns are not clipped */}
-                        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible py-1 pr-0.5 -my-1 lg:gap-2 lg:py-1.5">
+                        <div
+                            className="hidden h-6 w-px shrink-0 bg-gray-200 lg:block"
+                            aria-hidden
+                        />
+                        <div className="flex min-h-0 shrink-0 flex-nowrap items-center gap-1.5 overflow-x-visible overflow-y-visible py-1 pr-0.5 -my-1 lg:gap-2 lg:py-1.5">
                             {beforeSearchSlot ? (
-                                <div className="flex max-w-[min(100%,42rem)] shrink-0 flex-nowrap items-center gap-2">
+                                <div className="flex shrink-0 flex-nowrap items-center gap-2">
                                     {beforeSearchSlot}
                                 </div>
                             ) : null}
-                            <div className="hidden min-w-0 shrink-0 lg:flex items-center gap-2">
-                                <AssetGridMetadataPrimaryFilters
-                                    filterable_schema={filterable_schema}
-                                    selectedCategoryId={selectedCategoryId}
-                                    available_values={available_values}
-                                    assetType="image"
-                                    compact={true}
-                                    primaryColor={primaryColor}
-                                />
-                            </div>
+                            {!collapseInlinePrimaryFilters && (
+                                <div className="hidden min-w-0 shrink-0 items-center gap-2 lg:flex">
+                                    <AssetGridMetadataPrimaryFilters
+                                        filterable_schema={filterable_schema}
+                                        selectedCategoryId={selectedCategoryId}
+                                        available_values={available_values}
+                                        assetType="image"
+                                        compact={true}
+                                        primaryColor={primaryColor}
+                                        filterUrlNavigationKeys={filterUrlNavigationKeys}
+                                    />
+                                </div>
+                            )}
                             {showMoreFilters && isValidElement(moreFiltersContent) && (
                                 <div className="flex shrink-0">
                                     <MoreFiltersTriggerButton
@@ -446,169 +589,110 @@ export default function AssetGridToolbar({
                                         activeFilterCount={moreFiltersBarMeta.activeFilterCount}
                                         brandPrimary={moreFiltersBarMeta.brandPrimary}
                                         visibleSecondaryFiltersLength={moreFiltersBarMeta.visibleSecondaryFiltersLength}
+                                        inlinePrimaryFiltersCollapsed={collapseInlinePrimaryFilters}
+                                        controlsId={MORE_FILTERS_PANEL_ID}
                                     />
                                 </div>
                             )}
                         </div>
-                        {onSortChange && (
-                            <div className="flex shrink-0 items-center max-lg:ml-0.5">
-                                <SortDropdown
-                                    sortBy={sortBy}
-                                    sortDirection={sortDirection}
-                                    onSortChange={onSortChange}
-                                    showComplianceFilter={showComplianceFilter}
-                                    primaryColor={primaryColor}
-                                />
-                            </div>
-                        )}
-                        {showClearAllFilters && (
-                            <button
-                                type="button"
-                                onClick={handleClearAllFilters}
-                                className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/90 sm:px-2 sm:py-1.5 sm:text-xs sm:normal-case sm:tracking-normal"
-                                title="Clear search and all filters"
-                                aria-label="Clear search and all filters"
-                            >
-                                <XMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
-                                <span className="hidden sm:inline">Clear</span>
-                            </button>
-                        )}
-                        {moreFiltersBarMeta.desktopResultSummary ? (
-                            <span
-                                className="hidden shrink-0 whitespace-nowrap text-xs text-gray-500 lg:inline"
-                                aria-live="polite"
-                            >
-                                {moreFiltersBarMeta.desktopResultSummary}
-                            </span>
-                        ) : null}
                     </div>
 
-                    {/* Right: Info + Grid — compact, flex-shrink-0 */}
-                    <div className="flex flex-shrink-0 items-center gap-2 lg:justify-end">
-                        {/* Show Info Toggle */}
-                        <label className="flex items-center gap-1.5 sm:gap-2 cursor-pointer">                        
-                            <InformationCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-700 flex-shrink-0" title="Show info" />
-
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={showInfo}
-                                onClick={onToggleInfo}
-                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
-                                style={{
-                                    backgroundColor: showInfo ? primaryColor : '#d1d5db',
-                                }}
-                                onFocus={(e) => {
-                                    e.currentTarget.style.setProperty('--tw-ring-color', primaryColor)
-                                }}
-                            >
-                                <span
-                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
-                                        showInfo ? 'translate-x-5' : 'translate-x-0'
-                                    }`}
-                                />
-                            </button>                        
-                        </label>
-
-                        {/* Grid Size Button Group - 4 on desktop, last 2 only on mobile */}
-                        <div className="flex items-center gap-1.5">                        
-                            <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="Grid size">
-                                {SIZE_PRESETS.map((size, index) => {
-                                    const isSelected = currentPresetIndex === index
-                                    const iconSizes = ['small', 'medium', 'large', 'xlarge']
-                                    const iconSize = iconSizes[index] || 'medium'
-                                    // On mobile (default): only show first 2 buttons (small, medium). On md+: show all 4.
-                                    const isMobileOnlyHidden = index >= 2
-                                    
-                                    return (
-                                        <button
-                                            key={size}
-                                            type="button"
-                                            onClick={() => onCardSizeChange(size)}
-                                            className={`
-                                                px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
-                                                flex items-center justify-center
-                                                ${index === 0 ? 'rounded-l-md' : ''}
-                                                ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
-                                                ${index === 1 ? 'rounded-r-md md:rounded-r-none' : ''}
-                                                ${index > 0 ? '-ml-px' : ''}
-                                                ${isSelected 
-                                                    ? 'bg-white text-gray-900 shadow-sm z-10' 
-                                                    : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                                }
-                                                border border-gray-300
-                                                focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
-                                                ${isMobileOnlyHidden ? 'hidden md:flex' : ''}
-                                            `}
-                                            style={isSelected ? {
-                                                borderColor: primaryColor,
-                                                '--tw-ring-color': primaryColor,
-                                            } : {}}
-                                            aria-pressed={isSelected}
-                                            aria-label={`${iconSize} tile size`}
-                                            title={`${iconSize.charAt(0).toUpperCase() + iconSize.slice(1)} tile size`}
-                                        >
-                                            <SizeIcon size={iconSize} className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                        </button>
-                                    )
-                                })}
-                            </div>
-
-                            <div
-                                className="inline-flex rounded-md shadow-sm"
-                                role="radiogroup"
-                                aria-label="Asset layout"
-                            >
-                                <button
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={layoutMode === 'grid'}
-                                    onClick={() => onLayoutModeChange('grid')}
-                                    className={`
-                                        px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
-                                        flex items-center justify-center rounded-l-md border border-gray-300
-                                        focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
-                                        ${layoutMode === 'grid'
-                                            ? 'bg-white text-gray-900 shadow-sm z-10'
-                                            : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                        }
-                                    `}
-                                    style={layoutMode === 'grid' ? { borderColor: primaryColor, '--tw-ring-color': primaryColor } : {}}
-                                    title="Uniform grid"
-                                >
-                                    <LayoutUniformIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                    <span className="sr-only">Uniform grid</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={layoutMode === 'masonry'}
-                                    onClick={() => onLayoutModeChange('masonry')}
-                                    className={`
-                                        -ml-px px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all
-                                        flex items-center justify-center rounded-r-md border border-gray-300
-                                        focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
-                                        ${layoutMode === 'masonry'
-                                            ? 'bg-white text-gray-900 shadow-sm z-10'
-                                            : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                        }
-                                    `}
-                                    style={layoutMode === 'masonry' ? { borderColor: primaryColor, '--tw-ring-color': primaryColor } : {}}
-                                    title="Masonry — full image, max height"
-                                >
-                                    <LayoutMasonryIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                    <span className="sr-only">Masonry</span>
-                                </button>
-                            </div>
+                    {/* Mobile: sort, results summary, clear, view — always on the bar (Filters sheet = selectable filters only) */}
+                    {onSortChange ? (
+                        <div className="flex shrink-0 items-center lg:hidden">
+                            <SortDropdown
+                                sortBy={sortBy}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                                showComplianceFilter={showComplianceFilter}
+                                primaryColor={primaryColor}
+                                variant="icon"
+                            />
                         </div>
+                    ) : null}
+                    {mobileResultSummaryPopover}
+                    {clearFiltersButton ? (
+                        <div className="shrink-0 lg:hidden">{clearFiltersButton}</div>
+                    ) : null}
+                    <div className="flex shrink-0 items-center lg:hidden">
+                        <AssetGridViewOptionsDropdown mode="full" triggerVariant="icon" {...viewOptionsProps} />
+                    </div>
+
+                    {/* Desktop: results + display */}
+                    <div className="hidden shrink-0 items-center gap-3 lg:flex">
+                        {(resultSummaryEl || clearFiltersButton) && (
+                            <>
+                                <div className="h-6 w-px shrink-0 bg-gray-200" aria-hidden />
+                                <div className="flex shrink-0 items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1">
+                                    {resultSummaryEl}
+                                    {clearFiltersButton}
+                                </div>
+                            </>
+                        )}
+                        <div className="h-6 w-px shrink-0 bg-gray-200" aria-hidden />
+                        {displayInPopover ? (
+                            <AssetGridViewMenu primaryColor={primaryColor}>{viewPopoverSections}</AssetGridViewMenu>
+                        ) : (
+                            <div className="flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1">
+                                {sortDesktopControl}
+                                <AssetGridViewOptionsDropdown mode="full" triggerVariant="default" {...viewOptionsProps} />
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
 
-            {/* More Filters Section — More filters stays far left; selection buttons live in bar right (via barTrailingContent from parent) */}
+            {/* Secondary filters: desktop inline expand; mobile mounts sheet OR inline (never both) */}
             {showMoreFilters && renderedMoreFilters && (
-                <div className="border-t border-gray-200">
-                    {renderedMoreFilters}
+                <div id={MORE_FILTERS_PANEL_ID}>
+                    {viewportReady && toolbarMoreExpanded && !isLgViewport ? (
+                        <div
+                            className="fixed inset-0 z-[250] flex flex-col justify-end lg:hidden"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="asset-grid-mobile-filters-title"
+                        >
+                            <button
+                                type="button"
+                                className="min-h-[20vh] w-full flex-1 cursor-default bg-black/40 motion-safe:transition-opacity motion-safe:duration-200 motion-reduce:transition-none"
+                                aria-label="Close filters"
+                                onClick={() => setToolbarMoreExpanded(false)}
+                            />
+                            <div
+                                className="relative z-[1] flex max-h-[min(90vh,800px)] w-full flex-col overflow-hidden rounded-t-2xl border border-gray-100 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-md motion-safe:transition-transform motion-safe:duration-200 motion-reduce:transition-none"
+                                style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
+                            >
+                                <div className="relative z-20 flex shrink-0 items-center justify-between gap-2 border-b border-gray-100 bg-white/95 px-4 py-3">
+                                    <div className="min-w-0">
+                                        <p
+                                            id="asset-grid-mobile-filters-title"
+                                            className="text-sm font-semibold text-gray-900"
+                                        >
+                                            Filters
+                                        </p>
+                                        {moreFiltersBarMeta.desktopResultSummary ? (
+                                            <p className="truncate text-xs text-gray-500">
+                                                {moreFiltersBarMeta.desktopResultSummary}
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="rounded-full px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 active:scale-95 motion-safe:transition-transform motion-safe:duration-200 motion-reduce:transition-none motion-reduce:active:scale-100"
+                                        onClick={() => setToolbarMoreExpanded(false)}
+                                    >
+                                        Done
+                                    </button>
+                                </div>
+                                <div className="relative z-0 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                                    {renderedMoreFilters}
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
+                    {!viewportReady || !toolbarMoreExpanded || isLgViewport ? (
+                        <div className="border-t border-gray-200">{renderedMoreFilters}</div>
+                    ) : null}
                 </div>
             )}
 

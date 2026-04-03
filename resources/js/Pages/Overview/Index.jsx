@@ -12,8 +12,10 @@ import ActiveSignals from '../../Components/Brand/ActiveSignals'
 import AIInsights from '../../Components/Brand/AIInsights'
 import RecentMomentum from '../../Components/Brand/RecentMomentum'
 import OverviewCollageSkeleton from '../../Components/Overview/OverviewCollageSkeleton'
-import { SkeletonBrandInsights, SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overview/OverviewSkeletons'
+import InsightsLoading from '../../Components/Overview/InsightsLoading'
+import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overview/OverviewSkeletons'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
+import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
 function formatStorage(mb) {
     if (!mb || mb === 0) return '0 MB'
@@ -22,14 +24,13 @@ function formatStorage(mb) {
     return `${(mb / 1024).toFixed(1)} GB`
 }
 
-function scheduleWhenIdle(fn) {
-    if (typeof window === 'undefined') return
-    const ric = window.requestIdleCallback
-    if (typeof ric === 'function') {
-        ric(() => fn(), { timeout: 2000 })
-    } else {
-        window.setTimeout(fn, 1)
-    }
+/** Match BrandThemeBuilder::resolveBackground (6-digit hex + alpha stops). */
+function overviewDefaultBackdrop(primaryHex, secondaryHex) {
+    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
+    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
+    const p6 = p ? p[1] : '6366f1'
+    const s6 = s ? s[1] : '8b5cf6'
+    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
 }
 
 function tenantNavFromAuth(auth) {
@@ -38,15 +39,16 @@ function tenantNavFromAuth(auth) {
     return { id: c.id, name: c.name, slug: c.slug }
 }
 
-const METRICS_URL =
-    typeof route === 'function' ? route('overview.api.metrics') : '/app/api/overview/metrics'
-const ASSETS_URL =
-    typeof route === 'function' ? route('overview.api.assets') : '/app/api/overview/assets'
+const HERO_URL =
+    typeof route === 'function' ? route('overview.api.hero') : '/app/api/overview/hero'
+const STATS_URL =
+    typeof route === 'function' ? route('overview.api.stats') : '/app/api/overview/stats'
 const INSIGHTS_URL =
     typeof route === 'function' ? route('overview.api.insights') : '/app/api/overview/insights'
 
-/** Dedupe concurrent bootstrap fetches (e.g. React Strict Mode double-mount). */
-const brandOverviewBootstrapInflight = new Map()
+/** Dedupe concurrent hero/stats fetches (e.g. React Strict Mode double-mount). */
+const overviewHeroInflight = new Map()
+const overviewStatsInflight = new Map()
 
 const INSIGHTS_SESSION_PREFIX = 'overview_insights_v1:'
 const INSIGHTS_CLIENT_TTL_MS = 5 * 60 * 1000
@@ -85,26 +87,48 @@ export default function Overview() {
     const { auth: authFromPage } = page.props
     const auth = authFromPage
 
-    const [metricsPayload, setMetricsPayload] = useState(null)
-    const [assetsPayload, setAssetsPayload] = useState(null)
-    const [brandSignalsState, setBrandSignalsState] = useState([])
-    const [momentumDataState, setMomentumDataState] = useState({})
-    const [aiInsightsState, setAiInsightsState] = useState([])
-    const [insightsLoading, setInsightsLoading] = useState(true)
-    const [insightsUpdatedAt, setInsightsUpdatedAt] = useState(null)
+    const [hero, setHero] = useState(null)
+    const [stats, setStats] = useState(null)
+    /** null = heavy tier not finished (show placeholder); object = loaded (possibly empty). */
+    const [insights, setInsights] = useState(null)
 
     const activeBrand = authFromPage?.activeBrand ?? auth?.activeBrand
     const brandId = activeBrand?.id
 
-    const theme = metricsPayload?.theme ?? {}
-    const plan = metricsPayload?.plan
-    const stats = metricsPayload?.stats
-    const permissions = metricsPayload?.permissions ?? {}
-    const is_manager = metricsPayload?.is_manager ?? false
-    const pending_ai_suggestions = metricsPayload?.pending_ai_suggestions
-    const dashboard_links = metricsPayload?.dashboard_links ?? {}
+    const theme = stats?.theme ?? {}
+    const plan = stats?.plan
+    const statsBlock = stats?.stats
+    const permissions = stats?.permissions ?? {}
+    const is_manager = stats?.is_manager ?? false
+    const pending_ai_suggestions = stats?.pending_ai_suggestions
+    const dashboard_links = stats?.dashboard_links ?? {}
 
-    const brandColor = theme.colors?.primary || '#6366f1'
+    const brandSignalsState = insights?.brand_signals ?? []
+    const momentumDataState = insights?.momentum_data ?? {}
+    const aiInsightsState = insights?.ai_insights ?? []
+    const insightsUpdatedAt = insights?.generated_at ?? null
+
+    // Theme from API wins when loaded; until then use Inertia auth.activeBrand so first paint matches brand (no indigo flash).
+    const brandColor =
+        theme.colors?.primary || activeBrand?.primary_color || '#6366f1'
+    const secondaryForBackdrop =
+        theme.colors?.secondary ||
+        activeBrand?.secondary_color ||
+        activeBrand?.accent_color ||
+        brandColor
+    const overviewBackdropBackground =
+        theme.background?.value ||
+        overviewDefaultBackdrop(brandColor, secondaryForBackdrop)
+
+    const overviewIconColor = useMemo(
+        () =>
+            resolveOverviewIconColor(brandColor, {
+                secondary: theme.colors?.secondary || activeBrand?.secondary_color || null,
+                accent: activeBrand?.accent_color || null,
+            }),
+        [brandColor, theme.colors?.secondary, activeBrand?.secondary_color, activeBrand?.accent_color]
+    )
+
     const managedAgencyClients = authFromPage?.managed_agency_clients ?? []
     const showManagedCompanies =
         Boolean(authFromPage?.activeCompany?.is_agency) && managedAgencyClients.length > 0
@@ -123,21 +147,14 @@ export default function Overview() {
     }
     const hasDashboardLinks = Boolean(dashLinks.company)
 
-    const mergedCollage = assetsPayload?.collage_assets ?? []
-    const mergedMostViewed = assetsPayload?.most_viewed_assets ?? []
-    const mergedTrending = assetsPayload?.most_trending_assets ?? []
+    const collageAssets = Array.isArray(hero?.collage_assets) ? hero.collage_assets : []
 
-    const collageAssets = mergedCollage?.length
-        ? mergedCollage
-        : mergedMostViewed?.length
-          ? mergedMostViewed
-          : mergedTrending || []
-
-    const totalAssets = stats?.total_assets?.value ?? 0
-    const storageMB = stats?.storage_mb?.value ?? 0
-    const collectionsCount = stats?.collections_count ?? 0
-    const downloadsCount = stats?.download_links?.value ?? 0
-    const executionsCount = stats?.executions_count ?? 0
+    const totalAssets =
+        statsBlock?.total_assets?.value ?? hero?.headline?.total_assets ?? 0
+    const storageMB = statsBlock?.storage_mb?.value ?? 0
+    const collectionsCount = statsBlock?.collections_count ?? 0
+    const downloadsCount = statsBlock?.download_links?.value ?? 0
+    const executionsCount = statsBlock?.executions_count ?? hero?.headline?.executions_count ?? 0
     const aiReviews = pending_ai_suggestions?.total ?? 0
 
     const momentumItems = useMemo(
@@ -162,21 +179,32 @@ export default function Overview() {
 
     useEffect(() => {
         if (brandId === undefined || brandId === null) {
-            setInsightsLoading(false)
+            setHero(null)
+            setStats(null)
+            setInsights({
+                brand_signals: [],
+                momentum_data: {},
+                ai_insights: [],
+                generated_at: null,
+            })
             return undefined
         }
 
         let cancelled = false
 
+        setHero(null)
+        setStats(null)
+
         const cachedInsights = readInsightsSessionCache(brandId)
         if (cachedInsights) {
-            setBrandSignalsState(cachedInsights.brand_signals ?? [])
-            setMomentumDataState(cachedInsights.momentum_data ?? {})
-            setAiInsightsState(cachedInsights.ai_insights ?? [])
-            setInsightsUpdatedAt(cachedInsights.generated_at ?? null)
-            setInsightsLoading(false)
+            setInsights({
+                brand_signals: cachedInsights.brand_signals ?? [],
+                momentum_data: cachedInsights.momentum_data ?? {},
+                ai_insights: cachedInsights.ai_insights ?? [],
+                generated_at: cachedInsights.generated_at ?? null,
+            })
         } else {
-            setInsightsLoading(true)
+            setInsights(null)
         }
 
         const opts = {
@@ -187,44 +215,81 @@ export default function Overview() {
             },
         }
 
-        scheduleWhenIdle(() => {
-            if (cancelled) return
-
-            let inflight = brandOverviewBootstrapInflight.get(brandId)
-            if (!inflight) {
-                const pMetrics = fetch(METRICS_URL, opts).then((r) => (r.ok ? r.json() : null))
-                const pAssets = fetch(ASSETS_URL, opts).then((r) => (r.ok ? r.json() : null))
-                const pInsights = cachedInsights
-                    ? Promise.resolve(null)
-                    : fetch(INSIGHTS_URL, opts).then((r) => (r.ok ? r.json() : null))
-
-                inflight = Promise.all([pMetrics, pAssets, pInsights]).finally(() => {
-                    brandOverviewBootstrapInflight.delete(brandId)
-                })
-                brandOverviewBootstrapInflight.set(brandId, inflight)
-            }
-
-            inflight
-                .then(([met, ast, ins]) => {
-                    if (cancelled) return
-                    if (met) setMetricsPayload(met)
-                    if (ast) setAssetsPayload(ast)
-                    if (ins) {
-                        writeInsightsSessionCache(brandId, ins)
-                        setBrandSignalsState(ins.brand_signals ?? [])
-                        setMomentumDataState(ins.momentum_data ?? {})
-                        setAiInsightsState(ins.ai_insights ?? [])
-                        setInsightsUpdatedAt(ins.generated_at ?? null)
-                    }
-                })
-                .finally(() => {
-                    if (cancelled) return
-                    if (!cachedInsights) setInsightsLoading(false)
-                })
+        let heroInflight = overviewHeroInflight.get(brandId)
+        if (!heroInflight) {
+            heroInflight = fetch(HERO_URL, opts)
+                .then((r) => (r.ok ? r.json() : null))
+                .finally(() => overviewHeroInflight.delete(brandId))
+            overviewHeroInflight.set(brandId, heroInflight)
+        }
+        heroInflight.then((h) => {
+            if (!cancelled && h) setHero(h)
         })
+
+        let statsInflight = overviewStatsInflight.get(brandId)
+        if (!statsInflight) {
+            statsInflight = fetch(STATS_URL, opts)
+                .then((r) => (r.ok ? r.json() : null))
+                .finally(() => overviewStatsInflight.delete(brandId))
+            overviewStatsInflight.set(brandId, statsInflight)
+        }
+        statsInflight.then((s) => {
+            if (!cancelled && s) setStats(s)
+        })
+
+        let idleId
+        const settleTimer = window.setTimeout(() => {
+            const runInsights = () => {
+                if (cancelled || cachedInsights) return
+                fetch(INSIGHTS_URL, opts)
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((ins) => {
+                        if (cancelled) return
+                        if (ins) {
+                            writeInsightsSessionCache(brandId, ins)
+                            setInsights({
+                                brand_signals: ins.brand_signals ?? [],
+                                momentum_data: ins.momentum_data ?? {},
+                                ai_insights: ins.ai_insights ?? [],
+                                generated_at: ins.generated_at ?? null,
+                            })
+                        } else {
+                            setInsights({
+                                brand_signals: [],
+                                momentum_data: {},
+                                ai_insights: [],
+                                generated_at: null,
+                            })
+                        }
+                    })
+                    .catch(() => {
+                        if (!cancelled) {
+                            setInsights({
+                                brand_signals: [],
+                                momentum_data: {},
+                                ai_insights: [],
+                                generated_at: null,
+                            })
+                        }
+                    })
+            }
+            if (typeof window.requestIdleCallback === 'function') {
+                idleId = window.requestIdleCallback(runInsights, { timeout: 2000 })
+            } else {
+                idleId = window.setTimeout(runInsights, 1)
+            }
+        }, 500)
 
         return () => {
             cancelled = true
+            window.clearTimeout(settleTimer)
+            if (idleId != null) {
+                if (typeof window.cancelIdleCallback === 'function') {
+                    window.cancelIdleCallback(idleId)
+                } else {
+                    window.clearTimeout(idleId)
+                }
+            }
         }
     }, [brandId])
 
@@ -244,9 +309,7 @@ export default function Overview() {
                 <div
                     className="absolute inset-0 will-change-transform"
                     style={{
-                        background:
-                            theme.background?.value ||
-                            'radial-gradient(circle at 20% 20%, #6366f133, transparent), radial-gradient(circle at 80% 80%, #8b5cf633, transparent), #0B0B0D',
+                        background: overviewBackdropBackground,
                         transform: 'scale(1)',
                     }}
                 />
@@ -262,7 +325,11 @@ export default function Overview() {
                     <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
                 </div>
 
-                {assetsPayload ? <AssetCollage assets={collageAssets} /> : <OverviewCollageSkeleton />}
+                {hero ? (
+                    <AssetCollage assets={collageAssets} fastEntrance eagerImageCount={10} />
+                ) : (
+                    <OverviewCollageSkeleton />
+                )}
 
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
                     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:px-12">
@@ -276,7 +343,7 @@ export default function Overview() {
                                 <div className="animate-fadeInUp space-y-3 sm:space-y-4">
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                         <div className="min-w-0">
-                                            {!metricsPayload ? (
+                                            {!stats ? (
                                                 <SkeletonPlanBadge />
                                             ) : (
                                                 plan?.show_badge &&
@@ -312,7 +379,7 @@ export default function Overview() {
                                     </p>
                                 )}
 
-                                {!metricsPayload ? (
+                                {!stats && !hero ? (
                                     <SkeletonMetricPills />
                                 ) : (
                                     metrics.length > 0 && (
@@ -332,13 +399,13 @@ export default function Overview() {
                                     )
                                 )}
 
-                                {insightsLoading && (
+                                {insights === null && (
                                     <div aria-busy="true" aria-label="Loading brand insights">
-                                        <SkeletonBrandInsights brandColor={brandColor} />
+                                        <InsightsLoading />
                                     </div>
                                 )}
 
-                                {!insightsLoading && !hasDeferredInsightContent && (
+                                {insights !== null && !hasDeferredInsightContent && (
                                     <div
                                         className="flex gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 backdrop-blur-sm"
                                         style={{ boxShadow: `0 0 24px ${brandColor}12` }}
@@ -347,7 +414,7 @@ export default function Overview() {
                                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                                             style={{ backgroundColor: `${brandColor}22` }}
                                         >
-                                            <SparklesIcon className="h-4 w-4" style={{ color: brandColor }} />
+                                            <SparklesIcon className="h-4 w-4" style={{ color: overviewIconColor }} />
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <p className="text-xs font-semibold uppercase tracking-wide text-white/45">
@@ -362,17 +429,21 @@ export default function Overview() {
                                     </div>
                                 )}
 
-                                {brandSignalsState?.length > 0 && (
+                                {insights !== null && brandSignalsState?.length > 0 && (
                                     <ActiveSignals
                                         signals={brandSignalsState}
                                         insights={aiInsightsState}
                                         brandColor={brandColor}
+                                        iconAccentColor={overviewIconColor}
                                         permissions={permissions}
                                         insightsUpdatedAt={insightsUpdatedAt}
                                     />
                                 )}
 
-                                {aiInsightsState?.length > 0 && brandSignalsState?.length > 0 && (() => {
+                                {insights !== null &&
+                                    aiInsightsState?.length > 0 &&
+                                    brandSignalsState?.length > 0 &&
+                                    (() => {
                                     const signalTypes = new Set(
                                         brandSignalsState
                                             .map((s) => {
@@ -386,15 +457,30 @@ export default function Overview() {
                                         (ins) => !ins.type || !signalTypes.has(ins.type)
                                     )
                                     return orphans.length > 0 ? (
-                                        <AIInsights insights={orphans} brandColor={brandColor} />
+                                        <AIInsights
+                                            insights={orphans}
+                                            brandColor={brandColor}
+                                            iconAccentColor={overviewIconColor}
+                                        />
                                     ) : null
                                 })()}
-                                {aiInsightsState?.length > 0 &&
+                                {insights !== null &&
+                                    aiInsightsState?.length > 0 &&
                                     (!brandSignalsState || brandSignalsState.length === 0) && (
-                                        <AIInsights insights={aiInsightsState} brandColor={brandColor} />
+                                        <AIInsights
+                                            insights={aiInsightsState}
+                                            brandColor={brandColor}
+                                            iconAccentColor={overviewIconColor}
+                                        />
                                     )}
 
-                                <RecentMomentum data={momentumDataState} brandColor={brandColor} />
+                                {insights !== null && (
+                                    <RecentMomentum
+                                        data={momentumDataState}
+                                        brandColor={brandColor}
+                                        iconAccentColor={overviewIconColor}
+                                    />
+                                )}
 
                                 {showManagedCompanies && (
                                     <ManagedCompaniesTeaser
@@ -407,6 +493,7 @@ export default function Overview() {
                                     permissions={permissions}
                                     brand={activeBrand}
                                     brandColor={brandColor}
+                                    iconAccentColor={overviewIconColor}
                                 />
                             </motion.div>
 

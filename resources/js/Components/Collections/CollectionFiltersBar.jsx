@@ -12,6 +12,11 @@ const COLLECTION_INERTIA_ONLY = [
     'collection_type',
     'category_id',
     'filter_categories',
+    'filterable_schema',
+    'available_values',
+    'filters',
+    'filtered_grid_total',
+    'grid_folder_total',
     'selected_collection',
 ]
 

@@ -130,3 +130,59 @@ export function buildBrandCinematicTileBackground(primary, secondary) {
         '#0B0B0D',
     ].join(', ')
 }
+
+/**
+ * Normalize to #RRGGBB for contrast math (invalid → indigo fallback).
+ * @param {string|null|undefined} hexColor
+ * @returns {string}
+ */
+export function normalizeHexColor(hexColor) {
+    if (!hexColor || typeof hexColor !== 'string') return '#6366f1'
+    let hex = hexColor.replace('#', '').trim()
+    if (hex.length === 3) {
+        hex = hex.split('').map((c) => c + c).join('')
+    }
+    if (hex.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(hex)) return '#6366f1'
+    return `#${hex}`
+}
+
+/**
+ * WCAG 2.1 contrast ratio between two sRGB hex colors.
+ * @param {string} foregroundHex
+ * @param {string} backgroundHex
+ * @returns {number}
+ */
+export function getContrastRatio(foregroundHex, backgroundHex) {
+    const L1 = getLuminance(normalizeHexColor(foregroundHex))
+    const L2 = getLuminance(normalizeHexColor(backgroundHex))
+    const lighter = Math.max(L1, L2)
+    const darker = Math.min(L1, L2)
+    return (lighter + 0.05) / (darker + 0.05)
+}
+
+/** Approximate “card interior” on cinematic overview (#0B0B0D + ~6% white glass). */
+const OVERVIEW_ICON_SURFACE_HEX = '#1a1b1e'
+
+/**
+ * Pick a hex for icons on dark overview cards: try primary, secondary, accent; if none meets
+ * contrast vs a dark reference surface, use a light neutral (still reads as “accent” in context).
+ *
+ * @param {string|null|undefined} primaryHex
+ * @param {{ secondary?: string|null, accent?: string|null, surface?: string, minRatio?: number, fallback?: string }} [options]
+ * @returns {string}
+ */
+export function resolveOverviewIconColor(primaryHex, options = {}) {
+    const surface = options.surface || OVERVIEW_ICON_SURFACE_HEX
+    const minRatio = options.minRatio ?? 3
+    const fallback = options.fallback || '#e2e8f0'
+    const candidates = [primaryHex, options.secondary, options.accent].filter(
+        (c) => c != null && String(c).trim() !== ''
+    )
+    for (const raw of candidates) {
+        const c = normalizeHexColor(raw)
+        if (getContrastRatio(c, surface) >= minRatio) {
+            return c
+        }
+    }
+    return fallback
+}

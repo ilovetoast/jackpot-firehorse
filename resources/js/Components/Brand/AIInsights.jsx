@@ -1,13 +1,16 @@
 import { Link } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import { LightBulbIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
+import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
 /**
  * AIInsights — LLM-generated or rule-based human-readable insights.
  * Supports priority styling (high → brighter, medium → default, low → dim).
  * Optional href for clickable insights linking to Analytics or Assets.
  */
-export default function AIInsights({ insights = [], brandColor = '#6366f1' }) {
+export default function AIInsights({ insights = [], brandColor = '#6366f1', iconAccentColor = null }) {
+    const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
+
     const display = (insights || [])
         .slice(0, 2)
         .map((item) =>
@@ -44,7 +47,7 @@ export default function AIInsights({ insights = [], brandColor = '#6366f1' }) {
                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
                         style={{ backgroundColor: `${brandColor}1c` }}
                     >
-                        <LightBulbIcon className="h-3.5 w-3.5" style={{ color: brandColor }} />
+                        <LightBulbIcon className="h-3.5 w-3.5" style={{ color: iconFill }} />
                     </div>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
                         Insights

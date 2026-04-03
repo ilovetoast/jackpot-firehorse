@@ -844,6 +844,56 @@ class User extends Authenticatable
     }
 
     /**
+     * Whether the user may open /app/insights/* and see cinematic overview analytics affordances
+     * (matches PrimaryActions "Insights" and deferred overview insights UX).
+     *
+     * Includes: tenant or brand brand_settings.manage, incubating-agency steward/admin paths,
+     * and agency owner/admin/agency_admin or team.manage on an agency linked to this client tenant.
+     */
+    public function canViewBrandWorkspaceInsights(Tenant $tenant, Brand $brand): bool
+    {
+        if ((int) $brand->tenant_id !== (int) $tenant->id) {
+            return false;
+        }
+
+        if ($this->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return true;
+        }
+
+        if ($this->hasPermissionForBrand($brand, 'brand_settings.manage')) {
+            return true;
+        }
+
+        if ($this->canActAsIncubatingAgencyStewardForClient($tenant)
+            || $this->canAccessCompanySettingsAsIncubatingAgencyAdmin($tenant)) {
+            return true;
+        }
+
+        $agencyTenantIds = TenantAgency::query()
+            ->where('tenant_id', $tenant->id)
+            ->pluck('agency_tenant_id');
+
+        foreach ($agencyTenantIds as $agencyTenantId) {
+            $agencyTenant = Tenant::query()->find($agencyTenantId);
+            if (! $agencyTenant || ! $agencyTenant->is_agency) {
+                continue;
+            }
+            if (! $this->belongsToTenant($agencyTenant->id)) {
+                continue;
+            }
+            $roleOnAgency = strtolower((string) $this->getRoleForTenant($agencyTenant));
+            if (in_array($roleOnAgency, ['owner', 'admin', 'agency_admin'], true)) {
+                return true;
+            }
+            if ($this->hasPermissionForTenant($agencyTenant, 'team.manage')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if the user is suspended.
      */
     public function isSuspended(): bool

@@ -80,6 +80,8 @@ export default function AssetGridMetadataPrimaryFilters({
     compact = false, // Compact mode for toolbar placement
     /** Brand/workspace accent for segmented filters + styled selects (matches AssetGridToolbar). */
     primaryColor = '#6366f1',
+    /** Same as AssetGridSecondaryFilters: URL keys that must survive filter rebuilds (e.g. Collections `collection`). */
+    filterUrlNavigationKeys = [],
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -181,7 +183,9 @@ export default function AssetGridMetadataPrimaryFilters({
         }
         setFilters(newFilters)
         const urlParams = new URLSearchParams(window.location.search)
-        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys, {
+            preserveQueryKeys: filterUrlNavigationKeys || [],
+        })
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
@@ -194,7 +198,9 @@ export default function AssetGridMetadataPrimaryFilters({
         delete newFilters[fieldKey]
         setFilters(newFilters)
         const urlParams = new URLSearchParams(window.location.search)
-        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys, {
+            preserveQueryKeys: filterUrlNavigationKeys || [],
+        })
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
@@ -206,7 +212,7 @@ export default function AssetGridMetadataPrimaryFilters({
     useEffect(() => {
         updateFilterDebug({
             filters,
-            url: { search: typeof window !== 'undefined' ? window.location.search : '', flatParams: buildUrlParamsWithFlatFilters(new URLSearchParams(window.location.search || ''), filters, filterKeys) },
+            url: { search: typeof window !== 'undefined' ? window.location.search : '', flatParams: buildUrlParamsWithFlatFilters(new URLSearchParams(window.location.search || ''), filters, filterKeys, { preserveQueryKeys: filterUrlNavigationKeys || [] }) },
             visibility: {
                 visiblePrimary: (visiblePrimaryFilters || []).map(f => f.field_key || f.key),
                 hiddenCount: (filterable_schema || []).length - (visiblePrimaryFilters || []).length,

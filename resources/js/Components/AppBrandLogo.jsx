@@ -5,8 +5,21 @@ import { usePermission } from '../hooks/usePermission'
 import BrandIconUnified from './BrandIconUnified'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 
+function inertiaPathname(pageUrl) {
+    if (!pageUrl) {
+        return typeof window !== 'undefined' ? window.location.pathname : ''
+    }
+    try {
+        const u = String(pageUrl)
+        return (u.startsWith('http') ? new URL(u).pathname : u.split('?')[0].split('#')[0]) || ''
+    } catch {
+        return typeof window !== 'undefined' ? window.location.pathname : ''
+    }
+}
+
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
-    const { auth } = usePage().props
+    const page = usePage()
+    const { auth } = page.props
     const { can } = usePermission()
     const tenant = auth?.activeCompany
     const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
@@ -89,7 +102,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     }
 
     const brandName = activeBrand.name || 'Brand'
-    const isOnCompanyOverview = route().current('app')
+    /** Match GET /app (company portal), not Ziggy during Inertia — avoids logo ↔ text flash on nav. */
+    const navPath = inertiaPathname(page.url)
+    const isOnCompanyOverview = navPath === '/app' || navPath === '/app/'
     const displayLabel = (isOnCompanyOverview && canViewCompanyOverview && tenant)
         ? tenant.name
         : brandName
@@ -174,7 +189,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                     <Link
                                         href="/app"
                                         className={`flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-100 ${
-                                            route().current('app') ? 'bg-gray-100 font-medium' : ''
+                                            isOnCompanyOverview ? 'bg-gray-100 font-medium' : ''
                                         }`}
                                         onClick={() => setBrandMenuOpen(false)}
                                     >

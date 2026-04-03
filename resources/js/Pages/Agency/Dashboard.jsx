@@ -20,7 +20,7 @@ import AgencyBrandQuickJump from '../../Components/agency/AgencyBrandQuickJump'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 /**
- * Agency Dashboard — cinematic shell aligned with Overview; READ-ONLY partner metrics.
+ * Agency Dashboard — Overview: brand quick-jump only; Progress: tier, stats, clients, rewards.
  */
 const DASH_TABS = [
     { id: 'overview', label: 'Overview', icon: Squares2X2Icon },
@@ -53,6 +53,15 @@ export default function AgencyDashboard({
             setDashTab(tab)
         }
     }, [])
+
+    const goDashTab = (id) => {
+        setDashTab(id)
+        if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href)
+            url.searchParams.set('tab', id)
+            window.history.replaceState({}, '', url)
+        }
+    }
     const [readinessAnimateKey, setReadinessAnimateKey] = useState(0)
     const page = usePage()
     const { auth: authFromPage, flash = {} } = page.props
@@ -311,7 +320,8 @@ export default function AgencyDashboard({
                                         Agency dashboard
                                     </h1>
                                     <p className="mt-2 text-sm text-white/50">
-                                        Open client workspaces, review partner tier, incubation, and rewards.
+                                        Overview lists your client brands. Use Clients for onboarding and readiness; Progress for partner
+                                        tier, rewards, and incubation status.
                                     </p>
                                 </div>
                                 {hasDashboardLinks && (
@@ -345,7 +355,7 @@ export default function AgencyDashboard({
                                         <button
                                             key={t.id}
                                             type="button"
-                                            onClick={() => setDashTab(t.id)}
+                                            onClick={() => goDashTab(t.id)}
                                             className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
                                                 active
                                                     ? 'bg-white/10 text-white ring-1 ring-white/15'
@@ -361,134 +371,12 @@ export default function AgencyDashboard({
 
                             <div className="min-w-0 flex-1 space-y-8">
                         {dashTab === 'overview' && (
-                            <>
-                        {/* Tier card */}
-                        <div className={`${glassPanel} p-6 sm:p-8 mb-0`}>
-                            <div
-                                className={`flex flex-col gap-6 sm:flex-row sm:items-start ${
-                                    agency.tier.reward_percentage ? 'sm:justify-between' : ''
-                                }`}
-                            >
-                                <div className="flex items-start gap-4">
-                                    <div
-                                        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white/[0.08] ring-1 ring-white/10"
-                                        style={{ boxShadow: `0 0 32px ${brandColor}22` }}
-                                    >
-                                        <TrophyIcon className="h-8 w-8 text-white/90" aria-hidden />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-semibold text-white">{agency.tier.name} Partner</h2>
-                                        <p className="mt-1 text-sm text-white/50">
-                                            {agency.activated_client_count} activated client
-                                            {agency.activated_client_count !== 1 ? 's' : ''}
-                                        </p>
-                                    </div>
+                            <section className="mb-2">
+                                <div className="mb-3 flex items-center gap-2">
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">Brands</span>
                                 </div>
-                                {agency.tier.reward_percentage && (
-                                    <div className="text-left sm:text-right">
-                                        <p className="text-xs text-white/40">Partner reward rate</p>
-                                        <p className="text-2xl font-semibold tabular-nums" style={{ color: brandColor }}>
-                                            {agency.tier.reward_percentage}%
-                                        </p>
-                                        <p className="mt-1 text-xs text-white/45">
-                                            Earn up to {agency.tier.reward_percentage}% in partner credits
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-
-                            {agency.next_tier && (
-                                <div className="mt-8 border-t border-white/10 pt-6">
-                                    <div className="mb-2 flex items-center justify-between gap-4">
-                                        <p className="text-sm font-medium text-white/80">
-                                            Progress to {agency.next_tier.name}
-                                        </p>
-                                        <p className="text-sm tabular-nums text-white/50">
-                                            {agency.activated_client_count} / {agency.next_tier.threshold}
-                                        </p>
-                                    </div>
-                                    <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-                                        <div
-                                            className="h-full rounded-full transition-all duration-300"
-                                            style={{
-                                                width: `${agency.next_tier.progress_percentage}%`,
-                                                backgroundColor: brandColor,
-                                            }}
-                                        />
-                                    </div>
-                                    {agency.next_tier.activations_to_next_tier > 0 && (
-                                        <p className="mt-3 flex items-start gap-2 text-sm text-white/55">
-                                            <SparklesIcon className="h-4 w-4 inline shrink-0 mt-0.5" style={{ color: brandColor }} />
-                                            <span>
-                                                Complete {agency.next_tier.activations_to_next_tier} more client activation
-                                                {agency.next_tier.activations_to_next_tier !== 1 ? 's' : ''} to reach{' '}
-                                                {agency.next_tier.name}
-                                            </span>
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            {!agency.next_tier && agency.activated_client_count > 0 && (
-                                <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3">
-                                    <p className="text-sm text-white/75 flex items-center gap-2">
-                                        <TrophyIcon className="h-4 w-4 shrink-0 text-amber-300/90" />
-                                        You&apos;ve reached the highest partner tier. Thank you for your partnership!
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Stats */}
-                        <div className="mb-10 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                            {[
-                                {
-                                    icon: BuildingOfficeIcon,
-                                    label: 'Incubated clients',
-                                    value: incubated.length,
-                                    hint: 'Prepared by your agency',
-                                    warn: hasExpiringSoon,
-                                },
-                                {
-                                    icon: CheckCircleIcon,
-                                    label: 'Activated clients',
-                                    value: activated.length,
-                                    hint: 'Ownership transferred — partner rewards active',
-                                    accent: 'text-emerald-300/90',
-                                },
-                                {
-                                    icon: ClockIcon,
-                                    label: 'Pending billing',
-                                    value: pending_transfers.length,
-                                    hint: pending_transfers.length > 0 ? 'Transfer completes once billing is activated' : null,
-                                },
-                                {
-                                    icon: LinkIcon,
-                                    label: 'Referrals',
-                                    value: totalReferrals,
-                                    hint: `${activatedReferrals.length} activated, ${pendingReferrals.length} pending`,
-                                    accent: 'text-violet-300/90',
-                                },
-                            ].map((s, i) => (
-                                <div key={i} className={`${glassPanel} p-6`}>
-                                    <div className="mb-3 flex items-center gap-2">
-                                        <s.icon className={`h-5 w-5 ${s.accent || 'text-white/40'}`} aria-hidden />
-                                        <span className={statLabel}>{s.label}</span>
-                                    </div>
-                                    <p className="text-3xl font-semibold tabular-nums text-white">{s.value}</p>
-                                    {s.hint && <p className={`mt-2 ${bodySmall}`}>{s.hint}</p>}
-                                    {s.warn && (
-                                        <p className="mt-2 flex items-center gap-1 text-xs text-amber-300/90">
-                                            <ExclamationTriangleIcon className="h-3.5 w-3.5" />
-                                            Some windows ending soon
-                                        </p>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-
-                        <AgencyBrandQuickJump clients={managed_clients} brandColor={brandColor} />
-                            </>
+                                <AgencyBrandQuickJump clients={managed_clients} brandColor={brandColor} />
+                            </section>
                         )}
 
                         {dashTab === 'clients' && (
@@ -622,6 +510,130 @@ export default function AgencyDashboard({
                         {dashTab === 'progress' && (
                             <>
                         <div className="flex w-full min-w-0 flex-col gap-6">
+                            {/* Partner tier + snapshot stats (moved from Overview) */}
+                            <div className={`${glassPanel} p-6 sm:p-8`}>
+                                <div
+                                    className={`flex flex-col gap-6 sm:flex-row sm:items-start ${
+                                        agency.tier.reward_percentage ? 'sm:justify-between' : ''
+                                    }`}
+                                >
+                                    <div className="flex items-start gap-4">
+                                        <div
+                                            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white/[0.08] ring-1 ring-white/10"
+                                            style={{ boxShadow: `0 0 32px ${brandColor}22` }}
+                                        >
+                                            <TrophyIcon className="h-8 w-8 text-white/90" aria-hidden />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-semibold text-white">{agency.tier.name} Partner</h2>
+                                            <p className="mt-1 text-sm text-white/50">
+                                                {agency.activated_client_count} activated client
+                                                {agency.activated_client_count !== 1 ? 's' : ''}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {agency.tier.reward_percentage && (
+                                        <div className="text-left sm:text-right">
+                                            <p className="text-xs text-white/40">Partner reward rate</p>
+                                            <p className="text-2xl font-semibold tabular-nums" style={{ color: brandColor }}>
+                                                {agency.tier.reward_percentage}%
+                                            </p>
+                                            <p className="mt-1 text-xs text-white/45">
+                                                Earn up to {agency.tier.reward_percentage}% in partner credits
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {agency.next_tier && (
+                                    <div className="mt-8 border-t border-white/10 pt-6">
+                                        <div className="mb-2 flex items-center justify-between gap-4">
+                                            <p className="text-sm font-medium text-white/80">
+                                                Progress to {agency.next_tier.name}
+                                            </p>
+                                            <p className="text-sm tabular-nums text-white/50">
+                                                {agency.activated_client_count} / {agency.next_tier.threshold}
+                                            </p>
+                                        </div>
+                                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                                            <div
+                                                className="h-full rounded-full transition-all duration-300"
+                                                style={{
+                                                    width: `${agency.next_tier.progress_percentage}%`,
+                                                    backgroundColor: brandColor,
+                                                }}
+                                            />
+                                        </div>
+                                        {agency.next_tier.activations_to_next_tier > 0 && (
+                                            <p className="mt-3 flex items-start gap-2 text-sm text-white/55">
+                                                <SparklesIcon className="h-4 w-4 inline shrink-0 mt-0.5" style={{ color: brandColor }} />
+                                                <span>
+                                                    Complete {agency.next_tier.activations_to_next_tier} more client activation
+                                                    {agency.next_tier.activations_to_next_tier !== 1 ? 's' : ''} to reach{' '}
+                                                    {agency.next_tier.name}
+                                                </span>
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {!agency.next_tier && agency.activated_client_count > 0 && (
+                                    <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3">
+                                        <p className="text-sm text-white/75 flex items-center gap-2">
+                                            <TrophyIcon className="h-4 w-4 shrink-0 text-amber-300/90" />
+                                            You&apos;ve reached the highest partner tier. Thank you for your partnership!
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                {[
+                                    {
+                                        icon: BuildingOfficeIcon,
+                                        label: 'Incubated clients',
+                                        value: incubated.length,
+                                        hint: 'Prepared by your agency',
+                                        warn: hasExpiringSoon,
+                                    },
+                                    {
+                                        icon: CheckCircleIcon,
+                                        label: 'Activated clients',
+                                        value: activated.length,
+                                        hint: 'Ownership transferred — partner rewards active',
+                                        accent: 'text-emerald-300/90',
+                                    },
+                                    {
+                                        icon: ClockIcon,
+                                        label: 'Pending billing',
+                                        value: pending_transfers.length,
+                                        hint: pending_transfers.length > 0 ? 'Transfer completes once billing is activated' : null,
+                                    },
+                                    {
+                                        icon: LinkIcon,
+                                        label: 'Referrals',
+                                        value: totalReferrals,
+                                        hint: `${activatedReferrals.length} activated, ${pendingReferrals.length} pending`,
+                                        accent: 'text-violet-300/90',
+                                    },
+                                ].map((s, i) => (
+                                    <div key={i} className={`${glassPanel} p-6`}>
+                                        <div className="mb-3 flex items-center gap-2">
+                                            <s.icon className={`h-5 w-5 ${s.accent || 'text-white/40'}`} aria-hidden />
+                                            <span className={statLabel}>{s.label}</span>
+                                        </div>
+                                        <p className="text-3xl font-semibold tabular-nums text-white">{s.value}</p>
+                                        {s.hint && <p className={`mt-2 ${bodySmall}`}>{s.hint}</p>}
+                                        {s.warn && (
+                                            <p className="mt-2 flex items-center gap-1 text-xs text-amber-300/90">
+                                                <ExclamationTriangleIcon className="h-3.5 w-3.5" />
+                                                Some windows ending soon
+                                            </p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
                             {/* Client overview — full width */}
                             <div className={`${glassPanel} w-full min-w-0 overflow-hidden`}>
                                 <div className="border-b border-white/10 px-6 py-5">

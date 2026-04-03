@@ -9,6 +9,7 @@ import {
     LightBulbIcon,
     ArrowRightIcon,
 } from '@heroicons/react/24/outline'
+import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
 const ICON_MAP = {
     sparkles: SparklesIcon,
@@ -50,9 +51,13 @@ export default function ActiveSignals({
     signals = [],
     insights = [],
     brandColor = '#6366f1',
+    /** Resolved readable icon color on dark cards; when omitted, derived from brandColor only. */
+    iconAccentColor = null,
     permissions = {},
     insightsUpdatedAt = null,
 }) {
+    const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
+
     const visible = signals.filter((s) => {
         if (!s.permission) return true
         return permissions[s.permission] !== false
@@ -113,7 +118,7 @@ export default function ActiveSignals({
                                     >
                                         <Icon
                                             className={`h-3.5 w-3.5 shrink-0 ${isHigh ? 'text-amber-400/85' : ''}`}
-                                            style={!isHigh ? { color: brandColor } : undefined}
+                                            style={!isHigh ? { color: iconFill } : undefined}
                                         />
                                     </div>
                                     <span className={isHigh ? 'text-white/95 font-medium' : 'text-white/85'}>

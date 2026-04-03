@@ -23,15 +23,36 @@
  * @module AssetGridSecondaryFilters
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
+import {
+    XMarkIcon,
+    PlusIcon,
+    ClockIcon,
+    ArchiveBoxIcon,
+    ChevronDownIcon,
+    ChevronRightIcon,
+    TagIcon,
+    CubeTransparentIcon,
+    SparklesIcon,
+    Squares2X2Icon,
+    AdjustmentsHorizontalIcon,
+    SwatchIcon,
+    RectangleStackIcon,
+} from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters, getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
-import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterParam } from '../utils/filterUrlUtils'
+import {
+    parseFiltersFromUrl,
+    buildUrlParamsWithFlatFilters,
+    normalizeFilterParam,
+    clearToolbarFilterParams,
+    toolbarQueryHasClearableFilters,
+} from '../utils/filterUrlUtils'
+import { partitionFilterLayoutFields, getFieldKey } from '../utils/filterFieldGrouping'
 import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { usePermission } from '../hooks/usePermission'
@@ -43,6 +64,8 @@ const GRID_PARTIAL_RELOAD_KEYS = [
     'assets',
     'next_page_url',
     'filters',
+    'filterable_schema',
+    'available_values',
     'uploaded_by_users',
     'filtered_grid_total',
     'grid_folder_total',
@@ -54,6 +77,32 @@ function findUploadedByUser(users, rawId) {
     }
     const sid = String(rawId)
     return users.find((u) => String(u.id) === sid) ?? null
+}
+
+const FILTER_GRID_CLASS =
+    'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]'
+
+function FilterCollapsibleSection({ title, icon: Icon, open, onToggle, children }) {
+    return (
+        <section className="rounded-xl border border-gray-200/60 bg-white/80 shadow-sm overflow-hidden">
+            <button
+                type="button"
+                onClick={onToggle}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50/80"
+            >
+                <span className="flex items-center gap-2 min-w-0">
+                    {Icon ? <Icon className="h-5 w-5 shrink-0 text-gray-500" aria-hidden /> : null}
+                    <span className="truncate">{title}</span>
+                </span>
+                {open ? (
+                    <ChevronDownIcon className="h-5 w-5 shrink-0 text-gray-400" aria-hidden />
+                ) : (
+                    <ChevronRightIcon className="h-5 w-5 shrink-0 text-gray-400" aria-hidden />
+                )}
+            </button>
+            {open ? <div className="border-t border-gray-200/60 px-4 py-4">{children}</div> : null}
+        </section>
+    )
 }
 
 /**
@@ -85,6 +134,9 @@ function findUploadedByUser(users, rawId) {
  * @param {boolean} [props.hideInlineMoreFiltersButton] - Hide funnel in this bar (button lives in toolbar).
  * @param {Function} [props.onToolbarMoreFiltersMetaReport] - Reports counts for toolbar badge / hints.
  * @param {boolean} [props.hideSortInSecondaryBar] - When true, Sort lives in AssetGridToolbar (next to More filters).
+ * @param {string[]} [props.filterUrlNavigationKeys] - Query keys that are not metadata filters (e.g. Collections `collection`, `category_id`).
+ * @param {string[]|null} [props.inertiaPartialReloadKeys] - Inertia `only` keys for filter navigations; default asset grid keys when null.
+ * @param {boolean} [props.clearFiltersCollectionsView] - Pass true on Collections so clear-all matches toolbar behavior.
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -110,10 +162,26 @@ export default function AssetGridSecondaryFilters({
     hideInlineMoreFiltersButton = false,
     onToolbarMoreFiltersMetaReport,
     hideSortInSecondaryBar = false,
+    filterUrlNavigationKeys = [],
+    inertiaPartialReloadKeys = null,
+    clearFiltersCollectionsView = false,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+
+    const partialReloadKeys = useMemo(
+        () =>
+            Array.isArray(inertiaPartialReloadKeys) && inertiaPartialReloadKeys.length > 0
+                ? inertiaPartialReloadKeys
+                : GRID_PARTIAL_RELOAD_KEYS,
+        [inertiaPartialReloadKeys]
+    )
+
+    const filterUrlNavOptions = useMemo(
+        () => ({ navigationKeys: filterUrlNavigationKeys || [] }),
+        [filterUrlNavigationKeys]
+    )
     
     // Phase L.5.1: Check permissions for lifecycle filters
     // Pending Publication (pending_publication) requires asset.publish
@@ -225,7 +293,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -249,7 +317,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -273,7 +341,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -293,7 +361,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -313,7 +381,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -378,7 +446,12 @@ export default function AssetGridSecondaryFilters({
         const primaryMetadataFields = metadataFields.filter(field => field.is_primary === true)
         return getVisibleFilters(primaryMetadataFields, visibilityContext)
     }, [primaryFilterClassifications, visibilityContext, filterable_schema, selectedCategoryId, available_values])
-    
+
+    const layoutBuckets = useMemo(
+        () => partitionFilterLayoutFields(visiblePrimaryFilters, visibleSecondaryFilters),
+        [visiblePrimaryFilters, visibleSecondaryFilters]
+    )
+
     // Get hidden secondary filter count using existing helper
     // This is used for awareness messaging only (does not reveal hidden filters)
     const hiddenFilterCount = useMemo(() => {
@@ -403,6 +476,15 @@ export default function AssetGridSecondaryFilters({
     
     const page = usePage()
     const serverFilters = page.props.filters
+
+    /** Inertia often passes new object/array refs each render; use stable keys for sync effect deps. */
+    const serverFiltersSyncKey = useMemo(() => JSON.stringify(serverFilters ?? null), [serverFilters])
+    const filterKeysSyncKey = useMemo(() => filterKeys.join('\0'), [filterKeys])
+    const filterUrlNavSyncKey = useMemo(
+        () => JSON.stringify(filterUrlNavigationKeys || []),
+        [filterUrlNavigationKeys]
+    )
+
     const [internalExpanded, setInternalExpanded] = useState(false)
     const toolbarControlled =
         hideInlineMoreFiltersButton &&
@@ -410,6 +492,12 @@ export default function AssetGridSecondaryFilters({
         typeof onToolbarMoreFiltersExpandedChange === 'function'
     const isExpanded = toolbarControlled ? toolbarMoreFiltersExpanded : internalExpanded
     const setIsExpanded = toolbarControlled ? onToolbarMoreFiltersExpandedChange : setInternalExpanded
+
+    const [sectionBasicOpen, setSectionBasicOpen] = useState(true)
+    const [sectionAssetOpen, setSectionAssetOpen] = useState(false)
+    const [sectionAiOpen, setSectionAiOpen] = useState(false)
+    const [sectionCustomOpen, setSectionCustomOpen] = useState(false)
+    const [customFieldsExpanded, setCustomFieldsExpanded] = useState(false)
 
     function normalizeIncomingFilters(raw) {
         const out = {}
@@ -431,20 +519,28 @@ export default function AssetGridSecondaryFilters({
                 return normalizeIncomingFilters(serverFilters)
             }
             const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : (page.url?.split('?')[1] || ''))
-            return parseFiltersFromUrl(urlParams, filterKeys)
+            return parseFiltersFromUrl(urlParams, filterKeys, filterUrlNavOptions)
         } catch (e) { /* ignore */ }
         return {}
     })
     
+    // Sync from server `filters` or URL. Deps use *SyncKey values so Inertia’s new object refs each render don’t loop setFilters.
     useEffect(() => {
+        let next
         if (serverFilters && typeof serverFilters === 'object' && Object.keys(serverFilters).length > 0) {
-            setFilters(normalizeIncomingFilters(serverFilters))
-            return
+            next = normalizeIncomingFilters(serverFilters)
+        } else {
+            const search =
+                typeof window !== 'undefined'
+                    ? window.location.search
+                    : page.url?.includes('?')
+                      ? `?${(page.url || '').split('?')[1] || ''}`
+                      : ''
+            const urlParams = new URLSearchParams(search)
+            next = parseFiltersFromUrl(urlParams, filterKeys, filterUrlNavOptions)
         }
-        const search = typeof window !== 'undefined' ? window.location.search : (page.url?.includes('?') ? '?' + (page.url || '').split('?')[1] : '')
-        const urlParams = new URLSearchParams(search)
-        setFilters(parseFiltersFromUrl(urlParams, filterKeys))
-    }, [page.url, page.props.filters, filterKeys])
+        setFilters((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    }, [page.url, serverFiltersSyncKey, filterKeysSyncKey, filterUrlNavSyncKey])
     
     const handleFilterChange = (fieldKey, operator, value) => {
         const newFilters = { ...filters, [fieldKey]: { operator, value } }
@@ -453,11 +549,13 @@ export default function AssetGridSecondaryFilters({
         }
         setFilters(newFilters)
         const urlParams = new URLSearchParams(window.location.search)
-        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys, {
+            preserveQueryKeys: filterUrlNavigationKeys || [],
+        })
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
     
@@ -466,14 +564,34 @@ export default function AssetGridSecondaryFilters({
         delete newFilters[fieldKey]
         setFilters(newFilters)
         const urlParams = new URLSearchParams(window.location.search)
-        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys, {
+            preserveQueryKeys: filterUrlNavigationKeys || [],
+        })
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: GRID_PARTIAL_RELOAD_KEYS,
+            only: partialReloadKeys,
         })
     }
-    
+
+    const handleClearAllFiltersExpanded = useCallback(() => {
+        const searchPart = page.url.includes('?') ? `?${page.url.split('?')[1]}` : ''
+        const next = clearToolbarFilterParams(searchPart, {
+            filterKeys,
+            collectionsView: clearFiltersCollectionsView,
+        })
+        router.get(window.location.pathname, Object.fromEntries(next), {
+            preserveState: true,
+            preserveScroll: true,
+            only: partialReloadKeys,
+        })
+    }, [page.url, filterKeys, clearFiltersCollectionsView, partialReloadKeys])
+
+    const hasClearableToolbarFilters = useMemo(() => {
+        const searchPart = page.url.includes('?') ? `?${page.url.split('?')[1]}` : ''
+        return toolbarQueryHasClearableFilters(searchPart, filterKeys, clearFiltersCollectionsView)
+    }, [page.url, filterKeys, clearFiltersCollectionsView])
+
     // Count active filters (including lifecycle filters and user filter)
     const metadataFilterCount = Object.values(filters).filter(
         (f) => f && f.value !== null && f.value !== '' && (!Array.isArray(f.value) || f.value.length > 0)
@@ -489,32 +607,49 @@ export default function AssetGridSecondaryFilters({
     const hideDesktopHighlightBar =
         hideSortInSecondaryBar && !hasFilterPillsRow && barTrailingContent == null
 
-    const hasServerTotal = typeof filteredGridTotal === 'number' && !Number.isNaN(filteredGridTotal)
-    const hasFolderTotal =
-        typeof gridFolderTotal === 'number' && !Number.isNaN(gridFolderTotal)
+    const resolveCount = (v) =>
+        typeof v === 'number' && !Number.isNaN(v) ? v : null
+
+    const resolvedFiltered =
+        resolveCount(pageProps.filtered_grid_total) ?? resolveCount(filteredGridTotal)
+    const resolvedFolder =
+        resolveCount(pageProps.grid_folder_total) ?? resolveCount(gridFolderTotal)
+
+    const hasFilteredTotal = resolvedFiltered !== null
+    const hasFolderTotal = resolvedFolder !== null
 
     const folderDenominator = hasFolderTotal
-        ? gridFolderTotal
-        : hasServerTotal
-          ? filteredGridTotal
-          : totalInCategory != null
-            ? totalInCategory
-            : assetResultCount
+        ? resolvedFolder
+        : totalInCategory != null
+          ? totalInCategory
+          : assetResultCount
 
     const loadedCount = assetResultCount
     const showPlus =
-        !hasServerTotal &&
+        !hasFilteredTotal &&
         hasMoreAvailable &&
         loadedCount != null &&
         folderDenominator != null &&
         loadedCount < folderDenominator
 
-    const countPart =
-        hasServerTotal && folderDenominator != null
-            ? `${filteredGridTotal} of ${folderDenominator}`
-            : loadedCount != null && folderDenominator != null
-              ? `${loadedCount} of ${folderDenominator}${showPlus ? '+' : ''}`
-              : ''
+    let countPart = ''
+    if (hasFilteredTotal && hasFolderTotal) {
+        countPart = `${resolvedFiltered} of ${resolvedFolder}`
+    } else if (hasFilteredTotal && !hasFolderTotal) {
+        if (loadedCount != null) {
+            if (hasMoreAvailable && loadedCount < resolvedFiltered) {
+                countPart = `${loadedCount} of ${resolvedFiltered}+`
+            } else if (loadedCount === resolvedFiltered) {
+                countPart = `${resolvedFiltered} ${resolvedFiltered === 1 ? 'result' : 'results'}`
+            } else {
+                countPart = `${loadedCount} of ${resolvedFiltered}`
+            }
+        } else {
+            countPart = `${resolvedFiltered} ${resolvedFiltered === 1 ? 'result' : 'results'}`
+        }
+    } else if (loadedCount != null && folderDenominator != null) {
+        countPart = `${loadedCount} of ${folderDenominator}${showPlus ? '+' : ''}`
+    }
 
     useEffect(() => {
         if (!hideInlineMoreFiltersButton || !onToolbarMoreFiltersMetaReport) return
@@ -705,292 +840,502 @@ export default function AssetGridSecondaryFilters({
                 style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
             >
                 <div className={isExpanded ? 'min-h-0 overflow-visible' : 'min-h-0 overflow-hidden'}>
-                    <div className="px-3 py-3 sm:px-4 border-t border-gray-200">
-                    {/* Primary metadata filters (e.g. Logo Type) — mobile only; desktop shows them in toolbar */}
-                    {visiblePrimaryFilters.length > 0 && (
-                        <div className="mb-3 pb-3 border-b border-gray-200 lg:hidden">
-                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Primary Filters</label>
-                            <div className="grid grid-cols-1 gap-3">
-                                {visiblePrimaryFilters.map((field) => {
-                                    const fieldKey = field.field_key || field.key
-                                    const currentFilter = filters[fieldKey] || {}
-                                    const currentValue = currentFilter.value ?? null
-                                    const currentOperator = currentFilter.operator ?? (field.operators?.[0]?.value || 'equals')
-                                    return (
-                                        <FilterFieldInput
-                                            key={fieldKey}
-                                            field={field}
-                                            value={currentValue}
-                                            operator={currentOperator}
-                                            availableValues={available_values[fieldKey] || []}
-                                            onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
-                                            variant="secondary"
-                                        />
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    )}
-                    {/* Dense top row: lifecycle, brand alignment (Executions), file type, uploader */}
-                    <div className="mb-4 flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-gray-200 pb-4">
-                        {(canPublish || canBypassApproval || canArchive) && (
-                            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Lifecycle</span>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    {canPublish && (
-                                        <label className="flex cursor-pointer items-center gap-1.5">
-                                            <input
-                                                type="checkbox"
-                                                checked={pendingPublicationFilter}
-                                                onChange={handlePendingPublicationFilterToggle}
-                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            />
-                                            <span className="text-xs text-gray-700 flex items-center gap-1">
-                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
-                                                Pending Publication
-                                            </span>
-                                        </label>
-                                    )}
-                                    {canBypassApproval && (
-                                        <label className="flex cursor-pointer items-center gap-1.5">
-                                            <input
-                                                type="checkbox"
-                                                checked={unpublishedFilter}
-                                                onChange={handleUnpublishedFilterToggle}
-                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            />
-                                            <span className="text-xs text-gray-700 flex items-center gap-1">
-                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
-                                                Unpublished
-                                            </span>
-                                        </label>
-                                    )}
-                                    {canArchive && (
-                                        <label className="flex cursor-pointer items-center gap-1.5">
-                                            <input
-                                                type="checkbox"
-                                                checked={archivedFilter}
-                                                onChange={handleArchivedFilterToggle}
-                                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            />
-                                            <span className="text-xs text-gray-700 flex items-center gap-1">
-                                                <ArchiveBoxIcon className="h-3.5 w-3.5 text-gray-400" />
-                                                Archived
-                                            </span>
-                                        </label>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                        {showComplianceFilter && onComplianceFilterChange && (
-                            <div className="w-44 shrink-0">
-                                <label className="mb-1 block text-xs font-medium text-gray-700">Brand alignment</label>
-                                <select
-                                    value={complianceFilter || 'all'}
-                                    onChange={(e) => onComplianceFilterChange(e.target.value === 'all' ? '' : e.target.value)}
-                                    className="min-h-[2.375rem] w-full rounded-md border border-gray-300 bg-white py-1.5 pl-2 pr-8 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                >
-                                    <option value="all">All</option>
-                                    <option value="superb">Superb (≥90)</option>
-                                    <option value="strong">Strong (≥75)</option>
-                                    <option value="needs_review">Needs Review (&lt;60)</option>
-                                    <option value="failing">Failing (&lt;40)</option>
-                                    <option value="unscored">Unscored</option>
-                                </select>
-                            </div>
-                        )}
-                        {available_file_types && available_file_types.length > 0 && (
-                            <div className="w-36 shrink-0">
-                                <label className="mb-1 block text-xs font-medium text-gray-700">File type</label>
-                                <select
-                                    value={fileTypeFilter}
-                                    onChange={(e) => handleFileTypeFilterChange(e.target.value)}
-                                    className="min-h-[2.375rem] w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
-                                >
-                                    <option value="all">All</option>
-                                    {available_file_types.map((fileType) => (
-                                        <option key={fileType} value={fileType}>
-                                            {fileType.toUpperCase()}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                        {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
-                            <div className="shrink-0">
-                                <UserSelect
-                                    users={pageProps.uploaded_by_users}
-                                    value={userFilter}
-                                    onChange={handleUserFilterChange}
-                                    placeholder="All uploaders"
-                                    label="Uploaded by"
-                                    narrow
-                                />
-                            </div>
-                        )}
-                    </div>
-                    
-                    {/* Active Filters (if any) */}
-                    {activeFilterCount > 0 && (
-                        <div className="mb-3">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-medium text-gray-700">Active Filters</span>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {/* Phase L.5.1: Show lifecycle filter chips if active */}
-                                {pendingPublicationFilter && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-50 text-yellow-700 rounded">
-                                        <span>Pending Publication</span>
-                                        <button
-                                            type="button"
-                                            onClick={handlePendingPublicationFilterToggle}
-                                            className="text-yellow-600 hover:text-yellow-800"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
-                                {unpublishedFilter && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-50 text-yellow-700 rounded">
-                                        <span>Unpublished</span>
-                                        <button
-                                            type="button"
-                                            onClick={handleUnpublishedFilterToggle}
-                                            className="text-yellow-600 hover:text-yellow-800"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
-                                {archivedFilter && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-50 text-gray-700 rounded">
-                                        <span>Archived</span>
-                                        <button
-                                            type="button"
-                                            onClick={handleArchivedFilterToggle}
-                                            className="text-gray-600 hover:text-gray-800"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
-                                {fileTypeFilter && fileTypeFilter !== 'all' && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded">
-                                        <span>File Type: {fileTypeFilter.toUpperCase()}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleFileTypeFilterChange('all')}
-                                            className="text-blue-600 hover:text-blue-800"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
-                                {userFilter && (() => {
-                                    const u = findUploadedByUser(pageProps.uploaded_by_users, userFilter)
-                                    const label = u ? (u.name || u.email || 'User') : 'Unknown'
-                                    return (
-                                        <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded">
-                                            {u ? (
-                                                <Avatar
-                                                    avatarUrl={u.avatar_url}
-                                                    firstName={u.first_name}
-                                                    lastName={u.last_name}
-                                                    email={u.email}
-                                                    size="h-5 w-5 text-[9px]"
-                                                    primaryColor={brandPrimary}
-                                                />
-                                            ) : null}
-                                            <span>Uploaded by: {label}</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleUserFilterChange(null)}
-                                                className="text-indigo-600 hover:text-indigo-800"
-                                            >
-                                                <XMarkIcon className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    )
-                                })()}
-                                {Object.entries(filters).map(([fieldKey, filter]) => {
-                                    if (!filter || filter.value === null || filter.value === '') {
-                                        return null
-                                    }
-                                    const field = visibleSecondaryFilters.find(
-                                        (f) => (f.field_key || f.key) === fieldKey
-                                    )
-                                    if (!field) return null
-                                    
-                                    return (
-                                        <div
-                                            key={fieldKey}
-                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded"
-                                        >
-                                            <span>
-                                                {field.display_label || field.label}: {(() => {
-                                                    const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
-                                                    if ((field.type === 'select' || field.type === 'multiselect') && field.options?.length) {
-                                                        const opt = field.options.find((o) => String(o.value) === String(rawVal))
-                                                        if (opt) {
-                                                            const label = opt.display_label ?? opt.label ?? String(filter.value)
-                                                            return opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color) ? (
-                                                                <span className="inline-flex items-center gap-1">
-                                                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: opt.color }} />
-                                                                    {label}
-                                                                </span>
-                                                            ) : label
-                                                        }
-                                                    }
-                                                    return String(filter.value)
-                                                })()}
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveFilter(fieldKey)}
-                                                className="text-indigo-600 hover:text-indigo-800"
-                                            >
-                                                <XMarkIcon className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    )}
-                    
-                    {/* Filter fields — auto-fill min width; hue / dominant color rows get extra span */}
-                    {visibleSecondaryFilters.length > 0 ? (
-                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
-                            {visibleSecondaryFilters.map((field) => {
-                            const fieldKey = field.field_key || field.key
+                    <div className="space-y-4 border-t border-gray-200/80 px-3 py-4 sm:px-4">
+                    {(() => {
+                        const findFieldForPill = (key) =>
+                            visibleSecondaryFilters.find((f) => getFieldKey(f) === key) ||
+                            visiblePrimaryFilters.find((f) => getFieldKey(f) === key) ||
+                            (filterable_schema || []).find((f) => getFieldKey(f) === key)
+
+                        const renderMetadataField = (field) => {
+                            const fieldKey = getFieldKey(field)
                             const currentFilter = filters[fieldKey] || {}
                             const currentValue = currentFilter.value ?? null
                             const currentOperator = currentFilter.operator ?? (field.operators?.[0]?.value || 'equals')
-                            const widget = resolve(field, CONTEXT.FILTER)
-                            const spanWide =
-                                widget === WIDGET.COLOR_SWATCH || widget === WIDGET.DOMINANT_COLORS
-                                    ? 'min-w-0 sm:col-span-2 xl:col-span-2'
-                                    : 'min-w-0'
-
                             return (
-                                <div key={fieldKey} className={spanWide}>
+                                <div key={fieldKey} className="min-w-0 [&_select]:min-h-10 [&_input:not([type='checkbox']):not([type='radio'])]:min-h-10">
                                     <FilterFieldInput
                                         field={field}
                                         value={currentValue}
                                         operator={currentOperator}
                                         availableValues={available_values[fieldKey] || []}
-                                        onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                                        onChange={(op, val) => handleFilterChange(fieldKey, op, val)}
                                         variant="secondary"
+                                        accentColor={brandPrimary}
                                     />
                                 </div>
                             )
-                            })}
-                        </div>
-                    ) : (
-                        <div className="text-sm text-gray-500 text-center py-4">
-                            No filters available for this category
-                        </div>
-                    )}
+                        }
+
+                        const customSlice = customFieldsExpanded
+                            ? layoutBuckets.custom
+                            : layoutBuckets.custom.slice(0, 5)
+
+                        const hasAssetSection =
+                            layoutBuckets.assetProps.length > 0 ||
+                            (showComplianceFilter && onComplianceFilterChange) ||
+                            (available_file_types && available_file_types.length > 0)
+
+                        return (
+                            <>
+                                {/* Active filters — pills + clear all */}
+                                {(activeFilterCount > 0 || hasClearableToolbarFilters) && (
+                                    <div className="rounded-xl border border-gray-200/60 bg-gray-50/50 p-3">
+                                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                            <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                                                <AdjustmentsHorizontalIcon className="h-4 w-4 text-gray-500" aria-hidden />
+                                                Active filters
+                                            </span>
+                                            {hasClearableToolbarFilters ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleClearAllFiltersExpanded}
+                                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    Clear all
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {pendingPublicationFilter && (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
+                                                    Pending Publication
+                                                    <button
+                                                        type="button"
+                                                        onClick={handlePendingPublicationFilterToggle}
+                                                        className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                                                        aria-label="Remove"
+                                                    >
+                                                        <XMarkIcon className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </span>
+                                            )}
+                                            {unpublishedFilter && (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
+                                                    Unpublished
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleUnpublishedFilterToggle}
+                                                        className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                        aria-label="Remove"
+                                                    >
+                                                        <XMarkIcon className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </span>
+                                            )}
+                                            {archivedFilter && (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
+                                                    Archived
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleArchivedFilterToggle}
+                                                        className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                        aria-label="Remove"
+                                                    >
+                                                        <XMarkIcon className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </span>
+                                            )}
+                                            {fileTypeFilter && fileTypeFilter !== 'all' && (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
+                                                    File type: {fileTypeFilter.toUpperCase()}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleFileTypeFilterChange('all')}
+                                                        className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                        aria-label="Remove"
+                                                    >
+                                                        <XMarkIcon className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </span>
+                                            )}
+                                            {userFilter && (() => {
+                                                const u = findUploadedByUser(pageProps.uploaded_by_users, userFilter)
+                                                const label = u ? (u.name || u.email || 'User') : 'Unknown'
+                                                return (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
+                                                        {u ? (
+                                                            <Avatar
+                                                                avatarUrl={u.avatar_url}
+                                                                firstName={u.first_name}
+                                                                lastName={u.last_name}
+                                                                email={u.email}
+                                                                size="h-5 w-5 text-[9px]"
+                                                                primaryColor={brandPrimary}
+                                                            />
+                                                        ) : null}
+                                                        Uploaded by: {label}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleUserFilterChange(null)}
+                                                            className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                            aria-label="Remove"
+                                                        >
+                                                            <XMarkIcon className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </span>
+                                                )
+                                            })()}
+                                            {Array.from(primaryFilterKeys).map((fieldKey) => {
+                                                const filter = filters[fieldKey]
+                                                if (!filter || filter.value === null || filter.value === '') return null
+                                                if (Array.isArray(filter.value) && filter.value.length === 0) return null
+                                                const field = findFieldForPill(fieldKey)
+                                                if (!field) return null
+                                                let valueLabel = Array.isArray(filter.value)
+                                                    ? (filter.value[0] ?? '')
+                                                    : String(filter.value ?? '')
+                                                let optionColor = null
+                                                if (
+                                                    field &&
+                                                    (field.type === 'select' || field.type === 'multiselect') &&
+                                                    field.options?.length
+                                                ) {
+                                                    const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
+                                                    const opt = field.options.find((o) => String(o.value) === String(rawVal))
+                                                    if (opt) {
+                                                        valueLabel = opt.display_label ?? opt.label ?? valueLabel
+                                                        if (opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color)) {
+                                                            optionColor = opt.color
+                                                        }
+                                                    }
+                                                }
+                                                return (
+                                                    <span
+                                                        key={fieldKey}
+                                                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm"
+                                                    >
+                                                        {getFieldLabel(fieldKey)}:{' '}
+                                                        {optionColor ? (
+                                                            <span className="inline-flex items-center gap-1 truncate">
+                                                                <span
+                                                                    className="h-2 w-2 shrink-0 rounded-full"
+                                                                    style={{ backgroundColor: optionColor }}
+                                                                />
+                                                                <span className="truncate">{valueLabel}</span>
+                                                            </span>
+                                                        ) : (
+                                                            <span className="truncate">{valueLabel}</span>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveFilter(fieldKey)}
+                                                            className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                            aria-label={`Remove ${fieldKey}`}
+                                                        >
+                                                            <XMarkIcon className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </span>
+                                                )
+                                            })}
+                                            {Object.entries(filters).map(([fieldKey, filter]) => {
+                                                if (!filter || filter.value === null || filter.value === '') return null
+                                                if (Array.isArray(filter.value) && filter.value.length === 0) return null
+                                                if (primaryFilterKeys.has(fieldKey)) return null
+                                                const field = findFieldForPill(fieldKey)
+                                                if (!field) return null
+                                                const isBooleanToggle =
+                                                    fieldKey === 'starred' ||
+                                                    (field.type === 'boolean' && field.display_widget === 'toggle')
+                                                const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
+                                                let valueLabel = isBooleanToggle
+                                                    ? rawVal === true ||
+                                                      rawVal === 'true' ||
+                                                      rawVal === 1 ||
+                                                      rawVal === '1'
+                                                        ? 'Yes'
+                                                        : 'No'
+                                                    : Array.isArray(filter.value)
+                                                      ? (filter.value[0] ?? '')
+                                                      : String(filter.value ?? '')
+                                                let optionColor = null
+                                                if (
+                                                    (field.type === 'select' || field.type === 'multiselect') &&
+                                                    field.options?.length
+                                                ) {
+                                                    const opt = field.options.find((o) => String(o.value) === String(rawVal))
+                                                    if (opt) {
+                                                        valueLabel = opt.display_label ?? opt.label ?? valueLabel
+                                                        if (opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color)) {
+                                                            optionColor = opt.color
+                                                        }
+                                                    }
+                                                }
+                                                return (
+                                                    <span
+                                                        key={fieldKey}
+                                                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm"
+                                                    >
+                                                        <span className="truncate">
+                                                            {field.display_label || field.label}:{' '}
+                                                            {optionColor ? (
+                                                                <span className="inline-flex items-center gap-1">
+                                                                    <span
+                                                                        className="h-2 w-2 shrink-0 rounded-full"
+                                                                        style={{ backgroundColor: optionColor }}
+                                                                    />
+                                                                    {valueLabel}
+                                                                </span>
+                                                            ) : (
+                                                                valueLabel
+                                                            )}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveFilter(fieldKey)}
+                                                            className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100"
+                                                            aria-label={`Remove ${fieldKey}`}
+                                                        >
+                                                            <XMarkIcon className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </span>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Row 1 — primary bar (sticky) */}
+                                <div className="sticky top-0 z-10 -mx-3 border-b border-gray-200/60 bg-white/95 px-3 py-3 backdrop-blur-sm sm:-mx-4 sm:px-4">
+                                    <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                        <TagIcon className="h-3.5 w-3.5" aria-hidden />
+                                        Library scope
+                                    </p>
+                                    <div className="flex flex-nowrap items-end gap-4 overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                        {layoutBuckets.tagsField ? (
+                                            <div className="flex min-w-[12rem] max-w-[min(100%,24rem)] flex-1 flex-col gap-1.5">
+                                                <span className="text-xs font-medium text-gray-700">Tags</span>
+                                                <FilterFieldInput
+                                                    field={layoutBuckets.tagsField}
+                                                    value={
+                                                        filters[getFieldKey(layoutBuckets.tagsField)]?.value ?? null
+                                                    }
+                                                    operator={
+                                                        filters[getFieldKey(layoutBuckets.tagsField)]?.operator ||
+                                                        'in'
+                                                    }
+                                                    availableValues={
+                                                        available_values[getFieldKey(layoutBuckets.tagsField)] || []
+                                                    }
+                                                    onChange={(op, val) =>
+                                                        handleFilterChange(getFieldKey(layoutBuckets.tagsField), op, val)
+                                                    }
+                                                    variant="secondary"
+                                                    accentColor={brandPrimary}
+                                                />
+                                            </div>
+                                        ) : null}
+                                        {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 ? (
+                                            <div className="w-[min(100%,14rem)] shrink-0">
+                                                <UserSelect
+                                                    users={pageProps.uploaded_by_users}
+                                                    value={userFilter}
+                                                    onChange={handleUserFilterChange}
+                                                    placeholder="All uploaders"
+                                                    label="Uploaded by"
+                                                    narrow
+                                                />
+                                            </div>
+                                        ) : null}
+                                        {layoutBuckets.starredField ? (
+                                            <div className="shrink-0">{renderMetadataField(layoutBuckets.starredField)}</div>
+                                        ) : null}
+                                        {(canPublish || canBypassApproval || canArchive) && (
+                                            <div className="flex min-w-0 shrink-0 flex-col gap-1.5">
+                                                <span className="text-xs font-medium text-gray-700">Lifecycle</span>
+                                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                                    {canPublish && (
+                                                        <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={pendingPublicationFilter}
+                                                                onChange={handlePendingPublicationFilterToggle}
+                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="flex items-center gap-1 text-xs text-gray-700">
+                                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                                Pending
+                                                            </span>
+                                                        </label>
+                                                    )}
+                                                    {canBypassApproval && (
+                                                        <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={unpublishedFilter}
+                                                                onChange={handleUnpublishedFilterToggle}
+                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="flex items-center gap-1 text-xs text-gray-700">
+                                                                <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                                Unpublished
+                                                            </span>
+                                                        </label>
+                                                    )}
+                                                    {canArchive && (
+                                                        <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={archivedFilter}
+                                                                onChange={handleArchivedFilterToggle}
+                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="flex items-center gap-1 text-xs text-gray-700">
+                                                                <ArchiveBoxIcon className="h-3.5 w-3.5 text-gray-400" />
+                                                                Archived
+                                                            </span>
+                                                        </label>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Row 2 — visual / hue */}
+                                {layoutBuckets.visualFields.length > 0 ? (
+                                    <div className="rounded-xl border border-gray-200/60 bg-white/60 p-4">
+                                        <p className="mb-3 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                            <SwatchIcon className="h-3.5 w-3.5" aria-hidden />
+                                            Visual
+                                        </p>
+                                        <div className="flex flex-row flex-wrap items-start gap-4">
+                                            {layoutBuckets.visualFields.map((field) => {
+                                                const fieldKey = getFieldKey(field)
+                                                const w = resolve(field, CONTEXT.FILTER)
+                                                const wide =
+                                                    w === WIDGET.COLOR_SWATCH || w === WIDGET.DOMINANT_COLORS
+                                                return (
+                                                    <div
+                                                        key={fieldKey}
+                                                        className={
+                                                            wide ? 'min-w-0 w-full max-w-full sm:flex-1' : 'min-w-[10rem]'
+                                                        }
+                                                    >
+                                                        {renderMetadataField(field)}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
+
+                                {/* Collapsible sections */}
+                                <div className="flex flex-col gap-4">
+                                    {layoutBuckets.basic.length > 0 ? (
+                                        <FilterCollapsibleSection
+                                            title="Basic filters"
+                                            icon={AdjustmentsHorizontalIcon}
+                                            open={sectionBasicOpen}
+                                            onToggle={() => setSectionBasicOpen((v) => !v)}
+                                        >
+                                            <div className={FILTER_GRID_CLASS}>{layoutBuckets.basic.map(renderMetadataField)}</div>
+                                        </FilterCollapsibleSection>
+                                    ) : null}
+
+                                    {hasAssetSection ? (
+                                        <FilterCollapsibleSection
+                                            title="Asset properties"
+                                            icon={CubeTransparentIcon}
+                                            open={sectionAssetOpen}
+                                            onToggle={() => setSectionAssetOpen((v) => !v)}
+                                        >
+                                            <div className={`${FILTER_GRID_CLASS} mb-4`}>
+                                                {showComplianceFilter && onComplianceFilterChange ? (
+                                                    <div className="min-w-0 space-y-1.5">
+                                                        <label className="block text-xs font-medium text-gray-700">
+                                                            Brand alignment
+                                                        </label>
+                                                        <select
+                                                            value={complianceFilter || 'all'}
+                                                            onChange={(e) =>
+                                                                onComplianceFilterChange(
+                                                                    e.target.value === 'all' ? '' : e.target.value
+                                                                )
+                                                            }
+                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                        >
+                                                            <option value="all">All</option>
+                                                            <option value="superb">Superb (≥90)</option>
+                                                            <option value="strong">Strong (≥75)</option>
+                                                            <option value="needs_review">Needs Review (&lt;60)</option>
+                                                            <option value="failing">Failing (&lt;40)</option>
+                                                            <option value="unscored">Unscored</option>
+                                                        </select>
+                                                    </div>
+                                                ) : null}
+                                                {available_file_types && available_file_types.length > 0 ? (
+                                                    <div className="min-w-0 space-y-1.5">
+                                                        <label className="block text-xs font-medium text-gray-700">
+                                                            File type
+                                                        </label>
+                                                        <select
+                                                            value={fileTypeFilter}
+                                                            onChange={(e) => handleFileTypeFilterChange(e.target.value)}
+                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                        >
+                                                            <option value="all">All</option>
+                                                            {available_file_types.map((fileType) => (
+                                                                <option key={fileType} value={fileType}>
+                                                                    {fileType.toUpperCase()}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                ) : null}
+                                                {layoutBuckets.assetProps.map(renderMetadataField)}
+                                            </div>
+                                        </FilterCollapsibleSection>
+                                    ) : null}
+
+                                    {layoutBuckets.aiScene.length > 0 ? (
+                                        <FilterCollapsibleSection
+                                            title="AI / scene data"
+                                            icon={SparklesIcon}
+                                            open={sectionAiOpen}
+                                            onToggle={() => setSectionAiOpen((v) => !v)}
+                                        >
+                                            <div className={FILTER_GRID_CLASS}>
+                                                {layoutBuckets.aiScene.map(renderMetadataField)}
+                                            </div>
+                                        </FilterCollapsibleSection>
+                                    ) : null}
+
+                                    {layoutBuckets.custom.length > 0 ? (
+                                        <FilterCollapsibleSection
+                                            title="Custom fields"
+                                            icon={RectangleStackIcon}
+                                            open={sectionCustomOpen}
+                                            onToggle={() => setSectionCustomOpen((v) => !v)}
+                                        >
+                                            <div className={FILTER_GRID_CLASS}>
+                                                {customSlice.map(renderMetadataField)}
+                                            </div>
+                                            {layoutBuckets.custom.length > 5 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCustomFieldsExpanded((v) => !v)}
+                                                    className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    {customFieldsExpanded
+                                                        ? 'Show less'
+                                                        : `Show more (${layoutBuckets.custom.length - 5} hidden)`}
+                                                </button>
+                                            ) : null}
+                                        </FilterCollapsibleSection>
+                                    ) : null}
+                                </div>
+
+                                {visibleSecondaryFilters.length === 0 &&
+                                visiblePrimaryFilters.length === 0 &&
+                                !layoutBuckets.tagsField ? (
+                                    <div className="rounded-lg border border-dashed border-gray-200/80 py-8 text-center text-sm text-gray-500">
+                                        No filters available for this category
+                                    </div>
+                                ) : null}
+                            </>
+                        )
+                    })()}
                     
                     {/* Hidden Filter Awareness Message */}
                     {/* Only render when:

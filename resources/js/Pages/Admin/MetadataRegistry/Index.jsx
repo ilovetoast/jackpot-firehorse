@@ -1,8 +1,9 @@
-import { Link, router, usePage } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import { usePermission } from '../../../hooks/usePermission'
 import { useMemo, useState, useCallback } from 'react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import SystemMetadataFieldModal from '../../../Components/Admin/SystemMetadataFieldModal'
 import {
     InformationCircleIcon,
     SparklesIcon,
@@ -26,9 +27,6 @@ function bundleLink(templateId) {
     return `${ADMIN_SYSTEM_CATEGORIES_URL}?openBundle=${templateId}`
 }
 
-const METADATA_FIELD_STORE_URL =
-    typeof route === 'function' ? route('admin.metadata.fields.store') : '/app/admin/metadata/fields'
-
 function groupFieldsByType(fieldList) {
     const byType = new Map()
     for (const f of fieldList) {
@@ -39,20 +37,11 @@ function groupFieldsByType(fieldList) {
     return [...byType.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 }
 
-const ADD_FIELD_INITIAL = {
-    key: '',
-    system_label: '',
-    type: 'text',
-    applies_to: 'all',
-    population_mode: 'manual',
-    show_on_upload: true,
-    show_on_edit: true,
-    show_in_filters: true,
-    readonly: false,
-    group_key: 'custom',
-}
-
-export default function MetadataRegistryIndex({ fields = [], latestSystemTemplates = [] }) {
+export default function MetadataRegistryIndex({
+    fields = [],
+    latestSystemTemplates = [],
+    can_manage_system_fields: canManageSystemFieldsProp = false,
+}) {
     const { auth, flash } = usePage().props
     const { can } = usePermission()
     const [categoryModalOpen, setCategoryModalOpen] = useState(false)
@@ -69,77 +58,9 @@ export default function MetadataRegistryIndex({ fields = [], latestSystemTemplat
     const [collapsedTypes, setCollapsedTypes] = useState(() => ({}))
 
     const canManageVisibility = can('metadata.system.visibility.manage')
-    const canManageFields = can('metadata.system.fields.manage')
+    const canManageFields = Boolean(canManageSystemFieldsProp) || can('metadata.system.fields.manage')
 
     const [addModalOpen, setAddModalOpen] = useState(false)
-    const [addFieldForm, setAddFieldForm] = useState(() => ({ ...ADD_FIELD_INITIAL }))
-    const [addOptions, setAddOptions] = useState([{ value: '', label: '' }])
-    const [selectedTemplateIds, setSelectedTemplateIds] = useState(() => new Set())
-    const [addFieldErrors, setAddFieldErrors] = useState({})
-    const [addFieldProcessing, setAddFieldProcessing] = useState(false)
-
-    const toggleTemplateSelected = useCallback((id) => {
-        setSelectedTemplateIds((prev) => {
-            const next = new Set(prev)
-            if (next.has(id)) next.delete(id)
-            else next.add(id)
-            return next
-        })
-    }, [])
-
-    const closeAddModal = useCallback(() => {
-        setAddModalOpen(false)
-        setAddFieldForm({ ...ADD_FIELD_INITIAL })
-        setAddOptions([{ value: '', label: '' }])
-        setSelectedTemplateIds(new Set())
-        setAddFieldErrors({})
-    }, [])
-
-    const submitAddField = useCallback(
-        (e) => {
-            e.preventDefault()
-            setAddFieldErrors({})
-            const type = addFieldForm.type
-            let options =
-                type === 'select' || type === 'multiselect'
-                    ? addOptions.map((o) => ({ value: o.value.trim(), label: o.label.trim() })).filter((o) => o.value && o.label)
-                    : undefined
-            if ((type === 'select' || type === 'multiselect') && options.length === 0) {
-                setAddFieldErrors({ options: 'Add at least one option with value and label.' })
-                return
-            }
-            const template_defaults = [...selectedTemplateIds].map((system_category_id) => ({
-                system_category_id,
-                is_hidden: false,
-                is_upload_hidden: false,
-                is_filter_hidden: false,
-                is_edit_hidden: false,
-            }))
-            const payload = {
-                key: addFieldForm.key.trim(),
-                system_label: addFieldForm.system_label.trim(),
-                type,
-                applies_to: addFieldForm.applies_to,
-                population_mode: addFieldForm.population_mode,
-                show_on_upload: !!addFieldForm.show_on_upload,
-                show_on_edit: !!addFieldForm.show_on_edit,
-                show_in_filters: !!addFieldForm.show_in_filters,
-                readonly: !!addFieldForm.readonly,
-                group_key: addFieldForm.group_key?.trim() || 'custom',
-            }
-            if (options) payload.options = options
-            if (template_defaults.length > 0) payload.template_defaults = template_defaults
-
-            setAddFieldProcessing(true)
-            router.post(METADATA_FIELD_STORE_URL, payload, {
-                preserveScroll: true,
-                onFinish: () => setAddFieldProcessing(false),
-                onSuccess: () => closeAddModal(),
-                onError: (errs) => setAddFieldErrors(errs || {}),
-            })
-        },
-        [addFieldForm, addOptions, selectedTemplateIds, closeAddModal]
-    )
 
     const allTypes = useMemo(() => {
         const s = new Set(fields.map((f) => (f.field_type || 'other').toString()))
@@ -485,7 +406,7 @@ export default function MetadataRegistryIndex({ fields = [], latestSystemTemplat
                                     className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                 >
                                     <PlusIcon className="h-5 w-5" />
-                                    Add field
+                                    Add metadata field
                                 </button>
                             )}
                         </div>
@@ -633,6 +554,19 @@ export default function MetadataRegistryIndex({ fields = [], latestSystemTemplat
                                 ))}
                             </select>
                         </div>
+                        {canManageFields && (
+                            <div className="flex w-full flex-col justify-end sm:ml-auto sm:w-auto">
+                                <span className="mb-1 hidden text-xs font-medium text-gray-500 sm:block">&nbsp;</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setAddModalOpen(true)}
+                                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:w-auto"
+                                >
+                                    <PlusIcon className="h-5 w-5 shrink-0" />
+                                    Add metadata field
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
@@ -725,256 +659,11 @@ export default function MetadataRegistryIndex({ fields = [], latestSystemTemplat
                         </div>
                     </div>
 
-                    {addModalOpen && (
-                        <>
-                            <div
-                                className="fixed inset-0 z-50 bg-gray-500 bg-opacity-75 transition-opacity"
-                                onClick={closeAddModal}
-                                aria-hidden="true"
-                            />
-                            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                                <div
-                                    className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <div className="mb-4 flex items-start justify-between gap-4">
-                                        <h2 className="text-lg font-semibold text-gray-900">Add system field</h2>
-                                        <button
-                                            type="button"
-                                            onClick={closeAddModal}
-                                            className="rounded-md text-gray-400 hover:text-gray-600"
-                                        >
-                                            <XMarkIcon className="h-6 w-6" />
-                                        </button>
-                                    </div>
-                                    <form onSubmit={submitAddField} className="space-y-4">
-                                        <div>
-                                            <label htmlFor="af-key" className="block text-xs font-medium text-gray-700">
-                                                Key (snake_case)
-                                            </label>
-                                            <input
-                                                id="af-key"
-                                                value={addFieldForm.key}
-                                                onChange={(e) => setAddFieldForm((p) => ({ ...p, key: e.target.value }))}
-                                                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
-                                                required
-                                                autoComplete="off"
-                                            />
-                                            {addFieldErrors.key && (
-                                                <p className="mt-1 text-xs text-red-600">{addFieldErrors.key}</p>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <label htmlFor="af-label" className="block text-xs font-medium text-gray-700">
-                                                Label
-                                            </label>
-                                            <input
-                                                id="af-label"
-                                                value={addFieldForm.system_label}
-                                                onChange={(e) =>
-                                                    setAddFieldForm((p) => ({ ...p, system_label: e.target.value }))
-                                                }
-                                                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                                                required
-                                            />
-                                            {addFieldErrors.system_label && (
-                                                <p className="mt-1 text-xs text-red-600">{addFieldErrors.system_label}</p>
-                                            )}
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label htmlFor="af-type" className="block text-xs font-medium text-gray-700">
-                                                    Type
-                                                </label>
-                                                <select
-                                                    id="af-type"
-                                                    value={addFieldForm.type}
-                                                    onChange={(e) => setAddFieldForm((p) => ({ ...p, type: e.target.value }))}
-                                                    className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                                                >
-                                                    {['text', 'textarea', 'number', 'boolean', 'date', 'select', 'multiselect'].map(
-                                                        (t) => (
-                                                            <option key={t} value={t}>
-                                                                {t}
-                                                            </option>
-                                                        )
-                                                    )}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label htmlFor="af-applies" className="block text-xs font-medium text-gray-700">
-                                                    Applies to
-                                                </label>
-                                                <select
-                                                    id="af-applies"
-                                                    value={addFieldForm.applies_to}
-                                                    onChange={(e) =>
-                                                        setAddFieldForm((p) => ({ ...p, applies_to: e.target.value }))
-                                                    }
-                                                    className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                                                >
-                                                    {['all', 'image', 'video', 'document'].map((t) => (
-                                                        <option key={t} value={t}>
-                                                            {t}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="af-pop" className="block text-xs font-medium text-gray-700">
-                                                Population
-                                            </label>
-                                            <select
-                                                id="af-pop"
-                                                value={addFieldForm.population_mode}
-                                                onChange={(e) =>
-                                                    setAddFieldForm((p) => ({ ...p, population_mode: e.target.value }))
-                                                }
-                                                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                                            >
-                                                {['manual', 'automatic', 'hybrid'].map((t) => (
-                                                    <option key={t} value={t}>
-                                                        {t}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        {(addFieldForm.type === 'select' || addFieldForm.type === 'multiselect') && (
-                                            <div>
-                                                <p className="text-xs font-medium text-gray-700">Options</p>
-                                                {addOptions.map((row, i) => (
-                                                    <div key={i} className="mt-2 flex gap-2">
-                                                        <input
-                                                            placeholder="value"
-                                                            value={row.value}
-                                                            onChange={(e) => {
-                                                                const next = [...addOptions]
-                                                                next[i] = { ...next[i], value: e.target.value }
-                                                                setAddOptions(next)
-                                                            }}
-                                                            className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm font-mono"
-                                                        />
-                                                        <input
-                                                            placeholder="label"
-                                                            value={row.label}
-                                                            onChange={(e) => {
-                                                                const next = [...addOptions]
-                                                                next[i] = { ...next[i], label: e.target.value }
-                                                                setAddOptions(next)
-                                                            }}
-                                                            className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                                                        />
-                                                    </div>
-                                                ))}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setAddOptions((o) => [...o, { value: '', label: '' }])}
-                                                    className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                                                >
-                                                    + Add option row
-                                                </button>
-                                                {addFieldErrors.options && (
-                                                    <p className="mt-1 text-xs text-red-600">{addFieldErrors.options}</p>
-                                                )}
-                                            </div>
-                                        )}
-                                        <div className="flex flex-wrap gap-4 text-sm">
-                                            <label className="inline-flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={addFieldForm.show_on_upload}
-                                                    onChange={(e) =>
-                                                        setAddFieldForm((p) => ({ ...p, show_on_upload: e.target.checked }))
-                                                    }
-                                                    className="rounded border-gray-300"
-                                                />
-                                                Upload
-                                            </label>
-                                            <label className="inline-flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={addFieldForm.show_on_edit}
-                                                    onChange={(e) =>
-                                                        setAddFieldForm((p) => ({ ...p, show_on_edit: e.target.checked }))
-                                                    }
-                                                    className="rounded border-gray-300"
-                                                />
-                                                Edit
-                                            </label>
-                                            <label className="inline-flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={addFieldForm.show_in_filters}
-                                                    onChange={(e) =>
-                                                        setAddFieldForm((p) => ({ ...p, show_in_filters: e.target.checked }))
-                                                    }
-                                                    className="rounded border-gray-300"
-                                                />
-                                                Filters
-                                            </label>
-                                            <label className="inline-flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={addFieldForm.readonly}
-                                                    onChange={(e) =>
-                                                        setAddFieldForm((p) => ({ ...p, readonly: e.target.checked }))
-                                                    }
-                                                    className="rounded border-gray-300"
-                                                />
-                                                Read-only
-                                            </label>
-                                        </div>
-                                        {latestSystemTemplates.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-medium text-gray-700">
-                                                    Add to template bundles (optional)
-                                                </p>
-                                                <p className="mt-0.5 text-xs text-gray-500">
-                                                    Creates default bundle rows; all surfaces visible unless you edit the bundle later.
-                                                </p>
-                                                <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded border border-gray-200 p-2">
-                                                    {latestSystemTemplates.map((t) => (
-                                                        <label
-                                                            key={t.id}
-                                                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-800"
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedTemplateIds.has(t.id)}
-                                                                onChange={() => toggleTemplateSelected(t.id)}
-                                                                className="rounded border-gray-300"
-                                                            />
-                                                            <span className="truncate">
-                                                                {t.name}{' '}
-                                                                <span className="text-gray-400">({t.asset_type})</span>
-                                                            </span>
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
-                                            <button
-                                                type="button"
-                                                onClick={closeAddModal}
-                                                className="rounded-md px-3 py-2 text-sm font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                type="submit"
-                                                disabled={addFieldProcessing}
-                                                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-                                            >
-                                                {addFieldProcessing ? 'Creating…' : 'Create field'}
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-                        </>
-                    )}
+                    <SystemMetadataFieldModal
+                        isOpen={addModalOpen}
+                        onClose={() => setAddModalOpen(false)}
+                        latestSystemTemplates={latestSystemTemplates}
+                    />
 
                     {categoryModalOpen && selectedField && (
                         <>

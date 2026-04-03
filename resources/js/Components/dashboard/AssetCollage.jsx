@@ -22,16 +22,25 @@ function getCardNudge(colIndex, cardIndex) {
     return arr[cardIndex % arr.length] ?? 0
 }
 
-export default function AssetCollage({ assets = [] }) {
+export default function AssetCollage({
+    assets = [],
+    fastEntrance = false,
+    /** First N primary (non-loop) images use eager + fetchPriority high (hero tier). */
+    eagerImageCount = 4,
+}) {
     const [visible, setVisible] = useState(false)
     const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
     const rafRef = useRef(null)
     const lastPosRef = useRef({ x: 0, y: 0 })
 
     useEffect(() => {
+        if (fastEntrance) {
+            setVisible(true)
+            return undefined
+        }
         const t = setTimeout(() => setVisible(true), 300)
         return () => clearTimeout(t)
-    }, [])
+    }, [fastEntrance])
 
     const handleMouseMove = useCallback((e) => {
         const cx = window.innerWidth / 2
@@ -55,7 +64,7 @@ export default function AssetCollage({ assets = [] }) {
         }
     }, [handleMouseMove])
 
-    // Medium+ URLs only (no preview/LQIP — large object-cover tiles would look pixelated).
+    // Hero tier passes small thumbs; full assets payload uses medium+ for quality.
     const thumbs = assets
         .slice(0, MAX_ASSETS)
         .map((a) => a.final_thumbnail_url || a.thumbnail_url)
@@ -112,6 +121,7 @@ export default function AssetCollage({ assets = [] }) {
             >
                 {(() => {
                     let photoStagger = 0
+                    let primaryImageIndex = 0
                     return displayColumns.map((imgs, ci) => {
                     const isEmpty = !imgs || imgs.length === 0
                     const useFilmDrift = enableColumnDrift && !isEmpty
@@ -121,6 +131,8 @@ export default function AssetCollage({ assets = [] }) {
                         list.map((src, ii) => {
                             const nudge = getCardNudge(ci, ii)
                             const staggerIndex = keySuffix === '' ? photoStagger++ : 0
+                            const priorityIndex = keySuffix === '' ? primaryImageIndex++ : 9999
+                            const highPriority = priorityIndex < eagerImageCount
                             const cardClass =
                                 'w-full rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0'
                             const cardStyle = {
@@ -134,9 +146,9 @@ export default function AssetCollage({ assets = [] }) {
                                     src={src}
                                     alt=""
                                     className="h-full w-full object-cover"
-                                    loading={ci < 2 && ii < 2 ? 'eager' : 'lazy'}
+                                    loading={highPriority ? 'eager' : 'lazy'}
                                     decoding="async"
-                                    fetchPriority={ci < 2 && ii < 2 ? 'high' : 'low'}
+                                    fetchPriority={highPriority ? 'high' : 'low'}
                                 />
                             )
                             if (keySuffix !== '') {

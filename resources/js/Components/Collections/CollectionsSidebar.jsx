@@ -17,20 +17,35 @@ export default function CollectionsSidebar({
     canCreateCollection = false,
     onCreateCollection = null,
     publicCollectionsEnabled = false,
+    /** Landing grid: no collection selected — show through cinematic backdrop (desktop row). */
+    transparentBackground = false,
 }) {
     const isLight = textColor === '#000000'
-    const mutedStyle = { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
-    const buttonBg = isLight ? 'bg-black/10 hover:bg-black/15' : 'bg-white/20 hover:bg-white/30'
+    const onDarkBackdrop = transparentBackground
+    const listTextColor = onDarkBackdrop && isLight ? '#ffffff' : textColor
+    const mutedStyle = onDarkBackdrop
+        ? { color: 'rgba(255, 255, 255, 0.55)' }
+        : { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
+    const buttonBg = onDarkBackdrop
+        ? 'bg-white/15 hover:bg-white/25'
+        : isLight
+          ? 'bg-black/10 hover:bg-black/15'
+          : 'bg-white/20 hover:bg-white/30'
     const itemActiveBg = activeBgColor || (isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.2)')
-    const itemHoverBg = hoverBgColor || (isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.1)')
-    const buttonText = isLight ? 'text-gray-900' : 'text-white'
+    const itemHoverBg = onDarkBackdrop
+        ? 'rgba(255, 255, 255, 0.1)'
+        : hoverBgColor || (isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.1)')
+    const buttonText = onDarkBackdrop ? 'text-white' : isLight ? 'text-gray-900' : 'text-white'
 
     const handleSelectCollection = (id) => {
         router.get('/app/collections', { collection: id }, { preserveState: false, preserveScroll: true })
     }
 
     return (
-        <div className="flex flex-col w-72 h-full flex-shrink-0" style={{ backgroundColor: sidebarColor }}>
+        <div
+            className="relative flex flex-col w-72 h-full flex-shrink-0"
+            style={{ backgroundColor: transparentBackground ? 'transparent' : sidebarColor }}
+        >
             <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                 <nav className="mt-5 flex-1 px-2 space-y-1">
                     <div className="px-3 py-2">
@@ -59,7 +74,7 @@ export default function CollectionsSidebar({
                                     const isActive = selectedCollectionId != null && c.id === selectedCollectionId
                                     const showPublic = publicCollectionsEnabled && !!c.is_public
                                     const count = typeof c.assets_count === 'number' ? c.assets_count : null
-                                    const itemTextColor = isActive && activeTextColor ? activeTextColor : textColor
+                                    const itemTextColor = isActive && activeTextColor ? activeTextColor : listTextColor
                                     return (
                                         <button
                                             key={c.id}
@@ -73,13 +88,13 @@ export default function CollectionsSidebar({
                                             onMouseEnter={(e) => {
                                                 if (!isActive) {
                                                     e.currentTarget.style.backgroundColor = itemHoverBg
-                                                    e.currentTarget.style.color = textColor
+                                                    e.currentTarget.style.color = listTextColor
                                                 }
                                             }}
                                             onMouseLeave={(e) => {
                                                 if (!isActive) {
                                                     e.currentTarget.style.backgroundColor = 'transparent'
-                                                    e.currentTarget.style.color = textColor
+                                                    e.currentTarget.style.color = listTextColor
                                                 }
                                             }}
                                         >

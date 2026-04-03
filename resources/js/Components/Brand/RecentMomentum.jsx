@@ -6,6 +6,7 @@ import {
     UserGroupIcon,
 } from '@heroicons/react/24/outline'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
+import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
 const ICON_MAP = {
     'arrow-up': ArrowTrendingUpIcon,
@@ -18,7 +19,8 @@ const ICON_MAP = {
  * RecentMomentum — aggregated meaningful activity (not passive logs).
  * Max 4 items. Slightly lower visual weight than signals.
  */
-export default function RecentMomentum({ data = {}, brandColor = '#6366f1' }) {
+export default function RecentMomentum({ data = {}, brandColor = '#6366f1', iconAccentColor = null }) {
+    const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
     const items = summarizeMomentum(data)
 
     if (items.length === 0) return null
@@ -38,7 +40,7 @@ export default function RecentMomentum({ data = {}, brandColor = '#6366f1' }) {
                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
                         style={{ backgroundColor: `${brandColor}1c` }}
                     >
-                        <ArrowTrendingUpIcon className="h-3.5 w-3.5" style={{ color: brandColor }} />
+                        <ArrowTrendingUpIcon className="h-3.5 w-3.5" style={{ color: iconFill }} />
                     </div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-white/40">
                         Recent momentum
@@ -59,7 +61,7 @@ export default function RecentMomentum({ data = {}, brandColor = '#6366f1' }) {
                                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]"
                                     style={{ boxShadow: `inset 0 0 0 1px ${brandColor}14` }}
                                 >
-                                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: brandColor }} />
+                                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconFill }} />
                                 </div>
                                 <span>{item.label}</span>
                                 {item.trend != null && (

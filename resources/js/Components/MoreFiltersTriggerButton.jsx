@@ -9,9 +9,13 @@ export default function MoreFiltersTriggerButton({
     activeFilterCount = 0,
     brandPrimary = '#6366f1',
     visibleSecondaryFiltersLength = 0,
+    /** Toolbar overflow: primary metadata filters moved into this panel — show chevron even with 0 secondary fields. */
+    inlinePrimaryFiltersCollapsed = false,
     className = '',
+    /** id of the expandable panel for aria-controls (e.g. asset grid secondary filters). */
+    controlsId = undefined,
 }) {
-    const hasExpandableFields = visibleSecondaryFiltersLength > 0
+    const hasExpandableFields = visibleSecondaryFiltersLength > 0 || inlinePrimaryFiltersCollapsed
 
     return (
         <button
@@ -19,10 +23,17 @@ export default function MoreFiltersTriggerButton({
             onClick={onToggle}
             className={`flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/90 ${className}`}
             aria-expanded={isExpanded}
-            aria-label={isExpanded ? 'Collapse more filters' : 'Expand more filters'}
+            aria-controls={controlsId}
+            aria-label={
+                isExpanded
+                    ? 'Collapse filters'
+                    : inlinePrimaryFiltersCollapsed
+                      ? 'Expand filters — includes quick filters moved from the toolbar'
+                      : 'Expand filters'
+            }
         >
             <FunnelIcon className="h-4 w-4 text-slate-500 flex-shrink-0" aria-hidden />
-            <span className="text-xs sm:text-sm font-medium text-slate-700 truncate hidden sm:inline">More filters</span>
+            <span className="text-xs sm:text-sm font-medium text-slate-700 truncate">Filters</span>
             {activeFilterCount > 0 && (
                 <span
                     className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs"

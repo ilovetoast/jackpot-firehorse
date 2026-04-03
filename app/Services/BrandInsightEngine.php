@@ -59,7 +59,7 @@ class BrandInsightEngine
             // Contributors only ever see missing-metadata counts for assets they uploaded.
             $scopeMetadataToUploader = $canActOnMetadataInsights && $isContributor;
 
-            $canSeeRightsInsightsTab = $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
+            $canSeeRightsInsightsTab = $user->canViewBrandWorkspaceInsights($tenant, $brand);
 
             // 1a. AI Tag Suggestions Pending (high)
             if ($canSeeAllAiReview || $canSeeOthersAiReview) {
