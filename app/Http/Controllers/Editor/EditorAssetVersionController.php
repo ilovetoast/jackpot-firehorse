@@ -88,6 +88,31 @@ class EditorAssetVersionController extends Controller
             abort(404, 'Version file not available.');
         }
 
+        // Match {@see EditorAssetBridgeController::file}: canvas uses /file (raster fallback); version strip
+        // uses this route — without fallback, TIFF/HEIC bytes 200 OK but <img> cannot decode (broken thumb).
+        $mime = strtolower((string) ($assetVersion->mime_type ?? ''));
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $needsRasterFallback = str_starts_with($mime, 'image/tiff')
+            || in_array($mime, ['image/heic', 'image/heif'], true)
+            || in_array($ext, ['tif', 'tiff', 'heic', 'heif'], true);
+        if ($needsRasterFallback) {
+            foreach (['large', 'medium', 'thumb'] as $style) {
+                $thumbPath = $asset->thumbnailPathForStyle($style);
+                if ($thumbPath !== null && $thumbPath !== '' && Storage::disk('s3')->exists($thumbPath)) {
+                    $filename = basename($thumbPath) ?: 'thumb';
+
+                    return Storage::disk('s3')->response(
+                        $thumbPath,
+                        $filename,
+                        [
+                            'Content-Type' => $this->mimeTypeForStoragePath($thumbPath),
+                            'Cache-Control' => 'private, max-age=300',
+                        ]
+                    );
+                }
+            }
+        }
+
         if (! Storage::disk('s3')->exists($path)) {
             abort(404, 'File missing.');
         }
@@ -102,5 +127,19 @@ class EditorAssetVersionController extends Controller
                 'Cache-Control' => 'private, max-age=300',
             ]
         );
+    }
+
+    private function mimeTypeForStoragePath(string $path): string
+    {
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        return match ($extension) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            default => 'application/octet-stream',
+        };
     }
 }
