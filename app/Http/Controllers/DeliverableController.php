@@ -58,6 +58,7 @@ class DeliverableController extends Controller
                 'selected_category' => null,
                 'assets' => [],
                 'next_page_url' => null,
+                'filtered_grid_total' => 0,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'compliance_filter' => '',
@@ -1086,6 +1087,7 @@ class DeliverableController extends Controller
             'show_all_button' => $showAllButton,
             'assets' => $mappedAssets,
             'next_page_url' => $nextPageUrl,
+            'filtered_grid_total' => (int) $paginator->total(),
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,

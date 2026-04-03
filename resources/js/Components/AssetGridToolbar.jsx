@@ -95,7 +95,7 @@ export default function AssetGridToolbar({
         }
         const onlyKeys = Array.isArray(inertiaSearchOnly) && inertiaSearchOnly.length > 0
             ? inertiaSearchOnly
-            : ['assets', 'next_page_url', 'q']
+            : ['assets', 'next_page_url', 'q', 'filtered_grid_total']
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
@@ -147,6 +147,7 @@ export default function AssetGridToolbar({
         activeFilterCount: 0,
         visibleSecondaryFiltersLength: 0,
         brandPrimary: primaryColor,
+        desktopResultSummary: '',
     }))
 
     const reportMoreFiltersMeta = useCallback((meta) => {
@@ -155,11 +156,12 @@ export default function AssetGridToolbar({
                 prev &&
                 prev.activeFilterCount === meta.activeFilterCount &&
                 prev.visibleSecondaryFiltersLength === meta.visibleSecondaryFiltersLength &&
-                prev.brandPrimary === meta.brandPrimary
+                prev.brandPrimary === meta.brandPrimary &&
+                prev.desktopResultSummary === (meta.desktopResultSummary ?? '')
             ) {
                 return prev
             }
-            return meta
+            return { ...meta, desktopResultSummary: meta.desktopResultSummary ?? '' }
         })
     }, [])
 
@@ -190,7 +192,7 @@ export default function AssetGridToolbar({
     }, [pageUrl, serverQ, filterKeysForClear, clearFiltersCollectionsView])
 
     const defaultClearOnly = useMemo(
-        () => ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q'],
+        () => ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total'],
         []
     )
 
@@ -471,6 +473,14 @@ export default function AssetGridToolbar({
                                 <span className="hidden sm:inline">Clear</span>
                             </button>
                         )}
+                        {moreFiltersBarMeta.desktopResultSummary ? (
+                            <span
+                                className="hidden shrink-0 whitespace-nowrap text-xs text-gray-500 lg:inline"
+                                aria-live="polite"
+                            >
+                                {moreFiltersBarMeta.desktopResultSummary}
+                            </span>
+                        ) : null}
                     </div>
 
                     {/* Right: Info + Grid — compact, flex-shrink-0 */}

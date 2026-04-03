@@ -35,7 +35,9 @@ import AssetSidebar from '../../Components/AssetSidebar'
 import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
 import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
 
-export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
+const DELIVERABLE_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total']
+
+export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -309,7 +311,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             { 
                 preserveState: true, 
                 preserveScroll: true,
-                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'compliance_filter', 'show_compliance_filter', 'lifecycle', 'trash_count', 'can_view_trash']
+                only: ['filterable_schema', 'available_values', ...DELIVERABLE_GRID_QUERY_KEYS, 'selected_category', 'selected_category_slug', 'compliance_filter', 'show_compliance_filter', 'lifecycle', 'trash_count', 'can_view_trash']
             }
         )
     }
@@ -482,8 +484,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         // Reload grid and sidebar category counts (same contract as Assets/Index after finalize).
         router.reload({
             only: [
-                'assets',
-                'next_page_url',
+                ...DELIVERABLE_GRID_QUERY_KEYS,
                 'categories',
                 'show_all_button',
                 'total_asset_count',
@@ -702,8 +703,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             filterable_schema={filterable_schema}
                             available_values={available_values}
                             inertiaOnly={[
-                                'assets',
-                                'next_page_url',
+                                ...DELIVERABLE_GRID_QUERY_KEYS,
                                 'filters',
                                 'uploaded_by_users',
                                 'q',
@@ -785,10 +785,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                     urlParams.set('sort', newSort)
                                     urlParams.set('sort_direction', newDir)
                                     urlParams.delete('page')
-                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction', 'compliance_filter'] })
+                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...DELIVERABLE_GRID_QUERY_KEYS, 'sort', 'sort_direction', 'compliance_filter'] })
                                 }}
                                 showComplianceFilter={show_compliance_filter}
-                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'compliance_filter', 'show_compliance_filter']}
+                                clearFiltersInertiaOnly={[...DELIVERABLE_GRID_QUERY_KEYS, 'filters', 'uploaded_by_users', 'q', 'compliance_filter', 'show_compliance_filter']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
@@ -834,7 +834,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction', 'compliance_filter'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...DELIVERABLE_GRID_QUERY_KEYS, 'sort', 'sort_direction', 'compliance_filter'] })
                                         }}
                                         showComplianceFilter={show_compliance_filter}
                                         complianceFilter={compliance_filter}
@@ -843,10 +843,11 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                             if (val) urlParams.set('compliance_filter', val)
                                             else urlParams.delete('compliance_filter')
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'compliance_filter', 'show_compliance_filter'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...DELIVERABLE_GRID_QUERY_KEYS, 'compliance_filter', 'show_compliance_filter'] })
                                         }}
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
+                                        filteredGridTotal={typeof filtered_grid_total === 'number' ? filtered_grid_total : null}
                                         hasMoreAvailable={!!nextPageUrl}
                                     />
                                 }
@@ -991,7 +992,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
-                        router.reload({ only: ['assets', 'next_page_url'] })
+                        router.reload({ only: [...DELIVERABLE_GRID_QUERY_KEYS] })
                         if (result?.actionId === 'SOFT_DELETE') {
                             setBulkSelectedAssetIds([])
                             clearSelection()
@@ -1014,7 +1015,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         setBulkMetadataInitialOp(null)
                     }}
                     onComplete={() => {
-                        router.reload({ only: ['assets', 'next_page_url'] })
+                        router.reload({ only: [...DELIVERABLE_GRID_QUERY_KEYS] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)

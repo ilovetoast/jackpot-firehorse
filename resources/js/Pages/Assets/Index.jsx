@@ -50,7 +50,10 @@ const ASSET_INDEX_SIDEBAR_COUNT_PROPS = [
     'trash_count',
 ]
 
-export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
+/** Inertia `only` keys whenever the paginated grid query result is refreshed */
+const ASSET_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total']
+
+export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filtered_grid_total = 0, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -347,7 +350,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             router.get(window.location.pathname, Object.fromEntries(urlParams), {
                 preserveState: true,
                 preserveScroll: true,
-                only: ['assets', 'next_page_url', 'q'],
+                only: [...ASSET_GRID_QUERY_KEYS, 'q'],
             })
         }
    }, [selectedCategoryId])
@@ -502,8 +505,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             only: [
                 'filterable_schema',
                 'available_values',
-                'assets',
-                'next_page_url',
+                ...ASSET_GRID_QUERY_KEYS,
                 'selected_category',
                 'selected_category_slug',
                 'source',
@@ -524,8 +526,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             only: [
                 'filterable_schema',
                 'available_values',
-                'assets',
-                'next_page_url',
+                ...ASSET_GRID_QUERY_KEYS,
                 'selected_category',
                 'selected_category_slug',
                 'source',
@@ -656,7 +657,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         
         // Reload assets and sidebar counts (new uploads change staged/category totals)
         router.reload({
-            only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
+            only: [...ASSET_GRID_QUERY_KEYS, ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
             preserveScroll: true,
             preserveState: false, // Prevent state preservation to avoid dialog reopening
             onSuccess: () => {
@@ -1038,7 +1039,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         <AssetFilterChipsBar
                             filterable_schema={filterable_schema}
                             available_values={availableValues}
-                            inertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q']}
+                            inertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total']}
                         />
                     </div>
                     <div 
@@ -1099,9 +1100,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     urlParams.set('sort', newSort)
                                     urlParams.set('sort_direction', newDir)
                                     urlParams.delete('page')
-                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
+                                    router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...ASSET_GRID_QUERY_KEYS, 'sort', 'sort_direction'] })
                                 }}
-                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q']}
+                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
@@ -1147,10 +1148,11 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...ASSET_GRID_QUERY_KEYS, 'sort', 'sort_direction'] })
                                         }}
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
+                                        filteredGridTotal={typeof filtered_grid_total === 'number' ? filtered_grid_total : null}
                                         hasMoreAvailable={!!nextPageUrl}
                                     />
                                 }
@@ -1314,7 +1316,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
                         router.reload({
-                            only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
+                            only: [...ASSET_GRID_QUERY_KEYS, ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
                         })
                         // Clear selection when items leave the view (trash, force delete, or assign category from staged)
                         if (result?.actionId === 'SOFT_DELETE' || result?.actionId === 'FORCE_DELETE' || result?.assignCategory) {
@@ -1339,7 +1341,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         setBulkMetadataInitialOp(null)
                     }}
                     onComplete={() => {
-                        router.reload({ only: ['assets', 'next_page_url', ...ASSET_INDEX_SIDEBAR_COUNT_PROPS] })
+                        router.reload({ only: [...ASSET_GRID_QUERY_KEYS, ...ASSET_INDEX_SIDEBAR_COUNT_PROPS] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)

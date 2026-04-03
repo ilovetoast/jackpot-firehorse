@@ -116,6 +116,7 @@ class AssetController extends Controller
                 'categories_by_type' => ['all' => []],
                 'selected_category' => null,
                 'assets' => [],
+                'filtered_grid_total' => 0,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
@@ -1482,6 +1483,7 @@ class AssetController extends Controller
             'total_asset_count' => $isStagedView ? $stagedCount : $totalAssetCount, // Staged view: staged count; main grid: category total
             'assets' => $mappedAssets,
             'next_page_url' => $nextPageUrl,
+            'filtered_grid_total' => (int) $paginator->total(),
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'filters' => $filters, // Server-parsed filters for active filter UI sync with URL

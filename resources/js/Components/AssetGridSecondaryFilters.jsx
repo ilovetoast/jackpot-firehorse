@@ -11,7 +11,6 @@
  * 
  * ⚠️ CONSTRAINTS:
  * - React component only (render-only)
- * - No backend changes
  * - No helper modifications
  * - No resolver changes
  * - No new filtering logic
@@ -64,8 +63,9 @@ function findUploadedByUser(users, rawId) {
  * @param {string} [props.sortDirection] - asc | desc
  * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
  * @param {number} [props.assetResultCount] - Number of assets currently visible (e.g. revealed by infinite scroll)
- * @param {number} [props.totalInCategory] - Total assets loaded so far (for "x of y" display)
- * @param {boolean} [props.hasMoreAvailable] - If true, show "x of y+" when more can be loaded
+ * @param {number} [props.totalInCategory] - Legacy fallback total when server total is absent
+ * @param {number|null} [props.filteredGridTotal] - Server paginator total for current query (accurate "x of y")
+ * @param {boolean} [props.hasMoreAvailable] - If true, show "x of y+" when more can be loaded (only without server total)
  * @param {React.ReactNode} [props.barTrailingContent] - Optional content on the right of the bar (same line as count and Sort), e.g. Select Multiple / Select all
  * @param {boolean} [props.showComplianceFilter] - If true, show Brand DNA compliance filter (Deliverables only)
  * @param {string} [props.complianceFilter] - Current compliance filter value
@@ -88,6 +88,7 @@ export default function AssetGridSecondaryFilters({
     onSortChange = null,
     assetResultCount = null,
     totalInCategory = null,
+    filteredGridTotal = null,
     hasMoreAvailable = false,
     barTrailingContent = null,
     showComplianceFilter = false,
@@ -213,7 +214,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -237,7 +238,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -261,7 +262,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -281,7 +282,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -301,7 +302,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -445,7 +446,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -458,7 +459,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
         })
     }
     
@@ -468,12 +469,44 @@ export default function AssetGridSecondaryFilters({
     ).length
     const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0) + (fileTypeFilter && fileTypeFilter !== 'all' ? 1 : 0) + (userFilter ? 1 : 0)
 
+    const hasFilterPillsRow =
+        activeFilterCount > 0 ||
+        Array.from(primaryFilterKeys).some((k) => {
+            const filter = filters[k]
+            return filter && filter.value !== null && filter.value !== '' && (!Array.isArray(filter.value) || filter.value.length > 0)
+        })
+    const hideDesktopHighlightBar =
+        hideSortInSecondaryBar && !hasFilterPillsRow && barTrailingContent == null
+
+    const hasServerTotal = typeof filteredGridTotal === 'number' && !Number.isNaN(filteredGridTotal)
+    const totalMatching = hasServerTotal
+        ? filteredGridTotal
+        : totalInCategory != null
+          ? totalInCategory
+          : assetResultCount
+    const loadedCount = assetResultCount
+    const showPlus =
+        !hasServerTotal &&
+        hasMoreAvailable &&
+        loadedCount != null &&
+        totalMatching != null &&
+        loadedCount < totalMatching
+
     useEffect(() => {
         if (!hideInlineMoreFiltersButton || !onToolbarMoreFiltersMetaReport) return
+        const countPart =
+            loadedCount != null && totalMatching != null
+                ? `${loadedCount} of ${totalMatching}${showPlus ? '+' : ''}`
+                : ''
+        const desktopResultSummary =
+            activeFilterCount > 0 && countPart
+                ? `${countPart} · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}`
+                : ''
         onToolbarMoreFiltersMetaReport({
             activeFilterCount,
             visibleSecondaryFiltersLength: visibleSecondaryFilters.length,
             brandPrimary,
+            desktopResultSummary,
         })
     }, [
         hideInlineMoreFiltersButton,
@@ -481,6 +514,9 @@ export default function AssetGridSecondaryFilters({
         activeFilterCount,
         visibleSecondaryFilters.length,
         brandPrimary,
+        loadedCount,
+        totalMatching,
+        showPlus,
     ])
     
     // Always render the "More filters" bar container
@@ -490,7 +526,7 @@ export default function AssetGridSecondaryFilters({
         <div>
             {/* Bar: optional inline More (when not in toolbar) + pills + Sort — desktop More lives in AssetGridToolbar */}
             <div
-                className="px-3 py-1.5 sm:px-4 flex flex-row flex-wrap items-center gap-2 sm:justify-between text-left border-b border-gray-200 min-h-[2.25rem]"
+                className={`px-3 py-1.5 sm:px-4 flex flex-row flex-wrap items-center gap-2 sm:justify-between text-left border-b border-gray-200 min-h-[2.25rem]${hideDesktopHighlightBar ? ' lg:hidden' : ''}`}
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 flex-wrap">
@@ -619,12 +655,14 @@ export default function AssetGridSecondaryFilters({
                     {barTrailingContent != null && barTrailingContent}
                     {/* Indicator: result count and filter count in selected category */}
                     {(assetResultCount != null || activeFilterCount > 0) && (
-                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                        <span
+                            className={`text-xs text-gray-500 whitespace-nowrap${hideSortInSecondaryBar && activeFilterCount > 0 ? ' lg:hidden' : ''}`}
+                        >
                             {[
-                                assetResultCount != null
-                                    ? (totalInCategory != null
-                                        ? `${assetResultCount} of ${totalInCategory}${hasMoreAvailable ? '+' : ''}`
-                                        : String(assetResultCount))
+                                loadedCount != null
+                                    ? (totalMatching != null
+                                        ? `${loadedCount} of ${totalMatching}${showPlus ? '+' : ''}`
+                                        : String(loadedCount))
                                     : '',
                                 activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
                             ].filter(Boolean).join(' · ')}

@@ -28,6 +28,7 @@ import axios from 'axios'
 const COLLECTIONS_PARTIAL_RELOAD = [
     'assets',
     'next_page_url',
+    'filtered_grid_total',
     'q',
     'sort',
     'sort_direction',
@@ -43,6 +44,7 @@ export default function CollectionsIndex({
     collections = [],
     assets = [],
     next_page_url = null,
+    filtered_grid_total = 0,
     selected_collection = null,
     can_update_collection = false,
     can_create_collection = false,
@@ -650,6 +652,7 @@ export default function CollectionsIndex({
                                                     }
                                                     assetResultCount={assetsList?.length ?? 0}
                                                     totalInCategory={assetsList?.length ?? 0}
+                                                    filteredGridTotal={typeof filtered_grid_total === 'number' ? filtered_grid_total : null}
                                                     hasMoreAvailable={!!nextPageUrl}
                                                 />
                                             }
