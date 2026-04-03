@@ -79,6 +79,10 @@ class CompositionThumbnailAssetService
         ?int $compositionId
     ): string {
         return DB::transaction(function () use ($tenant, $brand, $user, $asset, $pngBinary, $compositionId) {
+            // Serialize concurrent thumbnail saves for the same asset: otherwise two requests can
+            // read the same max(version_number) and both insert the same next number (unique violation).
+            Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
+
             $size = strlen($pngBinary);
             $dims = @getimagesizefromstring($pngBinary);
             $width = isset($dims[0]) ? (int) $dims[0] : null;
@@ -86,6 +90,7 @@ class CompositionThumbnailAssetService
 
             $maxVersion = (int) (AssetVersion::query()
                 ->where('asset_id', $asset->id)
+                ->withTrashed()
                 ->max('version_number') ?? 0);
 
             $nextVersion = $maxVersion + 1;
