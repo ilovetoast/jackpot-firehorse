@@ -84,7 +84,7 @@ const FILTER_GRID_CLASS =
 
 function FilterCollapsibleSection({ title, icon: Icon, open, onToggle, children }) {
     return (
-        <section className="rounded-xl border border-gray-200/60 bg-white/80 shadow-sm overflow-hidden">
+        <section className="rounded-xl border border-gray-200/60 bg-white/80 shadow-sm overflow-visible">
             <button
                 type="button"
                 onClick={onToggle}

@@ -659,7 +659,7 @@ export default function AssetGridToolbar({
                                 onClick={() => setToolbarMoreExpanded(false)}
                             />
                             <div
-                                className="relative z-[1] flex max-h-[min(90vh,800px)] w-full flex-col overflow-hidden rounded-t-2xl border border-gray-100 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-md motion-safe:transition-transform motion-safe:duration-200 motion-reduce:transition-none"
+                                className="relative z-[1] flex max-h-[min(90vh,800px)] w-full flex-col rounded-t-2xl border border-gray-100 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-md motion-safe:transition-transform motion-safe:duration-200 motion-reduce:transition-none"
                                 style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
                             >
                                 <div className="relative z-20 flex shrink-0 items-center justify-between gap-2 border-b border-gray-100 bg-white/95 px-4 py-3">
