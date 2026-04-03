@@ -249,8 +249,14 @@ export default function AdminTicketsIndex({
                 <div className="mb-6">
                     <div className="mb-4 flex items-center justify-between">
                         <div>
-                            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Support Tickets</h1>
-                            <p className="mt-2 text-sm text-gray-700">Manage all support tickets across all tenants</p>
+                            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+                                {engineeringOnlyActive ? 'Engineering tickets' : 'Support tickets'}
+                            </h1>
+                            <p className="mt-2 text-sm text-gray-700">
+                                {engineeringOnlyActive
+                                    ? 'Internal tickets assigned to the engineering team'
+                                    : 'Customer-facing and internal support queue (tenant tickets)'}
+                            </p>
                         </div>
                         {canCreateEngineering && (
                             <button
@@ -324,18 +330,24 @@ export default function AdminTicketsIndex({
                     {/* Compact Horizontal Filters */}
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
                         <div className="flex flex-wrap items-center gap-3">
-                            {/* Workflow queue: customer vs internal */}
-                            <div className="flex-shrink-0">
-                                <select
-                                    value={filters?.queue || ''}
-                                    onChange={(e) => applyFilters({ queue: e.target.value || null })}
-                                    className="block w-full min-w-[160px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
-                                >
-                                    <option value="">All workflows</option>
-                                    <option value="customer">Customer tickets</option>
-                                    <option value="internal">Internal / ops</option>
-                                </select>
-                            </div>
+                            {/* Workflow queue: support default vs slices vs all types (hidden on engineering-only view) */}
+                            {!engineeringOnlyActive && (
+                                <div className="flex-shrink-0">
+                                    <select
+                                        value={filters?.queue === 'all' ? 'all' : filters?.queue || ''}
+                                        onChange={(e) => {
+                                            const v = e.target.value
+                                            applyFilters({ queue: v === '' ? null : v === 'all' ? 'all' : v })
+                                        }}
+                                        className="block w-full min-w-[180px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
+                                    >
+                                        <option value="">Support queue</option>
+                                        <option value="customer">Customer only</option>
+                                        <option value="internal">Internal / ops (non-customer)</option>
+                                        <option value="all">All ticket types</option>
+                                    </select>
+                                </div>
+                            )}
 
                             {/* Status Filter */}
                             <div className="flex-shrink-0">

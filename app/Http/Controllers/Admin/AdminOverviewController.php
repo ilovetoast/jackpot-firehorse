@@ -13,6 +13,7 @@ use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Enums\TicketStatus;
+use App\Enums\TicketTeam;
 use App\Enums\TicketType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -218,17 +219,22 @@ class AdminOverviewController extends Controller
 
     protected function getSupportMetrics(): array
     {
-        $open = Ticket::whereIn('status', [
+        $activeStatuses = [
             TicketStatus::OPEN,
             TicketStatus::WAITING_ON_SUPPORT,
             TicketStatus::IN_PROGRESS,
-        ])->count();
+        ];
+        // Support queue only: tenant-facing + tenant-internal (excludes internal/engineering queue).
+        $supportOpen = Ticket::whereIn('type', [TicketType::TENANT, TicketType::TENANT_INTERNAL])
+            ->whereIn('status', $activeStatuses)
+            ->count();
         $engineering = Ticket::where('type', TicketType::INTERNAL)
-            ->whereIn('status', [TicketStatus::OPEN, TicketStatus::IN_PROGRESS, TicketStatus::WAITING_ON_SUPPORT])
+            ->where('assigned_team', TicketTeam::ENGINEERING)
+            ->whereIn('status', $activeStatuses)
             ->count();
 
         return [
-            'open_tickets' => $open,
+            'open_tickets' => $supportOpen,
             'engineering_tickets' => $engineering,
             'total_tickets' => Ticket::count(),
         ];

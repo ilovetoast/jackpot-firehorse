@@ -143,8 +143,11 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         { name: 'AI Error Monitoring', description: 'Sentry issues, AI summary, root cause, fix suggestions', href: '/app/admin/ai-error-monitoring', icon: ExclamationTriangleIcon },
     ].filter(Boolean)
 
-    const supportItems = [
+    const supportQueueItems = [
         { name: 'Support Tickets', description: `${support.open_tickets ?? 0} open`, href: '/app/admin/support/tickets', icon: ChartBarIcon },
+    ]
+
+    const engineeringQueueItems = [
         { name: 'Engineering Tickets', description: `${support.engineering_tickets ?? 0} open`, href: '/app/admin/support/tickets?type=engineering', icon: CogIcon },
     ]
 
@@ -301,8 +304,16 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                         {perms.canViewSupport && (
                             <SectionCard
                                 title="Support & SLA"
-                                description={`${support.open_tickets ?? 0} open tickets`}
-                                items={supportItems}
+                                description={`${support.open_tickets ?? 0} open in support queue`}
+                                items={supportQueueItems}
+                                defaultExpanded={true}
+                            />
+                        )}
+                        {perms.canViewEngineering && (
+                            <SectionCard
+                                title="Engineering queue"
+                                description={`${support.engineering_tickets ?? 0} open engineering tickets`}
+                                items={engineeringQueueItems}
                                 defaultExpanded={true}
                             />
                         )}

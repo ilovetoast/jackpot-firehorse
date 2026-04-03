@@ -161,14 +161,20 @@ class AdminTicketController extends Controller
         if ($engineeringFilter) {
             $query->where('type', TicketType::INTERNAL)
                 ->where('assigned_team', TicketTeam::ENGINEERING);
-        }
-
-        // Workflow queue: customer-facing vs internal/ops
-        if ($request->filled('queue')) {
-            if ($request->queue === 'customer') {
-                $query->where('type', TicketType::TENANT);
-            } elseif ($request->queue === 'internal') {
-                $query->where('type', '!=', TicketType::TENANT);
+        } else {
+            // Workflow queue: default support view = tenant + tenant_internal only (not engineering queue).
+            if ($request->filled('queue')) {
+                if ($request->queue === 'customer') {
+                    $query->where('type', TicketType::TENANT);
+                } elseif ($request->queue === 'internal') {
+                    $query->where('type', '!=', TicketType::TENANT);
+                } elseif ($request->queue === 'all') {
+                    // Explicit "all types" — no type constraint
+                } else {
+                    $query->whereIn('type', [TicketType::TENANT, TicketType::TENANT_INTERNAL]);
+                }
+            } else {
+                $query->whereIn('type', [TicketType::TENANT, TicketType::TENANT_INTERNAL]);
             }
         }
 
