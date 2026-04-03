@@ -2,7 +2,9 @@
 
 namespace App\Policies;
 
+use App\Models\Brand;
 use App\Models\Category;
+use App\Models\Tenant;
 use App\Models\User;
 
 /**
@@ -54,7 +56,7 @@ class CategoryPolicy
         // User must be assigned to the brand
         if ($category->brand_id && ! $user->isAssignedToBrandId($category->brand_id)) {
             // Check if user is tenant admin/owner (they have access to all brands)
-            $tenant = $category->tenant;
+            $tenant = $this->resolveCategoryTenant($category);
             $tenantRole = $user->getRoleForTenant($tenant);
             if (! in_array($tenantRole, ['admin', 'owner'])) {
                 return false;
@@ -70,12 +72,12 @@ class CategoryPolicy
 
             // Check if user is tenant owner/admin or has 'view any restricted categories' permission
             // These users can bypass category access rules
-            $tenant = $category->tenant;
+            $tenant = $this->resolveCategoryTenant($category);
             $tenantRole = $user->getRoleForTenant($tenant);
             $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
 
             // Also check brand-level owner/admin role
-            $brand = $category->brand;
+            $brand = $this->resolveCategoryBrand($category);
             $isBrandOwnerOrAdmin = false;
             if ($brand) {
                 $brandRole = $user->getRoleForBrand($brand);
@@ -128,8 +130,8 @@ class CategoryPolicy
         }
 
         // Check brand-level permission (or tenant-level for admin/owner)
-        $brand = $category->brand;
-        $tenant = $category->tenant;
+        $brand = $this->resolveCategoryBrand($category);
+        $tenant = $this->resolveCategoryTenant($category);
 
         if ($brand) {
             // Check brand-level permission
@@ -207,8 +209,8 @@ class CategoryPolicy
         }
 
         // Check brand-level permission (or tenant-level for admin/owner)
-        $brand = $category->brand;
-        $tenant = $category->tenant;
+        $brand = $this->resolveCategoryBrand($category);
+        $tenant = $this->resolveCategoryTenant($category);
 
         if ($brand) {
             // Check brand-level permission
@@ -244,7 +246,7 @@ class CategoryPolicy
         }
 
         // User must have brand_categories.manage permission
-        $tenant = $category->tenant;
+        $tenant = $this->resolveCategoryTenant($category);
         if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
             return false;
         }
@@ -260,5 +262,37 @@ class CategoryPolicy
         }
 
         return true;
+    }
+
+    /**
+     * Avoid lazy-loading tenant on Category (lazy loading is disabled app-wide).
+     */
+    private function resolveCategoryTenant(Category $category): ?Tenant
+    {
+        if ($category->tenant_id === null) {
+            return null;
+        }
+
+        if ($category->relationLoaded('tenant')) {
+            return $category->getRelation('tenant');
+        }
+
+        return Tenant::query()->find($category->tenant_id);
+    }
+
+    /**
+     * Avoid lazy-loading brand on Category (lazy loading is disabled app-wide).
+     */
+    private function resolveCategoryBrand(Category $category): ?Brand
+    {
+        if ($category->brand_id === null) {
+            return null;
+        }
+
+        if ($category->relationLoaded('brand')) {
+            return $category->getRelation('brand');
+        }
+
+        return Brand::query()->find($category->brand_id);
     }
 }

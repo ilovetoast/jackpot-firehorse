@@ -3,6 +3,8 @@ import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import BrandAvatar from '../../Components/BrandAvatar'
+import ActivityActorAvatar from '../../Components/ActivityActorAvatar'
+import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import PendingAiSuggestionsTile from '../../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../../Components/PendingMetadataTile'
 import {
@@ -49,16 +51,14 @@ export default function Dashboard({
         return `${(mb / 1024).toFixed(2)} GB`
     }
 
-    const isUnlimited = (limit) => !limit || limit >= 999999 || limit === Number.MAX_SAFE_INTEGER
-
     const formatStorageWithLimit = (currentMB, limitMB) => {
         const current = formatStorage(currentMB)
-        if (!limitMB || isUnlimited(limitMB)) return `${current} of Unlimited`
+        if (!limitMB || isUnlimitedStorageMB(limitMB)) return `${current} of Unlimited`
         return `${current} / ${formatStorage(limitMB)}`
     }
 
     const formatDownloadsWithLimit = (current, limit) => {
-        if (!limit || isUnlimited(limit)) return `${current.toLocaleString()} of Unlimited`
+        if (!limit || isUnlimitedCount(limit)) return `${current.toLocaleString()} of Unlimited`
         return `${current.toLocaleString()} / ${limit.toLocaleString()}`
     }
 
@@ -393,17 +393,7 @@ export default function Dashboard({
                                 {recent_activity.map((event) => (
                                     <li key={event.id} className="px-6 py-4">
                                         <div className="flex items-center gap-4">
-                                            {event.subject?.thumbnail_url ? (
-                                                <img
-                                                    src={event.subject.thumbnail_url}
-                                                    alt=""
-                                                    className="h-8 w-8 rounded object-cover flex-shrink-0"
-                                                />
-                                            ) : (
-                                                <div className="h-8 w-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                                    <FolderIcon className="h-4 w-4 text-gray-400" />
-                                                </div>
-                                            )}
+                                            <ActivityActorAvatar actor={event.actor} size="sm" />
                                             <div className="min-w-0 flex-1">
                                                 <p className="text-sm text-gray-900">
                                                     <span className="font-medium">{event.actor?.name}</span>

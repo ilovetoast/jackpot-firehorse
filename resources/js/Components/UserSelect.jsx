@@ -21,7 +21,7 @@ export default function UserSelect({
     onChange,
     placeholder = 'All Users',
     label = 'Created By',
-    /** Narrow trigger for dense filter rows (max ~14rem). */
+    /** Narrow trigger for dense filter rows; dropdown still gets a readable min width when open. */
     narrow = false,
 }) {
     const [isOpen, setIsOpen] = useState(false)
@@ -63,7 +63,12 @@ export default function UserSelect({
         const top = rect.bottom + gap
         const maxH = Math.max(120, Math.min(MENU_MAX_HEIGHT_PX, window.innerHeight - top - 8))
         let left = rect.left
-        const width = rect.width
+        // Menu at least as wide as the trigger, but not cramped for names (narrow toolbar buttons are ~14rem).
+        const minMenuWidth = narrow ? 288 : 300
+        const width = Math.min(
+            Math.max(rect.width, minMenuWidth),
+            window.innerWidth - 16
+        )
         // Keep menu in viewport horizontally
         if (left + width > window.innerWidth - 8) {
             left = Math.max(8, window.innerWidth - width - 8)
@@ -81,7 +86,7 @@ export default function UserSelect({
             window.removeEventListener('resize', onScrollOrResize)
             document.removeEventListener('scroll', onScrollOrResize, true)
         }
-    }, [isOpen])
+    }, [isOpen, narrow])
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -149,8 +154,8 @@ export default function UserSelect({
                     !selectedUser ? 'bg-indigo-50' : ''
                 }`}
             >
-                <div className="flex items-center">
-                    <span className="block truncate text-sm text-gray-900">
+                <div className="flex items-center min-w-0">
+                    <span className="block min-w-0 flex-1 truncate text-sm text-gray-900">
                         {placeholder}
                     </span>
                     {!selectedUser && (
@@ -173,15 +178,16 @@ export default function UserSelect({
                                 isSelected ? 'bg-indigo-50' : ''
                             }`}
                         >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0 pr-1">
                                 <Avatar
                                     avatarUrl={user.avatar_url}
                                     firstName={user.first_name}
                                     lastName={user.last_name}
                                     email={user.email}
                                     size="sm"
+                                    className="shrink-0"
                                 />
-                                <span className="block truncate text-sm text-gray-900">
+                                <span className="block min-w-0 flex-1 truncate text-sm text-gray-900" title={getUserDisplayName(user)}>
                                     {getUserDisplayName(user)}
                                 </span>
                             </div>
@@ -202,7 +208,7 @@ export default function UserSelect({
     )
 
     return (
-        <div ref={containerRef} className={`relative ${narrow ? 'max-w-[14rem]' : ''}`}>
+        <div ref={containerRef} className={`relative ${narrow ? 'min-w-[11rem] max-w-[20rem]' : ''}`}>
             <label className={`text-xs font-medium text-gray-700 block ${narrow ? 'mb-1' : 'mb-2'}`}>{label}</label>
             <div className="relative">
                 <button
@@ -213,7 +219,7 @@ export default function UserSelect({
                     aria-haspopup="listbox"
                     className={`relative w-full bg-white border border-gray-300 rounded-md shadow-sm pl-3 pr-10 text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${narrow ? 'py-1.5 text-xs' : 'py-2'}`}
                 >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                         {selectedUser ? (
                             <>
                                 <Avatar
@@ -222,13 +228,14 @@ export default function UserSelect({
                                     lastName={selectedUser.last_name}
                                     email={selectedUser.email}
                                     size="sm"
+                                    className="shrink-0"
                                 />
-                                <span className="block truncate text-sm text-gray-900">
+                                <span className="block min-w-0 flex-1 truncate text-sm text-gray-900" title={getUserDisplayName(selectedUser)}>
                                     {getUserDisplayName(selectedUser)}
                                 </span>
                             </>
                         ) : (
-                            <span className="block truncate text-sm text-gray-500">
+                            <span className="block min-w-0 flex-1 truncate text-sm text-gray-500">
                                 {placeholder}
                             </span>
                         )}

@@ -43,15 +43,24 @@ class BrandInsightEngine
                 return [];
             }
 
+            // Brand viewers: no actionable "What Needs Attention" on this surface.
+            if (strtolower($user->getRoleForBrand($brand) ?? '') === 'viewer') {
+                return [];
+            }
+
+            $isContributor = $this->isBrandContributor($user, $brand);
+
             $canSeeAllAiReview = $this->tenantResolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
             $canSeeOwnAiReview = ! $canSeeAllAiReview
                 && $this->tenantResolver->hasForBrand($user, $brand, 'metadata.review_candidates');
-            $limitAiToUploader = $canSeeOwnAiReview ? $user : null;
+            // Contributors never see org-wide AI review queues here — only their own uploads.
+            $limitAiToUploader = ($isContributor || $canSeeOwnAiReview) ? $user : null;
 
             $canActOnMetadataInsights = $this->userCanActOnMetadataInsights($user, $brand);
-            $scopeMetadataToUploader = $canActOnMetadataInsights
-                && $canSeeOwnAiReview
-                && $this->isBrandContributor($user, $brand);
+            // Contributors only ever see missing-metadata counts for assets they uploaded.
+            $scopeMetadataToUploader = $canActOnMetadataInsights && $isContributor;
+
+            $canSeeRightsInsightsTab = $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
 
             // 1a. AI Tag Suggestions Pending (high)
             if ($canSeeAllAiReview || $canSeeOwnAiReview) {
@@ -115,8 +124,8 @@ class BrandInsightEngine
                 }
             }
 
-            // 3. Expiring Assets (medium)
-            if ($canActOnMetadataInsights) {
+            // 3. Expiring Assets (medium) — insights rights tab requires brand management access
+            if ($canActOnMetadataInsights && $canSeeRightsInsightsTab) {
                 $expiringCount = $this->getExpiringAssetsCount($brand);
                 if ($expiringCount > 0) {
                     $signals[] = [

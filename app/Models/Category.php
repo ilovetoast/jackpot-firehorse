@@ -259,12 +259,12 @@ class Category extends Model
 
         // Check if user is tenant owner/admin or has 'view any restricted categories' permission
         // These users can bypass category access rules
-        $tenant = $this->tenant;
+        $tenant = $this->resolveTenantWithoutLazyLoad();
         $tenantRole = $user->getRoleForTenant($tenant);
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
 
         // Also check brand-level owner/admin role
-        $brand = $this->brand;
+        $brand = $this->resolveBrandWithoutLazyLoad();
         $isBrandOwnerOrAdmin = false;
         if ($brand) {
             $brandRole = $user->getRoleForBrand($brand);
@@ -279,13 +279,20 @@ class Category extends Model
             return true;
         }
 
-        // Check if user has access via role or direct user assignment
-        $accessRules = $this->accessRules;
+        // Load rules without $this->accessRules (magic attribute) — preventLazyLoading() rejects that.
+        // Use the internal relations bag when eager-loaded; otherwise run an explicit relation query.
+        $relations = $this->getRelations();
+        $accessRules = (array_key_exists('accessRules', $relations) && $relations['accessRules'] !== null)
+            ? $relations['accessRules']
+            : $this->accessRules()->get();
 
         foreach ($accessRules as $rule) {
             if ($rule->access_type === 'role') {
+                if (! $brand) {
+                    continue;
+                }
                 // Check if user has this role for the brand
-                $userBrandRole = $user->getRoleForBrand($this->brand);
+                $userBrandRole = $user->getRoleForBrand($brand);
                 if ($userBrandRole === $rule->role) {
                     return true;
                 }
@@ -559,5 +566,37 @@ class Category extends Model
     public function requiresApproval(): bool
     {
         return $this->requires_approval === true;
+    }
+
+    /**
+     * Resolve tenant without triggering lazy load (app runs with Model::preventLazyLoading()).
+     */
+    private function resolveTenantWithoutLazyLoad(): ?Tenant
+    {
+        if ($this->tenant_id === null) {
+            return null;
+        }
+
+        if ($this->relationLoaded('tenant')) {
+            return $this->getRelation('tenant');
+        }
+
+        return Tenant::query()->find($this->tenant_id);
+    }
+
+    /**
+     * Resolve brand without triggering lazy load (app runs with Model::preventLazyLoading()).
+     */
+    private function resolveBrandWithoutLazyLoad(): ?Brand
+    {
+        if ($this->brand_id === null) {
+            return null;
+        }
+
+        if ($this->relationLoaded('brand')) {
+            return $this->getRelation('brand');
+        }
+
+        return Brand::query()->find($this->brand_id);
     }
 }

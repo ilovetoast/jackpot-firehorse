@@ -12,9 +12,9 @@
 
 ### Client (Page Load) — “No client metrics received yet”
 
-- **Source:** `client_performance_metrics` table, filled when the frontend POSTs to `/app/admin/performance/client-metric`.
+- **Source:** `client_performance_metrics` table, filled when the frontend POSTs to `/app/performance/client-metric` (legacy `/app/admin/performance/client-metric` still works).
 - **When it runs:** `initPerformanceTracking()` in `app.jsx` runs on app load; it sends **once per session** (after the first full page load, with a 2s delay), and only if `window.__performanceMetricsEnabled` is true (from `PERFORMANCE_CLIENT_METRICS_ENABLED`).
-- **So:** If the table is empty, either no page under the main app has finished loading since enabling, or the POST is failing (check Network tab for `/app/admin/performance/client-metric`). The route uses `web` middleware only (no auth), so 403 from auth is unlikely.
+- **So:** If the table is empty, either no page under the main app has finished loading since enabling, or the POST is failing (check Network tab for `client-metric`). The route uses `web` middleware only (no auth); if `PERFORMANCE_CLIENT_METRICS_ENABLED` is false the API returns 403 JSON.
 
 ### Asset URL Service Metrics (ASSET_URL_METRICS)
 

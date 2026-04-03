@@ -410,12 +410,14 @@ class DashboardController extends Controller
         ];
 
         if ($previewRole && in_array($previewRole, ['viewer', 'contributor'], true)) {
-            $permissions = [
-                'canManageBrand' => false,
-                'canManageTeam' => false,
-                'canViewAnalytics' => false,
-            ];
+            $permissions['canManageBrand'] = false;
+            $permissions['canManageTeam'] = false;
+            $permissions['canViewAnalytics'] = false;
         }
+
+        // Cinematic overview quick links (real permissions — not overridden by ?as= preview)
+        $permissions['canViewBrandAssets'] = $user->hasPermissionForBrand($brand, 'asset.view');
+        $permissions['canViewBrandExecutions'] = $user->hasPermissionForBrand($brand, 'asset.view');
 
         // Brand cinematic overview: link to company overview (/app) — you’re already on brand overview (no “here” crumb).
         $dashLabels = DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brand->name);
@@ -960,7 +962,9 @@ class DashboardController extends Controller
         return Cache::remember($cacheKey, $ttl, function () use ($brand, $user) {
             $brandSignals = app(BrandInsightEngine::class)->getSignals($brand, $user);
             $momentumData = app(BrandInsightEngine::class)->getMomentumData($brand);
-            $aiInsights = app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user);
+            $aiInsights = $brandSignals !== []
+                ? app(\App\Services\BrandInsightLLM::class)->getInsightsForBrand($brand, $brandSignals, $user)
+                : [];
 
             return [
                 'brand_signals' => $brandSignals,

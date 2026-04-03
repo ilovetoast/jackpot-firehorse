@@ -8,6 +8,7 @@ import AppNav from '../../Components/AppNav'
 import BrandAvatar from '../../Components/BrandAvatar'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import {
     FolderIcon,
@@ -62,16 +63,14 @@ export default function CompanyOverview({
         return `${(mb / 1024).toFixed(2)} GB`
     }
 
-    const isUnlimited = (limit) => !limit || limit >= 999999 || limit === Number.MAX_SAFE_INTEGER
-
     const formatStorageWithLimit = (currentMB, limitMB) => {
         const current = formatStorage(currentMB)
-        if (!limitMB || isUnlimited(limitMB)) return `${current} of Unlimited`
+        if (!limitMB || isUnlimitedStorageMB(limitMB)) return `${current} of Unlimited`
         return `${current} / ${formatStorage(limitMB)}`
     }
 
     const formatDownloadsWithLimit = (current, limit) => {
-        if (!limit || isUnlimited(limit)) return `${current.toLocaleString()} of Unlimited`
+        if (!limit || isUnlimitedCount(limit)) return `${current.toLocaleString()} of Unlimited`
         return `${current.toLocaleString()} / ${limit.toLocaleString()}`
     }
 

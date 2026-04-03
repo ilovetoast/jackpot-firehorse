@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -119,6 +119,49 @@ function ReliabilityTimelineIncidentMessage({ message }) {
     )
 }
 
+/** Full-stage lightbox fallback when raster preview URL is missing or fails to load (e.g. PSD, octet-stream). */
+function LightboxPreviewPlaceholder({ asset }) {
+    const title = asset?.title || asset?.original_filename || 'Asset'
+    const extRaw = asset?.file_extension || asset?.original_filename?.split('.').pop() || ''
+    const ext = String(extRaw).toUpperCase() || 'FILE'
+    return (
+        <div className="relative flex h-full min-h-0 w-full flex-col items-center justify-center overflow-hidden px-6 py-10">
+            <div
+                className="pointer-events-none absolute inset-0 bg-gradient-to-b from-indigo-950/35 via-black to-neutral-950"
+                aria-hidden
+            />
+            <div
+                className="pointer-events-none absolute inset-0 opacity-90 [background:radial-gradient(ellipse_85%_55%_at_50%_-5%,rgba(255,255,255,0.07),transparent_52%)]"
+                aria-hidden
+            />
+            <div
+                className="pointer-events-none absolute inset-0 opacity-[0.12]"
+                style={{
+                    backgroundImage:
+                        'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
+                }}
+                aria-hidden
+            />
+            <div
+                className="relative z-[1] flex max-w-md flex-col items-center text-center"
+                role="img"
+                aria-label={`No preview available for ${title}`}
+            >
+                <div className="relative mb-8 flex h-32 w-32 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset,0_24px_48px_-12px_rgba(0,0,0,0.6)]">
+                    <PhotoIcon className="h-16 w-16 text-white/30" aria-hidden />
+                    <span className="absolute -bottom-2.5 rounded-md bg-white/90 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-neutral-900 shadow-md backdrop-blur-sm">
+                        {ext}
+                    </span>
+                </div>
+                <p className="text-lg font-semibold tracking-tight text-white/95">{title}</p>
+                <p className="mt-3 text-sm leading-relaxed text-white/50">
+                    Preview isn&apos;t available for this file in the browser. Use <span className="text-white/70">Details</span> for metadata and actions, or download the original from the asset panel.
+                </p>
+            </div>
+        </div>
+    )
+}
+
 export default function AssetDrawer({
     asset,
     onClose,
@@ -149,6 +192,8 @@ export default function AssetDrawer({
     const [virtualGoogleFontReady, setVirtualGoogleFontReady] = useState(false)
     /** When true, lightbox shows AssetDetailPanel in the right column (or below on small screens) */
     const [showLightboxDetails, setShowLightboxDetails] = useState(false)
+    /** Lightbox raster preview failed or URL empty — show themed placeholder instead of broken <img> */
+    const [lightboxImageError, setLightboxImageError] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
     // Track layout settling to prevent preview jump during grid reflow (grid reserves drawer width in one frame)
@@ -783,6 +828,10 @@ export default function AssetDrawer({
     const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
     const canNavigateLeft = carouselIndex > 0
     const canNavigateRight = carouselIndex < imageAssets.length - 1
+
+    useEffect(() => {
+        setLightboxImageError(false)
+    }, [currentCarouselAsset?.id, showZoomModal])
 
     // Phase V-1: Fetch view URL for video when gallery opens
     // NOTE: Must be after currentCarouselAsset is defined
@@ -4027,22 +4076,32 @@ export default function AssetDrawer({
                                     <PDFViewer asset={currentCarouselAsset} />
                                 )
                             } else {
-                                // Image/PDF thumbnail
-                                const carouselImgUrl = currentCarouselAsset.thumbnail_url_large ?? currentCarouselAsset.final_thumbnail_url ?? currentCarouselAsset.thumbnail_url ?? currentCarouselAsset.preview_thumbnail_url ?? ''
+                                // Raster preview URL — placeholder if missing or not displayable in-browser
+                                const carouselImgUrl =
+                                    currentCarouselAsset.thumbnail_url_large ??
+                                    currentCarouselAsset.final_thumbnail_url ??
+                                    currentCarouselAsset.thumbnail_url ??
+                                    currentCarouselAsset.preview_thumbnail_url ??
+                                    ''
+                                const trimmedUrl = String(carouselImgUrl).trim()
+                                if (!trimmedUrl || lightboxImageError) {
+                                    return <LightboxPreviewPlaceholder asset={currentCarouselAsset} />
+                                }
                                 return (
                                     <img
                                         key={currentCarouselAsset.id}
-                                        src={carouselImgUrl}
+                                        src={trimmedUrl}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
                                         className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
                                         style={{
-                                            transform: transitionDirection === 'left' 
-                                                ? 'translateX(30px)' 
-                                                : transitionDirection === 'right' 
-                                                ? 'translateX(-30px)' 
-                                                : 'translateX(0)',
+                                            transform: transitionDirection === 'left'
+                                                ? 'translateX(30px)'
+                                                : transitionDirection === 'right'
+                                                  ? 'translateX(-30px)'
+                                                  : 'translateX(0)',
                                             opacity: transitionDirection ? 0 : 1,
                                         }}
+                                        onError={() => setLightboxImageError(true)}
                                     />
                                 )
                             }

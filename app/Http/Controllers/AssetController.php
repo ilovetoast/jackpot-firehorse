@@ -117,7 +117,7 @@ class AssetController extends Controller
             ->where('asset_type', AssetType::ASSET)
             ->active()
             ->ordered()
-            ->with(['tenant', 'brand']);
+            ->with(['tenant', 'brand', 'accessRules']);
 
         $includeHiddenFontsNav = $this->shouldIncludeHiddenFontsCategory($tenant, $brand, $user, $request->get('category'));
 

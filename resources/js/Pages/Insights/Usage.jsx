@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
+import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import {
     ServerIcon,
     CloudArrowDownIcon,
@@ -18,24 +19,28 @@ export default function AnalyticsUsage({
         if (!mb || mb === 0) return '0 MB'
         if (mb < 1) return `${(mb * 1024).toFixed(2)} KB`
         if (mb < 1024) return `${mb.toFixed(2)} MB`
+        if (mb >= 1048576) return `${(mb / 1048576).toFixed(2)} TB`
         return `${(mb / 1024).toFixed(2)} GB`
     }
 
-    const isUnlimited = (limit) => !limit || limit >= 999999 || limit === Number.MAX_SAFE_INTEGER
-
     const formatStorageWithLimit = (currentMB, limitMB) => {
         const current = formatStorage(currentMB)
-        if (!limitMB || isUnlimited(limitMB)) return `${current} of Unlimited`
+        if (!limitMB || isUnlimitedStorageMB(limitMB)) return `${current} of Unlimited`
         return `${current} / ${formatStorage(limitMB)}`
     }
 
     const formatDownloadsWithLimit = (current, limit) => {
-        if (!limit || isUnlimited(limit)) return `${(current ?? 0).toLocaleString()} of Unlimited`
+        if (!limit || isUnlimitedCount(limit)) return `${(current ?? 0).toLocaleString()} of Unlimited`
         return `${(current ?? 0).toLocaleString()} / ${limit.toLocaleString()}`
     }
 
-    const getUsagePercent = (current, limit) => {
-        if (!limit || isUnlimited(limit)) return 0
+    const getStorageUsagePercent = (current, limit) => {
+        if (!limit || isUnlimitedStorageMB(limit)) return 0
+        return Math.min(100, Math.round(((current ?? 0) / limit) * 100))
+    }
+
+    const getDownloadUsagePercent = (current, limit) => {
+        if (!limit || isUnlimitedCount(limit)) return 0
         return Math.min(100, Math.round(((current ?? 0) / limit) * 100))
     }
 
@@ -80,18 +85,18 @@ export default function AnalyticsUsage({
                                     <dd className="mt-0.5 text-2xl font-semibold text-gray-900">
                                         {formatStorageWithLimit(stats.storage_mb ?? 0, stats.storage_limit_mb)}
                                     </dd>
-                                    {stats.storage_limit_mb && !isUnlimited(stats.storage_limit_mb) && (
+                                    {stats.storage_limit_mb && !isUnlimitedStorageMB(stats.storage_limit_mb) && (
                                         <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
                                             <div
                                                 className={`h-2 rounded-full transition-all ${
-                                                    getUsagePercent(stats.storage_mb, stats.storage_limit_mb) >= 90
+                                                    getStorageUsagePercent(stats.storage_mb, stats.storage_limit_mb) >= 90
                                                         ? 'bg-red-500'
-                                                        : getUsagePercent(stats.storage_mb, stats.storage_limit_mb) >= 75
+                                                        : getStorageUsagePercent(stats.storage_mb, stats.storage_limit_mb) >= 75
                                                           ? 'bg-amber-500'
                                                           : 'bg-indigo-600'
                                                 }`}
                                                 style={{
-                                                    width: `${getUsagePercent(stats.storage_mb, stats.storage_limit_mb)}%`,
+                                                    width: `${getStorageUsagePercent(stats.storage_mb, stats.storage_limit_mb)}%`,
                                                 }}
                                             />
                                         </div>
@@ -109,18 +114,18 @@ export default function AnalyticsUsage({
                                     <dd className="mt-0.5 text-2xl font-semibold text-gray-900">
                                         {formatDownloadsWithLimit(stats.downloads, stats.downloads_limit)}
                                     </dd>
-                                    {stats.downloads_limit && !isUnlimited(stats.downloads_limit) && (
+                                    {stats.downloads_limit && !isUnlimitedCount(stats.downloads_limit) && (
                                         <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
                                             <div
                                                 className={`h-2 rounded-full transition-all ${
-                                                    getUsagePercent(stats.downloads, stats.downloads_limit) >= 90
+                                                    getDownloadUsagePercent(stats.downloads, stats.downloads_limit) >= 90
                                                         ? 'bg-red-500'
-                                                        : getUsagePercent(stats.downloads, stats.downloads_limit) >= 75
+                                                        : getDownloadUsagePercent(stats.downloads, stats.downloads_limit) >= 75
                                                           ? 'bg-amber-500'
                                                           : 'bg-indigo-600'
                                                 }`}
                                                 style={{
-                                                    width: `${getUsagePercent(stats.downloads, stats.downloads_limit)}%`,
+                                                    width: `${getDownloadUsagePercent(stats.downloads, stats.downloads_limit)}%`,
                                                 }}
                                             />
                                         </div>

@@ -135,10 +135,14 @@ Route::get('/csrf-token', function (Request $request) {
     return response()->json(['token' => csrf_token()]);
 })->middleware(['web']);
 
-// Performance client metrics (web + optional auth; guests can send, user_id will be null)
-Route::post('/app/admin/performance/client-metric', [\App\Http\Controllers\Admin\PerformanceController::class, 'clientMetric'])
-    ->middleware(['web'])
-    ->name('admin.performance.client-metric');
+// Performance client metrics (web + optional auth; guests can send, user_id will be null).
+// Primary path is NOT under /admin/* so contributor/non-staff sessions are not blocked by proxies/WAF rules on /admin.
+// GET returns 204 so prefetch / mistaken navigation never yields 405 Method Not Allowed on a POST-only URI.
+$performanceClientMetric = [\App\Http\Controllers\Admin\PerformanceController::class, 'clientMetric'];
+Route::get('/app/performance/client-metric', fn () => response()->noContent())->middleware(['web']);
+Route::post('/app/performance/client-metric', $performanceClientMetric)->middleware(['web'])->name('performance.client-metric');
+Route::get('/app/admin/performance/client-metric', fn () => response()->noContent())->middleware(['web']);
+Route::post('/app/admin/performance/client-metric', $performanceClientMetric)->middleware(['web'])->name('admin.performance.client-metric');
 
 Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
     ->name('test-push');

@@ -1,7 +1,7 @@
 /**
  * Observability v1: Client-side performance tracking.
  * Captures TTFB, DOMContentLoaded, Load event, total load time.
- * Throttled to 1 per session. Sends to /app/admin/performance/client-metric.
+ * Throttled to 1 per session. Sends to /app/performance/client-metric (not under /admin — avoids 405/WAF issues for contributors).
  */
 const SESSION_KEY = 'jackpot_performance_metric_sent'
 const imageLoadTimes = []
@@ -61,7 +61,7 @@ export function initPerformanceTracking() {
                 image_count: imageLoadTimes.length || null,
             }
 
-            fetch('/app/admin/performance/client-metric', {
+            fetch('/app/performance/client-metric', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

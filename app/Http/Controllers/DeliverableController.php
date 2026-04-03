@@ -73,7 +73,8 @@ class DeliverableController extends Controller
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('asset_type', AssetType::DELIVERABLE)
-            ->ordered();
+            ->ordered()
+            ->with(['tenant', 'brand', 'accessRules']);
 
         // Don't filter hidden categories here - we need them to check template existence
         // Hidden categories will be filtered in the response building below

@@ -69,7 +69,7 @@ class PerformanceController extends Controller
     }
 
     /**
-     * POST /app/admin/performance/client-metric - Ingest client-side metrics.
+     * POST /app/performance/client-metric (and legacy POST /app/admin/performance/client-metric) — ingest client-side metrics.
      */
     public function clientMetric(Request $request): JsonResponse
     {

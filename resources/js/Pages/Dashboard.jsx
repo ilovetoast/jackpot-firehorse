@@ -23,6 +23,7 @@ import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
 import Avatar from '../Components/Avatar'
 import BrandAvatar from '../Components/BrandAvatar'
+import { isUnlimitedCount, isUnlimitedStorageMB } from '../utils/planLimitDisplay'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../Components/PendingMetadataTile'
@@ -63,15 +64,10 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
         }
     }
 
-    // Check if storage limit is "unlimited" (999999 or very large number)
-    const isUnlimited = (limit) => {
-        return !limit || limit >= 999999 || limit === Number.MAX_SAFE_INTEGER || limit === 2147483647
-    }
-
     // Format storage with limit
     const formatStorageWithLimit = (currentMB, limitMB) => {
         const current = formatStorage(currentMB)
-        if (!limitMB || isUnlimited(limitMB)) {
+        if (!limitMB || isUnlimitedStorageMB(limitMB)) {
             return `${current} of Unlimited`
         }
         const limit = formatStorage(limitMB)
@@ -80,7 +76,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
     // Calculate storage usage percentage
     const getStorageUsagePercentage = (currentMB, limitMB) => {
-        if (!limitMB || isUnlimited(limitMB)) {
+        if (!limitMB || isUnlimitedStorageMB(limitMB)) {
             return 0
         }
         return Math.min((currentMB / limitMB) * 100, 100)
@@ -88,7 +84,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
     // Format downloads with limit
     const formatDownloadsWithLimit = (current, limit) => {
-        if (!limit || isUnlimited(limit)) {
+        if (!limit || isUnlimitedCount(limit)) {
             return `${current.toLocaleString()} of Unlimited`
         }
         return `${current.toLocaleString()} / ${limit.toLocaleString()}`
@@ -96,7 +92,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
     // Calculate download usage percentage
     const getDownloadUsagePercentage = (current, limit) => {
-        if (!limit || isUnlimited(limit)) {
+        if (!limit || isUnlimitedCount(limit)) {
             return 0
         }
         return Math.min((current / limit) * 100, 100)
@@ -134,19 +130,8 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
         }
     }
 
-    // Recent activity left cell: asset thumbnail > user avatar > company name > brand avatar > icon
+    // Recent activity left cell: user avatar first (asset preview URLs often break for non-raster types)
     const getActivityLeftCell = (activity) => {
-        const subjectType = activity.subject?.type ?? ''
-        const isAssetSubject = subjectType.includes('Asset')
-        if (isAssetSubject && activity.subject?.thumbnail_url) {
-            return (
-                <img
-                    src={activity.subject.thumbnail_url}
-                    alt=""
-                    className="h-10 w-10 rounded-lg object-cover flex-shrink-0 bg-gray-100"
-                />
-            )
-        }
         if (activity.actor?.type === 'user' && (activity.actor?.avatar_url || activity.actor?.name)) {
             return (
                 <Avatar
@@ -155,6 +140,17 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     lastName={activity.actor.last_name ?? activity.actor.name?.split(' ').slice(1).join(' ') ?? ''}
                     email={activity.actor.email}
                     size="sm"
+                />
+            )
+        }
+        const subjectType = activity.subject?.type ?? ''
+        const isAssetSubject = subjectType.includes('Asset')
+        if (isAssetSubject && activity.subject?.thumbnail_url) {
+            return (
+                <img
+                    src={activity.subject.thumbnail_url}
+                    alt=""
+                    className="h-10 w-10 rounded-lg object-cover flex-shrink-0 bg-gray-100"
                 />
             )
         }
@@ -322,7 +318,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                             {formatStorageWithLimit(dashboardStats.storage_mb.value, dashboardStats.storage_mb.limit)}
                                         </p>
                                     )}
-                                    {dashboardStats.storage_mb.limit && !isUnlimited(dashboardStats.storage_mb.limit) && (
+                                    {dashboardStats.storage_mb.limit && !isUnlimitedStorageMB(dashboardStats.storage_mb.limit) && (
                                         <div className="mt-2">
                                             <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
                                                 <span>Usage</span>
@@ -382,7 +378,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                             {formatDownloadsWithLimit(dashboardStats.download_links.value, dashboardStats.download_links.limit)}
                                         </p>
                                     )}
-                                    {dashboardStats.download_links.limit && !isUnlimited(dashboardStats.download_links.limit) && (
+                                    {dashboardStats.download_links.limit && !isUnlimitedCount(dashboardStats.download_links.limit) && (
                                         <div className="mt-2">
                                             <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
                                                 <span>Usage</span>

@@ -235,7 +235,7 @@ return [
             'max_brands' => 25, // Unlimited
             'max_categories' => 10, // Unlimited
             'max_private_categories' => 10,
-            'max_storage_mb' => 2097152, // 2 TB included
+            'max_storage_mb' => 5242880, // 5 TB included (1024-based: 5 * 1024 * 1024 MB)
             'max_upload_size_mb' => 999999, // Unlimited per-file
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
@@ -306,6 +306,7 @@ return [
             'Unlimited download links',
             'Share downloads with custom permissions',
             'Up to 15 tags per asset for maximum flexibility',
+            '5 TB storage included',
             '10,000 AI tagging operations and 10,000 AI suggestions per month',
             '50 AI brand research analyses per month',
         ],

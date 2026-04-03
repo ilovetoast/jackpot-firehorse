@@ -239,19 +239,26 @@ class BrandActivityFeedService
                 continue;
             }
 
-            $ids = collect($bucketEvents)->pluck('subject_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+            // subject_id is string (UUID for Asset, numeric string for other models) — never cast UUIDs to int.
+            $ids = collect($bucketEvents)
+                ->pluck('subject_id')
+                ->filter(fn ($id) => $id !== null && $id !== '')
+                ->map(fn ($id) => (string) $id)
+                ->unique()
+                ->values()
+                ->all();
 
             $models = match ($class) {
-                Asset::class => Asset::withTrashed()->whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                User::class => User::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Tenant::class => Tenant::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Brand::class => Brand::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Category::class => Category::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                Asset::class => Asset::withTrashed()->whereIn('id', $ids)->get()->keyBy(fn ($m) => (string) $m->getKey()),
+                User::class => User::whereIn('id', $ids)->get()->keyBy(fn ($m) => (string) $m->getKey()),
+                Tenant::class => Tenant::whereIn('id', $ids)->get()->keyBy(fn ($m) => (string) $m->getKey()),
+                Brand::class => Brand::whereIn('id', $ids)->get()->keyBy(fn ($m) => (string) $m->getKey()),
+                Category::class => Category::whereIn('id', $ids)->get()->keyBy(fn ($m) => (string) $m->getKey()),
                 default => collect(),
             };
 
             foreach ($bucketEvents as $event) {
-                $event->setRelation('subject', $models->get((int) $event->subject_id));
+                $event->setRelation('subject', $models->get((string) $event->subject_id));
             }
         }
     }

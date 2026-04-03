@@ -49,9 +49,10 @@ export default function AdminTicketsIndex({
     const [bulkNote, setBulkNote] = useState('')
     const [bulkProcessing, setBulkProcessing] = useState(false)
 
-    const engineeringOnlyActive =
+    /** Engineering queue (type=engineering / engineering_only): not the default support list */
+    const engineeringQueueView =
         !!filters?.engineering_only && filters.engineering_only !== '0' && filters.engineering_only !== false
-    const showEngineeringBulkUi = can_bulk_resolve_engineering && engineeringOnlyActive
+    const showEngineeringBulkUi = can_bulk_resolve_engineering && engineeringQueueView
 
     const isSelectableTicket = (ticket) =>
         ticket.is_engineering_queue &&
@@ -63,6 +64,12 @@ export default function AdminTicketsIndex({
     useEffect(() => {
         setSelectedIds({})
     }, [tickets])
+
+    useEffect(() => {
+        if (!engineeringQueueView) {
+            setShowCreateModal(false)
+        }
+    }, [engineeringQueueView])
 
     const selectedCount = Object.keys(selectedIds).filter((id) => selectedIds[id]).length
 
@@ -250,15 +257,15 @@ export default function AdminTicketsIndex({
                     <div className="mb-4 flex items-center justify-between">
                         <div>
                             <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-                                {engineeringOnlyActive ? 'Engineering tickets' : 'Support tickets'}
+                                {engineeringQueueView ? 'Engineering tickets' : 'Support tickets'}
                             </h1>
                             <p className="mt-2 text-sm text-gray-700">
-                                {engineeringOnlyActive
+                                {engineeringQueueView
                                     ? 'Internal tickets assigned to the engineering team'
                                     : 'Customer-facing and internal support queue (tenant tickets)'}
                             </p>
                         </div>
-                        {canCreateEngineering && (
+                        {canCreateEngineering && engineeringQueueView && (
                             <button
                                 onClick={() => setShowCreateModal(true)}
                                 className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
@@ -330,8 +337,8 @@ export default function AdminTicketsIndex({
                     {/* Compact Horizontal Filters */}
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
                         <div className="flex flex-wrap items-center gap-3">
-                            {/* Workflow queue: support default vs slices vs all types (hidden on engineering-only view) */}
-                            {!engineeringOnlyActive && (
+                            {/* Workflow queue: support default vs slices vs all types (hidden on engineering queue) */}
+                            {!engineeringQueueView && (
                                 <div className="flex-shrink-0">
                                     <select
                                         value={filters?.queue === 'all' ? 'all' : filters?.queue || ''}
@@ -442,8 +449,8 @@ export default function AdminTicketsIndex({
                                 </select>
                             </div>
 
-                            {/* Engineering Filters - Only show if user can create engineering tickets */}
-                            {canCreateEngineering && (
+                            {/* Engineering filters + create — only on engineering queue view */}
+                            {canCreateEngineering && engineeringQueueView && (
                                 <>
                                     {/* Severity Filter */}
                                     <div className="flex-shrink-0">
@@ -628,7 +635,7 @@ export default function AdminTicketsIndex({
                                         <th scope="col" className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Status
                                         </th>
-                                        {canCreateEngineering && (
+                                        {canCreateEngineering && engineeringQueueView && (
                                             <th scope="col" className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Severity
                                             </th>
@@ -695,7 +702,7 @@ export default function AdminTicketsIndex({
                                             <td className="px-2 py-4 whitespace-nowrap">
                                                 {getStatusBadge(ticket.status)}
                                             </td>
-                                            {canCreateEngineering && (
+                                            {canCreateEngineering && engineeringQueueView && (
                                                 <td className="px-2 py-4 whitespace-nowrap">
                                                     {getSeverityBadge(ticket.severity)}
                                                 </td>
@@ -817,8 +824,8 @@ export default function AdminTicketsIndex({
             </main>
             <AppFooter />
             
-            {/* Create Engineering Ticket Modal */}
-            {showCreateModal && (
+            {/* Create Engineering Ticket Modal — engineering queue only */}
+            {showCreateModal && engineeringQueueView && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowCreateModal(false)}></div>
