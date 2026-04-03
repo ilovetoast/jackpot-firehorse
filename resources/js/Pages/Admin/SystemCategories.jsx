@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -13,9 +13,469 @@ import {
     CheckIcon,
     InformationCircleIcon,
     Bars3Icon,
+    ChevronDownIcon,
 } from '@heroicons/react/24/outline'
 
-export default function SystemCategories({ templates, asset_types }) {
+function groupSystemFieldsByType(fieldList) {
+    const byType = new Map()
+    for (const f of fieldList) {
+        const t = (f.type || 'other').toString()
+        if (!byType.has(t)) byType.set(t, [])
+        byType.get(t).push(f)
+    }
+    return [...byType.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+}
+
+function isShownSomewhereInTemplate(f) {
+    return (
+        !f.is_hidden ||
+        !f.is_upload_hidden ||
+        !f.is_filter_hidden ||
+        !f.is_edit_hidden
+    )
+}
+
+function hasPrimaryPlacementOverride(f) {
+    return f.is_primary !== null && f.is_primary !== undefined
+}
+
+/** Shown expanded: visible in at least one surface, or filter primary is not “Default (system)”. */
+function isActiveTemplateField(f) {
+    if (f.is_system_suppressed) return false
+    return isShownSomewhereInTemplate(f) || hasPrimaryPlacementOverride(f)
+}
+
+function partitionFieldsForTemplateEditor(rows) {
+    const suppressed = []
+    const active = []
+    const inactive = []
+    for (const f of rows) {
+        if (f.is_system_suppressed) suppressed.push(f)
+        else if (isActiveTemplateField(f)) active.push(f)
+        else inactive.push(f)
+    }
+    return { active, inactive, suppressed }
+}
+
+function FieldDefaultCard({ f, updateField }) {
+    const suppressed = f.is_system_suppressed
+    const primaryVal =
+        f.is_primary === null || f.is_primary === undefined ? '' : f.is_primary ? 'yes' : 'no'
+    return (
+        <li
+            className={`rounded-xl border px-4 py-3 shadow-sm ${
+                suppressed ? 'border-amber-200/80 bg-amber-50/35' : 'border-gray-200 bg-white'
+            }`}
+        >
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-gray-900">{f.system_label}</span>
+                        <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                            {f.type}
+                        </span>
+                    </div>
+                    <div className="font-mono text-xs text-gray-500">{f.key}</div>
+                    {suppressed ? (
+                        <p className="mt-2 text-xs text-amber-900/90">
+                            <span className="font-medium">Globally suppressed</span> in the metadata registry —
+                            tenants never see this field on this template family, regardless of defaults below.
+                        </p>
+                    ) : null}
+                </div>
+            </div>
+            {!suppressed ? (
+                <div className="mt-4 border-t border-gray-100 pt-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Show in</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:border-gray-100 hover:bg-gray-50/80">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={!f.is_hidden}
+                                onChange={(e) =>
+                                    updateField(f.metadata_field_id, { is_hidden: !e.target.checked })
+                                }
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-gray-800">Library grid</span>
+                                <span className="block text-xs text-gray-500">Asset thumbnails and folder view</span>
+                            </span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:border-gray-100 hover:bg-gray-50/80">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={!f.is_upload_hidden}
+                                onChange={(e) =>
+                                    updateField(f.metadata_field_id, {
+                                        is_upload_hidden: !e.target.checked,
+                                    })
+                                }
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-gray-800">Upload flow</span>
+                                <span className="block text-xs text-gray-500">When adding new assets</span>
+                            </span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:border-gray-100 hover:bg-gray-50/80">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={!f.is_filter_hidden}
+                                onChange={(e) =>
+                                    updateField(f.metadata_field_id, {
+                                        is_filter_hidden: !e.target.checked,
+                                    })
+                                }
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-gray-800">Filters</span>
+                                <span className="block text-xs text-gray-500">Library filter sidebar</span>
+                            </span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:border-gray-100 hover:bg-gray-50/80">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={!f.is_edit_hidden}
+                                onChange={(e) =>
+                                    updateField(f.metadata_field_id, { is_edit_hidden: !e.target.checked })
+                                }
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-gray-800">Edit / detail</span>
+                                <span className="block text-xs text-gray-500">Asset panel and bulk edit</span>
+                            </span>
+                        </label>
+                    </div>
+                    <div className="mt-4 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                        <label
+                            htmlFor={`primary-${f.metadata_field_id}`}
+                            className="text-xs font-medium text-gray-600 sm:w-40 sm:shrink-0"
+                        >
+                            Filter sidebar placement
+                        </label>
+                        <select
+                            id={`primary-${f.metadata_field_id}`}
+                            className="block w-full max-w-xs rounded-md border-0 py-1.5 pl-2 pr-8 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-primary"
+                            value={primaryVal}
+                            onChange={(e) => {
+                                const v = e.target.value
+                                updateField(f.metadata_field_id, {
+                                    is_primary: v === '' ? null : v === 'yes',
+                                })
+                            }}
+                            aria-label={`Filter sidebar placement for ${f.key}`}
+                        >
+                            <option value="">Default (system)</option>
+                            <option value="yes">Primary column</option>
+                            <option value="no">Not primary</option>
+                        </select>
+                    </div>
+                </div>
+            ) : null}
+        </li>
+    )
+}
+
+function SystemCategoryFieldDefaultsPanel({ templateId, templateLabel, onClose }) {
+    const getCsrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+    const [loading, setLoading] = useState(true)
+    const [saving, setSaving] = useState(false)
+    const [err, setErr] = useState(null)
+    const [fields, setFields] = useState([])
+    const [filter, setFilter] = useState('')
+
+    useEffect(() => {
+        if (!templateId) return undefined
+        let cancelled = false
+        setLoading(true)
+        setErr(null)
+        setFilter('')
+        const loadUrl =
+            typeof route === 'function'
+                ? route('admin.system-categories.field-defaults', { systemCategory: templateId })
+                : `/app/admin/system-categories/${templateId}/field-defaults`
+        fetch(loadUrl, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((r) => {
+                if (!r.ok) throw new Error('Failed to load')
+                return r.json()
+            })
+            .then((data) => {
+                if (!cancelled) setFields(data.fields || [])
+            })
+            .catch(() => {
+                if (!cancelled) setErr('Could not load field defaults.')
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [templateId])
+
+    const updateField = useCallback((id, patch) => {
+        setFields((prev) => prev.map((f) => (f.metadata_field_id === id ? { ...f, ...patch } : f)))
+    }, [])
+
+    const save = async () => {
+        const saveUrl =
+            typeof route === 'function'
+                ? route('admin.system-categories.field-defaults.update', { systemCategory: templateId })
+                : `/app/admin/system-categories/${templateId}/field-defaults`
+        const defaults = fields
+            .filter((f) => !f.is_system_suppressed)
+            .map((f) => ({
+                metadata_field_id: f.metadata_field_id,
+                is_hidden: !!f.is_hidden,
+                is_upload_hidden: !!f.is_upload_hidden,
+                is_filter_hidden: !!f.is_filter_hidden,
+                is_edit_hidden: !!f.is_edit_hidden,
+                is_primary: f.is_primary === undefined ? null : f.is_primary,
+            }))
+        setSaving(true)
+        setErr(null)
+        try {
+            const res = await fetch(saveUrl, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': getCsrf(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ defaults }),
+            })
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}))
+                throw new Error(j.message || j.error || 'Save failed')
+            }
+            onClose()
+        } catch (e) {
+            setErr(e.message || 'Save failed')
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const fq = filter.trim().toLowerCase()
+    const visibleFields = fields.filter(
+        (f) =>
+            !fq ||
+            String(f.key || '')
+                .toLowerCase()
+                .includes(fq) ||
+            String(f.system_label || '')
+                .toLowerCase()
+                .includes(fq)
+    )
+
+    if (!templateId) return null
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex justify-end bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sc-field-defaults-title"
+        >
+            <button
+                type="button"
+                className="absolute inset-0 cursor-default"
+                aria-label="Close panel"
+                onClick={onClose}
+            />
+            <div className="relative flex h-full w-full max-w-4xl flex-col bg-white shadow-xl border-l border-gray-200">
+                <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4">
+                    <div className="min-w-0">
+                        <h2 id="sc-field-defaults-title" className="text-lg font-semibold text-gray-900">
+                            Default fields for template
+                        </h2>
+                        <p className="mt-1 text-sm text-gray-600 truncate" title={templateLabel}>
+                            {templateLabel || `Template #${templateId}`}
+                        </p>
+                        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                            These defaults apply when a brand adds this folder from the catalog or when a new brand is
+                            provisioned. Globally suppressed fields stay hidden regardless of toggles here.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                        aria-label="Close"
+                    >
+                        <XMarkIcon className="h-5 w-5" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-5 py-4">
+                    {loading ? (
+                        <p className="text-sm text-gray-500">Loading fields…</p>
+                    ) : err && fields.length === 0 ? (
+                        <p className="text-sm text-red-600">{err}</p>
+                    ) : (
+                        <>
+                            <input
+                                type="search"
+                                value={filter}
+                                onChange={(e) => setFilter(e.target.value)}
+                                placeholder="Filter by field name or key…"
+                                className="mb-3 block w-full rounded-md border-0 py-1.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-primary"
+                            />
+                            <div className="mb-4 space-y-2 rounded-lg bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200/80">
+                                <p>
+                                    <span className="font-semibold text-slate-800">How to read this</span>
+                                    <span className="text-slate-500"> — </span>
+                                    Check each place the field should{' '}
+                                    <strong className="text-slate-700">appear</strong> for new brand folders. Unchecked
+                                    means hidden there. “Filter sidebar placement” overrides primary vs secondary when
+                                    the field is shown in filters.
+                                </p>
+                                <p className="border-t border-slate-200/80 pt-2 text-slate-600">
+                                    <span className="font-semibold text-slate-800">Where on/off defaults come from</span>
+                                    <span className="text-slate-500"> — </span>
+                                    Values you save are stored in{' '}
+                                    <code className="rounded bg-slate-200/60 px-1 py-0.5 text-[10px]">
+                                        system_category_field_defaults
+                                    </code>
+                                    . If a field has no row yet, the app falls back to{' '}
+                                    <code className="rounded bg-slate-200/60 px-1 py-0.5 text-[10px]">
+                                        config/metadata_category_defaults.php
+                                    </code>
+                                    . Global suppression in the System Metadata Registry always wins over both.
+                                </p>
+                            </div>
+                            <div className="space-y-8">
+                                {visibleFields.length === 0 && fields.length > 0 ? (
+                                    <p className="text-sm text-gray-500">No fields match your filter.</p>
+                                ) : null}
+                                {groupSystemFieldsByType(visibleFields).map(([typeKey, rows]) => {
+                                    const { active, inactive, suppressed } = partitionFieldsForTemplateEditor(rows)
+                                    return (
+                                        <section key={typeKey} aria-labelledby={`field-type-${typeKey}`}>
+                                            <h3
+                                                id={`field-type-${typeKey}`}
+                                                className="sticky top-0 z-[1] -mx-1 mb-3 border-b border-gray-100 bg-white/95 px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 backdrop-blur-sm"
+                                            >
+                                                {typeKey} fields
+                                                <span className="ml-2 font-normal normal-case text-gray-400">
+                                                    ({rows.length}
+                                                    {active.length > 0 ? (
+                                                        <span className="text-emerald-600/90">
+                                                            {' '}
+                                                            · {active.length} active
+                                                        </span>
+                                                    ) : null}
+                                                    )
+                                                </span>
+                                            </h3>
+                                            {active.length > 0 ? (
+                                                <ul className="space-y-3">
+                                                    {active.map((f) => (
+                                                        <FieldDefaultCard
+                                                            key={f.metadata_field_id}
+                                                            f={f}
+                                                            updateField={updateField}
+                                                        />
+                                                    ))}
+                                                </ul>
+                                            ) : null}
+                                            {inactive.length > 0 ? (
+                                                <details
+                                                    key={`inactive-${typeKey}-${fq || '_'}`}
+                                                    className="group mt-3 rounded-lg border border-gray-200 bg-gray-50/60 open:border-gray-300 open:bg-white"
+                                                    defaultOpen={Boolean(fq.trim() && active.length === 0)}
+                                                >
+                                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100/80 [&::-webkit-details-marker]:hidden">
+                                                        <span>
+                                                            Not shown anywhere on this template ({inactive.length})
+                                                            <span className="mt-0.5 block text-xs font-normal text-gray-500">
+                                                                Hidden in grid, upload, filters, and edit — expand to turn
+                                                                on
+                                                            </span>
+                                                        </span>
+                                                        <ChevronDownIcon className="h-5 w-5 shrink-0 text-gray-400 transition-transform group-open:rotate-180" />
+                                                    </summary>
+                                                    <div className="border-t border-gray-200 px-2 pb-3 pt-2">
+                                                        <ul className="space-y-3">
+                                                            {inactive.map((f) => (
+                                                                <FieldDefaultCard
+                                                                    key={f.metadata_field_id}
+                                                                    f={f}
+                                                                    updateField={updateField}
+                                                                />
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                </details>
+                                            ) : null}
+                                            {suppressed.length > 0 ? (
+                                                <details className="group mt-3 rounded-lg border border-amber-200/80 bg-amber-50/40 open:bg-amber-50/60">
+                                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-amber-950/90 hover:bg-amber-100/50 [&::-webkit-details-marker]:hidden">
+                                                        <span>
+                                                            Globally suppressed ({suppressed.length})
+                                                            <span className="mt-0.5 block text-xs font-normal text-amber-900/75">
+                                                                Managed in System Metadata Registry — not editable here
+                                                            </span>
+                                                        </span>
+                                                        <ChevronDownIcon className="h-5 w-5 shrink-0 text-amber-800/60 transition-transform group-open:rotate-180" />
+                                                    </summary>
+                                                    <div className="border-t border-amber-200/60 px-2 pb-3 pt-2">
+                                                        <ul className="space-y-3">
+                                                            {suppressed.map((f) => (
+                                                                <FieldDefaultCard
+                                                                    key={f.metadata_field_id}
+                                                                    f={f}
+                                                                    updateField={updateField}
+                                                                />
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                </details>
+                                            ) : null}
+                                        </section>
+                                    )
+                                })}
+                            </div>
+                        </>
+                    )}
+                    {err && fields.length > 0 ? (
+                        <p className="mt-3 text-sm text-red-600" role="alert">
+                            {err}
+                        </p>
+                    ) : null}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-5 py-4">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="text-sm font-semibold text-gray-700 hover:text-gray-900"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        disabled={saving || loading}
+                        onClick={() => save()}
+                        className="inline-flex rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-dark disabled:opacity-50"
+                    >
+                        {saving ? 'Saving…' : 'Save defaults'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+export default function SystemCategories({ templates, asset_types, admin_metadata_registry_url }) {
     const { auth, flash } = usePage().props
     const [showForm, setShowForm] = useState(false)
     const [editingTemplate, setEditingTemplate] = useState(null)
@@ -23,6 +483,7 @@ export default function SystemCategories({ templates, asset_types }) {
     const [draggedTemplate, setDraggedTemplate] = useState(null)
     const [localTemplates, setLocalTemplates] = useState(templates || [])
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, template: null })
+    const [fieldDefaultsTemplateId, setFieldDefaultsTemplateId] = useState(null)
 
     const { data, setData, post, put, processing, errors, reset } = useForm({
         name: '',
@@ -188,12 +649,22 @@ export default function SystemCategories({ templates, asset_types }) {
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-8">
-                        <Link
-                            href="/app/admin"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to Admin
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
+                            <Link
+                                href="/app/admin"
+                                className="text-sm font-medium text-gray-500 hover:text-gray-700 inline-block"
+                            >
+                                ← Back to Admin
+                            </Link>
+                            {admin_metadata_registry_url ? (
+                                <Link
+                                    href={admin_metadata_registry_url}
+                                    className="text-sm font-medium text-primary hover:text-primary-dark inline-block"
+                                >
+                                    All system fields (table) →
+                                </Link>
+                            ) : null}
+                        </div>
                         <div className="flex items-start justify-between">
                             <div className="flex-1">
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">System Categories</h1>
@@ -453,6 +924,9 @@ export default function SystemCategories({ templates, asset_types }) {
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Brand folders
                                                 </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Field defaults
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
                                                 </th>
@@ -514,6 +988,19 @@ export default function SystemCategories({ templates, asset_types }) {
                                                             {typeof template.brand_row_count === 'number' ? template.brand_row_count : '—'}
                                                         </div>
                                                         <div className="text-xs text-gray-500">rows across brands</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                        {template.is_latest_version ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setFieldDefaultsTemplateId(template.id)}
+                                                                className="font-medium text-primary hover:text-primary-dark"
+                                                            >
+                                                                Edit bundle
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">Latest version only</span>
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">
@@ -591,6 +1078,9 @@ export default function SystemCategories({ templates, asset_types }) {
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Brand folders
                                                 </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Field defaults
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
                                                 </th>
@@ -653,6 +1143,19 @@ export default function SystemCategories({ templates, asset_types }) {
                                                         </div>
                                                         <div className="text-xs text-gray-500">rows across brands</div>
                                                     </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                        {template.is_latest_version ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setFieldDefaultsTemplateId(template.id)}
+                                                                className="font-medium text-primary hover:text-primary-dark"
+                                                            >
+                                                                Edit bundle
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">Latest version only</span>
+                                                        )}
+                                                    </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">
                                                             <button
@@ -682,6 +1185,14 @@ export default function SystemCategories({ templates, asset_types }) {
                 </div>
             </main>
             <AppFooter />
+
+            {fieldDefaultsTemplateId != null && (
+                <SystemCategoryFieldDefaultsPanel
+                    templateId={fieldDefaultsTemplateId}
+                    templateLabel={localTemplates.find((t) => t.id === fieldDefaultsTemplateId)?.name || ''}
+                    onClose={() => setFieldDefaultsTemplateId(null)}
+                />
+            )}
             
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog

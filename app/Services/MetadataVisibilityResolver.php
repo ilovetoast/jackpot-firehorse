@@ -69,9 +69,9 @@ class MetadataVisibilityResolver
         $systemSuppressedByFieldId = [];
         if ($category !== null && $category->system_category_id !== null) {
             $fieldIdsForSystem = collect($fields)->pluck('field_id')->filter()->unique()->values()->all();
-            if (!empty($fieldIdsForSystem)) {
-                foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategory(
-                    $category->system_category_id,
+            if (! empty($fieldIdsForSystem)) {
+                foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategoryFamily(
+                    (int) $category->system_category_id,
                     $fieldIdsForSystem
                 ) as $suppressedId) {
                     $systemSuppressedByFieldId[(int) $suppressedId] = true;
@@ -131,8 +131,8 @@ class MetadataVisibilityResolver
 
         $fieldIds = collect($fields)->pluck('field_id')->filter()->unique()->values()->all();
         $systemSuppressedByFieldId = [];
-        if (!empty($fieldIds)) {
-            foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategory(
+        if (! empty($fieldIds)) {
+            foreach ($this->visibilityService->getSuppressedFieldIdsForSystemCategoryFamily(
                 $systemCategoryId,
                 $fieldIds
             ) as $suppressedId) {

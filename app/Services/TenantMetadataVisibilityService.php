@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Models\SystemCategory;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -589,9 +590,10 @@ class TenantMetadataVisibilityService
     }
 
     /**
-     * Apply seeded default visibility for one category (from config/metadata_category_defaults.php).
-     * Used by "Reset to default" and by SystemCategoryService when adding a new category (Phase 3b).
-     * Deletes existing category-level visibility, then inserts rows matching the seeder defaults.
+     * Apply seeded default visibility for one category.
+     * System fields: prefer {@see system_category_field_defaults} for the latest template (slug + asset_type),
+     * then fall back to config/metadata_category_defaults.php. Tenant-scoped fields use config only.
+     * metadata_field_category_visibility suppression (any template version in the family) forces is_hidden.
      *
      * @return int Number of rows written (inserted)
      */
@@ -614,6 +616,15 @@ class TenantMetadataVisibilityService
         $brandId = $category->brand_id;
         $categoryId = $category->id;
 
+        $latestTemplateId = $this->resolveLatestSystemCategoryTemplateId($category);
+        $bundleByFieldId = [];
+        if ($latestTemplateId !== null) {
+            $bundleByFieldId = DB::table('system_category_field_defaults')
+                ->where('system_category_id', $latestTemplateId)
+                ->get()
+                ->keyBy('metadata_field_id');
+        }
+
         // All metadata fields for this tenant (system + tenant-scoped, exclude archived)
         $fields = DB::table('metadata_fields')
             ->where(function ($q) use ($tenant) {
@@ -627,24 +638,54 @@ class TenantMetadataVisibilityService
             ->whereNull('archived_at')
             ->get(['id', 'key', 'scope']);
 
+        $systemVisibility = app(SystemMetadataVisibilityService::class);
+        $fieldIdList = $fields->pluck('id')->all();
+        $scidForSuppression = $category->system_category_id ?? $latestTemplateId;
+        $suppressedFlip = [];
+        if ($scidForSuppression) {
+            foreach ($systemVisibility->getSuppressedFieldIdsForSystemCategoryFamily((int) $scidForSuppression, $fieldIdList) as $fid) {
+                $suppressedFlip[(int) $fid] = true;
+            }
+        }
+
         $rows = [];
 
         foreach ($fields as $field) {
             $key = $field->key;
             $scope = $field->scope ?? 'system';
-            $visibility = $this->computeSeededDefaultForField(
-                $key,
-                $scope,
-                $slug,
-                $isImageCategory,
-                $categoryConfig,
-                $restrictFields,
-                $tagsAndCollectionOnlySlugs,
-                $dominantColorsVisibility,
-                $systemAutomatedEnabledForAll
-            );
+            $visibility = null;
+
+            if ($scope === 'system' && isset($bundleByFieldId[$field->id])) {
+                $row = $bundleByFieldId[$field->id];
+                $visibility = [
+                    'is_hidden' => (bool) $row->is_hidden,
+                    'is_upload_hidden' => (bool) $row->is_upload_hidden,
+                    'is_filter_hidden' => (bool) $row->is_filter_hidden,
+                    'is_primary' => $row->is_primary === null ? null : (bool) $row->is_primary,
+                    'is_edit_hidden' => (bool) $row->is_edit_hidden,
+                ];
+            }
+
             if ($visibility === null) {
-                continue; // Skip (no row = fall back to field/tenant defaults)
+                $visibility = $this->computeSeededDefaultForField(
+                    $key,
+                    $scope,
+                    $slug,
+                    $isImageCategory,
+                    $categoryConfig,
+                    $restrictFields,
+                    $tagsAndCollectionOnlySlugs,
+                    $dominantColorsVisibility,
+                    $systemAutomatedEnabledForAll
+                );
+            }
+
+            if ($visibility === null) {
+                continue;
+            }
+
+            if (isset($suppressedFlip[(int) $field->id])) {
+                $visibility['is_hidden'] = true;
             }
 
             $rows[] = [
@@ -683,6 +724,69 @@ class TenantMetadataVisibilityService
         ]);
 
         return count($rows);
+    }
+
+    /**
+     * Latest system_categories.id for this brand category's slug + asset_type (for DB default bundles).
+     */
+    public function resolveLatestSystemCategoryTemplateId(Category $category): ?int
+    {
+        $slug = $category->slug;
+        $at = $category->asset_type instanceof \BackedEnum
+            ? $category->asset_type->value
+            : (string) $category->asset_type;
+
+        $latest = SystemCategory::query()
+            ->where('slug', $slug)
+            ->where('asset_type', $at)
+            ->orderByDesc('version')
+            ->orderByDesc('id')
+            ->first();
+
+        return $latest?->id;
+    }
+
+    /**
+     * Config-only seeded visibility map for active system fields (for backfilling system_category_field_defaults).
+     *
+     * @return array<int, array<string, mixed>> keyed by metadata_field_id
+     */
+    public function buildConfigDefaultsMapForSystemTemplate(string $slug, string $assetTypeValue): array
+    {
+        $config = config('metadata_category_defaults', []);
+        $categoryConfig = $config['category_config'] ?? [];
+        $restrictFields = $config['restrict_fields'] ?? [];
+        $tagsAndCollectionOnlySlugs = $config['tags_and_collection_only_slugs'] ?? ['video'];
+        $dominantColorsVisibility = $config['dominant_colors_visibility'] ?? [];
+        $systemAutomatedEnabledForAll = $config['system_automated_enabled_for_all'] ?? [];
+        $isImageCategory = $assetTypeValue === 'asset';
+
+        $fields = DB::table('metadata_fields')
+            ->where('scope', 'system')
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
+            ->get(['id', 'key', 'scope']);
+
+        $out = [];
+        foreach ($fields as $field) {
+            $visibility = $this->computeSeededDefaultForField(
+                $field->key,
+                $field->scope ?? 'system',
+                $slug,
+                $isImageCategory,
+                $categoryConfig,
+                $restrictFields,
+                $tagsAndCollectionOnlySlugs,
+                $dominantColorsVisibility,
+                $systemAutomatedEnabledForAll
+            );
+            if ($visibility !== null) {
+                $out[(int) $field->id] = $visibility;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -930,7 +1034,7 @@ class TenantMetadataVisibilityService
      *
      * @return array<string, mixed>|null
      */
-    private function computeSeededDefaultForField(
+    protected function computeSeededDefaultForField(
         string $fieldKey,
         string $fieldScope,
         string $categorySlug,

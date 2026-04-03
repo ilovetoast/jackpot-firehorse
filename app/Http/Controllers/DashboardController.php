@@ -30,7 +30,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -66,13 +65,40 @@ class DashboardController extends Controller
             return redirect()->route('assets.index')->with('warning', 'Select a company and brand to view the overview.');
         }
 
+        if ($view === 'Overview/Index') {
+            return Inertia::render('Overview/Index', []);
+        }
+
+        $user = Auth::user();
+        $metrics = $this->buildBrandOverviewMetricsProps($tenant, $brand, $user, $request);
+        $assetPayloads = $this->buildOverviewPageAssetPayloads($tenant, $brand, $user);
+
+        return Inertia::render($view, array_merge($metrics, [
+            'collage_assets' => $assetPayloads['collage_assets'],
+            'most_viewed_assets' => $assetPayloads['most_viewed_assets'],
+            'most_downloaded_assets' => $assetPayloads['most_downloaded_assets'],
+            'most_trending_assets' => $assetPayloads['most_trending_assets'],
+            'overview_assets_deferred' => false,
+            'brand_signals' => [],
+            'momentum_data' => [],
+            'ai_insights' => [],
+            'insights_deferred' => false,
+        ]));
+    }
+
+    /**
+     * Heavy overview metrics (stats, theme, activity, pending counts). Used by Overview/Dashboard SSR and /api/overview/metrics.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildBrandOverviewMetricsProps(Tenant $tenant, Brand $brand, User $user, Request $request): array
+    {
         // Get current plan name
         $planName = $this->planService->getCurrentPlan($tenant);
         $planConfig = config("plans.{$planName}", config('plans.free'));
         $planDisplayName = $planConfig['name'] ?? ucfirst($planName);
 
         // Check if user is owner or admin
-        $user = Auth::user();
         $isOwner = $tenant->isOwner($user);
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
@@ -117,29 +143,6 @@ class DashboardController extends Controller
             ->where('created_at', '<=', $endOfLastMonth)
             ->sum('size_bytes');
         $storageMBLastMonth = round($storageBytesLastMonth / 1024 / 1024, 2);
-
-        // AUDIT: Log query results and sample asset brand_ids for comparison
-        $sampleAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
-            ->limit(5)
-            ->get(['id', 'brand_id']);
-        if ($sampleAssets->count() > 0) {
-            $sampleAssetBrandIds = $sampleAssets->pluck('brand_id')->unique()->values()->toArray();
-            Log::info('[ASSET_QUERY_AUDIT] DashboardController::index() query results', [
-                'query_tenant_id' => $tenant->id,
-                'query_brand_id' => $brand->id,
-                'total_assets_count' => $totalAssets,
-                'sample_asset_brand_ids' => $sampleAssetBrandIds,
-                'brand_id_mismatch_count' => $sampleAssets->filter(fn ($a) => $a->brand_id != $brand->id)->count(),
-                'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
-            ]);
-        } else {
-            Log::info('[ASSET_QUERY_AUDIT] DashboardController::index() query results (empty)', [
-                'query_tenant_id' => $tenant->id,
-                'query_brand_id' => $brand->id,
-                'total_assets_count' => 0,
-                'note' => 'No assets found - cannot compare brand_ids',
-            ]);
-        }
 
         // Calculate percentage change for storage
         $storageChange = $storageMBLastMonth > 0
@@ -439,24 +442,7 @@ class DashboardController extends Controller
 
         $theme = app(BrandThemeBuilder::class)->build($tenant, $brand);
 
-        // Brand Intelligence insights: loaded async on Overview/Index (see /app/overview/insights) to avoid blocking TTFB.
-        $insightsDeferred = $view === 'Overview/Index';
-
-        // Cinematic overview right pane (collage + top lists): defer to /app/overview/assets so workspace switches stay fast.
-        if ($view === 'Overview/Index') {
-            $assetPayloads = [
-                'collage_assets' => collect(),
-                'most_viewed_assets' => collect(),
-                'most_downloaded_assets' => collect(),
-                'most_trending_assets' => collect(),
-            ];
-            $overviewAssetsDeferred = true;
-        } else {
-            $assetPayloads = $this->buildOverviewPageAssetPayloads($tenant, $brand, $user);
-            $overviewAssetsDeferred = false;
-        }
-
-        return Inertia::render($view, [
+        return [
             'tenant' => $tenant,
             'brand' => $brand,
             'permissions' => $permissions,
@@ -489,11 +475,6 @@ class DashboardController extends Controller
             ],
             'is_manager' => $isAdmin || $isBrandManager,
             'widget_visibility' => $userWidgetVisibility, // Widget visibility for current user's role
-            'collage_assets' => $assetPayloads['collage_assets'],
-            'most_viewed_assets' => $assetPayloads['most_viewed_assets'],
-            'most_downloaded_assets' => $assetPayloads['most_downloaded_assets'],
-            'most_trending_assets' => $assetPayloads['most_trending_assets'],
-            'overview_assets_deferred' => $overviewAssetsDeferred,
             'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
             'recent_activity' => $recentActivity, // Recent company activity (permission-gated)
             'pending_ai_suggestions' => [
@@ -508,12 +489,8 @@ class DashboardController extends Controller
             // Phase J.3: Contributor-specific counts (informational only)
             'contributor_pending_count' => $contributorPendingCount, // Contributor's own pending assets
             'contributor_rejected_count' => $contributorRejectedCount, // Contributor's own rejected assets
-            'brand_signals' => [], // Filled client-side when insights_deferred (Overview/Index)
-            'momentum_data' => [],
-            'ai_insights' => [],
-            'insights_deferred' => $insightsDeferred,
             'dashboard_links' => $dashboardLinks, // Subtle header links on cinematic Overview (permission-gated)
-        ]);
+        ];
     }
 
     /**
@@ -911,6 +888,23 @@ class DashboardController extends Controller
     }
 
     /**
+     * JSON: stats, theme, permissions, activity (cinematic overview — after first paint).
+     */
+    public function overviewMetricsJson(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $tenant || ! $brand || ! $user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        return response()->json($this->buildBrandOverviewMetricsProps($tenant, $brand, $user, $request))
+            ->header('Cache-Control', 'private, no-store, must-revalidate');
+    }
+
+    /**
      * JSON: deferred collage + top asset lists for cinematic overview (after first paint).
      */
     public function overviewAssetsJson(Request $request): JsonResponse
@@ -923,7 +917,8 @@ class DashboardController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        return response()->json($this->buildOverviewPageAssetPayloads($tenant, $brand, $user));
+        return response()->json($this->buildOverviewPageAssetPayloads($tenant, $brand, $user))
+            ->header('Cache-Control', 'private, no-store, must-revalidate');
     }
 
     /**
@@ -940,11 +935,9 @@ class DashboardController extends Controller
         }
 
         $payload = $this->buildBrandInsightsPayload($brand, $user);
-        $ttl = (int) config('brand_intelligence.overview_insights_ttl_seconds', 300);
-        $maxAge = min(max(60, $ttl), 3600);
 
         return response()->json($payload)
-            ->header('Cache-Control', 'private, max-age='.$maxAge);
+            ->header('Cache-Control', 'private, no-store, must-revalidate');
     }
 
     /**

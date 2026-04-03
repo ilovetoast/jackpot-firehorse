@@ -105,7 +105,17 @@ export default function ActiveSignals({
                             const matchedInsight = insightType && (insights || []).find((ins) => ins.type === insightType)
                             const content = (
                                 <>
-                                    <Icon className={`w-4 h-4 shrink-0 ${isHigh ? 'text-amber-400/80' : 'text-white/50'}`} />
+                                    <div
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                                        style={{
+                                            backgroundColor: isHigh ? 'rgba(251, 191, 36, 0.12)' : `${brandColor}18`,
+                                        }}
+                                    >
+                                        <Icon
+                                            className={`h-3.5 w-3.5 shrink-0 ${isHigh ? 'text-amber-400/85' : ''}`}
+                                            style={!isHigh ? { color: brandColor } : undefined}
+                                        />
+                                    </div>
                                     <span className={isHigh ? 'text-white/95 font-medium' : 'text-white/85'}>
                                         {signal.label}
                                     </span>
@@ -123,22 +133,22 @@ export default function ActiveSignals({
                                     `}
                                 >
                                     <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2.5">
                                             {signal.href ? (
                                                 <Link
                                                     href={signal.href}
-                                                    className="flex items-center gap-3 w-full rounded-md px-2 py-1 -mx-2 -my-1 transition-all duration-200 hover:bg-white/[0.06]"
+                                                    className="flex items-center gap-2.5 w-full rounded-md px-2 py-1 -mx-2 -my-1 transition-all duration-200 hover:bg-white/[0.06]"
                                                 >
                                                     {content}
                                                 </Link>
                                             ) : (
-                                                <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-2.5">
                                                     {content}
                                                 </div>
                                             )}
                                         </div>
                                         {matchedInsight?.text && (
-                                            <div className="flex items-start gap-2 pl-6 -mt-0.5">
+                                            <div className="flex items-start gap-2 pl-11 -mt-0.5">
                                                 <LightBulbIcon className="w-3.5 h-3.5 text-amber-400/40 shrink-0 mt-0.5" />
                                                 <span className="text-sm italic text-white/45">
                                                     {matchedInsight.href ? (

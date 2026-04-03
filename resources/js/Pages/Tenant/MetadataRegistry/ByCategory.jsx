@@ -79,6 +79,14 @@ import {
  * which fields are enabled for each category.
  */
 const METADATA_REGISTRY_URL = typeof route === 'function' ? route('tenant.metadata.registry.index') : '/app/tenant/metadata/registry'
+const PENDING_SYSTEM_OPTIONS_URL =
+    typeof route === 'function'
+        ? route('tenant.metadata.system-options.pending-count')
+        : '/app/api/tenant/metadata/system-options/pending-count'
+const REVEAL_SYSTEM_OPTIONS_URL =
+    typeof route === 'function'
+        ? route('tenant.metadata.system-options.reveal-pending')
+        : '/app/api/tenant/metadata/system-options/reveal-pending'
 const CORE_FIELD_KEYS = ['collection', 'tags']
 
 function getCsrfTokenForOptions() {
@@ -160,10 +168,31 @@ export default function ByCategoryView({
     const [archivedLoading, setArchivedLoading] = useState(false)
     const [restoreLoading, setRestoreLoading] = useState(false)
     const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
+    const [pendingSystemOptionCount, setPendingSystemOptionCount] = useState(0)
+    const [revealSystemOptionsLoading, setRevealSystemOptionsLoading] = useState(false)
 
     useEffect(() => {
         setLocalCategories(categories)
     }, [categories])
+
+    useEffect(() => {
+        let cancelled = false
+        fetch(PENDING_SYSTEM_OPTIONS_URL, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+            .then((r) => (r.ok ? r.json() : { pending_count: 0 }))
+            .then((d) => {
+                if (!cancelled) setPendingSystemOptionCount(Number(d.pending_count) || 0)
+            })
+            .catch(() => {})
+        return () => {
+            cancelled = true
+        }
+    }, [])
 
     // Scope to one brand at a time so the list has no duplicate category names
     const categoriesForBrand = useMemo(() => {
@@ -250,6 +279,42 @@ export default function ByCategoryView({
     }, [categoriesForBrand])
 
     const brandId = selectedBrandId ?? brands[0]?.id ?? categoriesForBrand[0]?.brand_id
+
+    const canRevealSystemOptions = canManageFields || canManageVisibility
+
+    const handleRevealSystemOptions = useCallback(async () => {
+        if (!canRevealSystemOptions) return
+        setRevealSystemOptionsLoading(true)
+        try {
+            const res = await fetch(REVEAL_SYSTEM_OPTIONS_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfTokenForOptions(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: '{}',
+            })
+            const data = await res.json().catch(() => ({}))
+            if (res.ok) {
+                setPendingSystemOptionCount(0)
+                if (typeof window !== 'undefined' && window.toast) {
+                    const n = Number(data.rows_removed)
+                    const msg =
+                        Number.isFinite(n) && n > 0
+                            ? `Revealed ${n} new platform value${n === 1 ? '' : 's'} in pickers.`
+                            : 'Platform pickers updated.'
+                    window.toast(msg, 'success')
+                }
+            } else if (typeof window !== 'undefined' && window.toast) {
+                window.toast(data.message || 'Could not apply update', 'error')
+            }
+        } finally {
+            setRevealSystemOptionsLoading(false)
+        }
+    }, [canRevealSystemOptions])
 
     const onCategoriesChange = useCallback((newGrouped) => {
         const bid = selectedBrandId ?? brands[0]?.id ?? categoriesForBrand[0]?.brand_id
@@ -1589,6 +1654,29 @@ export default function ByCategoryView({
                         The eye icon hides a folder from those sidebars; hidden folders stay listed below so you can still manage fields.
                         Platform folders you haven&apos;t added yet appear in the same panel as hidden folders, under <span className="font-medium text-gray-600">Available from catalog</span>.
                     </p>
+                    {pendingSystemOptionCount > 0 && (
+                        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2.5">
+                            <p className="text-xs text-amber-950/90">
+                                <span className="font-semibold tabular-nums">{pendingSystemOptionCount}</span> new platform
+                                select value{pendingSystemOptionCount === 1 ? ' is' : 's are'} hidden in your pickers until
+                                you add them.
+                            </p>
+                            {canRevealSystemOptions ? (
+                                <button
+                                    type="button"
+                                    onClick={handleRevealSystemOptions}
+                                    disabled={revealSystemOptionsLoading}
+                                    className="mt-2 inline-flex items-center rounded-md bg-amber-800 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-900 disabled:opacity-60"
+                                >
+                                    {revealSystemOptionsLoading ? 'Applying…' : 'Show new platform values'}
+                                </button>
+                            ) : (
+                                <p className="mt-2 text-[11px] text-amber-900/80">
+                                    Ask a tenant admin with metadata field or visibility management access to reveal them.
+                                </p>
+                            )}
+                        </div>
+                    )}
                     {brands.length > 1 && (
                         <div className="mb-4">
                             <label htmlFor="by-category-brand" className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">

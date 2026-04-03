@@ -39,6 +39,11 @@ self.addEventListener('fetch', (event) => {
         return
     }
 
+    // Dynamic overview JSON — never handle here (network only; avoids accidental caching if this SW grows fetch logic).
+    if (url.pathname.startsWith('/app/api/overview/')) {
+        return
+    }
+
     // HTML navigation: network-first so authenticated pages stay fresh.
     if (request.mode === 'navigate') {
         event.respondWith(

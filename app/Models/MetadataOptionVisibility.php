@@ -21,6 +21,7 @@ class MetadataOptionVisibility extends Model
         'brand_id',
         'category_id',
         'is_hidden',
+        'provision_source',
     ];
 
     protected $casts = [

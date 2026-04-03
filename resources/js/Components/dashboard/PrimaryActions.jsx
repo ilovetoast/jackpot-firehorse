@@ -54,19 +54,79 @@ function brandDisplayName(brand) {
     return typeof n === 'string' && n.trim() !== '' ? n.trim() : 'Brand'
 }
 
+function ActionCardLink({ href, Icon, title, description, brandColor, delayIndex }) {
+    const wellBg = `${brandColor}1a`
+    const hoverGlow = `${brandColor}33`
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: delayIndex * 0.06, duration: 0.4 }}
+        >
+            <Link
+                href={href}
+                className={`
+                    group flex items-center gap-3 min-h-[72px]
+                    w-full rounded-2xl px-4 py-3.5
+                    bg-gradient-to-br from-white/[0.07] to-white/[0.02]
+                    backdrop-blur-sm
+                    ring-1 ring-white/[0.1]
+                    transition-all duration-200 ease-out
+                    hover:scale-[1.01]
+                `}
+                style={{
+                    boxShadow: `0 0 0 1px rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.12)`,
+                }}
+                onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = `0 0 0 1px ${hoverGlow}, 0 10px 28px rgba(0,0,0,0.18), 0 0 24px ${brandColor}22`
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow =
+                        '0 0 0 1px rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.12)'
+                }}
+            >
+                {Icon && (
+                    <div
+                        className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl transition-colors duration-200 group-hover:brightness-110"
+                        style={{ backgroundColor: wellBg }}
+                    >
+                        <Icon className="h-[18px] w-[18px]" style={{ color: brandColor }} />
+                    </div>
+                )}
+                <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-white text-[13px] leading-snug">{title}</h3>
+                    <p className="text-[11px] text-white/45 leading-relaxed mt-0.5">{description}</p>
+                </div>
+                <svg
+                    className="text-white/[0.18] group-hover:text-white/45 transition-colors shrink-0 w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+            </Link>
+        </motion.div>
+    )
+}
+
 export default function PrimaryActions({ permissions = {}, brand = null, brandColor = '#6366f1' }) {
     const actions = ALL_ACTIONS.filter((action) => {
         if (action.always) return true
         if (action.permission) return permissions[action.permission] === true
         return false
-    }).map((action) => ({
-        ...action,
-        href: action.hrefFn ? action.hrefFn(brand) : action.href,
-        title: action.getTitle(brand),
-    })).filter((action) => action.href)
+    })
+        .map((action) => ({
+            ...action,
+            href: action.hrefFn ? action.hrefFn(brand) : action.href,
+            title: action.getTitle(brand),
+        }))
+        .filter((action) => action.href)
 
-    const quickLinks = QUICK_LINKS.filter((link) => permissions[link.permission] === true)
-        .map((link) => ({ ...link }))
+    const quickLinks = QUICK_LINKS.filter((link) => permissions[link.permission] === true).map((link) => ({
+        ...link,
+    }))
 
     if (actions.length === 0) {
         if (quickLinks.length === 0) {
@@ -77,51 +137,15 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
                 {quickLinks.map((a, i) => {
                     const Icon = ICON_MAP[a.key]
                     return (
-                        <motion.div
+                        <ActionCardLink
                             key={a.key}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.06, duration: 0.4 }}
-                        >
-                            <Link
-                                href={a.href}
-                                className={`
-                                group flex items-center gap-4 min-h-[80px]
-                                w-full rounded-xl px-5 py-4
-                                bg-gradient-to-br from-white/[0.06] to-white/[0.02]
-                                backdrop-blur-sm
-                                ring-1 ring-white/[0.08]
-                                transition-all duration-200 ease-out
-                                hover:scale-[1.02]
-                            `}
-                                style={{
-                                    boxShadow: '0 0 0 1px rgba(255,255,255,0.05)',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.boxShadow = `0 0 20px ${brandColor}26`
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.05)'
-                                }}
-                            >
-                                {Icon && (
-                                    <div className="shrink-0 rounded-xl flex items-center justify-center bg-white/10 group-hover:bg-white/[0.18] transition-colors duration-200 w-10 h-10">
-                                        <Icon className="h-5 w-5 text-white/70 group-hover:text-white transition-colors duration-200" />
-                                    </div>
-                                )}
-                                <div className="min-w-0 flex-1">
-                                    <h3 className="font-semibold text-white text-sm">
-                                        {a.title}
-                                    </h3>
-                                    <p className="text-xs text-white/45 leading-relaxed mt-0.5">
-                                        {a.description}
-                                    </p>
-                                </div>
-                                <svg className="text-white/20 group-hover:text-white/50 transition-colors shrink-0 w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                </svg>
-                            </Link>
-                        </motion.div>
+                            href={a.href}
+                            Icon={Icon}
+                            title={a.title}
+                            description={a.description}
+                            brandColor={brandColor}
+                            delayIndex={i}
+                        />
                     )
                 })}
             </div>
@@ -133,51 +157,15 @@ export default function PrimaryActions({ permissions = {}, brand = null, brandCo
             {actions.map((a, i) => {
                 const Icon = ICON_MAP[a.key]
                 return (
-                    <motion.div
+                    <ActionCardLink
                         key={a.key}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.06, duration: 0.4 }}
-                    >
-                        <Link
-                            href={a.href}
-                            className={`
-                                group flex items-center gap-4 min-h-[80px]
-                                w-full rounded-xl px-5 py-4
-                                bg-gradient-to-br from-white/[0.06] to-white/[0.02]
-                                backdrop-blur-sm
-                                ring-1 ring-white/[0.08]
-                                transition-all duration-200 ease-out
-                                hover:scale-[1.02]
-                            `}
-                            style={{
-                                boxShadow: '0 0 0 1px rgba(255,255,255,0.05)',
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.boxShadow = `0 0 20px ${brandColor}26`
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.05)'
-                            }}
-                        >
-                            {Icon && (
-                                <div className="shrink-0 rounded-xl flex items-center justify-center bg-white/10 group-hover:bg-white/[0.18] transition-colors duration-200 w-10 h-10">
-                                    <Icon className="h-5 w-5 text-white/70 group-hover:text-white transition-colors duration-200" />
-                                </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                                <h3 className="font-semibold text-white text-sm">
-                                    {a.title}
-                                </h3>
-                                <p className="text-xs text-white/45 leading-relaxed mt-0.5">
-                                    {a.description}
-                                </p>
-                            </div>
-                            <svg className="text-white/20 group-hover:text-white/50 transition-colors shrink-0 w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                            </svg>
-                        </Link>
-                    </motion.div>
+                        href={a.href}
+                        Icon={Icon}
+                        title={a.title}
+                        description={a.description}
+                        brandColor={brandColor}
+                        delayIndex={i}
+                    />
                 )
             })}
         </div>

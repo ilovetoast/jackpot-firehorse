@@ -7,7 +7,7 @@ import { LightBulbIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
  * Supports priority styling (high → brighter, medium → default, low → dim).
  * Optional href for clickable insights linking to Analytics or Assets.
  */
-export default function AIInsights({ insights = [] }) {
+export default function AIInsights({ insights = [], brandColor = '#6366f1' }) {
     const display = (insights || [])
         .slice(0, 2)
         .map((item) =>
@@ -35,10 +35,19 @@ export default function AIInsights({ insights = [] }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1 }}
         >
-            <div className="rounded-xl overflow-hidden bg-white/[0.02] backdrop-blur-sm px-4 py-3 sm:px-5">
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/25">
-                        💡 Insights
+            <div
+                className="rounded-2xl overflow-hidden border border-white/[0.06] bg-white/[0.035] backdrop-blur-sm px-4 py-3 sm:px-5"
+                style={{ boxShadow: `0 0 20px ${brandColor}10` }}
+            >
+                <div className="flex items-center gap-2.5">
+                    <div
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${brandColor}1c` }}
+                    >
+                        <LightBulbIcon className="h-3.5 w-3.5" style={{ color: brandColor }} />
+                    </div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                        Insights
                     </span>
                 </div>
                 {/* Cap height on small screens so the hero doesn’t push actions below the fold */}

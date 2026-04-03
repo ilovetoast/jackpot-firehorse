@@ -50,6 +50,9 @@ function mergeWithRenumberedSortOrder(visible, hidden) {
     return [...visible, ...hidden].map((c, i) => ({ ...c, sort_order: i + 1 }))
 }
 
+/** When the catalog has this many or more rows, use filter + select instead of a long list. */
+const CATALOG_COMPACT_THRESHOLD = 5
+
 const CATALOG_HELP =
     'Platform folders not on this brand yet. Add one to configure fields; new folders may start hidden in the library until you show them.'
 const CATALOG_HELP_VIEW_ONLY =
@@ -381,6 +384,9 @@ export default function CategoryList({
     const [toggleLoading, setToggleLoading] = useState(new Set())
     const [hiddenExpanded, setHiddenExpanded] = useState({ asset: false, deliverable: false })
     const [availableByType, setAvailableByType] = useState({ asset: [], deliverable: [] })
+    const [visibleCategoryLimits, setVisibleCategoryLimits] = useState(null)
+    const [catalogFilter, setCatalogFilter] = useState({ asset: '', deliverable: '' })
+    const [catalogSelectedId, setCatalogSelectedId] = useState({ asset: '', deliverable: '' })
     const [availableLoading, setAvailableLoading] = useState(false)
     const [addingTemplateId, setAddingTemplateId] = useState(null)
     const [addTemplateMessage, setAddTemplateMessage] = useState(null)
@@ -395,6 +401,7 @@ export default function CategoryList({
     useEffect(() => {
         if (!brandId || !availableCatalogUrl) {
             setAvailableByType({ asset: [], deliverable: [] })
+            setVisibleCategoryLimits(null)
             return
         }
         setAvailableLoading(true)
@@ -414,12 +421,16 @@ export default function CategoryList({
             })
             .then((data) => {
                 const list = data.available_system_templates || []
+                setVisibleCategoryLimits(data.visible_category_limits ?? null)
                 setAvailableByType({
                     asset: list.filter((t) => t.asset_type === 'asset'),
                     deliverable: list.filter((t) => t.asset_type === 'deliverable'),
                 })
             })
-            .catch(() => setAvailableByType({ asset: [], deliverable: [] }))
+            .catch(() => {
+                setAvailableByType({ asset: [], deliverable: [] })
+                setVisibleCategoryLimits(null)
+            })
             .finally(() => setAvailableLoading(false))
     }, [brandId, availableCatalogUrl])
 
@@ -459,6 +470,10 @@ export default function CategoryList({
                         window.toast(`Added “${template.name}”`, 'success')
                     }
                     onAfterAddSystemCategory?.(data.category)
+                    setCatalogSelectedId((s) => ({
+                        ...s,
+                        [template.asset_type === 'deliverable' ? 'deliverable' : 'asset']: '',
+                    }))
                 } else {
                     const msg = data.error || data.message || 'Could not add this folder.'
                     setAddTemplateMessage(msg)
@@ -616,6 +631,32 @@ export default function CategoryList({
                 if (templates.length > 0) {
                     const catalogTooltip =
                         CATALOG_HELP + (!canManageBrandCategories ? CATALOG_HELP_VIEW_ONLY : '')
+                    const limits = visibleCategoryLimits?.[assetTypeKey]
+                    const slotsLine =
+                        limits != null
+                            ? `Visible folders: ${limits.visible} / ${limits.max} for this brand’s ${
+                                  assetTypeKey === 'deliverable' ? 'executions' : 'asset library'
+                              }. Hidden folders do not count.`
+                            : null
+                    const useCompact = templates.length >= CATALOG_COMPACT_THRESHOLD
+                    const q = (catalogFilter[assetTypeKey] || '').trim().toLowerCase()
+                    const filtered = templates.filter(
+                        (t) =>
+                            !q ||
+                            String(t.name || '')
+                                .toLowerCase()
+                                .includes(q) ||
+                            String(t.slug || '')
+                                .toLowerCase()
+                                .includes(q)
+                    )
+                    const selectedRaw = catalogSelectedId[assetTypeKey] || ''
+                    const selectedTemplate = filtered.find(
+                        (t) => String(t.system_category_id) === String(selectedRaw)
+                    )
+                    const capTitle =
+                        'This folder would start visible, but the brand is at the visible folder limit. Hide another folder first, or choose a catalog template that starts hidden.'
+
                     catalogBlock = (
                         <div className="px-2.5 pb-2.5 pt-1">
                             <div className="rounded-md border border-indigo-100 bg-indigo-50/70 px-2.5 py-2">
@@ -632,33 +673,104 @@ export default function CategoryList({
                                         <InformationCircleIcon className="h-4 w-4" aria-hidden />
                                     </button>
                                 </div>
-                                <ul className="mt-2 space-y-1">
-                                    {templates.map((t) => (
-                                        <li
-                                            key={t.system_category_id}
-                                            className="flex items-center justify-between gap-2 rounded-md bg-white/80 px-2 py-1.5 text-sm text-gray-800 ring-1 ring-inset ring-indigo-100/80"
-                                        >
-                                            <span className="flex min-w-0 items-center gap-2">
-                                                <CategoryIcon
-                                                    iconId={t.icon || 'folder'}
-                                                    className="h-4 w-4 flex-shrink-0 text-gray-500"
-                                                />
-                                                <span className="truncate font-medium">{t.name}</span>
-                                            </span>
+                                {slotsLine ? (
+                                    <p className="mt-1.5 text-[11px] leading-snug text-indigo-900/75">{slotsLine}</p>
+                                ) : null}
+                                {useCompact ? (
+                                    <div className="mt-2 space-y-2">
+                                        <input
+                                            type="search"
+                                            value={catalogFilter[assetTypeKey] || ''}
+                                            onChange={(e) =>
+                                                setCatalogFilter((s) => ({
+                                                    ...s,
+                                                    [assetTypeKey]: e.target.value,
+                                                }))
+                                            }
+                                            placeholder="Filter catalog…"
+                                            className="block w-full rounded-md border-0 py-1.5 pl-2 pr-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-indigo-200/80 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-400/40"
+                                            aria-label="Filter platform catalog folders"
+                                        />
+                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                                            <select
+                                                value={selectedRaw}
+                                                onChange={(e) =>
+                                                    setCatalogSelectedId((s) => ({
+                                                        ...s,
+                                                        [assetTypeKey]: e.target.value,
+                                                    }))
+                                                }
+                                                className="block w-full min-w-0 flex-1 rounded-md border-0 py-1.5 pl-2 pr-8 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-indigo-200/80 focus:ring-2 focus:ring-indigo-400/40"
+                                                aria-label="Choose a catalog folder to add"
+                                            >
+                                                <option value="">Select a catalog folder…</option>
+                                                {filtered.map((t) => (
+                                                    <option
+                                                        key={t.system_category_id}
+                                                        value={t.system_category_id}
+                                                        disabled={!!t.visible_cap_blocks_add}
+                                                    >
+                                                        {t.name}
+                                                        {t.is_hidden ? ' (starts hidden)' : ''}
+                                                        {t.visible_cap_blocks_add ? ' — at visible cap' : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
                                             {canManageBrandCategories ? (
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleAddSystemTemplate(t)}
-                                                    disabled={addingTemplateId === t.system_category_id}
-                                                    className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                                                    onClick={() =>
+                                                        selectedTemplate && handleAddSystemTemplate(selectedTemplate)
+                                                    }
+                                                    disabled={
+                                                        !selectedTemplate ||
+                                                        !!selectedTemplate.visible_cap_blocks_add ||
+                                                        addingTemplateId === selectedTemplate.system_category_id
+                                                    }
+                                                    title={
+                                                        selectedTemplate?.visible_cap_blocks_add ? capTitle : undefined
+                                                    }
+                                                    className="inline-flex flex-shrink-0 items-center justify-center gap-0.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:pointer-events-none disabled:opacity-50 sm:w-auto"
                                                 >
                                                     <PlusIcon className="h-3.5 w-3.5" aria-hidden />
                                                     Add
                                                 </button>
                                             ) : null}
-                                        </li>
-                                    ))}
-                                </ul>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <ul className="mt-2 space-y-1">
+                                        {templates.map((t) => (
+                                            <li
+                                                key={t.system_category_id}
+                                                className="flex items-center justify-between gap-2 rounded-md bg-white/80 px-2 py-1.5 text-sm text-gray-800 ring-1 ring-inset ring-indigo-100/80"
+                                            >
+                                                <span className="flex min-w-0 items-center gap-2">
+                                                    <CategoryIcon
+                                                        iconId={t.icon || 'folder'}
+                                                        className="h-4 w-4 flex-shrink-0 text-gray-500"
+                                                    />
+                                                    <span className="truncate font-medium">{t.name}</span>
+                                                </span>
+                                                {canManageBrandCategories ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAddSystemTemplate(t)}
+                                                        disabled={
+                                                            !!t.visible_cap_blocks_add ||
+                                                            addingTemplateId === t.system_category_id
+                                                        }
+                                                        title={t.visible_cap_blocks_add ? capTitle : undefined}
+                                                        className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:pointer-events-none disabled:opacity-50"
+                                                    >
+                                                        <PlusIcon className="h-3.5 w-3.5" aria-hidden />
+                                                        Add
+                                                    </button>
+                                                ) : null}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
                             </div>
                         </div>
                     )

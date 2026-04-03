@@ -273,6 +273,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
         Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
         Route::get('/api/tenant/metadata/brands/{brand}/available-system-categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'availableSystemCategories'])->name('tenant.metadata.brands.available-system-categories');
+        Route::get('/api/tenant/metadata/system-options/pending-count', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'pendingSystemOptionRevealCount'])->name('tenant.metadata.system-options.pending-count');
+        Route::post('/api/tenant/metadata/system-options/reveal-pending', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'revealPendingSystemOptions'])->name('tenant.metadata.system-options.reveal-pending');
         Route::get('/api/tenant/metadata/fields/archived', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getArchivedFields'])->name('tenant.metadata.fields.archived');
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
@@ -493,6 +495,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::put('/admin/system-categories/{systemCategory}', [\App\Http\Controllers\SystemCategoryController::class, 'update'])->name('admin.system-categories.update');
     Route::delete('/admin/system-categories/{systemCategory}', [\App\Http\Controllers\SystemCategoryController::class, 'destroy'])->name('admin.system-categories.destroy');
     Route::post('/admin/system-categories/update-order', [\App\Http\Controllers\SystemCategoryController::class, 'updateOrder'])->name('admin.system-categories.update-order');
+    Route::get('/admin/system-categories/{systemCategory}/field-defaults', [\App\Http\Controllers\SystemCategoryController::class, 'fieldDefaults'])->name('admin.system-categories.field-defaults');
+    Route::put('/admin/system-categories/{systemCategory}/field-defaults', [\App\Http\Controllers\SystemCategoryController::class, 'updateFieldDefaults'])->name('admin.system-categories.field-defaults.update');
 
     // Billing routes (no tenant middleware - billing is company-level)
     Route::get('/billing', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing');
@@ -519,6 +523,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
             Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
             Route::get('/overview/assets', [\App\Http\Controllers\DashboardController::class, 'overviewAssetsJson'])->name('overview.assets');
+            Route::get('/api/overview/metrics', [\App\Http\Controllers\DashboardController::class, 'overviewMetricsJson'])->name('overview.api.metrics');
+            Route::get('/api/overview/assets', [\App\Http\Controllers\DashboardController::class, 'overviewAssetsJson'])->name('overview.api.assets');
+            Route::get('/api/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.api.insights');
             Route::get('/dashboard', fn () => redirect()->route('insights.overview'))->name('dashboard'); // Deprecated: redirect to Insights
 
             // Asset routes (tenant-scoped)

@@ -178,6 +178,56 @@ class SystemMetadataVisibilityService
     }
 
     /**
+     * Suppressed field IDs for any system_categories row in the same slug + asset_type family.
+     * Fixes mismatches when brand categories point at an older system_categories.id than admin rules.
+     *
+     * @param  list<int|string>  $fieldIds
+     * @return list<int>
+     */
+    public function getSuppressedFieldIdsForSystemCategoryFamily(?int $systemCategoryId, array $fieldIds): array
+    {
+        if ($systemCategoryId === null || $systemCategoryId <= 0) {
+            return [];
+        }
+
+        $fieldIds = array_values(array_unique(array_filter(array_map(static function ($id) {
+            if ($id === null || $id === '') {
+                return null;
+            }
+
+            return is_numeric($id) ? (int) $id : null;
+        }, $fieldIds), static fn ($id) => $id !== null)));
+
+        if ($fieldIds === []) {
+            return [];
+        }
+
+        $sc = DB::table('system_categories')->where('id', $systemCategoryId)->first();
+        if (! $sc) {
+            return [];
+        }
+
+        $familyIds = DB::table('system_categories')
+            ->where('slug', $sc->slug)
+            ->where('asset_type', $sc->asset_type)
+            ->pluck('id');
+
+        if ($familyIds->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('metadata_field_category_visibility')
+            ->whereIn('system_category_id', $familyIds)
+            ->where('is_visible', false)
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->pluck('metadata_field_id')
+            ->unique()
+            ->values()
+            ->map(static fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
      * Check if a field is suppressed for a system category.
      *
      * @param int $fieldId Metadata field ID

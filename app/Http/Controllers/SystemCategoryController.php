@@ -4,7 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
 use App\Models\SystemCategory;
+use App\Models\SystemCategoryFieldDefault;
 use App\Services\SystemCategoryService;
+use App\Services\SystemMetadataVisibilityService;
+use App\Support\MetadataCache;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -60,13 +64,127 @@ class SystemCategoryController extends Controller
                     'auto_provision' => $template->auto_provision,
                     'sort_order' => $template->sort_order,
                     'brand_row_count' => $brandRowCounts[$template->slug.'|'.$type] ?? 0,
+                    'is_latest_version' => $template->isLatestVersion(),
                 ];
             }),
             'asset_types' => [
                 ['value' => AssetType::ASSET->value, 'label' => 'ASSET'],
                 ['value' => AssetType::DELIVERABLE->value, 'label' => 'Deliverable'],
             ],
+            'admin_metadata_registry_url' => route('admin.metadata.registry.index'),
         ]);
+    }
+
+    /**
+     * JSON: system metadata fields + saved defaults for this template (latest version only).
+     */
+    public function fieldDefaults(SystemCategory $systemCategory): JsonResponse
+    {
+        $this->checkSiteOwnerAccess();
+        if (! $systemCategory->isLatestVersion()) {
+            abort(422, 'Only the latest template version can edit field defaults.');
+        }
+
+        $systemVisibility = app(SystemMetadataVisibilityService::class);
+
+        $fields = DB::table('metadata_fields')
+            ->where('scope', 'system')
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
+            ->orderBy('key')
+            ->get(['id', 'key', 'system_label', 'type']);
+
+        $defaults = SystemCategoryFieldDefault::query()
+            ->where('system_category_id', $systemCategory->id)
+            ->get()
+            ->keyBy('metadata_field_id');
+
+        $configFallback = app(\App\Services\TenantMetadataVisibilityService::class)
+            ->buildConfigDefaultsMapForSystemTemplate($systemCategory->slug, $systemCategory->asset_type->value);
+
+        $payload = [];
+        foreach ($fields as $f) {
+            $fid = (int) $f->id;
+            $suppressed = $systemVisibility->getSuppressedFieldIdsForSystemCategoryFamily(
+                (int) $systemCategory->id,
+                [$fid]
+            );
+            $row = $defaults[$fid] ?? null;
+            $cfg = $configFallback[$fid] ?? null;
+            $payload[] = [
+                'metadata_field_id' => $fid,
+                'key' => $f->key,
+                'system_label' => $f->system_label,
+                'type' => $f->type,
+                'is_system_suppressed' => $suppressed !== [],
+                'is_hidden' => $row ? (bool) $row->is_hidden : (bool) ($cfg['is_hidden'] ?? true),
+                'is_upload_hidden' => $row ? (bool) $row->is_upload_hidden : (bool) ($cfg['is_upload_hidden'] ?? false),
+                'is_filter_hidden' => $row ? (bool) $row->is_filter_hidden : (bool) ($cfg['is_filter_hidden'] ?? false),
+                'is_edit_hidden' => $row ? (bool) $row->is_edit_hidden : (bool) ($cfg['is_edit_hidden'] ?? false),
+                'is_primary' => $row && $row->is_primary !== null
+                    ? (bool) $row->is_primary
+                    : (array_key_exists('is_primary', $cfg ?? []) ? $cfg['is_primary'] : null),
+            ];
+        }
+
+        return response()->json([
+            'template' => [
+                'id' => $systemCategory->id,
+                'name' => $systemCategory->name,
+                'slug' => $systemCategory->slug,
+                'asset_type' => $systemCategory->asset_type->value,
+            ],
+            'fields' => $payload,
+            'note' => 'Rows marked “globally suppressed” use metadata_field_category_visibility and always hide the field for this template family regardless of defaults below.',
+        ]);
+    }
+
+    /**
+     * Save default field visibility for new brand categories from this template.
+     */
+    public function updateFieldDefaults(Request $request, SystemCategory $systemCategory): JsonResponse
+    {
+        $this->checkSiteOwnerAccess();
+        if (! $systemCategory->isLatestVersion()) {
+            return response()->json(['error' => 'Only the latest template version can edit field defaults.'], 422);
+        }
+
+        $validated = $request->validate([
+            'defaults' => 'required|array',
+            'defaults.*.metadata_field_id' => 'required|integer|exists:metadata_fields,id',
+            'defaults.*.is_hidden' => 'required|boolean',
+            'defaults.*.is_upload_hidden' => 'sometimes|boolean',
+            'defaults.*.is_filter_hidden' => 'sometimes|boolean',
+            'defaults.*.is_edit_hidden' => 'sometimes|boolean',
+            'defaults.*.is_primary' => 'nullable|boolean',
+        ]);
+
+        foreach ($validated['defaults'] as $item) {
+            $fieldId = (int) $item['metadata_field_id'];
+            $field = DB::table('metadata_fields')->where('id', $fieldId)->where('scope', 'system')->first();
+            if (! $field) {
+                continue;
+            }
+
+            SystemCategoryFieldDefault::query()->updateOrCreate(
+                [
+                    'system_category_id' => $systemCategory->id,
+                    'metadata_field_id' => $fieldId,
+                ],
+                [
+                    'is_hidden' => (bool) $item['is_hidden'],
+                    'is_upload_hidden' => (bool) ($item['is_upload_hidden'] ?? false),
+                    'is_filter_hidden' => (bool) ($item['is_filter_hidden'] ?? false),
+                    'is_edit_hidden' => (bool) ($item['is_edit_hidden'] ?? false),
+                    'is_primary' => array_key_exists('is_primary', $item) ? $item['is_primary'] : null,
+                ]
+            );
+        }
+
+        MetadataCache::flushGlobal();
+
+        return response()->json(['success' => true]);
     }
 
     /**

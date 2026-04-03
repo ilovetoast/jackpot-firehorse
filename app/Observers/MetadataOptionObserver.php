@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\MetadataOption;
+use App\Services\SystemMetadataOptionProvisioningService;
 use App\Support\MetadataCache;
 use Illuminate\Support\Facades\Cache;
 
@@ -11,6 +12,13 @@ use Illuminate\Support\Facades\Cache;
  */
 class MetadataOptionObserver
 {
+    public function created(MetadataOption $option): void
+    {
+        if ($option->is_system) {
+            app(SystemMetadataOptionProvisioningService::class)->hideNewSystemOptionForExistingTenants($option);
+        }
+    }
+
     public function saved(MetadataOption $option): void
     {
         $this->flushForOption($option);

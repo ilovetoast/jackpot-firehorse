@@ -10,16 +10,20 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\MetadataVisibilityProfile;
 use App\Models\SystemCategory;
 use App\Models\Tenant;
+use App\Services\CategoryVisibilityLimitService;
 use App\Services\SystemCategoryService;
+use App\Services\SystemMetadataOptionProvisioningService;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
 use App\Support\Metadata\CategoryTypeResolver;
+use App\Support\MetadataCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -249,6 +253,8 @@ class TenantMetadataRegistryController extends Controller
         }
 
         $available = [];
+        $limitService = app(CategoryVisibilityLimitService::class);
+        $visibleCategoryLimits = $limitService->limitsPayloadForBrand($brand);
 
         foreach ($systemTemplates as $template) {
             $typeVal = $template->asset_type->value;
@@ -268,6 +274,18 @@ class TenantMetadataRegistryController extends Controller
             });
 
             if (! $exists) {
+                $assetTypeEnum = AssetType::tryFrom($typeVal);
+                $visibleCapBlocksAdd = false;
+                $visibleSlotsRemaining = null;
+                if ($assetTypeEnum && $limitService->appliesTo($assetTypeEnum)) {
+                    $max = $limitService->maxFor($assetTypeEnum);
+                    $visible = $limitService->countVisible($brand, $assetTypeEnum);
+                    $visibleSlotsRemaining = max(0, $max - $visible);
+                    if (! $template->is_hidden && $visible >= $max) {
+                        $visibleCapBlocksAdd = true;
+                    }
+                }
+
                 $available[] = [
                     'system_category_id' => $template->id,
                     'name' => $template->name,
@@ -276,13 +294,66 @@ class TenantMetadataRegistryController extends Controller
                     'asset_type' => $template->asset_type->value,
                     'is_private' => $template->is_private,
                     'is_hidden' => $template->is_hidden,
+                    'visible_slots_remaining' => $visibleSlotsRemaining,
+                    'visible_cap_blocks_add' => $visibleCapBlocksAdd,
                 ];
             }
         }
 
         return response()->json([
             'available_system_templates' => $available,
+            'visible_category_limits' => $visibleCategoryLimits,
         ]);
+    }
+
+    /**
+     * Count platform select options hidden until tenant opts in (provision_source=system_seed).
+     */
+    public function pendingSystemOptionRevealCount(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canView) {
+            abort(403, 'You do not have permission to view the metadata registry.');
+        }
+
+        $count = app(SystemMetadataOptionProvisioningService::class)->countPendingSystemSeededHides($tenant->id);
+
+        return response()->json(['pending_count' => $count]);
+    }
+
+    /**
+     * Reveal all auto-hidden platform options for this tenant (does not touch manual hides).
+     */
+    public function revealPendingSystemOptions(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canManage = $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canManage) {
+            abort(403, 'You do not have permission to update metadata visibility.');
+        }
+
+        $deleted = app(SystemMetadataOptionProvisioningService::class)->revealSystemSeededOptionHidesForTenant($tenant->id);
+
+        MetadataCache::bumpVersion($tenant->id);
+
+        return response()->json(['success' => true, 'rows_removed' => $deleted]);
     }
 
     /**

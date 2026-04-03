@@ -15,6 +15,9 @@ import {
     AdjustmentsHorizontalIcon,
 } from '@heroicons/react/24/outline'
 
+const ADMIN_SYSTEM_CATEGORIES_URL =
+    typeof route === 'function' ? route('admin.system-categories.index') : '/app/admin/system-categories'
+
 export default function MetadataRegistryIndex({ fields = [] }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -147,19 +150,31 @@ export default function MetadataRegistryIndex({ fields = [] }) {
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-8">
-                        <Link
-                            href="/app/admin"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to Admin Dashboard
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
+                            <Link
+                                href="/app/admin"
+                                className="text-sm font-medium text-gray-500 hover:text-gray-700 inline-block"
+                            >
+                                ← Back to Admin Dashboard
+                            </Link>
+                            <Link
+                                href={ADMIN_SYSTEM_CATEGORIES_URL}
+                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 inline-block"
+                            >
+                                System categories &amp; field bundles →
+                            </Link>
+                        </div>
                         <div className="flex items-center justify-between">
                             <div>
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">
                                     System Metadata Registry
                                 </h1>
                                 <p className="mt-2 text-sm text-gray-700">
-                                    Read-only inspection of all system-provided metadata fields and their behavior
+                                    Secondary, field-centric view of all system metadata fields. Prefer{' '}
+                                    <Link href={ADMIN_SYSTEM_CATEGORIES_URL} className="font-medium text-indigo-600 hover:text-indigo-800">
+                                        System categories
+                                    </Link>{' '}
+                                    to edit default field bundles per template.
                                 </p>
                             </div>
                         </div>
@@ -176,7 +191,7 @@ export default function MetadataRegistryIndex({ fields = [] }) {
                                 <div className="mt-2 text-sm text-blue-700">
                                     <p>
                                         {canManageVisibility
-                                            ? 'Inspect system metadata fields and configure category-level visibility suppression.'
+                                            ? 'Use this table for metrics and global suppression per field. Default on/off field bundles for each catalog template are edited under System categories → Edit bundle.'
                                             : 'This registry provides read-only inspection of system metadata fields. No mutations or configuration changes are available in this view.'}
                                     </p>
                                 </div>
