@@ -420,6 +420,33 @@ export function defaultCompositionName(doc: DocumentModel): string {
     return `Untitled — ${dateStr}`
 }
 
+/** Same-origin URL for streaming original bytes (works in <img> after SW bypass for this path). */
+function editorBridgeFileUrlForAssetId(assetId: string): string {
+    const path = `/app/api/assets/${encodeURIComponent(assetId)}/file`
+    if (typeof window !== 'undefined' && window.location?.origin) {
+        return `${window.location.origin}${path}`
+    }
+    return path
+}
+
+/**
+ * Older saves sometimes stored thumbnail URLs in `src`; canvas must use /file or decode fails / looks wrong.
+ */
+function normalizeImageLayerSrcAfterApiLoad(layer: Layer): Layer {
+    if (layer.type !== 'image') {
+        return layer
+    }
+    const assetId = layer.assetId
+    if (!assetId || typeof layer.src !== 'string') {
+        return layer
+    }
+    const s = layer.src
+    if (s.includes('/thumbnail') || s.includes('thumbnail?style')) {
+        return { ...layer, src: editorBridgeFileUrlForAssetId(assetId) }
+    }
+    return layer
+}
+
 /** Normalize JSON from the server into a {@link DocumentModel}. */
 export function parseDocumentFromApi(raw: unknown): DocumentModel {
     if (!raw || typeof raw !== 'object') {
@@ -437,7 +464,7 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
             const t = (raw as { type?: string }).type
             return typeof t === 'string' && ALLOWED_LAYER_TYPES.has(t)
         }) as Layer[]
-    )
+    ).map(normalizeImageLayerSrcAfterApiLoad)
     return {
         id: typeof o.id === 'string' ? o.id : generateId(),
         width: w,

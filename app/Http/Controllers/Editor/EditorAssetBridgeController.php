@@ -123,6 +123,21 @@ class EditorAssetBridgeController extends Controller
             abort(404, 'File not available.');
         }
 
+        // TIFF/HEIC originals cannot render in most browsers' <img>; stream a generated raster when present.
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $ext = strtolower(pathinfo($key, PATHINFO_EXTENSION));
+        $needsRasterFallback = str_starts_with($mime, 'image/tiff')
+            || in_array($mime, ['image/heic', 'image/heif'], true)
+            || in_array($ext, ['tif', 'tiff', 'heic', 'heif'], true);
+        if ($needsRasterFallback) {
+            foreach (['large', 'medium', 'thumb'] as $style) {
+                $thumbPath = $asset->thumbnailPathForStyle($style);
+                if ($thumbPath) {
+                    return $this->streamS3KeyToResponse($asset, $thumbPath, 'private, max-age=300');
+                }
+            }
+        }
+
         return $this->streamS3KeyToResponse($asset, $key, 'private, max-age=300');
     }
 

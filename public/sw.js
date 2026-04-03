@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'jackpot-pwa-v1'
+const CACHE_VERSION = 'jackpot-pwa-v2'
 const APP_SHELL_CACHE = `app-shell-${CACHE_VERSION}`
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`
 
@@ -41,6 +41,12 @@ self.addEventListener('fetch', (event) => {
 
     // Dynamic overview JSON — never handle here (network only; avoids accidental caching if this SW grows fetch logic).
     if (url.pathname.startsWith('/app/api/overview/')) {
+        return
+    }
+
+    // Editor/DAM asset streams (original + thumbnails): session-scoped, must not be cache-first or stale
+    // bytes break <img> / canvas (see generative editor image layers).
+    if (url.pathname.startsWith('/app/api/assets/')) {
         return
     }
 
