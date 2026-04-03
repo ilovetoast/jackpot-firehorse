@@ -5,10 +5,8 @@ namespace App\Http\Controllers;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\DownloadStatus;
-use App\Enums\EventType;
 use App\Enums\MetricType;
 use App\Enums\ThumbnailStatus;
-use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetMetric;
 use App\Models\Brand;
@@ -21,6 +19,7 @@ use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\BrandInsightEngine;
+use App\Services\Insights\BrandActivityFeedService;
 use App\Services\PlanService;
 use App\Support\AssetVariant;
 use App\Support\DashboardLinks;
@@ -333,165 +332,7 @@ class DashboardController extends Controller
             $pendingAssetsCount = $contributorPendingCount + $contributorRejectedCount;
         }
 
-        // Get recent company activity (last 5) - only if user has permission
-        $recentActivity = null;
-        if ($user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
-            // Filter out events with invalid/null subject_type to avoid MorphTo errors
-            $validSubjectTypes = [
-                \App\Models\Asset::class,
-                \App\Models\User::class,
-                \App\Models\Tenant::class,
-                \App\Models\Brand::class,
-                \App\Models\Category::class,
-            ];
-
-            // Do not eager load 'actor': actor_type can be 'system'/'api'/'guest' (no model class).
-            // Use getActorModel() in the map for user actors to avoid MorphTo "Class system not found".
-            $activityQuery = ActivityEvent::where('tenant_id', $tenant->id)
-                ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT)
-                ->whereNotNull('subject_type')
-                ->whereIn('subject_type', $validSubjectTypes);
-            // Brand overview: prefer brand-scoped activity
-            if ($brand) {
-                $activityQuery->where(function ($q) use ($brand) {
-                    $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
-                });
-            }
-            // Do not use MorphTo eager load here: it can issue one assets query per row (N+1) with soft-delete scope.
-            // Batch-load subjects by type instead (one query per type, Assets use withTrashed for audit rows).
-            $activityEvents = $activityQuery->orderBy('created_at', 'desc')
-                ->limit(5)
-                ->with(['brand'])
-                ->get();
-
-            $this->batchLoadActivityEventSubjects($activityEvents);
-
-            // Belt-and-suspenders: if any row's morph type failed to resolve, mark subject as loaded (null) so
-            // map() does not trigger LazyLoadingViolation when using getRelation('subject').
-            $activityEvents->each(function (ActivityEvent $event) {
-                if (! $event->relationLoaded('subject')) {
-                    $event->setRelation('subject', null);
-                }
-            });
-
-            // One query for all user actors (getActorModel() otherwise runs User::find per row — N+1).
-            $actorUserIds = $activityEvents
-                ->filter(fn (ActivityEvent $e) => $e->actor_type === 'user' && $e->actor_id)
-                ->pluck('actor_id')
-                ->unique()
-                ->values()
-                ->all();
-            $actorsById = $actorUserIds === []
-                ? collect()
-                : User::whereIn('id', $actorUserIds)->get()->keyBy('id');
-
-            $recentActivity = $activityEvents->map(function ($event) use ($tenant, $actorsById) {
-                // Format event type display name
-                $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
-
-                // Get actor name and avatar/company for display (use getActorModel() for user; string types have no model)
-                $actorName = 'System';
-                $actorAvatarUrl = null;
-                $actorFirstName = null;
-                $actorLastName = null;
-                $actorEmail = null;
-                $companyName = null;
-                $actor = $event->getActorModel($actorsById);
-                if ($actor) {
-                    $actorName = $actor->name;
-                    $actorAvatarUrl = $actor->avatar_url ?? null;
-                    $actorFirstName = $actor->first_name ?? null;
-                    $actorLastName = $actor->last_name ?? null;
-                    $actorEmail = $actor->email ?? null;
-                } elseif (! empty($event->metadata['actor_name'])) {
-                    $actorName = $event->metadata['actor_name'];
-                }
-                // When actor is system/api/guest, show company (tenant) name
-                if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
-                    $companyName = $tenant->name ?? 'System';
-                }
-
-                // Get subject name and optional asset thumbnail URL (use getRelation — never $event->subject, which can lazy-load MorphTo).
-                $subjectName = 'Unknown';
-                $subjectThumbnailUrl = null;
-                $subject = $event->getRelation('subject');
-                if ($subject) {
-                    if (method_exists($subject, 'title') && ! empty($subject->title)) {
-                        $subjectName = $subject->title;
-                    } elseif (method_exists($subject, 'original_filename') && ! empty($subject->original_filename)) {
-                        $subjectName = $subject->original_filename;
-                    } elseif (method_exists($subject, 'name') && ! empty($subject->name)) {
-                        $subjectName = $subject->name;
-                    } elseif (method_exists($subject, 'id')) {
-                        if ($subject instanceof Asset) {
-                            $subjectName = 'Asset #'.substr((string) $subject->id, 0, 8);
-                        } else {
-                            $subjectName = 'Item #'.substr((string) $subject->id, 0, 8);
-                        }
-                    }
-                    // Asset subject: build thumbnail URL (thumb style for small activity icon)
-                    if ($subject instanceof Asset) {
-                        $meta = $subject->metadata ?? [];
-                        $thumbStatus = $subject->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                            ? $subject->thumbnail_status->value
-                            : ($subject->thumbnail_status ?? 'pending');
-                        if ($thumbStatus === 'completed') {
-                            $version = $meta['thumbnails_generated_at'] ?? null;
-                            $subjectThumbnailUrl = $subject->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
-                            if ($subjectThumbnailUrl && $version) {
-                                $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($version);
-                            }
-                        }
-                    }
-                } elseif (! empty($event->metadata['subject_name'])) {
-                    $subjectName = $event->metadata['subject_name'];
-                } elseif (! empty($event->metadata['asset_title'])) {
-                    $subjectName = $event->metadata['asset_title'];
-                } elseif (! empty($event->metadata['asset_filename'])) {
-                    $subjectName = $event->metadata['asset_filename'];
-                }
-
-                // Brand: include avatar fields for BrandAvatar
-                $brandPayload = null;
-                if ($event->brand) {
-                    $b = $event->brand;
-                    $brandPayload = [
-                        'id' => $b->id,
-                        'name' => $b->name,
-                        'logo_path' => $b->logo_path,
-                        'icon_bg_color' => $b->icon_bg_color,
-                        'icon_style' => $b->icon_style ?? 'subtle',
-                        'primary_color' => $b->primary_color ?? '#4f46e5',
-                    ];
-                }
-
-                return [
-                    'id' => $event->id,
-                    'event_type' => $event->event_type,
-                    'event_type_label' => $eventTypeLabel,
-                    'description' => $event->metadata['description'] ?? null,
-                    'actor' => [
-                        'type' => $event->actor_type,
-                        'name' => $actorName,
-                        'avatar_url' => $actorAvatarUrl,
-                        'first_name' => $actorFirstName,
-                        'last_name' => $actorLastName,
-                        'email' => $actorEmail,
-                    ],
-                    'company_name' => $companyName,
-                    'subject' => [
-                        'type' => $event->subject_type,
-                        'name' => $subjectName,
-                        'id' => $event->subject_id,
-                        'thumbnail_url' => $subjectThumbnailUrl,
-                    ],
-                    'brand' => $brandPayload,
-                    'metadata' => $event->metadata,
-                    'created_at' => $event->created_at->toISOString(),
-                    'created_at_human' => $event->created_at->diffForHumans(),
-                ];
-            });
-        }
+        $recentActivity = app(BrandActivityFeedService::class)->getRecentActivity($tenant, $brand, $user, 5);
 
         // Widget visibility by role (defaults only; no per-tenant overrides).
         // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'most_trending', 'pending_ai_suggestions', 'pending_metadata_approvals'
@@ -1131,102 +972,6 @@ class DashboardController extends Controller
     }
 
     /**
-     * Normalize polymorphic subject_type from DB (trim / legacy aliases) so batch load matches {@see Asset::class} etc.
-     */
-    protected function normalizeActivitySubjectType(?string $subjectType): ?string
-    {
-        if ($subjectType === null || $subjectType === '') {
-            return null;
-        }
-
-        $t = trim($subjectType);
-        if ($t === Asset::class || str_ends_with($t, '\\Asset') || $t === 'asset') {
-            return Asset::class;
-        }
-        if ($t === User::class || str_ends_with($t, '\\User')) {
-            return User::class;
-        }
-        if ($t === Tenant::class || str_ends_with($t, '\\Tenant')) {
-            return Tenant::class;
-        }
-        if ($t === Brand::class || str_ends_with($t, '\\Brand')) {
-            return Brand::class;
-        }
-        if ($t === Category::class || str_ends_with($t, '\\Category')) {
-            return Category::class;
-        }
-
-        return null;
-    }
-
-    /**
-     * Batch-resolve ActivityEvent polymorphic subjects (avoids MorphTo N+1 on /overview).
-     *
-     * Important: do NOT group by raw {@see ActivityEvent::$subject_type} alone — legacy rows can use
-     * slightly different strings for the same model (whitespace, aliases), which produced one query per
-     * row. Bucket by {@see normalizeActivitySubjectType()} so all Asset subjects share one whereIn.
-     *
-     * @param  \Illuminate\Support\Collection<int, ActivityEvent>|\Illuminate\Database\Eloquent\Collection<int, ActivityEvent>  $events
-     */
-    protected function batchLoadActivityEventSubjects($events): void
-    {
-        if ($events->isEmpty()) {
-            return;
-        }
-
-        foreach ($events as $event) {
-            $event->unsetRelation('subject');
-        }
-
-        /** @var array<string, list<ActivityEvent>> */
-        $buckets = [
-            Asset::class => [],
-            User::class => [],
-            Tenant::class => [],
-            Brand::class => [],
-            Category::class => [],
-        ];
-
-        foreach ($events as $event) {
-            if ($event->subject_type === null || $event->subject_type === '' || ! $event->subject_id) {
-                $event->setRelation('subject', null);
-
-                continue;
-            }
-
-            $normalized = $this->normalizeActivitySubjectType($event->subject_type);
-            if ($normalized === null || ! array_key_exists($normalized, $buckets)) {
-                $event->setRelation('subject', null);
-
-                continue;
-            }
-
-            $buckets[$normalized][] = $event;
-        }
-
-        foreach ($buckets as $class => $bucketEvents) {
-            if ($bucketEvents === []) {
-                continue;
-            }
-
-            $ids = collect($bucketEvents)->pluck('subject_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
-
-            $models = match ($class) {
-                Asset::class => Asset::withTrashed()->whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                User::class => User::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Tenant::class => Tenant::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Brand::class => Brand::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                Category::class => Category::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
-                default => collect(),
-            };
-
-            foreach ($bucketEvents as $event) {
-                $event->setRelation('subject', $models->get((int) $event->subject_id));
-            }
-        }
-    }
-
-    /**
      * Get query for assets with completed processing pipeline.
      *
      * Completion criteria (matches AssetCompletionService):
@@ -1258,24 +1003,5 @@ class DashboardController extends Controller
             ->normalIntakeOnly()
             ->excludeBuilderStaged()
             ->where('type', AssetType::ASSET);
-    }
-
-    /**
-     * Format event type constant into a readable display name.
-     */
-    protected function formatEventTypeLabel(string $eventType): string
-    {
-        // Convert dot notation to readable format
-        // e.g., "asset.uploaded" -> "Asset Uploaded"
-        $parts = explode('.', $eventType);
-        $formatted = array_map(function ($part) {
-            $formatted = ucfirst(str_replace('_', ' ', $part));
-            // Handle common abbreviations
-            $formatted = str_replace('Ai ', 'AI ', $formatted);
-
-            return $formatted;
-        }, $parts);
-
-        return implode(' ', $formatted);
     }
 }

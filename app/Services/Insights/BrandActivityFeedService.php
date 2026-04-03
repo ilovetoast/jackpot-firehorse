@@ -1,0 +1,271 @@
+<?php
+
+namespace App\Services\Insights;
+
+use App\Enums\EventType;
+use App\Models\ActivityEvent;
+use App\Models\Asset;
+use App\Models\Brand;
+use App\Models\Category;
+use App\Models\Tenant;
+use App\Models\User;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
+use Illuminate\Support\Collection;
+
+/**
+ * Brand-scoped activity feed for dashboard widget and Insights → Activity.
+ */
+class BrandActivityFeedService
+{
+    /**
+     * @return Collection<int, array<string, mixed>>|null null if user lacks activity_logs.view
+     */
+    public function getRecentActivity(Tenant $tenant, Brand $brand, User $user, int $limit = 5): ?Collection
+    {
+        if (! $user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
+            return null;
+        }
+
+        $validSubjectTypes = [
+            Asset::class,
+            User::class,
+            Tenant::class,
+            Brand::class,
+            Category::class,
+        ];
+
+        $activityQuery = ActivityEvent::where('tenant_id', $tenant->id)
+            ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT)
+            ->whereNotNull('subject_type')
+            ->whereIn('subject_type', $validSubjectTypes);
+
+        $activityQuery->where(function ($q) use ($brand) {
+            $q->where('brand_id', $brand->id)->orWhereNull('brand_id');
+        });
+
+        $activityEvents = $activityQuery->orderBy('created_at', 'desc')
+            ->limit($limit)
+            ->with(['brand'])
+            ->get();
+
+        $this->batchLoadActivityEventSubjects($activityEvents);
+
+        $activityEvents->each(function (ActivityEvent $event) {
+            if (! $event->relationLoaded('subject')) {
+                $event->setRelation('subject', null);
+            }
+        });
+
+        $actorUserIds = $activityEvents
+            ->filter(fn (ActivityEvent $e) => $e->actor_type === 'user' && $e->actor_id)
+            ->pluck('actor_id')
+            ->unique()
+            ->values()
+            ->all();
+        $actorsById = $actorUserIds === []
+            ? collect()
+            : User::whereIn('id', $actorUserIds)->get()->keyBy('id');
+
+        return $activityEvents->map(function ($event) use ($tenant, $actorsById) {
+            $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
+
+            $actorName = 'System';
+            $actorAvatarUrl = null;
+            $actorFirstName = null;
+            $actorLastName = null;
+            $actorEmail = null;
+            $companyName = null;
+            $actor = $event->getActorModel($actorsById);
+            if ($actor) {
+                $actorName = $actor->name;
+                $actorAvatarUrl = $actor->avatar_url ?? null;
+                $actorFirstName = $actor->first_name ?? null;
+                $actorLastName = $actor->last_name ?? null;
+                $actorEmail = $actor->email ?? null;
+            } elseif (! empty($event->metadata['actor_name'])) {
+                $actorName = $event->metadata['actor_name'];
+            }
+            if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
+                $companyName = $tenant->name ?? 'System';
+            }
+
+            $subjectName = 'Unknown';
+            $subjectThumbnailUrl = null;
+            $subject = $event->getRelation('subject');
+            if ($subject) {
+                if (method_exists($subject, 'title') && ! empty($subject->title)) {
+                    $subjectName = $subject->title;
+                } elseif (method_exists($subject, 'original_filename') && ! empty($subject->original_filename)) {
+                    $subjectName = $subject->original_filename;
+                } elseif (method_exists($subject, 'name') && ! empty($subject->name)) {
+                    $subjectName = $subject->name;
+                } elseif (method_exists($subject, 'id')) {
+                    if ($subject instanceof Asset) {
+                        $subjectName = 'Asset #'.substr((string) $subject->id, 0, 8);
+                    } else {
+                        $subjectName = 'Item #'.substr((string) $subject->id, 0, 8);
+                    }
+                }
+                if ($subject instanceof Asset) {
+                    $meta = $subject->metadata ?? [];
+                    $thumbStatus = $subject->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                        ? $subject->thumbnail_status->value
+                        : ($subject->thumbnail_status ?? 'pending');
+                    if ($thumbStatus === 'completed') {
+                        $version = $meta['thumbnails_generated_at'] ?? null;
+                        $subjectThumbnailUrl = $subject->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+                        if ($subjectThumbnailUrl && $version) {
+                            $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($version);
+                        }
+                    }
+                }
+            } elseif (! empty($event->metadata['subject_name'])) {
+                $subjectName = $event->metadata['subject_name'];
+            } elseif (! empty($event->metadata['asset_title'])) {
+                $subjectName = $event->metadata['asset_title'];
+            } elseif (! empty($event->metadata['asset_filename'])) {
+                $subjectName = $event->metadata['asset_filename'];
+            }
+
+            $brandPayload = null;
+            if ($event->brand) {
+                $b = $event->brand;
+                $brandPayload = [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'logo_path' => $b->logo_path,
+                    'icon_bg_color' => $b->icon_bg_color,
+                    'icon_style' => $b->icon_style ?? 'subtle',
+                    'primary_color' => $b->primary_color ?? '#4f46e5',
+                ];
+            }
+
+            return [
+                'id' => $event->id,
+                'event_type' => $event->event_type,
+                'event_type_label' => $eventTypeLabel,
+                'description' => $event->metadata['description'] ?? null,
+                'actor' => [
+                    'type' => $event->actor_type,
+                    'name' => $actorName,
+                    'avatar_url' => $actorAvatarUrl,
+                    'first_name' => $actorFirstName,
+                    'last_name' => $actorLastName,
+                    'email' => $actorEmail,
+                ],
+                'company_name' => $companyName,
+                'subject' => [
+                    'type' => $event->subject_type,
+                    'name' => $subjectName,
+                    'id' => $event->subject_id,
+                    'thumbnail_url' => $subjectThumbnailUrl,
+                ],
+                'brand' => $brandPayload,
+                'metadata' => $event->metadata,
+                'created_at' => $event->created_at->toISOString(),
+                'created_at_human' => $event->created_at->diffForHumans(),
+            ];
+        });
+    }
+
+    protected function normalizeActivitySubjectType(?string $subjectType): ?string
+    {
+        if ($subjectType === null || $subjectType === '') {
+            return null;
+        }
+
+        $t = trim($subjectType);
+        if ($t === Asset::class || str_ends_with($t, '\\Asset') || $t === 'asset') {
+            return Asset::class;
+        }
+        if ($t === User::class || str_ends_with($t, '\\User')) {
+            return User::class;
+        }
+        if ($t === Tenant::class || str_ends_with($t, '\\Tenant')) {
+            return Tenant::class;
+        }
+        if ($t === Brand::class || str_ends_with($t, '\\Brand')) {
+            return Brand::class;
+        }
+        if ($t === Category::class || str_ends_with($t, '\\Category')) {
+            return Category::class;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ActivityEvent>|\Illuminate\Database\Eloquent\Collection<int, ActivityEvent>  $events
+     */
+    protected function batchLoadActivityEventSubjects($events): void
+    {
+        if ($events->isEmpty()) {
+            return;
+        }
+
+        foreach ($events as $event) {
+            $event->unsetRelation('subject');
+        }
+
+        /** @var array<string, list<ActivityEvent>> */
+        $buckets = [
+            Asset::class => [],
+            User::class => [],
+            Tenant::class => [],
+            Brand::class => [],
+            Category::class => [],
+        ];
+
+        foreach ($events as $event) {
+            if ($event->subject_type === null || $event->subject_type === '' || ! $event->subject_id) {
+                $event->setRelation('subject', null);
+
+                continue;
+            }
+
+            $normalized = $this->normalizeActivitySubjectType($event->subject_type);
+            if ($normalized === null || ! array_key_exists($normalized, $buckets)) {
+                $event->setRelation('subject', null);
+
+                continue;
+            }
+
+            $buckets[$normalized][] = $event;
+        }
+
+        foreach ($buckets as $class => $bucketEvents) {
+            if ($bucketEvents === []) {
+                continue;
+            }
+
+            $ids = collect($bucketEvents)->pluck('subject_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+
+            $models = match ($class) {
+                Asset::class => Asset::withTrashed()->whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                User::class => User::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                Tenant::class => Tenant::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                Brand::class => Brand::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                Category::class => Category::whereIn('id', $ids)->get()->keyBy(fn ($m) => (int) $m->getKey()),
+                default => collect(),
+            };
+
+            foreach ($bucketEvents as $event) {
+                $event->setRelation('subject', $models->get((int) $event->subject_id));
+            }
+        }
+    }
+
+    protected function formatEventTypeLabel(string $eventType): string
+    {
+        $parts = explode('.', $eventType);
+        $formatted = array_map(function ($part) {
+            $formatted = ucfirst(str_replace('_', ' ', $part));
+            $formatted = str_replace('Ai ', 'AI ', $formatted);
+
+            return $formatted;
+        }, $parts);
+
+        return implode(' ', $formatted);
+    }
+}

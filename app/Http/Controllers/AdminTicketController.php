@@ -15,6 +15,7 @@ use App\Models\ActivityEvent;
 use App\Models\AITicketSuggestion;
 use App\Models\Brand;
 use App\Models\SupportRoundRobinUser;
+use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\TicketLink;
 use App\Models\TicketMessage;
@@ -396,7 +397,7 @@ class AdminTicketController extends Controller
 
         // Log assignment change
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1, // Use ticket tenant or fallback
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_ASSIGNED,
             subject: $ticket,
             actor: $user,
@@ -514,6 +515,30 @@ class AdminTicketController extends Controller
     }
 
     /**
+     * activity_events.tenant_id is a required FK. Internal / engineering tickets often have null tenant_id.
+     */
+    protected function activityTenantIdForTicket(Ticket $ticket): int
+    {
+        if ($ticket->tenant_id) {
+            return (int) $ticket->tenant_id;
+        }
+
+        $configured = config('tickets.activity_fallback_tenant_id');
+        if ($configured !== null && $configured !== '') {
+            return (int) $configured;
+        }
+
+        $id = Tenant::query()->orderBy('id')->value('id');
+        if ($id) {
+            return (int) $id;
+        }
+
+        throw new \RuntimeException(
+            'Cannot log ticket activity: no tenant on ticket and no tenants in database. Set TICKETS_ACTIVITY_FALLBACK_TENANT_ID in .env.'
+        );
+    }
+
+    /**
      * Set status to resolved with appropriate message visibility and optional creator email (tenant + public only).
      */
     protected function performTicketResolution(Ticket $ticket, User $user, string $resolutionBody, string $activityContext): void
@@ -543,7 +568,7 @@ class AdminTicketController extends Controller
             $ticket->update(['status' => TicketStatus::RESOLVED]);
 
             ActivityRecorder::record(
-                tenant: $ticket->tenant_id ?? 1,
+                tenant: $this->activityTenantIdForTicket($ticket),
                 eventType: EventType::TICKET_MESSAGE_CREATED,
                 subject: $ticket,
                 actor: $user,
@@ -556,7 +581,7 @@ class AdminTicketController extends Controller
             );
 
             ActivityRecorder::record(
-                tenant: $ticket->tenant_id ?? 1,
+                tenant: $this->activityTenantIdForTicket($ticket),
                 eventType: EventType::TICKET_STATUS_CHANGED,
                 subject: $ticket->fresh(),
                 actor: $user,
@@ -599,7 +624,7 @@ class AdminTicketController extends Controller
 
         // Log status change
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_STATUS_CHANGED,
             subject: $ticket,
             actor: $user,
@@ -632,7 +657,7 @@ class AdminTicketController extends Controller
 
         // Log status change
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_STATUS_CHANGED,
             subject: $ticket,
             actor: $user,
@@ -692,7 +717,7 @@ class AdminTicketController extends Controller
 
         // Log status change
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_STATUS_CHANGED,
             subject: $ticket,
             actor: $user,
@@ -741,7 +766,7 @@ class AdminTicketController extends Controller
 
         // Log public message creation
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_MESSAGE_CREATED,
             subject: $ticket,
             actor: $user,
@@ -795,7 +820,7 @@ class AdminTicketController extends Controller
 
         // Log internal note creation
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_INTERNAL_NOTE_ADDED,
             subject: $ticket,
             actor: $user,
@@ -851,7 +876,7 @@ class AdminTicketController extends Controller
 
         // Log conversion
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_CONVERTED,
             subject: $ticket,
             actor: $user,
@@ -931,7 +956,7 @@ class AdminTicketController extends Controller
 
         // Log linking
         ActivityRecorder::record(
-            tenant: $ticket->tenant_id ?? 1,
+            tenant: $this->activityTenantIdForTicket($ticket),
             eventType: EventType::TICKET_LINKED,
             subject: $ticket,
             actor: $user,

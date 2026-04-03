@@ -73,4 +73,18 @@ return [
 
     'round_robin_default_user_ids' => [1],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Activity log tenant for internal tickets
+    |--------------------------------------------------------------------------
+    |
+    | activity_events.tenant_id is required (FK to tenants). Internal / engineering
+    | tickets may have null tenant_id; bulk resolve and other staff actions still
+    | log activity. If unset, the lowest existing tenant id is used. Optionally set
+    | TICKETS_ACTIVITY_FALLBACK_TENANT_ID to a stable tenant (e.g. site owner).
+    |
+    */
+
+    'activity_fallback_tenant_id' => env('TICKETS_ACTIVITY_FALLBACK_TENANT_ID'),
+
 ];

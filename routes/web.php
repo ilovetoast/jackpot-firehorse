@@ -527,6 +527,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/insights/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('insights.metadata');
             Route::get('/insights/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('insights.metadata.data');
             Route::get('/insights/usage', [\App\Http\Controllers\AnalyticsOverviewController::class, 'usage'])->name('insights.usage');
+            Route::get('/insights/activity', [\App\Http\Controllers\AnalyticsOverviewController::class, 'activity'])->name('insights.activity');
             Route::get('/insights/review', [\App\Http\Controllers\AiReviewController::class, 'index'])->name('insights.review');
             // Backward compatibility: redirect /analytics to /insights
             Route::redirect('/analytics', '/insights', 301);

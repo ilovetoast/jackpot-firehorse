@@ -7,7 +7,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Deferred /app/overview/insights payload (signals, momentum, LLM insights).
-    | Lower TTL if you need fresher data; higher reduces load on repeat visits.
+    | On cache miss, BrandInsightLLM may call your AI provider (multi-second TTFB) before
+    | the response is cached; repeat visits within TTL are fast. Raise TTL to reduce cold hits.
     |
     */
     'overview_insights_ttl_seconds' => max(60, (int) env('BRAND_OVERVIEW_INSIGHTS_TTL', 300)),

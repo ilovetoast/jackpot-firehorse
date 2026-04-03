@@ -15,7 +15,7 @@ const SIDEBAR_ITEMS = [
     { id: 'review', label: 'Review', href: '/app/insights/review', icon: SparklesIcon },
     { id: 'metadata', label: 'Metadata', href: '/app/insights/metadata', icon: TableCellsIcon },
     { id: 'usage', label: 'Usage', href: '/app/insights/usage', icon: ArrowTrendingUpIcon },
-    { id: 'activity', label: 'Activity', href: '/app/insights/activity', icon: ClockIcon, disabled: true },
+    { id: 'activity', label: 'Activity', href: '/app/insights/activity', icon: ClockIcon },
 ]
 
 export default function InsightsLayout({ children, title = 'Insights', activeSection = 'overview' }) {

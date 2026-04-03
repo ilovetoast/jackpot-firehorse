@@ -10,6 +10,7 @@ use App\Models\Asset;
 use App\Models\Collection;
 use App\Models\Download;
 use App\Services\AiUsageService;
+use App\Services\Insights\BrandActivityFeedService;
 use App\Services\MetadataAnalyticsService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
@@ -55,6 +56,30 @@ class AnalyticsOverviewController extends Controller
             'rights_risk' => $data['rights_risk'],
             'plan' => $data['plan'],
             'brand_guidelines' => $data['brand_guidelines'],
+        ]);
+    }
+
+    /**
+     * Brand-scoped activity log (same data shape as the dashboard widget, longer list).
+     * GET /app/insights/activity
+     */
+    public function activity(Request $request): Response
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand) {
+            abort(403, 'Tenant and brand must be selected.');
+        }
+        $user = Auth::user();
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to view insights.');
+        }
+
+        $feed = app(BrandActivityFeedService::class)->getRecentActivity($tenant, $brand, $user, 100);
+
+        return Inertia::render('Insights/Activity', [
+            'activity' => $feed?->values()->all() ?? [],
+            'can_view_activity_logs' => $feed !== null,
         ]);
     }
 
