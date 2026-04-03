@@ -35,9 +35,25 @@ import AssetSidebar from '../../Components/AssetSidebar'
 import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
 import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
 
-const DELIVERABLE_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total']
+const DELIVERABLE_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total', 'grid_folder_total']
 
-export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
+/** Single partial-reload set for category / grid (avoid a categories-only reload + a second navigation). */
+const DELIVERABLE_CATEGORY_NAV_ONLY = [
+    'filterable_schema',
+    'available_values',
+    ...DELIVERABLE_GRID_QUERY_KEYS,
+    'selected_category',
+    'selected_category_slug',
+    'compliance_filter',
+    'show_compliance_filter',
+    'lifecycle',
+    'trash_count',
+    'can_view_trash',
+]
+
+const DELIVERABLE_SIDEBAR_COUNTS_ONLY = ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count']
+
+export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -45,6 +61,18 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+
+    // Keep highlight in sync with the server after partial reloads / Inertia visits (contributors + managers).
+    useEffect(() => {
+        if (selected_category === undefined) return
+        if (selected_category == null || selected_category === '') {
+            setSelectedCategoryId((prev) => (prev === null ? prev : null))
+            return
+        }
+        const next = parseInt(String(selected_category), 10)
+        if (Number.isNaN(next)) return
+        setSelectedCategoryId((prev) => (prev === next ? prev : next))
+    }, [selected_category])
     
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
@@ -305,16 +333,39 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         setIsUploadDialogOpen(false)
         
         setSelectedCategoryId(categoryId)
-        
-        router.get('/app/executions', 
-            categorySlug ? { category: categorySlug } : {},
-            { 
-                preserveState: true, 
-                preserveScroll: true,
-                only: ['filterable_schema', 'available_values', ...DELIVERABLE_GRID_QUERY_KEYS, 'selected_category', 'selected_category_slug', 'compliance_filter', 'show_compliance_filter', 'lifecycle', 'trash_count', 'can_view_trash']
-            }
-        )
+
+        let params
+        if (categorySlug) {
+            params = { category: categorySlug }
+        } else {
+            const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
+            urlParams.delete('category')
+            urlParams.delete('asset')
+            params = Object.fromEntries(urlParams)
+        }
+
+        router.get('/app/executions', params, {
+            preserveState: true,
+            preserveScroll: true,
+            only: DELIVERABLE_CATEGORY_NAV_ONLY,
+        })
     }
+
+    const handleAddCategorySuccess = useCallback((newCat) => {
+        if (newCat?.slug) {
+            const rawId = newCat.id
+            setSelectedCategoryId(
+                rawId != null && rawId !== '' ? parseInt(String(rawId), 10) : null
+            )
+            router.get('/app/executions', { category: newCat.slug }, {
+                preserveState: true,
+                preserveScroll: true,
+                only: [...DELIVERABLE_CATEGORY_NAV_ONLY, ...DELIVERABLE_SIDEBAR_COUNTS_ONLY],
+            })
+        } else {
+            router.reload({ only: [...DELIVERABLE_SIDEBAR_COUNTS_ONLY] })
+        }
+    }, [])
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
@@ -355,7 +406,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: 'all',
                 label: 'All',
-                count: total_asset_count > 0 ? total_asset_count : null,
+                count: typeof total_asset_count === 'number' ? total_asset_count : null,
                 category: null,
                 categoryId: null,
             })
@@ -365,7 +416,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             tabs.push({
                 key: String(category.id ?? `template-${category.slug}-${category.asset_type}`),
                 label: category.name,
-                count: typeof category.asset_count === 'number' && category.asset_count > 0 ? category.asset_count : null,
+                count: typeof category.asset_count === 'number' ? category.asset_count : null,
                 category,
                 categoryId: category.id ?? null,
             })
@@ -848,6 +899,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
                                         filteredGridTotal={typeof filtered_grid_total === 'number' ? filtered_grid_total : null}
+                                        gridFolderTotal={typeof grid_folder_total === 'number' ? grid_folder_total : null}
                                         hasMoreAvailable={!!nextPageUrl}
                                     />
                                 }
@@ -1034,10 +1086,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     brandName={auth.activeBrand.name ?? ''}
                     categoryLimits={null}
                     canViewMetadataRegistry={can('metadata.registry.view') || can('metadata.tenant.visibility.manage')}
-                    onSuccess={() => {
-                        router.reload({ only: ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count'] })
-                        setAddCategoryModalOpen(false)
-                    }}
+                    onSuccess={handleAddCategorySuccess}
                 />
             )}
             {addExistingCategoryOpen && auth?.activeBrand && (

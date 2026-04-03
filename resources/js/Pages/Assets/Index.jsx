@@ -51,9 +51,9 @@ const ASSET_INDEX_SIDEBAR_COUNT_PROPS = [
 ]
 
 /** Inertia `only` keys whenever the paginated grid query result is refreshed */
-const ASSET_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total']
+const ASSET_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total', 'grid_folder_total']
 
-export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filtered_grid_total = 0, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
+export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -544,7 +544,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             tabs.push({
                 key: 'all',
                 label: 'All',
-                count: total_asset_count > 0 ? total_asset_count : null,
+                count: typeof total_asset_count === 'number' ? total_asset_count : null,
                 category: null,
                 categoryId: null,
                 isTrash: false,
@@ -555,7 +555,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             tabs.push({
                 key: String(cat.id),
                 label: cat.name,
-                count: typeof cat.asset_count === 'number' && cat.asset_count > 0 ? cat.asset_count : null,
+                count: typeof cat.asset_count === 'number' ? cat.asset_count : null,
                 category: cat,
                 categoryId: cat.id,
                 isTrash: false,
@@ -918,7 +918,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                             >
                                                 <TagIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId == null ? activeTextColor : textColor }} />
                                                 <span className="flex-1">All</span>
-                                                {total_asset_count > 0 && (
+                                                {typeof total_asset_count === 'number' && (
                                                     <span className="text-xs opacity-80">{total_asset_count}</span>
                                                 )}
                                             </button>
@@ -934,7 +934,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                                 >
                                                     <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-80" style={{ color: isSelected ? activeTextColor : textColor }} />
                                                     <span className="flex-1">{category.name}</span>
-                                                    {typeof category.asset_count === 'number' && category.asset_count > 0 && (
+                                                    {typeof category.asset_count === 'number' && (
                                                         <span className="text-xs opacity-80">{category.asset_count}</span>
                                                     )}
                                                 </button>
@@ -1039,7 +1039,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         <AssetFilterChipsBar
                             filterable_schema={filterable_schema}
                             available_values={availableValues}
-                            inertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total']}
+                            inertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total', 'grid_folder_total']}
                         />
                     </div>
                     <div 
@@ -1102,7 +1102,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     urlParams.delete('page')
                                     router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...ASSET_GRID_QUERY_KEYS, 'sort', 'sort_direction'] })
                                 }}
-                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total']}
+                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total', 'grid_folder_total']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
@@ -1153,6 +1153,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
                                         filteredGridTotal={typeof filtered_grid_total === 'number' ? filtered_grid_total : null}
+                                        gridFolderTotal={typeof grid_folder_total === 'number' ? grid_folder_total : null}
                                         hasMoreAvailable={!!nextPageUrl}
                                     />
                                 }

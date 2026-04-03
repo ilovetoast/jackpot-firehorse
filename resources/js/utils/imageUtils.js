@@ -17,6 +17,29 @@ function isLikelySvg(imageSrc) {
     return s.startsWith('data:image/svg+xml') || s.includes('.svg') || s.includes('image/svg')
 }
 
+/**
+ * Only same-origin http(s) images should use crossOrigin="anonymous".
+ * CDN/S3/CloudFront thumbnails load fine in img tags without CORS, but anonymous CORS mode
+ * requires Access-Control-Allow-Origin — missing headers spam Chrome Issues ("blocked:cors") while
+ * the UI still works. Omitting crossOrigin for cross-origin URLs avoids that; canvas pixel reads
+ * then hit a tainted-canvas SecurityError and callers treat as skipped.
+ */
+function shouldSetCrossOriginAnonymous(imageSrc) {
+    if (!imageSrc.startsWith('http://') && !imageSrc.startsWith('https://')) {
+        return false
+    }
+    if (typeof window === 'undefined' || !window.location?.origin) {
+        return false
+    }
+    try {
+        const u = new URL(imageSrc, window.location.href)
+
+        return u.origin === window.location.origin
+    } catch {
+        return false
+    }
+}
+
 export async function isImageWhite(imageSrc, threshold = 0.9, samplePixels = 1000) {
     // SVG and other vector formats cannot be sampled for pixel data; skip detection
     if (isLikelySvg(imageSrc)) {
@@ -26,8 +49,7 @@ export async function isImageWhite(imageSrc, threshold = 0.9, samplePixels = 100
     return new Promise((resolve, reject) => {
         const img = new Image()
         
-        // Only set crossOrigin for http(s) URLs - blob/data URLs work without it
-        if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
+        if (shouldSetCrossOriginAnonymous(imageSrc)) {
             img.crossOrigin = 'anonymous'
         }
         
@@ -169,7 +191,7 @@ export async function getImageStyleWithDetection(imageSrc, backgroundColor = '#e
 function loadImage(src) {
     return new Promise((resolve, reject) => {
         const img = new Image()
-        if (src.startsWith('http://') || src.startsWith('https://')) {
+        if (shouldSetCrossOriginAnonymous(src)) {
             img.crossOrigin = 'anonymous'
         }
         img.onload = () => resolve(img)

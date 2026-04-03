@@ -185,7 +185,7 @@ export default function AssetGridMetadataPrimaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total', 'grid_folder_total'],
         })
     }
     
@@ -198,7 +198,7 @@ export default function AssetGridMetadataPrimaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters'],
+            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total', 'grid_folder_total'],
         })
     }
     

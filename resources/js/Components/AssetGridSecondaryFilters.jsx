@@ -39,6 +39,15 @@ import UserSelect from './UserSelect'
 import Avatar from './Avatar'
 import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
 
+const GRID_PARTIAL_RELOAD_KEYS = [
+    'assets',
+    'next_page_url',
+    'filters',
+    'uploaded_by_users',
+    'filtered_grid_total',
+    'grid_folder_total',
+]
+
 function findUploadedByUser(users, rawId) {
     if (rawId == null || rawId === '' || !Array.isArray(users)) {
         return null
@@ -64,7 +73,8 @@ function findUploadedByUser(users, rawId) {
  * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
  * @param {number} [props.assetResultCount] - Number of assets currently visible (e.g. revealed by infinite scroll)
  * @param {number} [props.totalInCategory] - Legacy fallback total when server total is absent
- * @param {number|null} [props.filteredGridTotal] - Server paginator total for current query (accurate "x of y")
+ * @param {number|null} [props.filteredGridTotal] - Server paginator total for current query (filtered count, numerator when present)
+ * @param {number|null} [props.gridFolderTotal] - Total in current library scope (category/All + q), excluding metadata filters; denominator for "x of y"
  * @param {boolean} [props.hasMoreAvailable] - If true, show "x of y+" when more can be loaded (only without server total)
  * @param {React.ReactNode} [props.barTrailingContent] - Optional content on the right of the bar (same line as count and Sort), e.g. Select Multiple / Select all
  * @param {boolean} [props.showComplianceFilter] - If true, show Brand DNA compliance filter (Deliverables only)
@@ -89,6 +99,7 @@ export default function AssetGridSecondaryFilters({
     assetResultCount = null,
     totalInCategory = null,
     filteredGridTotal = null,
+    gridFolderTotal = null,
     hasMoreAvailable = false,
     barTrailingContent = null,
     showComplianceFilter = false,
@@ -214,7 +225,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -238,7 +249,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -262,7 +273,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -282,7 +293,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -302,7 +313,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -446,7 +457,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -459,7 +470,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'filtered_grid_total'],
+            only: GRID_PARTIAL_RELOAD_KEYS,
         })
     }
     
@@ -479,29 +490,39 @@ export default function AssetGridSecondaryFilters({
         hideSortInSecondaryBar && !hasFilterPillsRow && barTrailingContent == null
 
     const hasServerTotal = typeof filteredGridTotal === 'number' && !Number.isNaN(filteredGridTotal)
-    const totalMatching = hasServerTotal
-        ? filteredGridTotal
-        : totalInCategory != null
-          ? totalInCategory
-          : assetResultCount
+    const hasFolderTotal =
+        typeof gridFolderTotal === 'number' && !Number.isNaN(gridFolderTotal)
+
+    const folderDenominator = hasFolderTotal
+        ? gridFolderTotal
+        : hasServerTotal
+          ? filteredGridTotal
+          : totalInCategory != null
+            ? totalInCategory
+            : assetResultCount
+
     const loadedCount = assetResultCount
     const showPlus =
         !hasServerTotal &&
         hasMoreAvailable &&
         loadedCount != null &&
-        totalMatching != null &&
-        loadedCount < totalMatching
+        folderDenominator != null &&
+        loadedCount < folderDenominator
+
+    const countPart =
+        hasServerTotal && folderDenominator != null
+            ? `${filteredGridTotal} of ${folderDenominator}`
+            : loadedCount != null && folderDenominator != null
+              ? `${loadedCount} of ${folderDenominator}${showPlus ? '+' : ''}`
+              : ''
 
     useEffect(() => {
         if (!hideInlineMoreFiltersButton || !onToolbarMoreFiltersMetaReport) return
-        const countPart =
-            loadedCount != null && totalMatching != null
-                ? `${loadedCount} of ${totalMatching}${showPlus ? '+' : ''}`
-                : ''
-        const desktopResultSummary =
-            activeFilterCount > 0 && countPart
+        const desktopResultSummary = countPart
+            ? activeFilterCount > 0
                 ? `${countPart} · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}`
-                : ''
+                : countPart
+            : ''
         onToolbarMoreFiltersMetaReport({
             activeFilterCount,
             visibleSecondaryFiltersLength: visibleSecondaryFilters.length,
@@ -514,9 +535,7 @@ export default function AssetGridSecondaryFilters({
         activeFilterCount,
         visibleSecondaryFilters.length,
         brandPrimary,
-        loadedCount,
-        totalMatching,
-        showPlus,
+        countPart,
     ])
     
     // Always render the "More filters" bar container
@@ -654,16 +673,13 @@ export default function AssetGridSecondaryFilters({
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 sm:justify-end min-w-0">
                     {barTrailingContent != null && barTrailingContent}
                     {/* Indicator: result count and filter count in selected category */}
-                    {(assetResultCount != null || activeFilterCount > 0) && (
+                    {(countPart || activeFilterCount > 0) && (
                         <span
                             className={`text-xs text-gray-500 whitespace-nowrap${hideSortInSecondaryBar && activeFilterCount > 0 ? ' lg:hidden' : ''}`}
                         >
                             {[
-                                loadedCount != null
-                                    ? (totalMatching != null
-                                        ? `${loadedCount} of ${totalMatching}${showPlus ? '+' : ''}`
-                                        : String(loadedCount))
-                                    : '',
+                                countPart ||
+                                    (loadedCount != null ? String(loadedCount) : ''),
                                 activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
                             ].filter(Boolean).join(' · ')}
                         </span>

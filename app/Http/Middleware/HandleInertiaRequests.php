@@ -562,26 +562,29 @@ class HandleInertiaRequests extends Middleware
         // Only calculate if tenant and brand are available
         if ($tenant && $activeBrand && $user) {
             try {
-                // Pending AI suggestions count (metadata candidates + tag candidates)
-                $pendingMetadataCount = DB::table('asset_metadata_candidates')
+                // Pending AI suggestions (same asset scope as /api/ai/review — contributors: teammates' uploads only)
+                $aiScope = app(\App\Services\AiReviewSuggestionScopeService::class);
+                $pendingMetadataQuery = DB::table('asset_metadata_candidates')
                     ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
                     ->whereNull('assets.deleted_at')
                     ->where('assets.tenant_id', $tenant->id)
                     ->where('assets.brand_id', $activeBrand->id)
                     ->whereNull('asset_metadata_candidates.resolved_at')
                     ->whereNull('asset_metadata_candidates.dismissed_at')
-                    ->where('asset_metadata_candidates.producer', 'ai')
-                    ->count();
+                    ->where('asset_metadata_candidates.producer', 'ai');
+                $aiScope->scopeQueryToAiReviewAssetVisibility($pendingMetadataQuery, $user, $activeBrand);
+                $pendingMetadataCount = (int) $pendingMetadataQuery->count();
 
-                $pendingTagCount = DB::table('asset_tag_candidates')
+                $pendingTagQuery = DB::table('asset_tag_candidates')
                     ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
                     ->whereNull('assets.deleted_at')
                     ->where('assets.tenant_id', $tenant->id)
                     ->where('assets.brand_id', $activeBrand->id)
                     ->where('asset_tag_candidates.producer', 'ai')
                     ->whereNull('asset_tag_candidates.resolved_at')
-                    ->whereNull('asset_tag_candidates.dismissed_at')
-                    ->count();
+                    ->whereNull('asset_tag_candidates.dismissed_at');
+                $aiScope->scopeQueryToAiReviewAssetVisibility($pendingTagQuery, $user, $activeBrand);
+                $pendingTagCount = (int) $pendingTagQuery->count();
 
                 $totalPendingAiSuggestions = $pendingMetadataCount + $pendingTagCount;
 

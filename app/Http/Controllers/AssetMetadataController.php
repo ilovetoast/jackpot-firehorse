@@ -4367,15 +4367,17 @@ class AssetMetadataController extends Controller
         $items = [];
         $assetIds = [];
 
-        // 1. Get tag candidates
-        $tagCandidates = DB::table('asset_tag_candidates')
+        // 1. Get tag candidates (per-user asset scope matches AI Review / bell)
+        $tagQuery = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
             ->whereNull('assets.deleted_at')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('asset_tag_candidates.producer', 'ai')
             ->whereNull('asset_tag_candidates.resolved_at')
-            ->whereNull('asset_tag_candidates.dismissed_at')
+            ->whereNull('asset_tag_candidates.dismissed_at');
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($tagQuery, $user, $brand);
+        $tagCandidates = $tagQuery
             ->select(
                 'asset_tag_candidates.id',
                 'asset_tag_candidates.asset_id',
@@ -4394,8 +4396,7 @@ class AssetMetadataController extends Controller
         }
 
         // 2. Get metadata candidates (AI only)
-        // Phase M-1: Only AI candidates are shown as suggestions
-        $metadataCandidates = DB::table('asset_metadata_candidates')
+        $metadataQuery = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
             ->join('metadata_fields', 'asset_metadata_candidates.metadata_field_id', '=', 'metadata_fields.id')
             ->whereNull('assets.deleted_at')
@@ -4403,7 +4404,9 @@ class AssetMetadataController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
-            ->where('asset_metadata_candidates.producer', 'ai') // Phase M-1: Only AI candidates
+            ->where('asset_metadata_candidates.producer', 'ai');
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($metadataQuery, $user, $brand);
+        $metadataCandidates = $metadataQuery
             ->select(
                 'asset_metadata_candidates.id',
                 'asset_metadata_candidates.asset_id',

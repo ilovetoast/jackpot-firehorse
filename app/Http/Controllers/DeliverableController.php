@@ -59,6 +59,7 @@ class DeliverableController extends Controller
                 'assets' => [],
                 'next_page_url' => null,
                 'filtered_grid_total' => 0,
+                'grid_folder_total' => 0,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'compliance_filter' => '',
@@ -205,7 +206,7 @@ class DeliverableController extends Controller
         }
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
             $id = isset($category['id']) ? (int) $category['id'] : 0;
-            $category['asset_count'] = $id > 0 ? ($assetCounts[$id] ?? 0) : 0;
+            $category['asset_count'] = $id > 0 ? (int) (($assetCounts[$id] ?? $assetCounts[(string) $id] ?? 0)) : 0;
 
             return $category;
         });
@@ -303,6 +304,14 @@ class DeliverableController extends Controller
             $tenant,
             $brand
         );
+
+        // Total in current library scope (All vs one category + lifecycle), plus search q only — excludes metadata filters, compliance, uploader, etc.
+        $gridFolderTotalQuery = (clone $assetsQuery);
+        $folderSearchQ = $request->input('q') ?? $request->input('search');
+        if (is_string($folderSearchQ) && trim($folderSearchQ) !== '') {
+            $this->assetSearchService->applyScopedSearch($gridFolderTotalQuery, trim($folderSearchQ));
+        }
+        $gridFolderTotal = (int) (clone $gridFolderTotalQuery)->reorder()->count();
 
         // Phase M: Base query for "has values" check (tenant, brand, category, lifecycle only; filters/search applied below)
         $baseQueryForFilterVisibility = (clone $assetsQuery);
@@ -1088,6 +1097,7 @@ class DeliverableController extends Controller
             'assets' => $mappedAssets,
             'next_page_url' => $nextPageUrl,
             'filtered_grid_total' => (int) $paginator->total(),
+            'grid_folder_total' => $gridFolderTotal,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,

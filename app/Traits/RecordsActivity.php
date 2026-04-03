@@ -120,12 +120,17 @@ trait RecordsActivity
                 ];
             }
             
-            // Always store subject name in metadata for easier retrieval
-            // This helps when the subject relationship isn't loaded or the model is deleted
-            if (method_exists($model, 'getNameAttribute') || isset($model->name)) {
-                $metadata['subject_name'] = $model->name ?? null;
-            } elseif (method_exists($model, 'getTitleAttribute') || isset($model->title)) {
-                $metadata['subject_name'] = $model->title ?? null;
+            // Snapshot display name for feeds when the subject row is gone or not eager-loaded
+            $inferredName = null;
+            foreach (['title', 'original_filename', 'name'] as $attr) {
+                $v = $model->getAttribute($attr);
+                if (filled($v)) {
+                    $inferredName = is_string($v) ? trim($v) : (string) $v;
+                    break;
+                }
+            }
+            if ($inferredName !== null) {
+                $metadata['subject_name'] = $inferredName;
             }
 
             // Record the event

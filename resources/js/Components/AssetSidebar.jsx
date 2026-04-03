@@ -76,7 +76,7 @@ const NavButton = ({
             />
         )}
         <span className="flex-1">{label}</span>
-        {count != null && count > 0 && (
+        {typeof count === 'number' && (
             <span
                 className="text-xs font-normal opacity-80"
                 style={{ color: isSelected ? activeTextColor : unselectedCountColor }}
@@ -251,8 +251,7 @@ export default function AssetSidebar({
                                             />
                                             <span className="flex-1">{category.name}</span>
                                             {category.id != null &&
-                                                typeof category.asset_count === 'number' &&
-                                                category.asset_count > 0 && (
+                                                typeof category.asset_count === 'number' && (
                                                 <span
                                                     className="text-xs font-normal opacity-80 ml-2"
                                                     style={{ color: isSelected ? activeTextColor : unselectedCountColor }}

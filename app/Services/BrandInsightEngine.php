@@ -50,11 +50,10 @@ class BrandInsightEngine
 
             $isContributor = $this->isBrandContributor($user, $brand);
 
-            $canSeeAllAiReview = $this->tenantResolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
-            $canSeeOwnAiReview = ! $canSeeAllAiReview
-                && $this->tenantResolver->hasForBrand($user, $brand, 'metadata.review_candidates');
-            // Contributors never see org-wide AI review queues here — only their own uploads.
-            $limitAiToUploader = ($isContributor || $canSeeOwnAiReview) ? $user : null;
+            $aiScope = app(\App\Services\AiReviewSuggestionScopeService::class);
+            $canSeeAllAiReview = $aiScope->canViewBrandWideAiReviewQueues($user, $brand);
+            $canSeeOthersAiReview = ! $canSeeAllAiReview && $aiScope->canAccessAiReviewApi($user, $brand);
+            // Contributors: review queue is assets uploaded by teammates (not org-wide).
 
             $canActOnMetadataInsights = $this->userCanActOnMetadataInsights($user, $brand);
             // Contributors only ever see missing-metadata counts for assets they uploaded.
@@ -63,8 +62,8 @@ class BrandInsightEngine
             $canSeeRightsInsightsTab = $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
 
             // 1a. AI Tag Suggestions Pending (high)
-            if ($canSeeAllAiReview || $canSeeOwnAiReview) {
-                $tagCount = $this->getPendingAiTagSuggestionsCount($brand, $limitAiToUploader);
+            if ($canSeeAllAiReview || $canSeeOthersAiReview) {
+                $tagCount = $this->getPendingAiTagSuggestionsCount($brand, $user);
                 if ($tagCount > 0) {
                     $signals[] = [
                         'type' => 'action',
@@ -81,8 +80,8 @@ class BrandInsightEngine
             }
 
             // 1b. AI Category Suggestions Pending (high)
-            if ($canSeeAllAiReview || $canSeeOwnAiReview) {
-                $categoryCount = $this->getPendingAiCategorySuggestionsCount($brand, $limitAiToUploader);
+            if ($canSeeAllAiReview || $canSeeOthersAiReview) {
+                $categoryCount = $this->getPendingAiCategorySuggestionsCount($brand, $user);
                 if ($categoryCount > 0) {
                     $signals[] = [
                         'type' => 'action',
@@ -191,7 +190,7 @@ class BrandInsightEngine
         return strtolower($user->getRoleForBrand($brand) ?? '') === 'contributor';
     }
 
-    protected function getPendingAiTagSuggestionsCount(Brand $brand, ?User $limitToUploader = null): int
+    protected function getPendingAiTagSuggestionsCount(Brand $brand, User $user): int
     {
         $q = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
@@ -201,14 +200,12 @@ class BrandInsightEngine
             ->where('asset_tag_candidates.producer', 'ai')
             ->whereNull('asset_tag_candidates.resolved_at')
             ->whereNull('asset_tag_candidates.dismissed_at');
-        if ($limitToUploader) {
-            $q->where('assets.user_id', $limitToUploader->id);
-        }
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
 
         return (int) $q->count();
     }
 
-    protected function getPendingAiCategorySuggestionsCount(Brand $brand, ?User $limitToUploader = null): int
+    protected function getPendingAiCategorySuggestionsCount(Brand $brand, User $user): int
     {
         $q = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
@@ -218,9 +215,7 @@ class BrandInsightEngine
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
             ->where('asset_metadata_candidates.producer', 'ai');
-        if ($limitToUploader) {
-            $q->where('assets.user_id', $limitToUploader->id);
-        }
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
 
         return (int) $q->count();
     }

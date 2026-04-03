@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
 /**
@@ -93,20 +94,9 @@ class BrandActivityFeedService
             $subjectName = 'Unknown';
             $subjectThumbnailUrl = null;
             $subject = $event->getRelation('subject');
-            if ($subject) {
-                if (method_exists($subject, 'title') && ! empty($subject->title)) {
-                    $subjectName = $subject->title;
-                } elseif (method_exists($subject, 'original_filename') && ! empty($subject->original_filename)) {
-                    $subjectName = $subject->original_filename;
-                } elseif (method_exists($subject, 'name') && ! empty($subject->name)) {
-                    $subjectName = $subject->name;
-                } elseif (method_exists($subject, 'id')) {
-                    if ($subject instanceof Asset) {
-                        $subjectName = 'Asset #'.substr((string) $subject->id, 0, 8);
-                    } else {
-                        $subjectName = 'Item #'.substr((string) $subject->id, 0, 8);
-                    }
-                }
+            if ($subject instanceof Model) {
+                // Use attributes / accessors — not method_exists('title'), which is false for normal Eloquent columns.
+                $subjectName = $this->resolveSubjectDisplayName($subject);
                 if ($subject instanceof Asset) {
                     $meta = $subject->metadata ?? [];
                     $thumbStatus = $subject->thumbnail_status instanceof \App\Enums\ThumbnailStatus
@@ -167,6 +157,29 @@ class BrandActivityFeedService
                 'created_at_human' => $event->created_at->diffForHumans(),
             ];
         });
+    }
+
+    /**
+     * Human-readable label for activity feed (Insights, dashboard widget).
+     * Must use {@see Model::getAttribute()} — not method_exists('title'), which is false for normal columns/accessors.
+     */
+    protected function resolveSubjectDisplayName(Model $subject): string
+    {
+        foreach (['title', 'original_filename', 'name'] as $attr) {
+            $v = $subject->getAttribute($attr);
+            if (filled($v)) {
+                return is_string($v) ? trim($v) : (string) $v;
+            }
+        }
+
+        $key = $subject->getKey();
+        if ($key !== null && $key !== '') {
+            $idStr = (string) $key;
+
+            return ($subject instanceof Asset ? 'Asset' : 'Item').' #'.substr($idStr, 0, 8);
+        }
+
+        return 'Unknown';
     }
 
     protected function normalizeActivitySubjectType(?string $subjectType): ?string

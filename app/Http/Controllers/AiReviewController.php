@@ -62,18 +62,16 @@ class AiReviewController extends Controller
         // Contributors keep metadata.suggestions.view in the permission map but must not see org-wide queues here.
         $isContributor = strtolower((string) $user->getRoleForBrand($brand)) === 'contributor';
         $canViewAll = ! $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
-        $canReviewOwn = $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
-        if (! $canViewAll && ! $canReviewOwn) {
+        $canReviewOthers = $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
+        if (! $canViewAll && ! $canReviewOthers) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
-        $limitToUploader = $canReviewOwn ? $user : null;
-
         if ($type === 'tags') {
-            return $this->getTagSuggestions($tenant, $brand, $limitToUploader);
+            return $this->getTagSuggestions($tenant, $brand, $user);
         }
         if ($type === 'categories') {
-            return $this->getCategorySuggestions($tenant, $brand, $limitToUploader);
+            return $this->getCategorySuggestions($tenant, $brand, $user);
         }
         if ($type === 'values') {
             return $this->getValueSuggestions($tenant, $brand, $request);
@@ -447,7 +445,7 @@ class AiReviewController extends Controller
         return $out;
     }
 
-    protected function getTagSuggestions($tenant, $brand, $limitToUploader = null): JsonResponse
+    protected function getTagSuggestions($tenant, $brand, $user): JsonResponse
     {
         $q = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
@@ -468,9 +466,7 @@ class AiReviewController extends Controller
                 'assets.thumbnail_status',
                 'assets.metadata'
             );
-        if ($limitToUploader) {
-            $q->where('assets.user_id', $limitToUploader->id);
-        }
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
 
         [$perPage, $page] = $this->reviewPaginationParams(request());
         $total = (clone $q)->count();
@@ -484,7 +480,7 @@ class AiReviewController extends Controller
         return $this->formatTagResponse($candidates, $this->paginationMeta($total, $perPage, $page));
     }
 
-    protected function getCategorySuggestions($tenant, $brand, $limitToUploader = null): JsonResponse
+    protected function getCategorySuggestions($tenant, $brand, $user): JsonResponse
     {
         $q = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
@@ -510,9 +506,7 @@ class AiReviewController extends Controller
                 'assets.thumbnail_status',
                 'assets.metadata'
             );
-        if ($limitToUploader) {
-            $q->where('assets.user_id', $limitToUploader->id);
-        }
+        app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
 
         [$perPage, $page] = $this->reviewPaginationParams(request());
         $total = (clone $q)->count();

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Download;
 use App\Models\Notification;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -36,7 +38,11 @@ class NotificationController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        $notifications = $raw->map(fn (Notification $n) => $this->formatGrouped($n))->values()->all();
+        $notifications = $raw
+            ->map(fn (Notification $n) => $this->formatGrouped($n, $user))
+            ->filter(fn (array $n) => $n['type'] !== 'download.ready' || ($n['count'] ?? 0) > 0)
+            ->values()
+            ->all();
 
         // Priority: actionable first, then informational
         usort($notifications, function ($a, $b) {
@@ -50,9 +56,7 @@ class NotificationController extends Controller
             return strcmp($bAt, $aAt);
         });
 
-        $unreadCount = $user->notifications()
-            ->whereNull('read_at')
-            ->count();
+        $unreadCount = count(array_filter($notifications, fn (array $n) => ($n['is_unread'] ?? false)));
 
         return response()->json([
             'notifications' => $notifications,
@@ -60,16 +64,22 @@ class NotificationController extends Controller
         ]);
     }
 
-    protected function formatGrouped(Notification $notification): array
+    protected function formatGrouped(Notification $notification, User $viewer): array
     {
         $items = $notification->meta['items'] ?? [];
         $data = $notification->data ?? [];
+        if ($notification->type === 'download.ready') {
+            $items = $this->filterDownloadReadyItemsForUser($items, $data, $viewer);
+        }
         $brands = $this->computeBrandBreakdown($items, $data);
+        $count = $notification->type === 'download.ready'
+            ? count($items)
+            : (int) ($notification->count ?? 1);
 
         return [
             'id' => $notification->id,
             'type' => $notification->type,
-            'count' => (int) ($notification->count ?? 1),
+            'count' => $count,
             'latest_at' => ($notification->latest_at ?? $notification->created_at)?->toISOString(),
             'created_at' => $notification->created_at->toISOString(),
             'brands' => $brands,
@@ -79,6 +89,54 @@ class NotificationController extends Controller
             'read_at' => $notification->read_at?->toISOString(),
             'is_unread' => $notification->isUnread(),
         ];
+    }
+
+    /**
+     * Drop grouped download.ready rows that are not ZIPs created by the viewer (legacy / mis-keyed data).
+     */
+    protected function filterDownloadReadyItemsForUser(array $items, array $data, User $viewer): array
+    {
+        $ids = [];
+        foreach ($items as $it) {
+            if (! empty($it['download_id'])) {
+                $ids[] = (string) $it['download_id'];
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if ($ids === [] && ! empty($data['download_id'])) {
+            $ids = [(string) $data['download_id']];
+        }
+        if ($ids === []) {
+            return [];
+        }
+        $ownedIds = Download::query()
+            ->whereIn('id', $ids)
+            ->where('created_by_user_id', $viewer->id)
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+        $owned = array_flip($ownedIds);
+        $filtered = array_values(array_filter($items, function ($it) use ($owned) {
+            $did = isset($it['download_id']) ? (string) $it['download_id'] : '';
+
+            return $did !== '' && isset($owned[$did]);
+        }));
+        if ($filtered === [] && ! empty($data['download_id'])) {
+            $did = (string) $data['download_id'];
+            if (isset($owned[$did])) {
+                $filtered = [[
+                    'brand_id' => $data['brand_id'] ?? null,
+                    'brand_name' => $data['brand_name'] ?? null,
+                    'download_title' => $data['download_title'] ?? null,
+                    'download_id' => $did,
+                    'tenant_id' => $data['tenant_id'] ?? null,
+                    'tenant_name' => $data['tenant_name'] ?? null,
+                    'created_at' => $data['created_at'] ?? now()->toISOString(),
+                ]];
+            }
+        }
+
+        return $filtered;
     }
 
     protected function computeBrandBreakdown(array $items, array $primaryData): array

@@ -117,6 +117,7 @@ class AssetController extends Controller
                 'selected_category' => null,
                 'assets' => [],
                 'filtered_grid_total' => 0,
+                'grid_folder_total' => 0,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
@@ -287,7 +288,7 @@ class AssetController extends Controller
         // Add counts to categories (integer keys — MySQL/pluck often returns string category_id keys)
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
             $id = isset($category['id']) ? (int) $category['id'] : 0;
-            $category['asset_count'] = $id > 0 ? ($assetCounts[$id] ?? 0) : 0;
+            $category['asset_count'] = $id > 0 ? (int) (($assetCounts[$id] ?? $assetCounts[(string) $id] ?? 0)) : 0;
 
             return $category;
         });
@@ -495,6 +496,7 @@ class AssetController extends Controller
                 }
             }
         }
+        $gridFolderTotalQuery = (clone $assetsQuery);
         if (! empty($filters) && is_array($filters)) {
             $this->metadataFilterService->applyFilters(
                 $assetsQuery,
@@ -508,7 +510,11 @@ class AssetController extends Controller
         if (is_string($searchQ) && trim($searchQ) !== '') {
             $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
             $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, trim($searchQ));
+            $this->assetSearchService->applyScopedSearch($gridFolderTotalQuery, trim($searchQ));
         }
+
+        // Library scope total for "filtered of folder" UI: category + lifecycle + view modes above, search q, excluding metadata filters / uploader / special URL filters not on $gridFolderTotalQuery
+        $gridFolderTotal = (int) (clone $gridFolderTotalQuery)->reorder()->count();
 
         // Uploaded-by filter: distinct uploaders in current scope (before applying uploaded_by), for avatar dropdown
         $uploadedByUsersPayload = [];
@@ -1484,6 +1490,7 @@ class AssetController extends Controller
             'assets' => $mappedAssets,
             'next_page_url' => $nextPageUrl,
             'filtered_grid_total' => (int) $paginator->total(),
+            'grid_folder_total' => $gridFolderTotal,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'filters' => $filters, // Server-parsed filters for active filter UI sync with URL

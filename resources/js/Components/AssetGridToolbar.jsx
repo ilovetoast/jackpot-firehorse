@@ -95,7 +95,7 @@ export default function AssetGridToolbar({
         }
         const onlyKeys = Array.isArray(inertiaSearchOnly) && inertiaSearchOnly.length > 0
             ? inertiaSearchOnly
-            : ['assets', 'next_page_url', 'q', 'filtered_grid_total']
+            : ['assets', 'next_page_url', 'q', 'filtered_grid_total', 'grid_folder_total']
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
@@ -192,7 +192,7 @@ export default function AssetGridToolbar({
     }, [pageUrl, serverQ, filterKeysForClear, clearFiltersCollectionsView])
 
     const defaultClearOnly = useMemo(
-        () => ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total'],
+        () => ['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total', 'grid_folder_total'],
         []
     )
 

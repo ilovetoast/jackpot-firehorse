@@ -207,28 +207,29 @@ class DashboardController extends Controller
             ];
         }
 
-        // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
-        // Metadata approval is asset-centric and inline - no separate queue
-        // Only count items for assets in the current brand
-        $pendingMetadataCount = DB::table('asset_metadata_candidates')
+        // Phase M-1: Pending AI suggestions — same per-user asset scope as AI Review / notification bell
+        $aiScope = app(\App\Services\AiReviewSuggestionScopeService::class);
+        $pendingMetadataQuery = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
             ->whereNull('assets.deleted_at')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
-            ->where('asset_metadata_candidates.producer', 'ai') // Phase M-1: Only AI candidates
-            ->count();
+            ->where('asset_metadata_candidates.producer', 'ai');
+        $aiScope->scopeQueryToAiReviewAssetVisibility($pendingMetadataQuery, $user, $brand);
+        $pendingMetadataCount = (int) $pendingMetadataQuery->count();
 
-        $pendingTagCount = DB::table('asset_tag_candidates')
+        $pendingTagQuery = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
             ->whereNull('assets.deleted_at')
             ->where('assets.tenant_id', $tenant->id)
             ->where('assets.brand_id', $brand->id)
             ->where('asset_tag_candidates.producer', 'ai')
             ->whereNull('asset_tag_candidates.resolved_at')
-            ->whereNull('asset_tag_candidates.dismissed_at')
-            ->count();
+            ->whereNull('asset_tag_candidates.dismissed_at');
+        $aiScope->scopeQueryToAiReviewAssetVisibility($pendingTagQuery, $user, $brand);
+        $pendingTagCount = (int) $pendingTagQuery->count();
 
         // Phase M-1: Exclude asset_metadata.approved_at IS NULL from pending count
         // Metadata is reviewed inline during asset review, not as separate suggestions
