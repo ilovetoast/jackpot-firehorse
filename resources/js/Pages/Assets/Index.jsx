@@ -26,6 +26,7 @@ import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
+import { canViewAssetSystemFolders } from '../../utils/canViewAssetSystemFolders'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import axios from 'axios'
 import { motion } from 'framer-motion'
@@ -54,6 +55,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     const { auth } = pageProps
     const { can } = usePermission()
     const canUpload = can('asset.upload')
+    const canViewSystemFolders = canViewAssetSystemFolders(auth)
     
     // Use prop directly (now in function signature) or fallback to pageProps
     const availableValues = available_values || pageProps.available_values || {}
@@ -559,19 +561,19 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                 isReferenceMaterials: false,
             })
         })
-        // Always show References tab so users can open builder reference materials (type=REFERENCE)
-        tabs.push({
-            key: 'reference_materials',
-            label: 'References',
-            count: reference_materials_count > 0 ? reference_materials_count : null,
-            category: null,
-            categoryId: null,
-            isTrash: false,
-            isReferenceMaterials: true,
-        })
-        // Staged: assets without category, shown when count > 0
-        if (staged_count > 0) {
-            tabs.push({ key: 'staged', label: 'Staged', count: staged_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false, isStaged: true })
+        if (canViewSystemFolders) {
+            tabs.push({
+                key: 'reference_materials',
+                label: 'References',
+                count: reference_materials_count > 0 ? reference_materials_count : null,
+                category: null,
+                categoryId: null,
+                isTrash: false,
+                isReferenceMaterials: true,
+            })
+            if (staged_count > 0) {
+                tabs.push({ key: 'staged', label: 'Staged', count: staged_count, category: null, categoryId: null, isTrash: false, isReferenceMaterials: false, isStaged: true })
+            }
         }
         if (can_view_trash && (trash_count > 0 || lifecycle === 'deleted')) {
             tabs.push({
@@ -585,7 +587,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             })
         }
         return tabs
-    }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle, reference_materials_count, source, staged_count])
+    }, [show_all_button, total_asset_count, visibleMobileCategories, can_view_trash, trash_count, lifecycle, reference_materials_count, source, staged_count, canViewSystemFolders])
 
     const activeMobileCategoryTabIndex = useMemo(() => (
         mobileCategoryTabs.findIndex((tab) => {
@@ -853,8 +855,8 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                         trashCount={trash_count}
                         researchCount={reference_materials_count}
                         stagedCount={staged_count}
-                        showStaged={true}
-                        showResearch={true}
+                        showStaged={canViewSystemFolders}
+                        showResearch={canViewSystemFolders}
                         baseUrl="/app/assets"
                         onResearchClick={handleReferenceMaterialsClick}
                         onStagedClick={() => router.get('/app/assets/staged')}
@@ -937,30 +939,31 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                                 </button>
                                             )
                                         })}
-                                        {/* References — always visible so users can open builder reference materials (type=REFERENCE) */}
-                                        <>
-                                            <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
-                                            <button
-                                                onClick={() => { handleReferenceMaterialsClick(); setMobileCategoriesOpen(false) }}
-                                                className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
-                                                style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
-                                            >
-                                                <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
-                                                <span className="flex-1">References</span>
-                                                {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
-                                            </button>
-                                        </>
-                                        {staged_count > 0 && (
+                                        {canViewSystemFolders && (
                                             <>
+                                                <div className="my-1.5 border-t" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)' }} />
                                                 <button
-                                                    onClick={() => { router.get('/app/assets/staged'); setMobileCategoriesOpen(false) }}
+                                                    type="button"
+                                                    onClick={() => { handleReferenceMaterialsClick(); setMobileCategoriesOpen(false) }}
                                                     className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
-                                                    style={{ backgroundColor: isStagedView ? activeBgColor : 'transparent', color: isStagedView ? activeTextColor : textColor }}
+                                                    style={{ backgroundColor: isReferenceMaterialsView ? activeBgColor : 'transparent', color: isReferenceMaterialsView ? activeTextColor : textColor }}
                                                 >
-                                                    <FolderIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isStagedView ? activeTextColor : textColor }} />
-                                                    <span className="flex-1">Staged</span>
-                                                    <span className="text-xs opacity-80">{staged_count}</span>
+                                                    <DocumentTextIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isReferenceMaterialsView ? activeTextColor : textColor }} />
+                                                    <span className="flex-1">References</span>
+                                                    {reference_materials_count > 0 && <span className="text-xs opacity-80">{reference_materials_count}</span>}
                                                 </button>
+                                                {staged_count > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { router.get('/app/assets/staged'); setMobileCategoriesOpen(false) }}
+                                                        className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
+                                                        style={{ backgroundColor: isStagedView ? activeBgColor : 'transparent', color: isStagedView ? activeTextColor : textColor }}
+                                                    >
+                                                        <FolderIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: isStagedView ? activeTextColor : textColor }} />
+                                                        <span className="flex-1">Staged</span>
+                                                        <span className="text-xs opacity-80">{staged_count}</span>
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                         {can_view_trash && (trash_count > 0 || lifecycle === 'deleted') && (

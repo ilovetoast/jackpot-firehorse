@@ -40,14 +40,23 @@ export default function AiTagSuggestionsInline({
     }, [assetId])
 
     const { can } = usePermission()
+    const brandRole = (auth?.brand_role || '').toLowerCase()
+    const isContributorBrandRole = brandRole === 'contributor'
+    const isViewerBrandRole = brandRole === 'viewer'
     const isOwnUpload =
         uploadedByUserId != null &&
         auth?.user?.id != null &&
         String(uploadedByUserId) === String(auth.user.id)
-    const canView =
-        can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
-    const canApply =
-        can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
+    const canView = isViewerBrandRole
+        ? false
+        : isContributorBrandRole
+            ? isOwnUpload && can('metadata.edit_post_upload')
+            : can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
+    const canApply = isViewerBrandRole
+        ? false
+        : isContributorBrandRole
+            ? isOwnUpload && can('metadata.edit_post_upload')
+            : can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
     const [processing, setProcessing] = useState(new Set())
 
     // Handle accept (create tag in asset_tags) — no confirmation modal

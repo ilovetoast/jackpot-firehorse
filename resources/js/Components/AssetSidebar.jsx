@@ -3,7 +3,8 @@
  * Used by Assets, Executions, and Generative pages.
  *
  * LIBRARY: All, category list (Logos, Photography, etc.)
- * SYSTEM: Staged, References, Trash (workflow queues)
+ * SYSTEM: Staged, References, Trash (workflow queues). Staged + References are hidden from
+ * contributors/viewers via showStaged/showResearch from the parent (brand admin/manager, tenant admin, agency).
  *
  * References = builder reference materials (source=reference_materials, type=REFERENCE)
  * Staged = assets without category (intake_state=staged)

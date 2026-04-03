@@ -300,8 +300,7 @@ class PermissionMap
             ),
 
             // Contributor: Upload/edit assets (cannot approve)
-            // AI suggestions: same as brand_manager for viewing/applying/dismissing recommendations on their assets
-            // (was tenant-only checks in API, which hid tag suggestions from every contributor)
+            // AI suggestion permissions exist for own-upload flows; AssetMetadataController / AiReviewController scope contributors to their uploads only.
             'contributor' => array_merge(
                 ['view brand'],
                 $assetPermissions,

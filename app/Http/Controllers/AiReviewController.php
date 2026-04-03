@@ -59,8 +59,10 @@ class AiReviewController extends Controller
             return response()->json(['message' => 'Tenant and brand must be selected'], 403);
         }
 
-        $canViewAll = $resolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
-        $canReviewOwn = ! $canViewAll && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
+        // Contributors keep metadata.suggestions.view in the permission map but must not see org-wide queues here.
+        $isContributor = strtolower((string) $user->getRoleForBrand($brand)) === 'contributor';
+        $canViewAll = ! $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
+        $canReviewOwn = $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
         if (! $canViewAll && ! $canReviewOwn) {
             return response()->json(['message' => 'Permission denied'], 403);
         }

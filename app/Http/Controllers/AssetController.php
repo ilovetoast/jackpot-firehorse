@@ -88,6 +88,18 @@ class AssetController extends Controller
         // Eager load tenants once so policy checks (Asset, Category) avoid N+1 tenant_user queries
         $user?->loadMissing('tenants');
 
+        if ($user && $tenant && $brand) {
+            $sourceEarly = $request->get('source');
+            if (($sourceEarly === 'staged' || $sourceEarly === 'reference_materials')
+                && ! $this->userCanViewAssetSystemFolders($user, $tenant, $brand)) {
+                if ($request->boolean('load_more') || $request->get('format') === 'json') {
+                    abort(403, 'You do not have permission to view system folders.');
+                }
+
+                return redirect()->route('assets.index');
+            }
+        }
+
         if (! $tenant || ! $brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
             if ($request->get('format') === 'json') {
@@ -2899,5 +2911,29 @@ class AssetController extends Controller
         }
 
         return $out;
+    }
+
+    /**
+     * Staged intake + reference materials (References): brand admin/manager, tenant owner/admin/agency_admin, or agency-tenant members.
+     */
+    protected function userCanViewAssetSystemFolders(User $user, \App\Models\Tenant $tenant, Brand $brand): bool
+    {
+        $tenantRole = strtolower((string) $user->getRoleForTenant($tenant));
+        if (in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true)) {
+            return true;
+        }
+
+        $brandRole = strtolower((string) $user->getRoleForBrand($brand));
+        if (in_array($brandRole, ['admin', 'brand_manager'], true)) {
+            return true;
+        }
+
+        foreach ($user->tenants as $t) {
+            if ($t->is_agency) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

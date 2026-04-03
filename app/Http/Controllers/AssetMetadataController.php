@@ -3702,6 +3702,10 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
+        if (! $this->canViewAiSuggestionsOnAsset($user, $tenant, $brand, $asset)) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
         // Log deferral (no database changes)
         Log::info('[AssetMetadataController] Candidate deferred', [
             'asset_id' => $asset->id,
@@ -4811,10 +4815,35 @@ class AssetMetadataController extends Controller
     }
 
     /**
-     * View AI tag + metadata suggestions: global reviewers, or the uploader with post-upload metadata edit.
+     * Brand contributors may only review AI suggestions on assets they uploaded (not org-wide queues).
+     */
+    protected function userHasContributorBrandRole(User $user, Brand $brand): bool
+    {
+        return strtolower((string) $user->getRoleForBrand($brand)) === 'contributor';
+    }
+
+    /**
+     * Brand viewers never get AI suggestion review APIs.
+     */
+    protected function userHasViewerBrandRole(User $user, Brand $brand): bool
+    {
+        return strtolower((string) $user->getRoleForBrand($brand)) === 'viewer';
+    }
+
+    /**
+     * View AI tag + metadata suggestions: brand admin/manager (and similar) with view-all, or uploader with post-upload edit.
      */
     protected function canViewAiSuggestionsOnAsset(User $user, Tenant $tenant, Brand $brand, Asset $asset): bool
     {
+        if ($this->userHasViewerBrandRole($user, $brand)) {
+            return false;
+        }
+
+        if ($this->userHasContributorBrandRole($user, $brand)) {
+            return (int) $asset->user_id === (int) $user->id
+                && $user->canForContext('metadata.edit_post_upload', $tenant, $brand);
+        }
+
         if ($user->canForContext('metadata.suggestions.view', $tenant, $brand)) {
             return true;
         }
@@ -4831,6 +4860,16 @@ class AssetMetadataController extends Controller
     protected function canApplyAiSuggestionOnAsset(User $user, Brand $brand, Asset $asset): bool
     {
         $resolver = app(TenantPermissionResolver::class);
+
+        if ($this->userHasViewerBrandRole($user, $brand)) {
+            return false;
+        }
+
+        if ($this->userHasContributorBrandRole($user, $brand)) {
+            return (int) $asset->user_id === (int) $user->id
+                && $resolver->hasForBrand($user, $brand, 'metadata.edit_post_upload');
+        }
+
         if ($resolver->hasForBrand($user, $brand, 'metadata.suggestions.apply')) {
             return true;
         }
@@ -4847,6 +4886,16 @@ class AssetMetadataController extends Controller
     protected function canDismissAiSuggestionOnAsset(User $user, Brand $brand, Asset $asset): bool
     {
         $resolver = app(TenantPermissionResolver::class);
+
+        if ($this->userHasViewerBrandRole($user, $brand)) {
+            return false;
+        }
+
+        if ($this->userHasContributorBrandRole($user, $brand)) {
+            return (int) $asset->user_id === (int) $user->id
+                && $resolver->hasForBrand($user, $brand, 'metadata.edit_post_upload');
+        }
+
         if ($resolver->hasForBrand($user, $brand, 'metadata.suggestions.dismiss')) {
             return true;
         }

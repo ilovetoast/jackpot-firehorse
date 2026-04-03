@@ -27,14 +27,24 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
 
     const { can } = usePermission()
+    const brandRole = (auth?.brand_role || '').toLowerCase()
+    const isContributorBrandRole = brandRole === 'contributor'
+    const isViewerBrandRole = brandRole === 'viewer'
     const isOwnUpload =
         uploadedByUserId != null &&
         auth?.user?.id != null &&
         String(uploadedByUserId) === String(auth.user.id)
-    const canViewSuggestions =
-        can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
-    const canApplySuggestions =
-        can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
+    // Contributors only review AI metadata candidates on assets they uploaded; admin/brand_manager/agency use view-all.
+    const canViewSuggestions = isViewerBrandRole
+        ? false
+        : isContributorBrandRole
+            ? isOwnUpload && can('metadata.edit_post_upload')
+            : can('metadata.suggestions.view') || (isOwnUpload && can('metadata.edit_post_upload'))
+    const canApplySuggestions = isViewerBrandRole
+        ? false
+        : isContributorBrandRole
+            ? isOwnUpload && can('metadata.edit_post_upload')
+            : can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
 
     // Fetch reviewable candidates
     useEffect(() => {
@@ -263,6 +273,7 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
             return
         }
         if (processing.has(candidateId)) return
+        if (!canViewSuggestions) return
 
         setProcessing((prev) => new Set(prev).add(candidateId))
 
