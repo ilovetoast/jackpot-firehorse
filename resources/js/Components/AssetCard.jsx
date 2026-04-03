@@ -38,6 +38,8 @@ export default function AssetCard({
     onAssetApproved = null,
     cardVariant = 'default',
     cardStyle = 'default',
+    /** Column width preference (px); used to size masonry placeholders like uniform grid tiles */
+    cardSize = 220,
     selectionAssetType = 'asset',
     layoutMode = 'grid',
     masonryMaxHeightPx = 560,
@@ -426,6 +428,12 @@ export default function AssetCard({
         : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
     const isMasonry = layoutMode === 'masonry'
+    /** Masonry: min thumbnail height matches grid tile (same column width × same aspect ratio). */
+    const masonryThumbnailMinHeightPx = useMemo(() => {
+        if (!isMasonry) return undefined
+        const w = Math.max(160, Math.min(600, Number(cardSize) || 220))
+        return isGuidelines ? Math.round((w * 3) / 5) : Math.round((w * 3) / 4)
+    }, [isMasonry, isGuidelines, cardSize])
 
     /** Light checkerboard so white/light marks stay visible (logos + graphics; CSS-only). */
     /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
@@ -468,10 +476,15 @@ export default function AssetCard({
             {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
                 className={`${
-                    isMasonry ? 'w-full min-h-[120px] flex flex-col' : aspectRatio
+                    isMasonry ? 'w-full flex flex-col' : aspectRatio
                 } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
-                    ...(isMasonry ? { maxHeight: masonryMaxHeightPx } : {}),
+                    ...(isMasonry
+                        ? {
+                              maxHeight: masonryMaxHeightPx,
+                              minHeight: masonryThumbnailMinHeightPx,
+                          }
+                        : {}),
                     ...((!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}),
                     ...checkerboardThumbnailStyle,
                 }}
@@ -545,6 +558,7 @@ export default function AssetCard({
                             thumbnailVersion={thumbnailVersion}
                             shouldAnimateThumbnail={shouldAnimateThumbnail}
                             masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
+                            masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                         />
 
                         {/* Phase V-1: Play icon overlay for videos */}

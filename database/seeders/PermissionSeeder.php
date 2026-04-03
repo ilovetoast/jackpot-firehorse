@@ -129,6 +129,8 @@ class PermissionSeeder extends Seeder
             'metadata.registry.view',
             // Phase C1 Step 2: System-level metadata visibility management
             'metadata.system.visibility.manage',
+            // System metadata field creation (site-level)
+            'metadata.system.fields.manage',
             // Admin thumbnail regeneration (site roles only)
             'assets.regenerate_thumbnails_admin',
         ];
@@ -256,6 +258,7 @@ class PermissionSeeder extends Seeder
             'ai.budgets.manage',
             'metadata.registry.view',
             'metadata.system.visibility.manage',
+            'metadata.system.fields.manage',
             'assets.regenerate_thumbnails_admin',
         ]);
 

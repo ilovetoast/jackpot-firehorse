@@ -357,6 +357,56 @@ class TenantMetadataRegistryController extends Controller
     }
 
     /**
+     * Count category-scoped field visibility rows waiting for tenant opt-in (provision_source=system_seed).
+     */
+    public function pendingSystemFieldSeedCount(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canView) {
+            abort(403, 'You do not have permission to view the metadata registry.');
+        }
+
+        $count = $this->visibilityService->countPendingSystemSeededFieldRows((int) $tenant->id);
+
+        return response()->json(['pending_count' => $count]);
+    }
+
+    /**
+     * Reveal all platform field surfaces held back with system_seed for this tenant.
+     */
+    public function revealPendingSystemFieldSeeds(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canManage = $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canManage) {
+            abort(403, 'You do not have permission to update metadata visibility.');
+        }
+
+        $updated = $this->visibilityService->revealSystemSeededFieldVisibilityForTenant((int) $tenant->id);
+
+        MetadataCache::bumpVersion($tenant->id);
+
+        return response()->json(['success' => true, 'rows_updated' => $updated]);
+    }
+
+    /**
      * Get the metadata registry (API endpoint).
      *
      * GET /api/tenant/metadata/registry

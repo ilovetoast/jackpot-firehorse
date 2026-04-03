@@ -317,6 +317,7 @@ export default function AssetGrid({
                                 isPendingPublicationFilter={isPendingPublicationFilter}
                                 onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null}
                                 cardStyle={cardStyle}
+                                cardSize={cardSize}
                                 selectionAssetType={selectionAssetType}
                                 layoutMode={layoutMode}
                                 masonryMaxHeightPx={masonryMaxPx}

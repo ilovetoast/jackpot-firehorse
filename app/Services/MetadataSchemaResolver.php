@@ -250,21 +250,12 @@ class MetadataSchemaResolver
             return [];
         }
 
-        // Build OR conditions for all applicable scopes
-        $selectColumns = [
-            'metadata_field_id',
-            'is_hidden',
-            'is_upload_hidden',
-            'is_filter_hidden',
-            'is_primary',
-            'is_edit_hidden',
-            'is_required',
-        ];
-        
+        // Use SELECT * so code stays compatible before/after provision_source migration:
+        // explicit "provision_source" in SELECT fails on DBs that have not migrated yet.
         $query = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenantId)
             ->whereIn('metadata_field_id', $fieldIds)
-            ->select($selectColumns)
+            ->select('*')
             ->where(function ($q) use ($brandId, $categoryId) {
                 // Tenant-level: brand_id IS NULL AND category_id IS NULL
                 $q->where(function ($subQ) {
@@ -300,12 +291,13 @@ class MetadataSchemaResolver
         foreach ($query as $row) {
             // Only set if not already set (first = highest priority wins)
             if (!isset($results[$row->metadata_field_id])) {
+                $isSystemSeed = ($row->provision_source ?? null) === 'system_seed';
                 $results[$row->metadata_field_id] = [
-                    'is_hidden' => (bool) $row->is_hidden,
-                    'is_upload_hidden' => (bool) $row->is_upload_hidden,
-                    'is_edit_hidden' => (bool) ($row->is_edit_hidden ?? false), // C9.2: Edit visibility
-                    'is_filter_hidden' => (bool) $row->is_filter_hidden,
-                    'is_primary' => isset($row->is_primary) ? ($row->is_primary === 1 || $row->is_primary === true) : null,
+                    'is_hidden' => $isSystemSeed ? true : (bool) $row->is_hidden,
+                    'is_upload_hidden' => $isSystemSeed ? true : (bool) $row->is_upload_hidden,
+                    'is_edit_hidden' => $isSystemSeed ? true : (bool) ($row->is_edit_hidden ?? false), // C9.2: Edit visibility
+                    'is_filter_hidden' => $isSystemSeed ? true : (bool) $row->is_filter_hidden,
+                    'is_primary' => $isSystemSeed ? false : (isset($row->is_primary) ? ($row->is_primary === 1 || $row->is_primary === true) : null),
                     'is_required' => isset($row->is_required) ? ($row->is_required === 1 || $row->is_required === true) : null,
                 ];
             }

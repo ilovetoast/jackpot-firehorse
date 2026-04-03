@@ -698,6 +698,7 @@ class TenantMetadataVisibilityService
                 'is_filter_hidden' => $visibility['is_filter_hidden'],
                 'is_primary' => $visibility['is_primary'] ?? null,
                 'is_edit_hidden' => $visibility['is_edit_hidden'] ?? false,
+                'provision_source' => null,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
@@ -1333,5 +1334,33 @@ class TenantMetadataVisibilityService
         ]);
 
         return $count;
+    }
+
+    public function countPendingSystemSeededFieldRows(int $tenantId): int
+    {
+        return (int) DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenantId)
+            ->where('provision_source', 'system_seed')
+            ->count();
+    }
+
+    /**
+     * Turn on all standard surfaces for rows the platform added as system_seed (hybrid field rollout).
+     *
+     * @return int Rows updated
+     */
+    public function revealSystemSeededFieldVisibilityForTenant(int $tenantId): int
+    {
+        return (int) DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenantId)
+            ->where('provision_source', 'system_seed')
+            ->update([
+                'is_hidden' => false,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'is_edit_hidden' => false,
+                'provision_source' => null,
+                'updated_at' => now(),
+            ]);
     }
 }

@@ -87,6 +87,14 @@ const REVEAL_SYSTEM_OPTIONS_URL =
     typeof route === 'function'
         ? route('tenant.metadata.system-options.reveal-pending')
         : '/app/api/tenant/metadata/system-options/reveal-pending'
+const PENDING_SYSTEM_FIELDS_URL =
+    typeof route === 'function'
+        ? route('tenant.metadata.system-fields.pending-count')
+        : '/app/api/tenant/metadata/system-fields/pending-count'
+const REVEAL_SYSTEM_FIELDS_URL =
+    typeof route === 'function'
+        ? route('tenant.metadata.system-fields.reveal-pending')
+        : '/app/api/tenant/metadata/system-fields/reveal-pending'
 const CORE_FIELD_KEYS = ['collection', 'tags']
 
 function getCsrfTokenForOptions() {
@@ -170,6 +178,8 @@ export default function ByCategoryView({
     const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
     const [pendingSystemOptionCount, setPendingSystemOptionCount] = useState(0)
     const [revealSystemOptionsLoading, setRevealSystemOptionsLoading] = useState(false)
+    const [pendingSystemFieldCount, setPendingSystemFieldCount] = useState(0)
+    const [revealSystemFieldsLoading, setRevealSystemFieldsLoading] = useState(false)
 
     useEffect(() => {
         setLocalCategories(categories)
@@ -177,16 +187,27 @@ export default function ByCategoryView({
 
     useEffect(() => {
         let cancelled = false
-        fetch(PENDING_SYSTEM_OPTIONS_URL, {
-            credentials: 'same-origin',
-            headers: {
-                Accept: 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        })
-            .then((r) => (r.ok ? r.json() : { pending_count: 0 }))
-            .then((d) => {
-                if (!cancelled) setPendingSystemOptionCount(Number(d.pending_count) || 0)
+        Promise.all([
+            fetch(PENDING_SYSTEM_OPTIONS_URL, {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            }).then((r) => (r.ok ? r.json() : { pending_count: 0 })),
+            fetch(PENDING_SYSTEM_FIELDS_URL, {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            }).then((r) => (r.ok ? r.json() : { pending_count: 0 })),
+        ])
+            .then(([opt, fld]) => {
+                if (!cancelled) {
+                    setPendingSystemOptionCount(Number(opt.pending_count) || 0)
+                    setPendingSystemFieldCount(Number(fld.pending_count) || 0)
+                }
             })
             .catch(() => {})
         return () => {
@@ -313,6 +334,40 @@ export default function ByCategoryView({
             }
         } finally {
             setRevealSystemOptionsLoading(false)
+        }
+    }, [canRevealSystemOptions])
+
+    const handleRevealSystemFields = useCallback(async () => {
+        if (!canRevealSystemOptions) return
+        setRevealSystemFieldsLoading(true)
+        try {
+            const res = await fetch(REVEAL_SYSTEM_FIELDS_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfTokenForOptions(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: '{}',
+            })
+            const data = await res.json().catch(() => ({}))
+            if (res.ok) {
+                setPendingSystemFieldCount(0)
+                if (typeof window !== 'undefined' && window.toast) {
+                    const n = Number(data.rows_updated)
+                    const msg =
+                        Number.isFinite(n) && n > 0
+                            ? `Enabled ${n} new platform field row${n === 1 ? '' : 's'} on your categories.`
+                            : 'Category fields updated.'
+                    window.toast(msg, 'success')
+                }
+            } else if (typeof window !== 'undefined' && window.toast) {
+                window.toast(data.message || 'Could not apply update', 'error')
+            }
+        } finally {
+            setRevealSystemFieldsLoading(false)
         }
     }, [canRevealSystemOptions])
 
@@ -1673,6 +1728,29 @@ export default function ByCategoryView({
                             ) : (
                                 <p className="mt-2 text-[11px] text-amber-900/80">
                                     Ask a tenant admin with metadata field or visibility management access to reveal them.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                    {pendingSystemFieldCount > 0 && (
+                        <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/90 px-3 py-2.5">
+                            <p className="text-xs text-indigo-950/90">
+                                <span className="font-semibold tabular-nums">{pendingSystemFieldCount}</span> new platform
+                                metadata field placement{pendingSystemFieldCount === 1 ? ' is' : 's are'} on hold until you
+                                enable them (upload, grid, filters, and detail stay off for those rows).
+                            </p>
+                            {canRevealSystemOptions ? (
+                                <button
+                                    type="button"
+                                    onClick={handleRevealSystemFields}
+                                    disabled={revealSystemFieldsLoading}
+                                    className="mt-2 inline-flex items-center rounded-md bg-indigo-700 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-800 disabled:opacity-60"
+                                >
+                                    {revealSystemFieldsLoading ? 'Applying…' : 'Enable new platform fields'}
+                                </button>
+                            ) : (
+                                <p className="mt-2 text-[11px] text-indigo-900/80">
+                                    Ask a tenant admin with metadata field or visibility management access to enable them.
                                 </p>
                             )}
                         </div>

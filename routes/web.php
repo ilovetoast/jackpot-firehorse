@@ -275,6 +275,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/api/tenant/metadata/brands/{brand}/available-system-categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'availableSystemCategories'])->name('tenant.metadata.brands.available-system-categories');
         Route::get('/api/tenant/metadata/system-options/pending-count', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'pendingSystemOptionRevealCount'])->name('tenant.metadata.system-options.pending-count');
         Route::post('/api/tenant/metadata/system-options/reveal-pending', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'revealPendingSystemOptions'])->name('tenant.metadata.system-options.reveal-pending');
+        Route::get('/api/tenant/metadata/system-fields/pending-count', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'pendingSystemFieldSeedCount'])->name('tenant.metadata.system-fields.pending-count');
+        Route::post('/api/tenant/metadata/system-fields/reveal-pending', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'revealPendingSystemFieldSeeds'])->name('tenant.metadata.system-fields.reveal-pending');
         Route::get('/api/tenant/metadata/fields/archived', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getArchivedFields'])->name('tenant.metadata.fields.archived');
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
@@ -475,6 +477,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
     // Metadata Registry routes (no tenant middleware - system-level only)
     Route::get('/admin/metadata/registry', [\App\Http\Controllers\Admin\MetadataRegistryController::class, 'index'])->name('admin.metadata.registry.index');
+    Route::post('/admin/metadata/fields', [\App\Http\Controllers\Admin\MetadataRegistryController::class, 'store'])->name('admin.metadata.fields.store');
 
     // Metadata Field Category Visibility routes (no tenant middleware - system-level only)
     Route::get('/admin/metadata/fields/{field}/categories', [\App\Http\Controllers\Admin\MetadataFieldCategoryVisibilityController::class, 'getCategories'])->name('admin.metadata.fields.categories');
@@ -497,6 +500,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/system-categories/update-order', [\App\Http\Controllers\SystemCategoryController::class, 'updateOrder'])->name('admin.system-categories.update-order');
     Route::get('/admin/system-categories/{systemCategory}/field-defaults', [\App\Http\Controllers\SystemCategoryController::class, 'fieldDefaults'])->name('admin.system-categories.field-defaults');
     Route::put('/admin/system-categories/{systemCategory}/field-defaults', [\App\Http\Controllers\SystemCategoryController::class, 'updateFieldDefaults'])->name('admin.system-categories.field-defaults.update');
+    Route::post('/admin/system-categories/{systemCategory}/seed-bundle-preset', [\App\Http\Controllers\SystemCategoryController::class, 'seedBundlePreset'])->name('admin.system-categories.seed-bundle-preset');
 
     // Billing routes (no tenant middleware - billing is company-level)
     Route::get('/billing', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing');

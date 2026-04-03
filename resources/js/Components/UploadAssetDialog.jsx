@@ -21,7 +21,18 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
-import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { Switch } from '@headlessui/react'
+import {
+    XMarkIcon,
+    CloudArrowUpIcon,
+    ArrowPathIcon,
+    CheckCircleIcon,
+    ChevronDownIcon,
+    ChevronUpIcon,
+    ChevronRightIcon,
+    TagIcon,
+    SparklesIcon,
+} from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
@@ -4435,51 +4446,100 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 />
                             )}
 
-                            {/* C9.2: Upload-time AI skip controls (Admin/Brand Manager only) */}
+                            {/* C9.2: Upload-time AI skip controls (Admin/Brand Manager only) — compact toggle rows (bulk-actions visual language) */}
                             {isAdminOrBrandManager && v2Files.length > 0 && (
-                                <div className="mb-4 min-w-[42rem] rounded-md bg-gray-50 border border-gray-200 p-4">
-                                    <h4 className="text-sm font-medium text-gray-900 mb-3">AI Processing Options</h4>
-                                    <div className="space-y-3">
-                                        <label className="flex items-start">
-                                            <input
-                                                type="checkbox"
-                                                checked={applyAiTagging}
-                                                onChange={(e) => setApplyAiTagging(e.target.checked)}
-                                                disabled={aiTaggingDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                className="mt-0.5 h-4 w-4 border-gray-300 rounded focus:ring-2 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                style={{ accentColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
-                                            />
-                                            <div className="ml-3 flex-1">
-                                                <span className={`text-sm font-medium ${aiTaggingDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
-                                                    Apply AI Tagging
-                                                </span>
-                                                {aiTaggingDisabled && (
-                                                    <p className="mt-1 text-xs text-gray-500">
-                                                        AI tagging is disabled for this tenant or brand.
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </label>
-                                        <label className="flex items-start">
-                                            <input
-                                                type="checkbox"
-                                                checked={applyAiMetadata}
-                                                onChange={(e) => setApplyAiMetadata(e.target.checked)}
-                                                disabled={aiMetadataDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                className="mt-0.5 h-4 w-4 border-gray-300 rounded focus:ring-2 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                style={{ accentColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
-                                            />
-                                            <div className="ml-3 flex-1">
-                                                <span className={`text-sm font-medium ${aiMetadataDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
-                                                    Apply AI Metadata
-                                                </span>
-                                                {aiMetadataDisabled && (
-                                                    <p className="mt-1 text-xs text-gray-500">
-                                                        AI metadata generation is disabled for this tenant or brand.
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </label>
+                                <div className="mb-4 rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+                                    <div className="px-3 py-2 border-b border-gray-100 bg-gradient-to-r from-gray-50/90 to-white">
+                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                            AI processing
+                                        </h4>
+                                        <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
+                                            Runs after finalize. Tag and field suggestions are independent — you can use one, both, or neither.
+                                        </p>
+                                    </div>
+                                    <div className="p-2 space-y-2">
+                                        {[
+                                            {
+                                                key: 'tagging',
+                                                checked: applyAiTagging,
+                                                onChange: setApplyAiTagging,
+                                                disabled: aiTaggingDisabled || batchStatus === 'finalizing' || isFinalizeSuccess,
+                                                title: 'AI tagging',
+                                                helper: 'Suggest tags from the image (shown in the asset drawer after processing)',
+                                                disabledNote: 'AI tagging is disabled for this tenant or brand.',
+                                                Icon: TagIcon,
+                                                iconBg: 'bg-violet-100',
+                                                iconColor: 'text-violet-700',
+                                            },
+                                            {
+                                                key: 'metadata',
+                                                checked: applyAiMetadata,
+                                                onChange: setApplyAiMetadata,
+                                                disabled: aiMetadataDisabled || batchStatus === 'finalizing' || isFinalizeSuccess,
+                                                title: 'AI metadata',
+                                                helper: 'Suggest structured fields (e.g. photo type, scene) in the drawer',
+                                                disabledNote: 'AI metadata generation is disabled for this tenant or brand.',
+                                                Icon: SparklesIcon,
+                                                iconBg: 'bg-indigo-100',
+                                                iconColor: 'text-indigo-700',
+                                            },
+                                        ].map(
+                                            ({
+                                                key,
+                                                checked,
+                                                onChange,
+                                                disabled,
+                                                title,
+                                                helper,
+                                                disabledNote,
+                                                Icon,
+                                                iconBg,
+                                                iconColor,
+                                            }) => (
+                                                <div
+                                                    key={key}
+                                                    className={`flex items-center gap-2.5 rounded-lg border border-gray-100 px-2.5 py-2 transition-colors ${
+                                                        disabled ? 'opacity-60' : 'hover:bg-gray-50/80'
+                                                    }`}
+                                                >
+                                                    <span
+                                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconBg}`}
+                                                    >
+                                                        <Icon className={`h-4 w-4 ${iconColor}`} aria-hidden />
+                                                    </span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p
+                                                            className={`text-sm font-medium leading-tight ${
+                                                                disabled ? 'text-gray-400' : 'text-gray-900'
+                                                            }`}
+                                                        >
+                                                            {title}
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
+                                                            {disabled ? disabledNote : helper}
+                                                        </p>
+                                                    </div>
+                                                    <Switch
+                                                        checked={checked}
+                                                        onChange={onChange}
+                                                        disabled={disabled}
+                                                        className="group relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-gray-200 transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed"
+                                                        style={
+                                                            checked
+                                                                ? { backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary }
+                                                                : undefined
+                                                        }
+                                                    >
+                                                        <span
+                                                            aria-hidden
+                                                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition duration-200 ease-out ${
+                                                                checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+                                                            }`}
+                                                        />
+                                                    </Switch>
+                                                </div>
+                                            )
+                                        )}
                                     </div>
                                 </div>
                             )}

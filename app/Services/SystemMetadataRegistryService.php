@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\SystemCategory;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -32,6 +33,7 @@ class SystemMetadataRegistryService
         $fields = DB::table('metadata_fields')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->select([
                 'id',
                 'key',
@@ -59,6 +61,9 @@ class SystemMetadataRegistryService
 
         // Get AI-related flags (check candidates table for producer = 'ai')
         $aiRelatedFields = $this->getAiRelatedFields($fieldIds);
+
+        $optionCounts = $this->getSystemOptionCountsByField($fieldIds);
+        $defaultBundleTemplates = $this->buildDefaultBundleTemplatesByFieldId($fieldIds);
 
         // Build result array
         $result = [];
@@ -106,10 +111,159 @@ class SystemMetadataRegistryService
                 'percent_populated' => round($fieldMetrics['percent_populated'], 2),
                 'percent_user_override' => round($fieldMetrics['percent_user_override'], 2),
                 'pending_review_count' => $fieldMetrics['pending_review_count'],
+                'system_options_count' => (int) ($optionCounts[$fieldId] ?? 0),
+                'default_bundle_templates' => $defaultBundleTemplates[$fieldId] ?? [],
+                'in_default_bundle_count' => count($defaultBundleTemplates[$fieldId] ?? []),
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Count system metadata_options rows per field (select / multiselect).
+     *
+     * @param  list<int>  $fieldIds
+     * @return array<int, int>
+     */
+    protected function getSystemOptionCountsByField(array $fieldIds): array
+    {
+        if ($fieldIds === []) {
+            return [];
+        }
+
+        return DB::table('metadata_options')
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->where('is_system', true)
+            ->select('metadata_field_id', DB::raw('COUNT(*) as c'))
+            ->groupBy('metadata_field_id')
+            ->pluck('c', 'metadata_field_id')
+            ->map(static fn ($c) => (int) $c)
+            ->all();
+    }
+
+    /**
+     * For each field: latest-version system templates that have a bundle row and are not globally suppressed for that family.
+     *
+     * @param  list<int>  $fieldIds
+     * @return array<int, list<array{id:int,name:string,slug:string,asset_type:string}>>
+     */
+    protected function buildDefaultBundleTemplatesByFieldId(array $fieldIds): array
+    {
+        if ($fieldIds === []) {
+            return [];
+        }
+
+        $latestIds = SystemCategory::query()->latestVersion()->pluck('id')->all();
+        if ($latestIds === []) {
+            return array_fill_keys($fieldIds, []);
+        }
+
+        $defaults = DB::table('system_category_field_defaults as scfd')
+            ->join('system_categories as sc', 'sc.id', '=', 'scfd.system_category_id')
+            ->whereIn('scfd.system_category_id', $latestIds)
+            ->whereIn('scfd.metadata_field_id', $fieldIds)
+            ->select([
+                'scfd.metadata_field_id',
+                'scfd.system_category_id',
+                'sc.name as template_name',
+                'sc.slug',
+                'sc.asset_type',
+            ])
+            ->get();
+
+        $categories = DB::table('system_categories')
+            ->select('id', 'slug', 'asset_type')
+            ->get();
+
+        $familyIdsByKey = [];
+        foreach ($categories as $c) {
+            $k = $c->slug.'|'.$c->asset_type;
+            $familyIdsByKey[$k] ??= [];
+            $familyIdsByKey[$k][] = (int) $c->id;
+        }
+
+        $suppressions = DB::table('metadata_field_category_visibility')
+            ->where('is_visible', false)
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->get(['metadata_field_id', 'system_category_id']);
+
+        $suppressedByField = [];
+        foreach ($suppressions as $s) {
+            $fid = (int) $s->metadata_field_id;
+            $suppressedByField[$fid] ??= [];
+            $suppressedByField[$fid][(int) $s->system_category_id] = true;
+        }
+
+        $out = array_fill_keys($fieldIds, []);
+
+        foreach ($defaults as $row) {
+            $fid = (int) $row->metadata_field_id;
+            $tid = (int) $row->system_category_id;
+            $fk = $row->slug.'|'.$row->asset_type;
+            $familyIds = $familyIdsByKey[$fk] ?? [$tid];
+
+            $suppressed = false;
+            $flip = $suppressedByField[$fid] ?? [];
+            foreach ($familyIds as $cid) {
+                if (! empty($flip[$cid])) {
+                    $suppressed = true;
+                    break;
+                }
+            }
+
+            if ($suppressed) {
+                continue;
+            }
+
+            $assetType = $row->asset_type;
+            if ($assetType instanceof \BackedEnum) {
+                $assetType = $assetType->value;
+            }
+
+            $out[$fid][] = [
+                'id' => $tid,
+                'name' => $row->template_name,
+                'slug' => $row->slug,
+                'asset_type' => (string) $assetType,
+            ];
+        }
+
+        foreach ($out as $fid => $list) {
+            usort($list, static fn ($a, $b) => strcmp($a['name'], $b['name']));
+            $out[$fid] = $list;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Latest-version system category templates for admin UI (field attach, etc.).
+     *
+     * @return list<array{id:int,name:string,slug:string,asset_type:string}>
+     */
+    public function getLatestSystemTemplatesForAdmin(): array
+    {
+        $rows = SystemCategory::query()
+            ->latestVersion()
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug', 'asset_type']);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $at = $row->asset_type;
+            if ($at instanceof \BackedEnum) {
+                $at = $at->value;
+            }
+            $out[] = [
+                'id' => (int) $row->id,
+                'name' => (string) $row->name,
+                'slug' => (string) $row->slug,
+                'asset_type' => (string) $at,
+            ];
+        }
+
+        return $out;
     }
 
     /**

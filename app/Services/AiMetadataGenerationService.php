@@ -78,8 +78,13 @@ class AiMetadataGenerationService
      */
     public function generateMetadata(Asset $asset): array
     {
+        // Upload-time toggles: structured field suggestions vs tag candidates are independent in the UI.
+        // _skip_ai_metadata: do not create asset_metadata_candidates (photo type, scene, etc.).
+        // _skip_ai_tagging: do not create asset_tag_candidates (still one vision call when either runs).
+        $skipAiMetadataUpload = (bool) (($asset->metadata ?? [])['_skip_ai_metadata'] ?? false);
+
         // Structured fields (select/multiselect with options). Tags field has no options — excluded here.
-        $fields = $this->getEligibleFields($asset);
+        $fields = $skipAiMetadataUpload ? [] : $this->getEligibleFields($asset);
 
         // Tags are free-form (asset_tag_candidates). Run inference when the Tags field is AI-enabled
         // for this category even if no structured fields qualify — otherwise executions/deliverables often
@@ -143,8 +148,8 @@ class AiMetadataGenerationService
         $tags = $parsed['tags'] ?? [];
         $tagParseStats = $parsed['tag_parse_stats'] ?? null;
 
-        // Create candidates in database
-        $candidatesCreated = $this->createCandidates($asset, $candidates);
+        // Persist structured field candidates only when upload did not opt out of AI metadata
+        $candidatesCreated = $skipAiMetadataUpload ? 0 : $this->createCandidates($asset, $candidates);
 
         // Tag candidates when eligible and not upload-skipped; createTags() skips tags already on the asset.
         $tagsCreated = $tagsInference ? $this->createTags($asset, $tags) : 0;
@@ -156,11 +161,13 @@ class AiMetadataGenerationService
             $response['model'] ?? $this->defaultModel
         );
 
+        $fieldsProcessedKeys = $skipAiMetadataUpload ? [] : array_keys($candidates);
+
         Log::info('[AiMetadataGenerationService] Generated metadata and tags', [
             'asset_id' => $asset->id,
             'candidates_created' => $candidatesCreated,
             'tags_created' => $tagsCreated,
-            'fields_processed' => array_keys($candidates),
+            'fields_processed' => $fieldsProcessedKeys,
             'cost' => $cost,
             'tokens_in' => $response['tokens_in'] ?? 0,
             'tokens_out' => $response['tokens_out'] ?? 0,
@@ -184,7 +191,7 @@ class AiMetadataGenerationService
             'ai_tag_inference_detail' => $aiTagInferenceDetail,
             'tag_parse_stats' => $tagParseStats,
             'cost' => $cost,
-            'fields_processed' => array_keys($candidates),
+            'fields_processed' => $fieldsProcessedKeys,
             'tokens_in' => $response['tokens_in'] ?? 0,
             'tokens_out' => $response['tokens_out'] ?? 0,
             'model' => $response['model'] ?? $this->defaultModel,

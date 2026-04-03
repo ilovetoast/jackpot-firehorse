@@ -218,6 +218,66 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
+     * Upload-time _skip_ai_metadata must still create tag candidates when tagging is on (vision runs tags-only).
+     * Regression: ProcessAssetJob used to skip AiMetadataGenerationJob entirely when metadata was off — no tags at all.
+     */
+    public function test_skip_ai_metadata_upload_still_creates_tag_candidates(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'fields' => [
+                        'photo_type' => [
+                            'value' => 'studio',
+                            'confidence' => 0.95,
+                        ],
+                    ],
+                    'tags' => [
+                        ['value' => 'from-vision', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $meta = $asset->metadata ?? [];
+        $meta['_skip_ai_metadata'] = true;
+        $meta['_skip_ai_tagging'] = false;
+        $asset->update(['metadata' => $meta]);
+
+        $field = $this->createAiEligibleField('photo_type', $asset->tenant_id);
+        $this->createFieldOption($field->id, 'studio');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset->fresh());
+
+        $this->assertEquals(0, $results['candidates_created']);
+        $this->assertGreaterThanOrEqual(1, $results['tags_created']);
+        $this->assertTrue($results['tag_inference_attempted']);
+        $this->assertSame('attempted_ok', $results['ai_tag_inference_status'] ?? null);
+        $this->assertEmpty($results['fields_processed']);
+
+        $this->assertEquals(0, DB::table('asset_metadata_candidates')->where('asset_id', $asset->id)->count());
+        $row = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->first();
+        $this->assertNotNull($row);
+        $this->assertEquals('from-vision', $row->tag);
+    }
+
+    /**
      * Test: Skips when category missing
      */
     public function test_skips_when_category_missing(): void

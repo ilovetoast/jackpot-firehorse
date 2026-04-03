@@ -88,6 +88,10 @@ class SystemCategoryService
      */
     public function createTemplate(array $data): SystemCategory
     {
+        $seedBundlePreset = $data['seed_bundle_preset'] ?? 'none';
+        $seedFieldTypes = $data['seed_field_types'] ?? null;
+        unset($data['seed_bundle_preset'], $data['seed_field_types']);
+
         // Generate slug if not provided
         if (! isset($data['slug']) || empty($data['slug'])) {
             $data['slug'] = Str::slug($data['name']);
@@ -118,6 +122,24 @@ class SystemCategoryService
 
         if ($template->auto_provision) {
             ProvisionSystemCategoryToExistingBrandsJob::dispatch($template->id);
+        }
+
+        if (in_array($seedBundlePreset, ['minimal', 'by_field_types', 'photography_like'], true)) {
+            if ($seedBundlePreset !== 'by_field_types' || (is_array($seedFieldTypes) && $seedFieldTypes !== [])) {
+                try {
+                    app(SystemCategoryFieldBundlePresetService::class)->seed(
+                        $template,
+                        $seedBundlePreset,
+                        is_array($seedFieldTypes) ? $seedFieldTypes : null
+                    );
+                } catch (\Throwable $e) {
+                    \Log::warning('[SystemCategoryService] Bundle preset seed failed', [
+                        'template_id' => $template->id,
+                        'preset' => $seedBundlePreset,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         return $template;

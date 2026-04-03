@@ -13,6 +13,28 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { resolve, isExcludedFromGenericLoop, isDominantColorsSwatches, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
+/** Parse fetch body as JSON; avoids SyntaxError when server returns HTML error pages. */
+async function parseJsonResponse(res) {
+    const text = await res.text()
+    if (!res.ok) {
+        const err = new Error(`HTTP ${res.status}`)
+        err.status = res.status
+        err.bodySnippet = text.slice(0, 400)
+        throw err
+    }
+    if (!text || !text.trim()) {
+        return {}
+    }
+    try {
+        return JSON.parse(text)
+    } catch (e) {
+        const err = new Error('Response was not valid JSON')
+        err.cause = e
+        err.bodySnippet = text.slice(0, 400)
+        throw err
+    }
+}
+
 export default function AssetMetadataDisplay({
     assetId,
     onPendingCountChange,
@@ -60,17 +82,18 @@ export default function AssetMetadataDisplay({
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
+                Accept: 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
             },
             credentials: 'same-origin',
         })
-            .then((res) => res.json())
+            .then((res) => parseJsonResponse(res))
             .then((data) => {
                 applyEditablePayload(data)
                 setLoading(false)
             })
             .catch((err) => {
-                console.error('[AssetMetadataDisplay] Failed to fetch metadata', err)
+                console.error('[AssetMetadataDisplay] Failed to fetch metadata', err.message, err.bodySnippet || err.cause || '')
                 setLoading(false)
             })
     }
@@ -109,11 +132,12 @@ export default function AssetMetadataDisplay({
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
                 },
                 credentials: 'same-origin',
             })
-                .then((res) => res.json())
+                .then((res) => parseJsonResponse(res))
                 .then((data) => {
                     applyEditablePayload(data)
                 })
@@ -204,11 +228,11 @@ export default function AssetMetadataDisplay({
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
                 },
                 credentials: 'same-origin',
             })
-            const data = await res.json()
+            const data = await parseJsonResponse(res)
             if (data.status === 'queued') {
                 fetchMetadata()
                 // Poll until pipeline finishes (analysis complete or metadata_health.is_complete) or 60s
@@ -221,10 +245,13 @@ export default function AssetMetadataDisplay({
                     attempts++
                     setTimeout(() => {
                         fetch(`/app/assets/${assetId}/metadata/editable`, {
-                            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content },
+                            headers: {
+                                Accept: 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                            },
                             credentials: 'same-origin',
                         })
-                            .then((r) => r.json())
+                            .then((r) => parseJsonResponse(r))
                             .then((d) => {
                                 setMetadataHealth(d.metadata_health ?? null)
                                 setAnalysisStatus(d.analysis_status ?? 'uploading')

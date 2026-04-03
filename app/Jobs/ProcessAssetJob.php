@@ -138,11 +138,13 @@ class ProcessAssetJob implements ShouldQueue
         }
 
         // Policy allows AI tagging - build job array based on skip flags.
-        // Order is critical: AiMetadataGenerationJob creates asset_tag_candidates; AiTagAutoApplyJob must run after that.
+        // Order is critical: AiMetadataGenerationJob creates asset_tag_candidates + field candidates (one vision call).
+        // IMPORTANT: Tag candidates and structured candidates share AiMetadataGenerationJob. If we only skipped the job
+        // when _skip_ai_metadata was set, "AI tagging on + AI metadata off" would never run vision — no tags at all.
         $jobs = [];
 
-        // C9.2: AI metadata generation (creates tag + field candidates)
-        if (! $skipAiMetadata) {
+        // Run vision when either structured metadata or tag inference is wanted (service respects _skip_ai_* per kind).
+        if (! $skipAiMetadata || ! $skipAiTagging) {
             $jobs[] = new AiMetadataGenerationJob($asset->id);
         }
 
@@ -151,7 +153,7 @@ class ProcessAssetJob implements ShouldQueue
             $jobs[] = new AiTagAutoApplyJob($asset->id);
         }
 
-        // Phase 2 – Step 5: suggestions from structured candidates
+        // Phase 2 – Step 5: suggestions from structured candidates (not tag pills — those come from tag candidates UI)
         if (! $skipAiMetadata) {
             $jobs[] = new AiMetadataSuggestionJob($asset->id);
         }

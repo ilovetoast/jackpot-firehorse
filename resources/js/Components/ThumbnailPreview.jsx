@@ -34,6 +34,7 @@
  * @param {string|null} props.primaryColor - Brand primary color for placeholder
  * @param {string|null} props.forceObjectFit - Force object-fit value ('cover' or 'contain'), overrides category-based logic
  * @param {number|null} props.masonryMaxHeight - When set, image sizes to natural aspect ratio up to this max height (masonry grid)
+ * @param {number|null} props.masonryMinHeight - Masonry: min height for placeholders / empty states (match grid tile)
  * @param {boolean} props.preferLargeForVector - When true, use 'large' style (4096px) for SVG/vector assets in detail view for crisp rendering
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
@@ -71,6 +72,7 @@ export default function ThumbnailPreview({
     primaryColor = null,
     forceObjectFit = null,
     masonryMaxHeight = null,
+    masonryMinHeight = null,
     preferLargeForVector = false
 }) {
     const { auth } = usePage().props
@@ -242,15 +244,25 @@ export default function ThumbnailPreview({
     }, [forceObjectFit, isSmallThumbnail, asset?.category?.slug])
 
     const isMasonryHeight = masonryMaxHeight != null && Number(masonryMaxHeight) > 0
+    const effectiveMasonryMinHeightPx = useMemo(() => {
+        if (!isMasonryHeight) return 120
+        const maxH = Number(masonryMaxHeight)
+        const raw = masonryMinHeight != null ? Number(masonryMinHeight) : 120
+        let minH = Number.isFinite(raw) && raw > 0 ? raw : 120
+        if (Number.isFinite(maxH) && maxH > 0) {
+            minH = Math.min(minH, maxH)
+        }
+        return Math.max(80, minH)
+    }, [isMasonryHeight, masonryMaxHeight, masonryMinHeight])
     const imgFitClasses = isMasonryHeight
         ? 'w-full h-auto max-h-full object-contain object-center'
         : `w-full h-full ${objectFitClass}`
     const masonryWrapperStyle = isMasonryHeight
-        ? { maxHeight: Number(masonryMaxHeight), minHeight: 120 }
+        ? { maxHeight: Number(masonryMaxHeight), minHeight: effectiveMasonryMinHeightPx }
         : undefined
-    /** Masonry: icon/placeholder branches must fill the tile (match AssetCard min-h), not collapse to icon size. */
+    /** Masonry: icon/placeholder branches must fill the tile (match grid tile height), not collapse to icon size. */
     const masonryPlaceholderStyle = isMasonryHeight
-        ? { maxHeight: Number(masonryMaxHeight), minHeight: 120, width: '100%' }
+        ? { maxHeight: Number(masonryMaxHeight), minHeight: effectiveMasonryMinHeightPx, width: '100%' }
         : undefined
 
     // Check thumbnail status - if FAILED, show icon immediately
@@ -341,7 +353,7 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
                         : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
@@ -370,7 +382,7 @@ export default function ThumbnailPreview({
                 <div
                     className={
                         isMasonryHeight
-                            ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${contrastBackdropClass}`
+                            ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${contrastBackdropClass}`
                             : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className} ${contrastBackdropClass}`
                     }
                     style={masonryPlaceholderStyle}
@@ -616,7 +628,7 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
                         : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
@@ -646,7 +658,7 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? 'relative flex w-full min-h-[120px] items-center justify-center bg-white'
+                        ? 'relative flex w-full items-center justify-center bg-white'
                         : `flex items-center justify-center bg-white ${className}`
                 }
                 style={masonryPlaceholderStyle}
@@ -666,7 +678,7 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
                         : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
@@ -689,7 +701,7 @@ export default function ThumbnailPreview({
             <div
                 className={
                     isMasonryHeight
-                        ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                        ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
                         : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
                 }
                 style={masonryPlaceholderStyle}
@@ -710,7 +722,7 @@ export default function ThumbnailPreview({
         <div
             className={
                 isMasonryHeight
-                    ? `relative flex w-full min-h-[120px] items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                    ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
                     : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
             }
             style={masonryPlaceholderStyle}

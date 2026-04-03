@@ -485,6 +485,19 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, template: null })
     const [fieldDefaultsTemplateId, setFieldDefaultsTemplateId] = useState(null)
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const params = new URLSearchParams(window.location.search)
+        const raw = params.get('openBundle')
+        if (!raw) return
+        const id = parseInt(raw, 10)
+        if (!Number.isFinite(id) || id <= 0) return
+        setFieldDefaultsTemplateId(id)
+        params.delete('openBundle')
+        const qs = params.toString()
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }, [])
+
     const { data, setData, post, put, processing, errors, reset } = useForm({
         name: '',
         slug: '',
@@ -493,7 +506,45 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
         is_hidden: false,
         auto_provision: false,
         sort_order: 0,
+        seed_bundle_preset: 'none',
+        seed_field_types: [],
     })
+
+    const SEEDABLE_FIELD_TYPES = ['boolean', 'text', 'textarea', 'number', 'date', 'select', 'multiselect']
+
+    const toggleSeedFieldType = (t) => {
+        const cur = data.seed_field_types || []
+        if (cur.includes(t)) {
+            setData(
+                'seed_field_types',
+                cur.filter((x) => x !== t)
+            )
+        } else {
+            setData('seed_field_types', [...cur, t])
+        }
+    }
+
+    const runSeedBundlePreset = async (templateId, templateName, preset, fieldTypes = null) => {
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+        const body = { preset }
+        if (fieldTypes && fieldTypes.length > 0) body.field_types = fieldTypes
+        const res = await fetch(`/app/admin/system-categories/${templateId}/seed-bundle-preset`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': token,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify(body),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+            window.alert(json.error || json.message || 'Failed to seed bundle')
+            return
+        }
+        window.alert(`Seeded ${json.rows_upserted ?? 0} field default row(s) for ${templateName}.`)
+    }
 
     const handleCreate = () => {
         setEditingTemplate(null)
@@ -511,6 +562,8 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
             is_hidden: template.is_hidden,
             auto_provision: !!template.auto_provision,
             sort_order: template.sort_order,
+            seed_bundle_preset: 'none',
+            seed_field_types: [],
         })
         setShowForm(true)
     }
@@ -846,6 +899,50 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
                                     </div>
                                 </div>
 
+                                {!editingTemplate && (
+                                    <div className="rounded-md border border-gray-200 bg-gray-50/80 p-4">
+                                        <label htmlFor="seed_bundle_preset" className="block text-sm font-medium text-gray-900">
+                                            Optional: seed field bundle after create
+                                        </label>
+                                        <p className="mt-1 text-xs text-gray-600">
+                                            Writes <code className="rounded bg-white px-1">system_category_field_defaults</code>{' '}
+                                            from a preset. You can still edit the bundle afterward.
+                                        </p>
+                                        <select
+                                            id="seed_bundle_preset"
+                                            value={data.seed_bundle_preset}
+                                            onChange={(e) => setData('seed_bundle_preset', e.target.value)}
+                                            className="mt-2 block w-full max-w-md rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 sm:text-sm"
+                                        >
+                                            <option value="none">None (config fallback until you edit bundle)</option>
+                                            <option value="minimal">Minimal — tags, collection, starred</option>
+                                            <option value="photography_like">Rich — common field types (boolean, selects, text, …)</option>
+                                            <option value="by_field_types">By field types (choose below)</option>
+                                        </select>
+                                        {data.seed_bundle_preset === 'by_field_types' && (
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                {SEEDABLE_FIELD_TYPES.map((t) => (
+                                                    <label
+                                                        key={t}
+                                                        className="inline-flex cursor-pointer items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={(data.seed_field_types || []).includes(t)}
+                                                            onChange={() => toggleSeedFieldType(t)}
+                                                            className="rounded border-gray-300 text-primary focus:ring-primary"
+                                                        />
+                                                        {t}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {errors.seed_bundle_preset && (
+                                            <p className="mt-1 text-sm text-red-600">{errors.seed_bundle_preset}</p>
+                                        )}
+                                    </div>
+                                )}
+
                                 {errors.error && (
                                     <div className="rounded-md bg-red-50 p-4">
                                         <p className="text-sm text-red-800">{errors.error}</p>
@@ -991,13 +1088,37 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                         {template.is_latest_version ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setFieldDefaultsTemplateId(template.id)}
-                                                                className="font-medium text-primary hover:text-primary-dark"
-                                                            >
-                                                                Edit bundle
-                                                            </button>
+                                                            <div className="flex flex-col gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFieldDefaultsTemplateId(template.id)}
+                                                                    className="text-left font-medium text-primary hover:text-primary-dark"
+                                                                >
+                                                                    Edit bundle
+                                                                </button>
+                                                                <select
+                                                                    aria-label={`Seed bundle preset for ${template.name}`}
+                                                                    className="max-w-[11rem] rounded-md border-gray-300 py-1 text-xs text-gray-800 shadow-sm"
+                                                                    defaultValue=""
+                                                                    onChange={async (e) => {
+                                                                        const preset = e.target.value
+                                                                        e.target.value = ''
+                                                                        if (!preset) return
+                                                                        if (
+                                                                            !window.confirm(
+                                                                                `Seed "${preset}" defaults into ${template.name}? Existing bundle rows for matched fields will be updated.`
+                                                                            )
+                                                                        ) {
+                                                                            return
+                                                                        }
+                                                                        await runSeedBundlePreset(template.id, template.name, preset)
+                                                                    }}
+                                                                >
+                                                                    <option value="">Seed preset…</option>
+                                                                    <option value="minimal">Minimal</option>
+                                                                    <option value="photography_like">Rich types</option>
+                                                                </select>
+                                                            </div>
                                                         ) : (
                                                             <span className="text-gray-400 text-xs">Latest version only</span>
                                                         )}
@@ -1145,13 +1266,37 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                         {template.is_latest_version ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setFieldDefaultsTemplateId(template.id)}
-                                                                className="font-medium text-primary hover:text-primary-dark"
-                                                            >
-                                                                Edit bundle
-                                                            </button>
+                                                            <div className="flex flex-col gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFieldDefaultsTemplateId(template.id)}
+                                                                    className="text-left font-medium text-primary hover:text-primary-dark"
+                                                                >
+                                                                    Edit bundle
+                                                                </button>
+                                                                <select
+                                                                    aria-label={`Seed bundle preset for ${template.name}`}
+                                                                    className="max-w-[11rem] rounded-md border-gray-300 py-1 text-xs text-gray-800 shadow-sm"
+                                                                    defaultValue=""
+                                                                    onChange={async (e) => {
+                                                                        const preset = e.target.value
+                                                                        e.target.value = ''
+                                                                        if (!preset) return
+                                                                        if (
+                                                                            !window.confirm(
+                                                                                `Seed "${preset}" defaults into ${template.name}? Existing bundle rows for matched fields will be updated.`
+                                                                            )
+                                                                        ) {
+                                                                            return
+                                                                        }
+                                                                        await runSeedBundlePreset(template.id, template.name, preset)
+                                                                    }}
+                                                                >
+                                                                    <option value="">Seed preset…</option>
+                                                                    <option value="minimal">Minimal</option>
+                                                                    <option value="photography_like">Rich types</option>
+                                                                </select>
+                                                            </div>
                                                         ) : (
                                                             <span className="text-gray-400 text-xs">Latest version only</span>
                                                         )}

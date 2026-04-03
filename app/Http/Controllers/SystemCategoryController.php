@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\AssetType;
 use App\Models\SystemCategory;
 use App\Models\SystemCategoryFieldDefault;
+use App\Services\SystemCategoryFieldBundlePresetService;
 use App\Services\SystemCategoryService;
 use App\Services\SystemMetadataVisibilityService;
 use App\Support\MetadataCache;
@@ -188,6 +189,31 @@ class SystemCategoryController extends Controller
     }
 
     /**
+     * POST: seed default bundle rows from a preset (latest template only).
+     */
+    public function seedBundlePreset(Request $request, SystemCategory $systemCategory): JsonResponse
+    {
+        $this->checkSiteOwnerAccess();
+        $validated = $request->validate([
+            'preset' => 'required|string|in:minimal,by_field_types,photography_like',
+            'field_types' => 'nullable|array',
+            'field_types.*' => 'string|max:32',
+        ]);
+
+        try {
+            $n = app(SystemCategoryFieldBundlePresetService::class)->seed(
+                $systemCategory,
+                $validated['preset'],
+                $validated['field_types'] ?? null
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['success' => true, 'rows_upserted' => $n]);
+    }
+
+    /**
      * Store a newly created system category template.
      */
     public function store(Request $request)
@@ -201,6 +227,9 @@ class SystemCategoryController extends Controller
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
             'auto_provision' => 'sometimes|boolean',
+            'seed_bundle_preset' => 'nullable|string|in:none,minimal,by_field_types,photography_like',
+            'seed_field_types' => 'nullable|array',
+            'seed_field_types.*' => 'string|max:32',
         ]);
 
         try {
