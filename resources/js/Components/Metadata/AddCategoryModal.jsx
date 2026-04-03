@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowTopRightOnSquareIcon, CheckCircleIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import CategoryIconSelector from '../CategoryIconSelector'
 
 /**
  * Centered modal for adding a new category.
@@ -19,6 +20,7 @@ export default function AddCategoryModal({
     canViewMetadataRegistry = true,
 }) {
     const [name, setName] = useState('')
+    const [icon, setIcon] = useState('folder')
     const [assetType, setAssetType] = useState(assetTypeProp || 'asset')
     const [isPrivate, setIsPrivate] = useState(false)
     const [selectedRoles, setSelectedRoles] = useState([])
@@ -44,6 +46,7 @@ export default function AddCategoryModal({
     useEffect(() => {
         if (isOpen) {
             setName('')
+            setIcon('folder')
             setAssetType(assetTypeProp || 'asset')
             setIsPrivate(false)
             setSelectedRoles([])
@@ -95,8 +98,15 @@ export default function AddCategoryModal({
         }
 
         const limits = categoryLimitsProp ?? fetchedCategoryLimits
-        if (limits && !limits.can_create) {
+        if (limits && limits.can_create === false) {
             setError("You've reached your category limit for this plan.")
+            return
+        }
+        const vis = limits?.visible_by_asset_type?.[type]
+        if (vis?.at_cap) {
+            setError(
+                `You already have ${vis.max} visible categories for this library. Hide a category first, or contact support.`
+            )
             return
         }
 
@@ -112,6 +122,7 @@ export default function AddCategoryModal({
             const payload = {
                 name: trimmed,
                 asset_type: type,
+                icon: icon || 'folder',
                 is_private: isPrivate,
                 ...(accessRules.length > 0 && { access_rules: accessRules }),
             }
@@ -134,6 +145,7 @@ export default function AddCategoryModal({
                     id: data.category.id,
                     name: data.category.name,
                     slug: data.category.slug,
+                    icon: data.category.icon || icon || 'folder',
                     asset_type: type,
                     is_system: false,
                     is_hidden: false,
@@ -289,6 +301,16 @@ export default function AddCategoryModal({
                                 />
                                 <p className="mt-1.5 text-xs text-gray-500">
                                     Categories help organize your assets and define metadata behavior.
+                                </p>
+                            </div>
+
+                            <div>
+                                <span className="block text-sm font-medium text-gray-700 mb-1.5">
+                                    Icon
+                                </span>
+                                <CategoryIconSelector value={icon} onChange={setIcon} disabled={loading || atLimit} />
+                                <p className="mt-1.5 text-xs text-gray-500">
+                                    Shown next to this folder in sidebars and category lists.
                                 </p>
                             </div>
 

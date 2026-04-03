@@ -5,7 +5,6 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
-import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
 import { CategoryIcon, getIconById } from '../../Helpers/categoryIcons'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 
@@ -36,8 +35,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     // is_locked is site admin only - not editable by tenants
     const [draggedItem, setDraggedItem] = useState(null)
     const [localCategories, setLocalCategories] = useState(categories || [])
-    const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
-    const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const editInputRef = useRef(null)
 
     // Update local categories when props change
@@ -90,7 +87,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     const handleEditStart = (category) => {
         if (category.is_template) return
         // Allow editing system categories if plan allows, but check locked status
-        if (category.is_system && !plan?.can_edit_system_categories) return
         if (category.is_locked && !category.is_system) return // Locked custom categories can't be edited
         setEditingId(category.id)
         setEditName(category.name)
@@ -106,6 +102,20 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     }
 
     const handleEditSave = (categoryId, category) => {
+        if (category?.is_system) {
+            router.put(`/app/categories/${categoryId}`, { is_hidden: editIsHidden }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setEditingId(null)
+                    setEditName('')
+                    setEditIcon('folder')
+                    setEditIsHidden(false)
+                    setEditIsLocked(false)
+                },
+            })
+            return
+        }
+
         if (!editName.trim()) {
             handleEditCancel()
             return
@@ -114,13 +124,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
         const updateData = {
             name: editName.trim(),
             icon: editIcon,
-        }
-        
-        // Add system category fields if editing a system category and plan allows
-        // is_locked is site admin only - not editable by tenants
-        if (category?.is_system && plan?.can_edit_system_categories) {
-            updateData.is_hidden = editIsHidden
-            // is_locked is site admin only - not included in tenant updates
         }
 
         router.put(`/app/categories/${categoryId}`, updateData, {
@@ -244,11 +247,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                         <div>
                             <h1 className="text-3xl font-bold tracking-tight text-gray-900">Categories</h1>
                             <p className="mt-2 text-sm text-gray-700">Manage your asset categories</p>
-                            {plan && !plan.can_edit_system_categories && (
-                                <p className="mt-1 text-xs text-amber-600">
-                                    System categories are locked. Upgrade to <span className="font-semibold">Pro</span> or <span className="font-semibold">Enterprise</span> to edit system categories.
-                                </p>
-                            )}
                         </div>
                         {limits.can_create && (
                             <button
@@ -431,9 +429,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     const isDragging = draggedItem?.id === category.id
                                     // Custom categories are always editable if not locked/template
                                     // System categories are editable only if plan allows it
-                                    const isEditable = category.id && !category.is_template && !category.is_locked && (
-                                        !category.is_system || (plan?.can_edit_system_categories === true)
-                                    )
+                                    const isEditable = category.id && !category.is_template && (!category.is_locked || category.is_system)
                                     const isDeletable = category.id && !category.is_template && !category.is_locked && !category.is_system
 
                                     return (
@@ -493,20 +489,28 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                     <div className="flex-1 min-w-0">
                                                         {editingId === category.id ? (
                                                             <div className="space-y-2">
-                                                                <input
-                                                                    ref={editInputRef}
-                                                                    type="text"
-                                                                    value={editName}
-                                                                    onChange={(e) => setEditName(e.target.value)}
-                                                                    onKeyDown={(e) => handleEditKeyDown(e, category.id, category)}
-                                                                    className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                                                />
-                                                                <CategoryIconSelector
-                                                                    value={editIcon}
-                                                                    onChange={setEditIcon}
-                                                                />
-                                                                {/* System Category Controls - Only for system categories if plan allows */}
-                                                                {category.is_system && plan?.can_edit_system_categories && (
+                                                                {!category.is_system && (
+                                                                    <>
+                                                                        <input
+                                                                            ref={editInputRef}
+                                                                            type="text"
+                                                                            value={editName}
+                                                                            onChange={(e) => setEditName(e.target.value)}
+                                                                            onKeyDown={(e) => handleEditKeyDown(e, category.id, category)}
+                                                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                                        />
+                                                                        <CategoryIconSelector
+                                                                            value={editIcon}
+                                                                            onChange={setEditIcon}
+                                                                        />
+                                                                    </>
+                                                                )}
+                                                                {category.is_system && (
+                                                                    <p className="text-sm text-gray-600">
+                                                                        Name and icon are set by the platform. You can only control whether this folder is hidden from the library.
+                                                                    </p>
+                                                                )}
+                                                                {category.is_system && (
                                                                     <div className="space-y-2 border-t border-gray-200 pt-2">
                                                                         <div className="flex items-center">
                                                                             <input
@@ -520,14 +524,13 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                                                 Hide this category
                                                                             </label>
                                                                         </div>
-                                                                        {/* is_locked is site admin only - not shown to tenants */}
                                                                     </div>
                                                                 )}
                                                                 <div className="flex items-center gap-2 pt-1">
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => handleEditSave(category.id, category)}
-                                                                        disabled={processing || !editName.trim()}
+                                                                        disabled={processing || (!category.is_system && !editName.trim())}
                                                                         className="inline-flex items-center rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                                                     >
                                                                         <svg className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -558,19 +561,9 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                                             System
                                                                         </span>
                                                                     )}
-                                                                    {category.upgrade_available && category.is_system && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
-                                                                            Update available
-                                                                        </span>
-                                                                    )}
                                                                     {category.is_private && (
                                                                         <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-indigo-100 text-indigo-800 ring-indigo-600/20">
                                                                             Private
-                                                                        </span>
-                                                                    )}
-                                                                    {category.is_system && !plan?.can_edit_system_categories && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-600 ring-gray-600/20" title="Upgrade to Pro or Enterprise to edit system categories">
-                                                                            Locked
                                                                         </span>
                                                                     )}
                                                                 </div>
@@ -582,21 +575,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 ml-4">
-                                                    {category.upgrade_available && category.is_system && category.id && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                setSelectedCategoryForUpgrade(category)
-                                                                setUpgradeModalOpen(true)
-                                                            }}
-                                                            onMouseDown={(e) => e.stopPropagation()}
-                                                            className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
-                                                            title="Review update"
-                                                        >
-                                                            Review update
-                                                        </button>
-                                                    )}
                                                     {isEditable && editingId !== category.id && (
                                                         <button
                                                             type="button"
@@ -641,21 +619,6 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                 </div>
             </main>
             <AppFooter />
-            {upgradeModalOpen && selectedCategoryForUpgrade && (
-                <CategoryUpgradeModal
-                    category={selectedCategoryForUpgrade}
-                    isOpen={upgradeModalOpen}
-                    onClose={() => {
-                        setUpgradeModalOpen(false)
-                        setSelectedCategoryForUpgrade(null)
-                    }}
-                    onSuccess={() => {
-                        setUpgradeModalOpen(false)
-                        setSelectedCategoryForUpgrade(null)
-                        router.reload()
-                    }}
-                />
-            )}
         </div>
     )
 }

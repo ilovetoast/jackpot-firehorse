@@ -9,6 +9,9 @@ return [
     | Define subscription plans with their Stripe price IDs and feature limits.
     | Plans define feature limits, not access logic.
     |
+    | Note: max_categories is legacy; custom category count is not plan-gated.
+    | Per-brand visible category caps use config/categories.php (asset + deliverable).
+    |
     */
 
     'free' => [

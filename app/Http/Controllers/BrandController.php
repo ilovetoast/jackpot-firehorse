@@ -14,6 +14,7 @@ use App\Services\BrandDNA\BrandLogoVariantAutomationService;
 use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandService;
 use App\Services\CategoryService;
+use App\Services\CategoryVisibilityLimitService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
@@ -36,7 +37,8 @@ class BrandController extends Controller
         protected BrandService $brandService,
         protected PlanService $planService,
         protected CategoryService $categoryService,
-        protected SystemCategoryService $systemCategoryService
+        protected SystemCategoryService $systemCategoryService,
+        protected CategoryVisibilityLimitService $categoryVisibilityLimitService
     ) {}
 
     /**
@@ -433,11 +435,8 @@ class BrandController extends Controller
             }
         }
 
-        // Get plan limits for categories
-        $limits = $this->planService->getPlanLimits($tenant);
-        // Only count custom (non-system) categories against the limit
+        $visibleCategoryLimits = $this->categoryVisibilityLimitService->limitsPayloadForBrand($brand);
         $currentCategoryCount = $brand->categories()->custom()->count();
-        $canCreateCategory = $this->categoryService->canCreate($tenant, $brand);
 
         // Phase MI-1: Get brand users with active membership only
         $brandUsers = $brand->users()
@@ -486,8 +485,6 @@ class BrandController extends Controller
         $canCreatePrivateCategory = $this->planService->canCreatePrivateCategory($tenant, $brand);
         $maxPrivateCategories = $this->planService->getMaxPrivateCategories($tenant);
         $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
-        $canEditSystemCategories = $this->planService->hasFeature($tenant, 'edit_system_categories');
-
         $brandModel = $brand->brandModel;
         $activeVersion = $brandModel?->activeVersion;
         $modelPayload = self::deepUnwrapPayload($activeVersion?->model_payload ?? []);
@@ -623,10 +620,12 @@ class BrandController extends Controller
                 ];
             }),
             'available_system_templates' => $availableTemplates->values(),
+            'visible_category_limits' => $visibleCategoryLimits,
             'category_limits' => [
                 'current' => $currentCategoryCount,
-                'max' => $limits['max_categories'],
-                'can_create' => $canCreateCategory,
+                'max' => null,
+                'can_create' => true,
+                'visible_by_asset_type' => $visibleCategoryLimits,
             ],
             'brand_users' => $brandUsers,
             'brand_roles' => $brandRoles,
@@ -638,7 +637,7 @@ class BrandController extends Controller
                 'can_create' => $canCreatePrivateCategory,
                 'plan_allows' => in_array($currentPlan, ['pro', 'premium', 'enterprise']),
             ],
-            'can_edit_system_categories' => $canEditSystemCategories,
+            'can_edit_system_categories' => true,
             // Phase M-2: Pass tenant settings to check if company metadata approval is enabled
             'tenant_settings' => $tenant->settings ?? [],
             'current_plan' => $currentPlan,
@@ -957,9 +956,8 @@ class BrandController extends Controller
             abort(403, 'You do not have permission to manage categories.');
         }
 
-        $limits = $this->planService->getPlanLimits($tenant);
+        $visibleByAssetType = $this->categoryVisibilityLimitService->limitsPayloadForBrand($brand);
         $currentCount = $brand->categories()->custom()->count();
-        $canCreate = $this->categoryService->canCreate($tenant, $brand);
 
         $brandUsers = $brand->users()
             ->wherePivotNull('removed_at')
@@ -994,8 +992,9 @@ class BrandController extends Controller
         return response()->json([
             'category_limits' => [
                 'current' => $currentCount,
-                'max' => $limits['max_categories'],
-                'can_create' => $canCreate,
+                'max' => null,
+                'can_create' => true,
+                'visible_by_asset_type' => $visibleByAssetType,
             ],
             'brand_users' => $brandUsers->values(),
             'brand_roles' => $brandRoles,

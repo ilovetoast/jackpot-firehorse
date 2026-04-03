@@ -7,6 +7,7 @@ use App\Models\SystemCategory;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -14,8 +15,7 @@ class SystemCategoryController extends Controller
 {
     public function __construct(
         protected SystemCategoryService $systemCategoryService
-    ) {
-    }
+    ) {}
 
     /**
      * Check if the current user is a site owner/admin.
@@ -36,19 +36,30 @@ class SystemCategoryController extends Controller
         $this->checkSiteOwnerAccess();
         $templates = $this->systemCategoryService->getAllTemplates();
 
+        $brandRowCounts = collect(
+            DB::table('categories')
+                ->select('slug', 'asset_type')
+                ->selectRaw('COUNT(*) as c')
+                ->whereNull('deleted_at')
+                ->where('is_system', true)
+                ->groupBy('slug', 'asset_type')
+                ->get()
+        )->mapWithKeys(fn ($row) => [$row->slug.'|'.$row->asset_type => (int) $row->c]);
+
         return Inertia::render('Admin/SystemCategories', [
-            'templates' => $templates->map(function ($template) {
-                $stats = $this->systemCategoryService->getUpgradeStatistics($template);
+            'templates' => $templates->map(function ($template) use ($brandRowCounts) {
+                $type = $template->asset_type->value;
+
                 return [
                     'id' => $template->id,
                     'name' => $template->name,
                     'slug' => $template->slug,
                     'icon' => $template->icon,
-                    'asset_type' => $template->asset_type->value,
+                    'asset_type' => $type,
                     'is_hidden' => $template->is_hidden,
+                    'auto_provision' => $template->auto_provision,
                     'sort_order' => $template->sort_order,
-                    'version' => $template->version,
-                    'upgrade_stats' => $stats,
+                    'brand_row_count' => $brandRowCounts[$template->slug.'|'.$type] ?? 0,
                 ];
             }),
             'asset_types' => [
@@ -68,16 +79,21 @@ class SystemCategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
+            'asset_type' => 'required|string|in:'.implode(',', array_column(AssetType::cases(), 'value')),
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
+            'auto_provision' => 'sometimes|boolean',
         ]);
 
         try {
             $template = $this->systemCategoryService->createTemplate($validated);
 
+            $message = $template->auto_provision
+                ? 'Template created. Existing brands receive this folder in the background (starts hidden in each brand so tenants can show it when ready). New brands use the template defaults you set.'
+                : 'System category template created successfully.';
+
             return redirect()->route('admin.system-categories.index')
-                ->with('success', 'System category template created successfully.');
+                ->with('success', $message);
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),
@@ -95,16 +111,20 @@ class SystemCategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
+            'asset_type' => 'required|string|in:'.implode(',', array_column(AssetType::cases(), 'value')),
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
+            'auto_provision' => 'sometimes|boolean',
         ]);
 
         try {
             $this->systemCategoryService->updateTemplate($systemCategory, $validated);
 
             return redirect()->route('admin.system-categories.index')
-                ->with('success', 'System category template updated successfully.');
+                ->with(
+                    'success',
+                    'Template saved. Display name and icon were pushed to every brand that already has this folder (same slug/type). New brands still follow Auto-add / catalog rules.'
+                );
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),

@@ -27,6 +27,8 @@ class MetadataAnalyticsService
      * @param  string|null  $startDate  Optional date range start (Y-m-d)
      * @param  string|null  $endDate  Optional date range end (Y-m-d)
      * @param  bool  $includeInternal  Whether to include internal-only fields (admin only)
+     * @param  list<string>|null  $onlySections  If set, only these keys are computed (faster for Insights Overview, etc.):
+     *                                           overview, coverage, required_compliance, ai_effectiveness, freshness, rights_risk, governance_gaps
      * @return array Analytics data
      */
     public function getAnalytics(
@@ -35,17 +37,29 @@ class MetadataAnalyticsService
         ?int $categoryId = null,
         ?string $startDate = null,
         ?string $endDate = null,
-        bool $includeInternal = false
+        bool $includeInternal = false,
+        ?array $onlySections = null,
     ): array {
-        return [
-            'overview' => $this->getOverview($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'coverage' => $this->getCoverage($tenantId, $brandId, $categoryId, $includeInternal, $startDate, $endDate),
-            'required_compliance' => $this->getRequiredCompliance($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'ai_effectiveness' => $this->getAiEffectiveness($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'freshness' => $this->getFreshness($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'rights_risk' => $this->getRightsRisk($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'governance_gaps' => $this->getGovernanceGaps($tenantId, $brandId, $categoryId),
+        $builders = [
+            'overview' => fn () => $this->getOverview($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'coverage' => fn () => $this->getCoverage($tenantId, $brandId, $categoryId, $includeInternal, $startDate, $endDate),
+            'required_compliance' => fn () => $this->getRequiredCompliance($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'ai_effectiveness' => fn () => $this->getAiEffectiveness($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'freshness' => fn () => $this->getFreshness($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'rights_risk' => fn () => $this->getRightsRisk($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'governance_gaps' => fn () => $this->getGovernanceGaps($tenantId, $brandId, $categoryId),
         ];
+
+        $keys = $onlySections === null
+            ? array_keys($builders)
+            : array_values(array_intersect(array_keys($builders), $onlySections));
+
+        $out = [];
+        foreach ($keys as $key) {
+            $out[$key] = $builders[$key]();
+        }
+
+        return $out;
     }
 
     /**

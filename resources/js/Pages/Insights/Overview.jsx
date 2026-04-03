@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
@@ -17,19 +17,97 @@ import {
     DocumentTextIcon,
 } from '@heroicons/react/24/outline'
 
+function MetadataAnalyticsSkeleton() {
+    const bar = (w) => (
+        <div className={`h-8 rounded bg-gray-200 animate-pulse ${w}`} aria-hidden />
+    )
+    return (
+        <div className="space-y-6" aria-busy="true" aria-label="Loading metadata summary">
+            <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                    {[1, 2, 3, 4].map((i) => (
+                        <div key={i}>
+                            <div className="h-4 w-28 rounded bg-gray-200 animate-pulse mb-2" />
+                            {bar('w-20')}
+                            <div className="h-3 w-36 rounded bg-gray-100 animate-pulse mt-2" />
+                        </div>
+                    ))}
+                </div>
+                <div className="mt-6 pt-6 border-t border-gray-200 space-y-2">
+                    <div className="h-4 w-48 rounded bg-gray-200 animate-pulse" />
+                    {[1, 2, 3].map((i) => (
+                        <div key={i} className="flex justify-between gap-4">
+                            <div className="h-4 flex-1 max-w-xs rounded bg-gray-100 animate-pulse" />
+                            <div className="h-4 w-10 rounded bg-gray-100 animate-pulse" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 export default function AnalyticsOverview({
     stats = {},
     ai_usage = null,
     /** When monthly AI tagging/suggestions cap is reached — brand admins / brand managers only */
     ai_monthly_cap_alert = null,
-    metadata_overview = {},
-    metadata_coverage = {},
-    ai_effectiveness = {},
-    rights_risk = {},
     plan = {},
     brand_guidelines = {},
 }) {
     const [suggestionsModalOpen, setSuggestionsModalOpen] = useState(false)
+    const [lazyMeta, setLazyMeta] = useState(null)
+    const [metadataLoadError, setMetadataLoadError] = useState(false)
+    const metadataMountedRef = useRef(true)
+
+    useEffect(() => {
+        metadataMountedRef.current = true
+        return () => {
+            metadataMountedRef.current = false
+        }
+    }, [])
+
+    const fetchMetadataAnalytics = useCallback(() => {
+        setMetadataLoadError(false)
+        setLazyMeta(null)
+        const url =
+            typeof route === 'function'
+                ? route('insights.overview.metadata-analytics')
+                : '/app/insights/overview/metadata-analytics'
+        fetch(url, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error('Failed to load metadata analytics')
+                }
+                return res.json()
+            })
+            .then((data) => {
+                if (!metadataMountedRef.current) {
+                    return
+                }
+                setLazyMeta({
+                    metadata_overview: data.metadata_overview ?? {},
+                    metadata_coverage: data.metadata_coverage ?? {},
+                    ai_effectiveness: data.ai_effectiveness ?? {},
+                    rights_risk: data.rights_risk ?? {},
+                })
+            })
+            .catch(() => {
+                if (metadataMountedRef.current) {
+                    setMetadataLoadError(true)
+                }
+            })
+    }, [])
+
+    useEffect(() => {
+        fetchMetadataAnalytics()
+    }, [fetchMetadataAnalytics])
 
     // Deep link: open suggestions modal when ?open=suggestions in URL
     useEffect(() => {
@@ -100,8 +178,11 @@ export default function AnalyticsOverview({
         return <div className={cardClass}>{content}</div>
     }
 
-    const overview = metadata_overview
-    const coverage = metadata_coverage
+    const metadataLoading = lazyMeta === null && !metadataLoadError
+    const overview = lazyMeta?.metadata_overview ?? {}
+    const coverage = lazyMeta?.metadata_coverage ?? {}
+    const ai_effectiveness = lazyMeta?.ai_effectiveness ?? {}
+    const rights_risk = lazyMeta?.rights_risk ?? {}
     const lowestCoverage = coverage?.lowest_coverage_fields?.slice(0, 5) ?? []
 
     const g = brand_guidelines || {}
@@ -292,71 +373,96 @@ export default function AnalyticsOverview({
                     </div>
                 </section>
 
-                {/* Metadata Health Summary */}
+                {/* Metadata Health Summary — loaded after first paint */}
                 <section>
                     <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center">
                         <ChartBarIcon className="h-5 w-5 mr-2 text-gray-400" />
                         Metadata Health Summary
                     </h2>
-                    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
-                        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Completeness</p>
-                                <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                    {overview.completeness_percentage?.toFixed(1) ?? '0'}%
-                                </p>
-                                <p className="mt-0.5 text-xs text-gray-500">
-                                    {overview.assets_with_metadata?.toLocaleString() ?? 0} of{' '}
-                                    {overview.total_assets?.toLocaleString() ?? 0} assets
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Avg Metadata per Asset</p>
-                                <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                    {overview.avg_metadata_per_asset?.toFixed(1) ?? '0'}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Total Metadata Values</p>
-                                <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                    {overview.total_metadata_values?.toLocaleString() ?? '0'}
-                                </p>
-                            </div>
-                            <div>
-                                <Link
-                                    href="/app/insights/metadata"
-                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
-                                >
-                                    View full metadata insights
-                                    <ArrowRightIcon className="h-4 w-4" />
-                                </Link>
-                            </div>
+                    {metadataLoadError && (
+                        <div
+                            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-4"
+                            role="alert"
+                        >
+                            <p>Couldn&apos;t load metadata summary. Your brand totals above are still accurate.</p>
+                            <button
+                                type="button"
+                                onClick={() => fetchMetadataAnalytics()}
+                                className="mt-2 text-sm font-semibold text-indigo-700 hover:text-indigo-600"
+                            >
+                                Try again
+                            </button>
                         </div>
-                        {lowestCoverage.length > 0 && (
-                            <div className="mt-6 pt-6 border-t border-gray-200">
-                                <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                                    Fields with Lowest Coverage
-                                </h3>
-                                <div className="space-y-2">
-                                    {lowestCoverage.map((field, idx) => (
-                                        <div
-                                            key={field.field_key ?? idx}
-                                            className="flex items-center justify-between text-sm"
-                                        >
-                                            <span className="text-gray-700">{field.field_label}</span>
-                                            <span className="text-gray-500 tabular-nums">
-                                                {field.coverage_percentage}%
-                                            </span>
+                    )}
+                    {metadataLoading ? (
+                        <MetadataAnalyticsSkeleton />
+                    ) : (
+                        !metadataLoadError && (
+                            <>
+                                <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-500">Completeness</p>
+                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
+                                                {overview.completeness_percentage?.toFixed(1) ?? '0'}%
+                                            </p>
+                                            <p className="mt-0.5 text-xs text-gray-500">
+                                                {overview.assets_with_metadata?.toLocaleString() ?? 0} of{' '}
+                                                {overview.total_assets?.toLocaleString() ?? 0} assets
+                                            </p>
                                         </div>
-                                    ))}
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-500">Avg Metadata per Asset</p>
+                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
+                                                {overview.avg_metadata_per_asset?.toFixed(1) ?? '0'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-500">Total Metadata Values</p>
+                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
+                                                {overview.total_metadata_values?.toLocaleString() ?? '0'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <Link
+                                                href="/app/insights/metadata"
+                                                className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                            >
+                                                View full metadata insights
+                                                <ArrowRightIcon className="h-4 w-4" />
+                                            </Link>
+                                        </div>
+                                    </div>
+                                    {lowestCoverage.length > 0 && (
+                                        <div className="mt-6 pt-6 border-t border-gray-200">
+                                            <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                                                Fields with Lowest Coverage
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {lowestCoverage.map((field, idx) => (
+                                                    <div
+                                                        key={field.field_key ?? idx}
+                                                        className="flex items-center justify-between text-sm"
+                                                    >
+                                                        <span className="text-gray-700">{field.field_label}</span>
+                                                        <span className="text-gray-500 tabular-nums">
+                                                            {field.coverage_percentage}%
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            </>
+                        )
+                    )}
                 </section>
 
                 {/* AI Suggestion Effectiveness (preview) */}
-                {(ai_effectiveness?.total_suggestions > 0 || ai_effectiveness?.approved_suggestions > 0) && (
+                {!metadataLoading &&
+                    !metadataLoadError &&
+                    (ai_effectiveness?.total_suggestions > 0 || ai_effectiveness?.approved_suggestions > 0) && (
                     <section>
                         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center">
                             <SparklesIcon className="h-5 w-5 mr-2 text-gray-400" />
@@ -394,10 +500,12 @@ export default function AnalyticsOverview({
                             </div>
                         </div>
                     </section>
-                )}
+                    )}
 
                 {/* Rights & Risk Indicators */}
-                {(rights_risk?.expired_count > 0 ||
+                {!metadataLoading &&
+                    !metadataLoadError &&
+                    (rights_risk?.expired_count > 0 ||
                     rights_risk?.expiring_30_days > 0 ||
                     rights_risk?.expiring_60_days > 0 ||
                     rights_risk?.expiring_90_days > 0) && (
@@ -458,7 +566,7 @@ export default function AnalyticsOverview({
                             </div>
                         </div>
                     </section>
-                )}
+                    )}
             </div>
 
             {/* AI suggestions review modal — opened via ?open=suggestions deep link */}

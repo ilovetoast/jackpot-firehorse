@@ -76,7 +76,7 @@ const NavButton = ({
             />
         )}
         <span className="flex-1">{label}</span>
-        {typeof count === 'number' && (
+        {typeof count === 'number' && count > 0 && (
             <span
                 className="text-xs font-normal opacity-80"
                 style={{ color: isSelected ? activeTextColor : unselectedCountColor }}
@@ -222,6 +222,9 @@ export default function AssetSidebar({
                                 )}
                                 {filteredCategories.map((category) => {
                                     const isSelected = selectedCategoryId === category.id && lifecycle !== 'deleted'
+                                    const categoryCount = Number(category.asset_count)
+                                    const showCategoryCount =
+                                        category.id != null && Number.isFinite(categoryCount) && categoryCount > 0
                                     return (
                                         <button
                                             key={category.id}
@@ -250,13 +253,12 @@ export default function AssetSidebar({
                                                 style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
                                             />
                                             <span className="flex-1">{category.name}</span>
-                                            {category.id != null &&
-                                                typeof category.asset_count === 'number' && (
+                                            {showCategoryCount && (
                                                 <span
                                                     className="text-xs font-normal opacity-80 ml-2"
                                                     style={{ color: isSelected ? activeTextColor : unselectedCountColor }}
                                                 >
-                                                    {category.asset_count}
+                                                    {categoryCount}
                                                 </span>
                                             )}
                                             {category.is_private && setTooltipVisible && (

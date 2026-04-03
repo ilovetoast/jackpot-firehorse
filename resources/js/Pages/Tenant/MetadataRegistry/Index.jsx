@@ -15,6 +15,7 @@ export default function TenantMetadataRegistryIndex({
     brands = [],
     active_brand_id = null,
     categories,
+    canManageBrandCategories = false,
     canManageVisibility,
     canManageFields,
     customFieldsLimit = null,
@@ -97,6 +98,7 @@ export default function TenantMetadataRegistryIndex({
                     selectedBrandId={selectedBrandId}
                     onBrandChange={setSelectedBrandId}
                     categories={categories}
+                    canManageBrandCategories={canManageBrandCategories}
                     canManageVisibility={canManageVisibility}
                     canManageFields={canManageFields}
                     customFieldsLimit={customFieldsLimit}

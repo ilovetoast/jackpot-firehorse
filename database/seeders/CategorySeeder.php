@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\Brand;
 use App\Models\Tenant;
 use App\Services\SystemCategorySeeder;
 use Illuminate\Database\Seeder;
@@ -10,8 +9,8 @@ use Illuminate\Database\Seeder;
 /**
  * Category Seeder
  *
- * Seeds system categories for all existing brands.
- * Uses SystemCategorySeeder service to ensure consistency and idempotency.
+ * Seeds system categories for all existing brands (templates with auto_provision only).
+ * Uses SystemCategorySeeder → SystemCategoryService::syncToBrand() for consistency and idempotency.
  */
 class CategorySeeder extends Seeder
 {

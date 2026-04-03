@@ -35,6 +35,7 @@ class SystemCategory extends Model
         'asset_type',
         'is_private',
         'is_hidden',
+        'auto_provision',
         'sort_order',
         'version',
         'change_summary',
@@ -51,6 +52,7 @@ class SystemCategory extends Model
             'asset_type' => AssetType::class,
             'is_private' => 'boolean',
             'is_hidden' => 'boolean',
+            'auto_provision' => 'boolean',
             'sort_order' => 'integer',
             'version' => 'integer',
         ];
@@ -68,7 +70,7 @@ class SystemCategory extends Model
                 $systemCategory->slug = Str::slug($systemCategory->name);
             }
             // Set default version if not provided
-            if (!isset($systemCategory->version)) {
+            if (! isset($systemCategory->version)) {
                 $systemCategory->version = 1;
             }
         });
@@ -105,8 +107,6 @@ class SystemCategory extends Model
     /**
      * Get the latest version of this system category template.
      * Finds the SystemCategory with the same slug and asset_type but highest version.
-     *
-     * @return SystemCategory|null
      */
     public function getLatestVersion(): ?SystemCategory
     {
@@ -118,12 +118,11 @@ class SystemCategory extends Model
 
     /**
      * Check if this is the latest version of the template.
-     *
-     * @return bool
      */
     public function isLatestVersion(): bool
     {
         $latest = $this->getLatestVersion();
+
         return $latest && $latest->id === $this->id;
     }
 }

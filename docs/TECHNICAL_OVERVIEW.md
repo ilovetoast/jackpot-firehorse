@@ -131,6 +131,13 @@ AI is **assistive, not authoritative**.
 - Explainable metrics with tooltips
 - No background mutation jobs
 
+### 2.11 Brand library categories (system templates)
+
+- **Templates:** `system_categories` rows are managed in admin. **`auto_provision`** controls whether `SystemCategoryService::syncToBrand()` copies a template when a brand is created (`Database\Seeders\SystemCategoryTemplateSeeder` sets core templates to `auto_provision=true`).
+- **Brand rows:** `categories` are tenant/brand scoped. Tenants may edit **name**, **icon**, and **is_hidden** on system-backed rows; **slug** stays immutable. There is **no** tenant-facing “upgrade category to new template version” workflow; templates are updated in place.
+- **Limits:** `CategoryVisibilityLimitService` + `config/categories.php` enforce a max **visible** (non-hidden) count per brand for **`asset`** and **`deliverable`** types. **REFERENCE** / reference material is not counted toward that cap.
+- **Plans:** `PlanService` still gates **private** custom categories; generic custom category **count** is not plan-limited (visibility cap applies instead).
+
 ---
 
 ## 3. Plans & Current Feature Gates
@@ -142,6 +149,7 @@ AI is **assistive, not authoritative**.
 - Grid filtering & saved views
 - No approval workflow
 - Limited AI (optional)
+- Custom library folders subject to per-brand visible caps; **private** role-restricted folders require a paid tier (see `PlanService::canCreatePrivateCategory`)
 
 ### Pro
 - Metadata approval workflow

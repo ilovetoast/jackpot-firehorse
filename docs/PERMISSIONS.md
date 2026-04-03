@@ -85,6 +85,12 @@ Brand roles control access to:
 - Category management (for Admin/Brand Manager)
 - Brand settings (for Admin/Brand Manager)
 
+### Library categories (system templates vs custom)
+
+- **Who manages folders:** Users with **`brand_categories.manage`** (typically brand Admin; Brand Manager where the plan allows) can reorder categories, add custom folders, add catalog templates to a brand, and edit **name**, **icon**, and **hidden** visibility for **system-backed** categories. **Slug** and **lock** status are not tenant-editable.
+- **Who can see a folder:** `CategoryPolicy::view` enforces **private** categories using `category_access` rules, with bypass for tenant/brand admins and users with **`view.restricted.categories`**. See `App\Models\Category::userHasAccess()` (uses eager-loaded or explicit `accessRules` queries — no lazy-loaded relation access).
+- **Private categories:** Creating **private** (role-restricted) custom categories requires a **paid** plan tier that allows them; Starter/Free get an explicit upgrade message — this is separate from the per-brand **visible folder count** cap in `config/categories.php`.
+
 ---
 
 ## Role Combinations

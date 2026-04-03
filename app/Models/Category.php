@@ -25,8 +25,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Category Types:
  * - System Categories (is_system = true): Auto-created defaults (Logos, Photography, Graphics)
  *   - Cannot be deleted
- *   - Cannot be renamed or have icon changed (immutable)
- *   - Can be hidden (Enterprise/Pro plans only)
+ *   - Name and icon are tenant-editable; slug is immutable for stability
+ *   - Can be hidden per brand
  *   - is_locked is site admin only (cannot be set/changed by tenants)
  *   - Exist for every brand
  * - Custom Categories (is_system = false): User-created categories

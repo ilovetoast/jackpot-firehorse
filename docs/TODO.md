@@ -13,6 +13,7 @@ Must Have
 - Performance response-time instrumentation (page + image load) - still doesn't work
 -? Visual metadata integrity SLO enforcement?
 - Unified asset health scoring standardization - in needs work
+- asset operation - view asset in tenenat, would require admin and impersonate, should be recorder, full implentation of support with read only, and admin with deep dive.
 
 
 

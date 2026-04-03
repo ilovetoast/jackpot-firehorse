@@ -7,6 +7,7 @@ initPerformanceTracking()
 
 import { createInertiaApp, router } from '@inertiajs/react'
 import { removeWorkspaceSwitchingOverlay } from './utils/workspaceSwitchOverlay'
+import { maybeLogJackpotConsoleBanner } from './utils/jackpotConsoleBanner'
 import PermissionDeniedHost from './Components/PermissionDeniedHost'
 import GlobalErrorDialog from './Components/GlobalErrorDialog'
 
@@ -18,8 +19,10 @@ router.on('start', () => {
 })
 
 // Company/brand switches use full page navigation; overlay is shown via sessionStorage + blade (see app.blade.php)
-router.on('finish', () => {
+router.on('finish', (event) => {
     removeWorkspaceSwitchingOverlay()
+    const pageProps = event.detail?.page?.props ?? router.page?.props
+    maybeLogJackpotConsoleBanner(pageProps)
 })
 
 // Logged-in 403 on inertia:invalid is handled in inertiaGlobalErrorHandling.js
@@ -124,6 +127,7 @@ createInertiaApp({
         )
     },
     setup({ el, App, props }) {
+        maybeLogJackpotConsoleBanner(props.initialPage?.props)
         const root = createRoot(el)
         root.render(
             <BrandThemeProvider initialPage={props.initialPage}>

@@ -9,7 +9,6 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\CategoryAccess;
 use App\Models\Tenant;
-use App\Services\ActivityRecorder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -17,7 +16,7 @@ use Illuminate\Support\Str;
  * Category Service
  *
  * Handles business logic for category creation, updates, and deletion.
- * Ensures plan limits are enforced and system categories are protected.
+ * Enforces visibility caps for asset/deliverable types, private-category plan rules, and system-category field rules.
  *
  * Important: is_locked is site admin only
  * - Tenants cannot set or change is_locked
@@ -27,9 +26,9 @@ use Illuminate\Support\Str;
 class CategoryService
 {
     public function __construct(
-        protected PlanService $planService
-    ) {
-    }
+        protected PlanService $planService,
+        protected CategoryVisibilityLimitService $visibilityLimit
+    ) {}
 
     /**
      * Check if tenant can create a category for a brand.
@@ -45,17 +44,15 @@ class CategoryService
      * Creates a custom (non-system) category for a brand.
      * System categories should only be created via SystemCategorySeeder.
      *
-     * @param Tenant $tenant The tenant/company
-     * @param Brand $brand The brand to create the category for
-     * @param array $data Category data (name, slug, asset_type, is_private, etc.)
+     * @param  Tenant  $tenant  The tenant/company
+     * @param  Brand  $brand  The brand to create the category for
+     * @param  array  $data  Category data (name, slug, asset_type, is_private, etc.)
      * @return Category The created category
+     *
      * @throws PlanLimitExceededException If plan limit is exceeded
      */
     public function create(Tenant $tenant, Brand $brand, array $data): Category
     {
-        // Check plan limit
-        $this->planService->checkLimit('categories', $tenant, $brand);
-
         // Generate slug if not provided
         if (! isset($data['slug']) || empty($data['slug'])) {
             $data['slug'] = Str::slug($data['name']);
@@ -72,7 +69,7 @@ class CategoryService
             ->where('asset_type', $data['asset_type'])
             ->where('slug', $slug)
             ->exists()) {
-            $slug = $baseSlug . '-' . $counter;
+            $slug = $baseSlug.'-'.$counter;
             $counter++;
         }
         $data['slug'] = $slug;
@@ -83,12 +80,17 @@ class CategoryService
         $data['is_system'] = false; // User-created categories are never system
         $data['is_locked'] = false; // User-created categories are never locked (is_locked is site admin only)
         $data['is_hidden'] = $data['is_hidden'] ?? false; // Default to visible
-        
+
+        $assetType = $data['asset_type'] instanceof AssetType ? $data['asset_type'] : AssetType::from($data['asset_type']);
+        if (! $data['is_hidden']) {
+            $this->visibilityLimit->assertCanMakeVisible($brand, $assetType);
+        }
+
         // Prevent tenants from setting is_locked (site admin only)
         if (isset($data['is_locked']) && $data['is_locked'] === true) {
             throw new \Exception('Lock status can only be managed by site administrators.');
         }
-        
+
         // Validate private category requirements
         $isPrivate = $data['is_private'] ?? false;
         if ($isPrivate) {
@@ -98,10 +100,10 @@ class CategoryService
             }
 
             // Check plan allows private categories
-            if (!$this->planService->canCreatePrivateCategory($tenant, $brand)) {
+            if (! $this->planService->canCreatePrivateCategory($tenant, $brand)) {
                 $maxPrivate = $this->planService->getMaxPrivateCategories($tenant);
                 if ($maxPrivate === 0) {
-                    throw new \Exception('Private categories require Pro or Enterprise plan.');
+                    throw new \Exception('Private, role-protected categories require a paid plan (Pro, Premium, or Enterprise).');
                 } else {
                     throw new PlanLimitExceededException(
                         'private_categories',
@@ -117,9 +119,9 @@ class CategoryService
                 throw new \Exception('Private categories must have at least one access rule (role or user).');
             }
         }
-        
+
         // Auto-assign icon if not provided
-        if (!isset($data['icon']) || empty($data['icon'])) {
+        if (! isset($data['icon']) || empty($data['icon'])) {
             $data['icon'] = \App\Helpers\CategoryIcons::getDefaultIcon($data['name'], $data['slug']);
         }
 
@@ -141,7 +143,7 @@ class CategoryService
         }
 
         // Create access rules if category is private
-        if ($isPrivate && !empty($accessRules)) {
+        if ($isPrivate && ! empty($accessRules)) {
             $this->syncAccessRules($category, $accessRules);
         }
 
@@ -153,63 +155,46 @@ class CategoryService
      *
      * Updates a custom category. System categories can only be updated if plan allows.
      *
-     * @param Category $category The category to update
-     * @param array $data Updated data
+     * @param  Category  $category  The category to update
+     * @param  array  $data  Updated data
      * @return Category The updated category
+     *
      * @throws \Exception If category is locked or system (without plan permission)
      */
     public function update(Category $category, array $data): Category
     {
-        // System categories can only be updated if plan has edit_system_categories feature
         if ($category->is_system) {
-            $tenant = $category->tenant;
-            if (! $this->planService->hasFeature($tenant, 'edit_system_categories')) {
-                throw new \Exception('Cannot update system categories. Upgrade to Pro or Enterprise plan to edit system categories.');
-            }
-            
-            // System categories are immutable - only allow hide changes
-            // is_locked is site admin only and cannot be changed by tenants
-            // Prevent changing name, slug, icon, or other immutable fields
-            $allowedFieldsForSystem = ['is_hidden'];
-            $requestedFields = array_keys($data);
-            $disallowedFields = array_diff($requestedFields, $allowedFieldsForSystem);
-            
-            if (!empty($disallowedFields)) {
-                throw new \Exception('System categories are immutable. Only hide settings can be changed. Lock status is managed by site administrators only.');
-            }
-            
-            // Explicitly prevent tenants from setting is_locked
+            unset($data['slug']);
+
             if (isset($data['is_locked'])) {
                 throw new \Exception('Lock status can only be managed by site administrators.');
             }
+
+            // System folders: visibility only from tenants. Name/icon come from the platform template (admin).
+            $allowedFieldsForSystem = ['is_hidden'];
+            $disallowedFields = array_diff(array_keys($data), $allowedFieldsForSystem);
+            if (! empty($disallowedFields)) {
+                throw new \Exception('Only visibility (show/hide) can be changed for system categories. Name and icon are managed in Admin → System Categories.');
+            }
+        } elseif ($category->is_locked) {
+            // Custom locked categories: only allow is_hidden updates
+            $allowedFieldsForLocked = ['is_hidden'];
+            $isUpdatingOnlyAllowedFields = empty(array_diff(array_keys($data), $allowedFieldsForLocked));
+            if (! $isUpdatingOnlyAllowedFields) {
+                throw new \Exception('Cannot update locked categories.');
+            }
         }
 
-        // For system categories with edit permission, allow hide updates even if locked
-        // is_locked cannot be changed by tenants (site admin only)
-        // For custom locked categories, only allow is_hidden updates
-        if ($category->is_locked) {
-            if ($category->is_system && $this->planService->hasFeature($category->tenant, 'edit_system_categories')) {
-                // System categories: only allow is_hidden updates (is_locked is site admin only)
-                $allowedFieldsForLockedSystem = ['is_hidden'];
-                $isUpdatingOnlyAllowedFields = empty(array_diff(array_keys($data), $allowedFieldsForLockedSystem));
-                if (!$isUpdatingOnlyAllowedFields) {
-                    throw new \Exception('Cannot update locked system categories. Only hide settings can be changed. Lock status is managed by site administrators only.');
-                }
-            } else {
-                // Custom locked categories: only allow is_hidden updates
-                $allowedFieldsForLocked = ['is_hidden'];
-                $isUpdatingOnlyAllowedFields = empty(array_diff(array_keys($data), $allowedFieldsForLocked));
-                if (!$isUpdatingOnlyAllowedFields) {
-                    throw new \Exception('Cannot update locked categories.');
-                }
-            }
+        $effectiveHidden = array_key_exists('is_hidden', $data) ? (bool) $data['is_hidden'] : $category->is_hidden;
+        if ($category->is_hidden && ! $effectiveHidden) {
+            $this->visibilityLimit->assertCanMakeVisible($category->brand, $category->asset_type);
         }
 
         // Prevent changing is_system flag
         if (isset($data['is_system'])) {
             unset($data['is_system']);
         }
-        
+
         // Prevent tenants from setting is_locked (site admin only)
         // This check applies to both system and custom categories
         if (isset($data['is_locked'])) {
@@ -219,8 +204,8 @@ class CategoryService
         // Validate private category requirements if is_private is being set/changed
         $isPrivate = $data['is_private'] ?? $category->is_private;
         $wasPrivate = $category->is_private;
-        $isChangingToPrivate = !$wasPrivate && $isPrivate;
-        $isChangingFromPrivate = $wasPrivate && !$isPrivate;
+        $isChangingToPrivate = ! $wasPrivate && $isPrivate;
+        $isChangingFromPrivate = $wasPrivate && ! $isPrivate;
 
         // Validate private category requirements
         if ($isPrivate) {
@@ -233,10 +218,10 @@ class CategoryService
             if ($isChangingToPrivate) {
                 $tenant = $category->tenant;
                 $brand = $category->brand;
-                if (!$this->planService->canCreatePrivateCategory($tenant, $brand)) {
+                if (! $this->planService->canCreatePrivateCategory($tenant, $brand)) {
                     $maxPrivate = $this->planService->getMaxPrivateCategories($tenant);
                     if ($maxPrivate === 0) {
-                        throw new \Exception('Private categories require Pro or Enterprise plan.');
+                        throw new \Exception('Private, role-protected categories require a paid plan (Pro, Premium, or Enterprise).');
                     } else {
                         throw new PlanLimitExceededException(
                             'private_categories',
@@ -259,8 +244,8 @@ class CategoryService
             }
         }
 
-        // Generate slug if name changed and slug not provided
-        if (isset($data['name']) && (! isset($data['slug']) || empty($data['slug']))) {
+        // Generate slug if name changed and slug not provided (custom categories only)
+        if (! $category->is_system && isset($data['name']) && (! isset($data['slug']) || empty($data['slug']))) {
             $data['slug'] = Str::slug($data['name']);
 
             // Ensure slug is unique within tenant/brand/asset_type scope (excluding current category)
@@ -273,7 +258,7 @@ class CategoryService
                 ->where('slug', $slug)
                 ->where('id', '!=', $category->id)
                 ->exists()) {
-                $slug = $baseSlug . '-' . $counter;
+                $slug = $baseSlug.'-'.$counter;
                 $counter++;
             }
             $data['slug'] = $slug;
@@ -315,18 +300,18 @@ class CategoryService
      * System categories can only be deleted if their system template no longer exists.
      * This allows for potential restoration and maintains version history.
      *
-     * @param Category $category The category to delete
-     * @return void
+     * @param  Category  $category  The category to delete
+     *
      * @throws \Exception If category is locked or system (and template still exists)
      */
     public function delete(Category $category): void
     {
         // Use the category's helper method to check if it can be deleted
-        if (!$category->canBeDeleted()) {
+        if (! $category->canBeDeleted()) {
             if ($category->is_system && $category->systemTemplateExists()) {
                 throw new \Exception('Cannot delete system categories while the template exists.');
             }
-            if ($category->is_locked && !$category->is_system) {
+            if ($category->is_locked && ! $category->is_system) {
                 throw new \Exception('Cannot delete locked categories.');
             }
             throw new \Exception('This category cannot be deleted.');
@@ -342,16 +327,20 @@ class CategoryService
      * Allows hiding/showing categories. System categories can be hidden
      * but this should be plan/permission gated in the controller.
      *
-     * @param Category $category The category to toggle
-     * @param bool $hidden Whether to hide or show the category
+     * @param  Category  $category  The category to toggle
+     * @param  bool  $hidden  Whether to hide or show the category
      * @return Category The updated category
+     *
      * @throws \Exception If category is locked and trying to change hidden state
      */
     public function setHidden(Category $category, bool $hidden): Category
     {
-        // System categories can be hidden, but locked categories cannot be modified
-        if ($category->is_locked && $category->is_hidden !== $hidden) {
+        if ($category->is_locked && ! $category->is_system && $category->is_hidden !== $hidden) {
             throw new \Exception('Cannot change hidden state of locked categories.');
+        }
+
+        if (! $hidden && $category->is_hidden) {
+            $this->visibilityLimit->assertCanMakeVisible($category->brand, $category->asset_type);
         }
 
         $category->update(['is_hidden' => $hidden]);
@@ -362,9 +351,7 @@ class CategoryService
     /**
      * Sync access rules for a category.
      *
-     * @param Category $category
-     * @param array $accessRules Array of access rules: [['type' => 'role', 'role' => 'admin'], ['type' => 'user', 'user_id' => 1]]
-     * @return void
+     * @param  array  $accessRules  Array of access rules: [['type' => 'role', 'role' => 'admin'], ['type' => 'user', 'user_id' => 1]]
      */
     public function syncAccessRules(Category $category, array $accessRules): void
     {
@@ -375,6 +362,7 @@ class CategoryService
             } elseif ($rule->access_type === 'user') {
                 return ['type' => 'user', 'user_id' => $rule->user_id];
             }
+
             return null;
         })->filter()->values()->toArray();
 
@@ -384,7 +372,7 @@ class CategoryService
         // Create new access rules
         $newRules = [];
         foreach ($accessRules as $rule) {
-            if ($rule['type'] === 'role' && !empty($rule['role'])) {
+            if ($rule['type'] === 'role' && ! empty($rule['role'])) {
                 CategoryAccess::create([
                     'category_id' => $category->id,
                     'brand_id' => $category->brand_id,
@@ -392,7 +380,7 @@ class CategoryService
                     'role' => $rule['role'],
                 ]);
                 $newRules[] = ['type' => 'role', 'role' => $rule['role']];
-            } elseif ($rule['type'] === 'user' && !empty($rule['user_id'])) {
+            } elseif ($rule['type'] === 'user' && ! empty($rule['user_id'])) {
                 CategoryAccess::create([
                     'category_id' => $category->id,
                     'brand_id' => $category->brand_id,
@@ -413,8 +401,8 @@ class CategoryService
                 $user,
                 $category->brand,
                 [
-                    'roles' => array_filter($newRules, fn($r) => $r['type'] === 'role'),
-                    'users' => array_filter($newRules, fn($r) => $r['type'] === 'user'),
+                    'roles' => array_filter($newRules, fn ($r) => $r['type'] === 'role'),
+                    'users' => array_filter($newRules, fn ($r) => $r['type'] === 'user'),
                 ]
             );
         }

@@ -30,6 +30,7 @@ export default function SystemCategories({ templates, asset_types }) {
         icon: 'folder',
         asset_type: 'asset',
         is_hidden: false,
+        auto_provision: false,
         sort_order: 0,
     })
 
@@ -47,6 +48,7 @@ export default function SystemCategories({ templates, asset_types }) {
             icon: template.icon || 'folder',
             asset_type: template.asset_type,
             is_hidden: template.is_hidden,
+            auto_provision: !!template.auto_provision,
             sort_order: template.sort_order,
         })
         setShowForm(true)
@@ -196,7 +198,7 @@ export default function SystemCategories({ templates, asset_types }) {
                             <div className="flex-1">
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">System Categories</h1>
                                 <p className="mt-2 text-sm text-gray-700">
-                                    Manage global system category templates. These categories are automatically copied to new brands when they are created.
+                                    This page is the <strong>platform catalog</strong>: every template here is <em>available</em> to all tenants. <strong>Auto-add to new brands</strong> creates the folder row on new brands and queues a hidden copy on existing brands so tenants can show it when ready. <strong>Catalog only</strong> means the row is created when a tenant adds or shows that folder (same API as “add from catalog”). Saving a template pushes <strong>name and icon</strong> to all brand rows that already use this slug; tenants cannot rename system folders locally.
                                 </p>
                                 <div className="mt-4 rounded-md bg-blue-50 p-4">
                                     <div className="flex">
@@ -205,7 +207,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                         </div>
                                         <div className="ml-3">
                                             <p className="text-sm text-blue-700">
-                                                <strong>Note:</strong> When you update a system category template, a new version is created. Existing brands will see an "Update available" badge and can choose to upgrade their category to the latest version while preserving any customizations they've made.
+                                                <strong>Visibility:</strong> <strong>Hidden template default</strong> applies to <em>new</em> brands and to the template itself in listings. When auto-adding to existing brands, folders are created <strong>hidden</strong> regardless of that checkbox so libraries do not change until a tenant enables them in Metadata → By category. Each brand may show at most 20 visible categories per asset and executions library.
                                             </p>
                                         </div>
                                     </div>
@@ -333,18 +335,43 @@ export default function SystemCategories({ templates, asset_types }) {
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center">
-                                        <input
-                                            id="is_hidden"
-                                            name="is_hidden"
-                                            type="checkbox"
-                                            checked={data.is_hidden}
-                                            onChange={(e) => setData('is_hidden', e.target.checked)}
-                                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                        />
-                                        <label htmlFor="is_hidden" className="ml-3 block text-sm font-medium text-gray-900">
-                                            Is Hidden
-                                        </label>
+                                    <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
+                                        <div className="flex flex-col gap-1 max-w-md">
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    id="is_hidden"
+                                                    name="is_hidden"
+                                                    type="checkbox"
+                                                    checked={data.is_hidden}
+                                                    onChange={(e) => setData('is_hidden', e.target.checked)}
+                                                    className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                />
+                                                <label htmlFor="is_hidden" className="block text-sm font-medium text-gray-900">
+                                                    Hidden by default (new brands)
+                                                </label>
+                                            </div>
+                                            <p className="text-xs text-gray-500 pl-7">
+                                                Applies when a <strong>new</strong> brand is created. Existing brands always get new auto-added folders <strong>hidden</strong> until a tenant shows them.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 max-w-md">
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    id="auto_provision"
+                                                    name="auto_provision"
+                                                    type="checkbox"
+                                                    checked={data.auto_provision}
+                                                    onChange={(e) => setData('auto_provision', e.target.checked)}
+                                                    className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                />
+                                                <label htmlFor="auto_provision" className="block text-sm font-medium text-gray-900">
+                                                    Auto-add to brands (new + existing)
+                                                </label>
+                                            </div>
+                                            <p className="text-xs text-gray-500 pl-7">
+                                                Queues a background job to create the folder on every brand that does not have it yet (hidden on existing brands).
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -405,6 +432,9 @@ export default function SystemCategories({ templates, asset_types }) {
                                     <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                             <tr>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
+                                                    <span className="sr-only">Drag handle</span>
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Name
                                                 </th>
@@ -418,7 +448,10 @@ export default function SystemCategories({ templates, asset_types }) {
                                                     Flags
                                                 </th>
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Upgrade Status
+                                                    New brands
+                                                </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Brand folders
                                                 </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
@@ -466,30 +499,21 @@ export default function SystemCategories({ templates, asset_types }) {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        {template.upgrade_stats && template.upgrade_stats.total_brands > 0 ? (
-                                                            <div className="text-sm">
-                                                                <div className="flex items-center gap-2">
-                                                                    {template.upgrade_stats.queued_upgrades > 0 && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
-                                                                            {template.upgrade_stats.queued_upgrades} queued
-                                                                        </span>
-                                                                    )}
-                                                                    {template.upgrade_stats.upgraded > 0 && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20">
-                                                                            {template.upgrade_stats.upgraded} upgraded
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="mt-1 text-xs text-gray-500">
-                                                                    v{template.version} • {template.upgrade_stats.total_brands} brand{template.upgrade_stats.total_brands !== 1 ? 's' : ''}
-                                                                </div>
-                                                            </div>
+                                                        {template.auto_provision ? (
+                                                            <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-800 ring-green-600/20">
+                                                                Auto-add
+                                                            </span>
                                                         ) : (
-                                                            <div className="text-sm text-gray-400">
-                                                                <div>v{template.version}</div>
-                                                                <div className="text-xs mt-1">No brands yet</div>
-                                                            </div>
+                                                            <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-600 ring-gray-600/20">
+                                                                Catalog only
+                                                            </span>
                                                         )}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-sm text-gray-700 tabular-nums">
+                                                            {typeof template.brand_row_count === 'number' ? template.brand_row_count : '—'}
+                                                        </div>
+                                                        <div className="text-xs text-gray-500">rows across brands</div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">
@@ -562,7 +586,10 @@ export default function SystemCategories({ templates, asset_types }) {
                                                     Flags
                                                 </th>
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Upgrade Status
+                                                    New brands
+                                                </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Brand folders
                                                 </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
@@ -610,30 +637,21 @@ export default function SystemCategories({ templates, asset_types }) {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        {template.upgrade_stats && template.upgrade_stats.total_brands > 0 ? (
-                                                            <div className="text-sm">
-                                                                <div className="flex items-center gap-2">
-                                                                    {template.upgrade_stats.queued_upgrades > 0 && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
-                                                                            {template.upgrade_stats.queued_upgrades} queued
-                                                                        </span>
-                                                                    )}
-                                                                    {template.upgrade_stats.upgraded > 0 && (
-                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20">
-                                                                            {template.upgrade_stats.upgraded} upgraded
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="mt-1 text-xs text-gray-500">
-                                                                    v{template.version} • {template.upgrade_stats.total_brands} brand{template.upgrade_stats.total_brands !== 1 ? 's' : ''}
-                                                                </div>
-                                                            </div>
+                                                        {template.auto_provision ? (
+                                                            <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-800 ring-green-600/20">
+                                                                Auto-add
+                                                            </span>
                                                         ) : (
-                                                            <div className="text-sm text-gray-400">
-                                                                <div>v{template.version}</div>
-                                                                <div className="text-xs mt-1">No brands yet</div>
-                                                            </div>
+                                                            <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-600 ring-gray-600/20">
+                                                                Catalog only
+                                                            </span>
                                                         )}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-sm text-gray-700 tabular-nums">
+                                                            {typeof template.brand_row_count === 'number' ? template.brand_row_count : '—'}
+                                                        </div>
+                                                        <div className="text-xs text-gray-500">rows across brands</div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">

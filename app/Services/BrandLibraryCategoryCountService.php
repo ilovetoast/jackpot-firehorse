@@ -8,17 +8,15 @@ use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Lifecycle\LifecycleResolver;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Per-category and total counts for the asset/deliverable library sidebar.
- * Uses driver-safe metadata.category_id casting (MySQL/Postgres/SQLite) and short-lived cache.
+ * Uses driver-safe metadata.category_id casting (MySQL/Postgres/SQLite).
+ * Not cached: sidebar counts must match the grid immediately after uploads/recategorization.
  */
 class BrandLibraryCategoryCountService
 {
-    private const CACHE_TTL_SECONDS = 120;
-
     public function __construct(
         protected LifecycleResolver $lifecycleResolver
     ) {}
@@ -42,33 +40,17 @@ class BrandLibraryCategoryCountService
             return ['total' => 0, 'by_category' => []];
         }
 
-        $cacheKey = $this->cacheKey(
-            $tenant->id,
-            $brand->id,
-            $user->id,
+        return $this->computeCounts(
+            $tenant,
+            $brand,
+            $user,
+            $viewableCategoryIds,
+            $categoryIdsForGrouping,
             $normalizedLifecycle,
             $isTrashView,
             $assetType,
             $normalIntakeOnly,
-            $explicitSoftDeleteWhenNotTrash,
-            $viewableCategoryIds
-        );
-
-        return Cache::remember(
-            $cacheKey,
-            self::CACHE_TTL_SECONDS,
-            fn () => $this->computeCounts(
-                $tenant,
-                $brand,
-                $user,
-                $viewableCategoryIds,
-                $categoryIdsForGrouping,
-                $normalizedLifecycle,
-                $isTrashView,
-                $assetType,
-                $normalIntakeOnly,
-                $explicitSoftDeleteWhenNotTrash
-            )
+            $explicitSoftDeleteWhenNotTrash
         );
     }
 
@@ -115,15 +97,17 @@ class BrandLibraryCategoryCountService
         $assetCounts = [];
 
         if (! empty($categoryIdsForGrouping)) {
+            // Alias must NOT be `category_id`: Asset model has a categoryId() accessor that reads
+            // metadata JSON, which is unset on these aggregate rows — so $row->category_id was always null.
             $countRows = (clone $countQuery)
-                ->selectRaw("{$cast} as category_id, COUNT(*) as count")
+                ->selectRaw("{$cast} as library_category_id, COUNT(*) as aggregate")
                 ->groupBy(DB::raw($cast))
                 ->get();
 
             foreach ($countRows as $row) {
-                $cid = (int) ($row->category_id ?? 0);
+                $cid = (int) ($row->library_category_id ?? 0);
                 if ($cid > 0) {
-                    $assetCounts[$cid] = (int) ($row->count ?? 0);
+                    $assetCounts[$cid] = (int) ($row->aggregate ?? 0);
                 }
             }
         }
@@ -132,36 +116,5 @@ class BrandLibraryCategoryCountService
             'total' => $totalAssetCount,
             'by_category' => $assetCounts,
         ];
-    }
-
-    private function cacheKey(
-        int $tenantId,
-        int $brandId,
-        int $userId,
-        ?string $normalizedLifecycle,
-        bool $isTrashView,
-        AssetType $assetType,
-        bool $normalIntakeOnly,
-        bool $explicitSoftDeleteWhenNotTrash,
-        array $viewableCategoryIds
-    ): string {
-        $ids = array_map('intval', $viewableCategoryIds);
-        sort($ids);
-        $idsHash = hash('sha256', json_encode($ids));
-
-        $lifecyclePart = $normalizedLifecycle ?? 'default';
-
-        return sprintf(
-            'brand_category_sidebar_counts:%d:%d:%d:%s:%s:%s:%s:%s:%s',
-            $tenantId,
-            $brandId,
-            $userId,
-            $lifecyclePart,
-            $isTrashView ? '1' : '0',
-            $assetType->value,
-            $normalIntakeOnly ? '1' : '0',
-            $explicitSoftDeleteWhenNotTrash ? '1' : '0',
-            $idsHash
-        );
     }
 }

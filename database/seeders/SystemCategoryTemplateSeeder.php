@@ -10,9 +10,11 @@ use Illuminate\Database\Seeder;
  * System Category Template Seeder
  *
  * Seeds only system category templates (no brand categories).
- * New brand creation clones from these templates via SystemCategoryService::syncToBrand.
+ * New brands receive copies of templates where auto_provision=true via SystemCategoryService::syncToBrand.
+ * Admin-created templates default to auto_provision=false (catalog-only) unless toggled in admin.
  *
- * Each template has explicit version = 1.
+ * Each seeded template sets auto_provision=true so core folders (Logos, Photography, …) stay on new brands.
+ * Each template has explicit version = 1 (template rows are updated in place; no tenant version upgrade flow).
  * Default enabled fields (collection, tags) are configured in metadata_category_defaults.
  *
  * ASSET: Logos, Photography, Graphics, Video, Fonts (hidden)
@@ -176,14 +178,24 @@ class SystemCategoryTemplateSeeder extends Seeder
         ];
 
         foreach ($templates as $template) {
+            $row = array_merge($template, ['auto_provision' => true]);
+
             SystemCategory::firstOrCreate(
                 [
-                    'slug' => $template['slug'],
-                    'asset_type' => $template['asset_type'],
+                    'slug' => $row['slug'],
+                    'asset_type' => $row['asset_type'],
                     'version' => 1,
                 ],
-                $template
+                $row
             );
+        }
+
+        // Normalize v1 seeded rows if they already existed before auto_provision was added to firstOrCreate attributes
+        foreach ($templates as $template) {
+            SystemCategory::where('slug', $template['slug'])
+                ->where('asset_type', $template['asset_type'])
+                ->where('version', 1)
+                ->update(['auto_provision' => true]);
         }
 
         // Rename "Digital Ads" to "Digital" (slug stays digital-ads for config compatibility)

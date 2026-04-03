@@ -257,17 +257,12 @@ class PlanService
     }
 
     /**
-     * Check if tenant can create a category for a brand.
-     * Only counts custom (non-system) categories against the limit.
+     * Check if tenant can create a custom (non-system) category for a brand.
+     * Plan tier no longer caps custom category count; visibility per asset type is enforced separately.
      */
     public function canCreateCategory(Tenant $tenant, Brand $brand): bool
     {
-        $limits = $this->getPlanLimits($tenant);
-
-        // Count only custom (non-system) categories for the brand
-        $currentCount = $brand->categories()->custom()->count();
-
-        return $currentCount < $limits['max_categories'];
+        return true;
     }
 
     /**

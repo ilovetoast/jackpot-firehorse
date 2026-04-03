@@ -7,7 +7,6 @@ use App\Enums\AssetType;
 use App\Enums\StorageBucketStatus;
 use App\Enums\ThumbnailStatus;
 use App\Enums\TicketStatus;
-use App\Enums\TicketType;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\Asset;
@@ -15,11 +14,11 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\StorageBucket;
+use App\Models\SystemCategory;
 use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
-use App\Models\SystemCategory;
 use App\Services\MetadataPersistenceService;
 use App\Services\SystemCategoryService;
 use App\Services\TenantBucketService;
@@ -50,7 +49,8 @@ use Illuminate\Support\Str;
  *
  * This seeder:
  * - Creates companies, brands, users, categories (system + custom), assets and deliverables
- * - Syncs system categories so filters (Photo Type, Logo Type, Print Type, etc.) have data
+ * - Syncs auto_provision system templates so filters (Photo Type, Logo Type, Print Type, etc.) have data
+ * - Keeps random custom category counts low enough to stay under the per-brand visible cap (asset + deliverable)
  * - Persists metadata to asset_metadata with approved_at so the drawer displays it
  * - Adds tags (asset_tags) and collections (collections + asset_collections) for company 1
  * - Uses placeholder S3 paths (no real uploads)
@@ -60,7 +60,7 @@ class DevelopmentDataSeeder extends Seeder
     // Size options: 'small', 'medium', 'large'
     // Can be overridden via SEEDER_SIZE environment variable
     private const SIZE = 'large'; // Default to large
-    
+
     // Size configurations (small: fewer companies/users, but at least 50 assorted assets for company 1)
     private const SIZE_CONFIG = [
         'small' => [
@@ -68,8 +68,8 @@ class DevelopmentDataSeeder extends Seeder
             'tickets' => 2,
             'min_assets' => 10,
             'max_assets' => 30,
-            'min_categories' => 3,
-            'max_categories' => 10,
+            'min_categories' => 2,
+            'max_categories' => 5,
             'min_brands' => 1,
             'max_brands' => 2,
         ],
@@ -78,8 +78,8 @@ class DevelopmentDataSeeder extends Seeder
             'tickets' => 10,
             'min_assets' => 50,
             'max_assets' => 500,
-            'min_categories' => 5,
-            'max_categories' => 15,
+            'min_categories' => 3,
+            'max_categories' => 8,
             'min_brands' => 1,
             'max_brands' => 4,
         ],
@@ -88,73 +88,76 @@ class DevelopmentDataSeeder extends Seeder
             'tickets' => 20,
             'min_assets' => 100,
             'max_assets' => 1000,
-            'min_categories' => 5,
-            'max_categories' => 20,
+            'min_categories' => 3,
+            'max_categories' => 10,
             'min_brands' => 1,
             'max_brands' => 5,
         ],
     ];
-    
+
     private function getSize(): string
     {
         return env('SEEDER_SIZE', self::SIZE);
     }
-    
+
     private function getConfig(): array
     {
         $size = $this->getSize();
-        if (!isset(self::SIZE_CONFIG[$size])) {
+        if (! isset(self::SIZE_CONFIG[$size])) {
             $this->command->warn("Invalid size '{$size}', defaulting to 'large'");
             $size = 'large';
         }
+
         return self::SIZE_CONFIG[$size];
     }
-    
+
     private function getCompaniesCount(): int
     {
         return $this->getConfig()['companies'];
     }
-    
+
     private function getTicketsCount(): int
     {
         return $this->getConfig()['tickets'];
     }
-    
+
     private function getMinAssetsPerCompany(): int
     {
         return $this->getConfig()['min_assets'];
     }
-    
+
     private function getMaxAssetsPerCompany(): int
     {
         return $this->getConfig()['max_assets'];
     }
-    
+
     private function getMinCategoriesPerCompany(): int
     {
         return $this->getConfig()['min_categories'];
     }
-    
+
     private function getMaxCategoriesPerCompany(): int
     {
         return $this->getConfig()['max_categories'];
     }
-    
+
     private function getMinBrandsPerCompany(): int
     {
         return $this->getConfig()['min_brands'];
     }
-    
+
     private function getMaxBrandsPerCompany(): int
     {
         return $this->getConfig()['max_brands'];
     }
-    
+
     // Special role percentages
     private const SUPPORT_USER_PERCENT = 0.5; // 0.5% of users
+
     private const SITE_ADMIN_PERCENT = 0.1; // 0.1% of users
+
     private const ENGINEERING_PERCENT = 0.2; // 0.2% of users
-    
+
     // Plan distribution
     private const PLAN_DISTRIBUTION = [
         'free' => 0.3,      // 30% free
@@ -162,10 +165,10 @@ class DevelopmentDataSeeder extends Seeder
         'pro' => 0.25,      // 25% pro
         'enterprise' => 0.2, // 20% enterprise
     ];
-    
+
     // Some companies should exceed limits (for testing)
     private const EXCEED_LIMIT_PERCENT = 0.05; // 5% of companies
-    
+
     /**
      * Run the database seeds.
      */
@@ -177,52 +180,54 @@ class DevelopmentDataSeeder extends Seeder
             $this->command->error('⚠️  This seeder is for local/testing only.');
             $this->command->error("Current environment: {$env}");
             $this->command->error('Aborting to prevent accidental staging/production data.');
+
             return;
         }
-        
+
         // Get size configuration
         $size = $this->getSize();
         $companiesCount = $this->getCompaniesCount();
         $expectedUsers = $this->estimateUserCount($companiesCount);
-        
-        $this->command->info("📊 Seeder Size: " . strtoupper($size));
+
+        $this->command->info('📊 Seeder Size: '.strtoupper($size));
         $this->command->info("   Companies: ~{$companiesCount}");
         $this->command->info("   Users: ~{$expectedUsers}");
-        $this->command->info("   Assets: " . $this->getMinAssetsPerCompany() . "-" . $this->getMaxAssetsPerCompany() . " per company");
-        
+        $this->command->info('   Assets: '.$this->getMinAssetsPerCompany().'-'.$this->getMaxAssetsPerCompany().' per company');
+
         // Confirmation prompt (skip if --force is used or in non-interactive mode)
         $isForced = $this->command->option('force') ?? false;
-        if (!$isForced && !$this->command->confirm("This will generate {$companiesCount} companies with extensive test data. Continue?", false)) {
+        if (! $isForced && ! $this->command->confirm("This will generate {$companiesCount} companies with extensive test data. Continue?", false)) {
             $this->command->info('Seeder cancelled.');
+
             return;
         }
-        
+
         $this->command->info('🚀 Starting development data generation...');
         $startTime = microtime(true);
-        
+
         // Get plan limits from config
         $planLimits = $this->getPlanLimits();
-        
+
         // Create companies in chunks to manage memory
         $chunkSize = $size === 'small' ? 10 : ($size === 'medium' ? 25 : 50);
         $totalChunks = ceil($companiesCount / $chunkSize);
-        
+
         for ($chunk = 0; $chunk < $totalChunks; $chunk++) {
             $offset = $chunk * $chunkSize;
             $count = min($chunkSize, $companiesCount - $offset);
-            
-            $this->command->info("Creating companies " . ($offset + 1) . "-" . ($offset + $count) . " of " . $companiesCount . "...");
-            
+
+            $this->command->info('Creating companies '.($offset + 1).'-'.($offset + $count).' of '.$companiesCount.'...');
+
             for ($i = 0; $i < $count; $i++) {
                 $this->createCompanyWithData($planLimits);
             }
-            
+
             // Clear memory
             if ($chunk % 10 === 0) {
                 gc_collect_cycles();
             }
         }
-        
+
         // Seed assets for company 1 / brand 1 (default seed company) with lots of filterable metadata
         $this->command->info('Seeding assets for company 1 / brand 1 (lots of filters)...');
         $this->seedAssetsForFirstCompanyBrand($planLimits);
@@ -230,49 +235,49 @@ class DevelopmentDataSeeder extends Seeder
         // Create support tickets
         $this->command->info('Creating support tickets...');
         $this->createSupportTickets();
-        
+
         $endTime = microtime(true);
         $duration = round($endTime - $startTime, 2);
-        
+
         $this->command->info("✅ Development data generation complete! ({$duration}s)");
-        $this->command->info("Created:");
-        $this->command->info("  - Companies: " . Tenant::count());
-        $this->command->info("  - Brands: " . Brand::count());
-        $this->command->info("  - Users: " . User::count());
-        $this->command->info("  - Assets: " . Asset::count());
-        $this->command->info("  - Categories: " . Category::count());
-        $this->command->info("  - Tickets: " . Ticket::count());
+        $this->command->info('Created:');
+        $this->command->info('  - Companies: '.Tenant::count());
+        $this->command->info('  - Brands: '.Brand::count());
+        $this->command->info('  - Users: '.User::count());
+        $this->command->info('  - Assets: '.Asset::count());
+        $this->command->info('  - Categories: '.Category::count());
+        $this->command->info('  - Tickets: '.Ticket::count());
     }
-    
+
     /**
      * Create a company with all associated data.
      */
     private function createCompanyWithData(array $planLimits): void
     {
         // Create company
-        $companyName = fake()->company() . ' ' . fake()->companySuffix();
+        $companyName = fake()->company().' '.fake()->companySuffix();
         $companySlug = Str::slug($companyName);
-        
+
         // Ensure unique slug
         $originalSlug = $companySlug;
         $counter = 1;
         while (Tenant::where('slug', $companySlug)->exists()) {
-            $companySlug = $originalSlug . '-' . $counter;
+            $companySlug = $originalSlug.'-'.$counter;
             $counter++;
         }
-        
+
         $planName = $this->getRandomPlan();
         $planConfig = $planLimits[$planName] ?? $planLimits['free'];
-        
+
         $company = Tenant::create([
             'name' => $companyName,
             'slug' => $companySlug,
             'timezone' => fake()->timezone(),
             'manual_plan_override' => $planName,
             'billing_status' => fake()->randomElement([null, 'comped', 'trial']),
-            'stripe_id' => fake()->boolean(30) ? 'cus_' . Str::random(24) : null, // 30% have Stripe
+            'stripe_id' => fake()->boolean(30) ? 'cus_'.Str::random(24) : null, // 30% have Stripe
         ]);
-        
+
         // Create storage bucket with canonical expected name (so resolveActiveBucketOrFail finds it)
         $expectedBucketName = app(TenantBucketService::class)->getBucketName($company);
         $bucket = StorageBucket::create([
@@ -281,23 +286,23 @@ class DevelopmentDataSeeder extends Seeder
             'status' => StorageBucketStatus::ACTIVE,
             'region' => config('storage.default_region', 'us-east-1'),
         ]);
-        
+
         // Create brands
         $brandCount = fake()->numberBetween($this->getMinBrandsPerCompany(), $this->getMaxBrandsPerCompany());
         $brands = [];
-        
+
         for ($b = 0; $b < $brandCount; $b++) {
-            $brandName = $b === 0 ? $company->name : fake()->company() . ' Brand';
+            $brandName = $b === 0 ? $company->name : fake()->company().' Brand';
             $brandSlug = Str::slug($brandName);
-            
+
             // Ensure unique slug per tenant
             $originalBrandSlug = $brandSlug;
             $brandCounter = 1;
             while (Brand::where('tenant_id', $company->id)->where('slug', $brandSlug)->exists()) {
-                $brandSlug = $originalBrandSlug . '-' . $brandCounter;
+                $brandSlug = $originalBrandSlug.'-'.$brandCounter;
                 $brandCounter++;
             }
-            
+
             $brand = Brand::create([
                 'tenant_id' => $company->id,
                 'name' => $brandName,
@@ -309,10 +314,10 @@ class DevelopmentDataSeeder extends Seeder
                 'accent_color' => fake()->hexColor(),
                 'nav_color' => fake()->hexColor(),
                 'icon_bg_color' => fake()->hexColor(),
-                'logo_path' => 'dev-seeder/logos/' . Str::uuid() . '.png', // Placeholder path
+                'logo_path' => 'dev-seeder/logos/'.Str::uuid().'.png', // Placeholder path
                 'logo_filter' => fake()->randomElement(['brightness', 'contrast', 'saturate', 'none']),
             ]);
-            
+
             $brands[] = $brand;
         }
 
@@ -325,46 +330,46 @@ class DevelopmentDataSeeder extends Seeder
         // Determine user count (some companies exceed limits)
         $maxUsers = $planConfig['max_users'] ?? PHP_INT_MAX;
         $shouldExceedLimit = fake()->boolean(self::EXCEED_LIMIT_PERCENT * 100);
-        $userCount = $shouldExceedLimit 
+        $userCount = $shouldExceedLimit
             ? $maxUsers + fake()->numberBetween(10, 50) // Exceed by 10-50 users
             : fake()->numberBetween(1, min($maxUsers, 200)); // Normal range
-        
+
         // Create owner first
         // Generate unique email for owner
         $ownerEmail = fake()->safeEmail();
         while (User::where('email', $ownerEmail)->exists()) {
-            $ownerEmail = 'owner-' . Str::random(8) . '@' . fake()->domainName();
+            $ownerEmail = 'owner-'.Str::random(8).'@'.fake()->domainName();
         }
-        
+
         $owner = User::create([
             'first_name' => fake()->firstName(),
             'last_name' => fake()->lastName(),
             'email' => $ownerEmail,
             'password' => bcrypt('password'),
-            'avatar_url' => 'dev-seeder/avatars/' . Str::uuid() . '.jpg', // Placeholder path
+            'avatar_url' => 'dev-seeder/avatars/'.Str::uuid().'.jpg', // Placeholder path
         ]);
-        
+
         $company->users()->attach($owner->id, ['role' => 'owner']);
-        
+
         // Attach owner to default brand as admin (owner is tenant-level only)
         $brands[0]->users()->attach($owner->id, ['role' => 'admin']);
-        
+
         // Create additional users
         for ($u = 1; $u < $userCount; $u++) {
             // Generate unique email
             $userEmail = fake()->safeEmail();
             while (User::where('email', $userEmail)->exists()) {
-                $userEmail = 'user-' . Str::random(8) . '-' . time() . '@' . fake()->domainName();
+                $userEmail = 'user-'.Str::random(8).'-'.time().'@'.fake()->domainName();
             }
-            
+
             $user = User::create([
                 'first_name' => fake()->firstName(),
                 'last_name' => fake()->lastName(),
                 'email' => $userEmail,
                 'password' => bcrypt('password'),
-                'avatar_url' => 'dev-seeder/avatars/' . Str::uuid() . '.jpg', // Placeholder path
+                'avatar_url' => 'dev-seeder/avatars/'.Str::uuid().'.jpg', // Placeholder path
             ]);
-            
+
             // Assign role using new role system
             // Distribution: 30% viewer, 25% uploader, 25% contributor, 10% manager, 10% admin
             $role = fake()->randomElement([
@@ -375,7 +380,7 @@ class DevelopmentDataSeeder extends Seeder
                 'admin', // 5%
             ]);
             $company->users()->attach($user->id, ['role' => $role]);
-            
+
             // Assign to random brands with appropriate roles
             $brandsToAssign = fake()->randomElements($brands, fake()->numberBetween(1, min(count($brands), 3)));
             foreach ($brandsToAssign as $brand) {
@@ -383,7 +388,7 @@ class DevelopmentDataSeeder extends Seeder
                 $brandRole = fake()->randomElement(['viewer', 'uploader', 'contributor', 'manager', 'admin']);
                 $brand->users()->attach($user->id, ['role' => $brandRole]);
             }
-            
+
             // Assign special roles (rare) - use correct role names from PermissionSeeder
             if (fake()->boolean(self::SUPPORT_USER_PERCENT * 100)) {
                 $user->assignRole('site_support');
@@ -395,27 +400,27 @@ class DevelopmentDataSeeder extends Seeder
                 $user->assignRole('site_engineering');
             }
         }
-        
+
         // Create categories for each brand
         foreach ($brands as $brand) {
             $categoryCount = fake()->numberBetween($this->getMinCategoriesPerCompany(), $this->getMaxCategoriesPerCompany());
-            
+
             for ($c = 0; $c < $categoryCount; $c++) {
                 $baseSlug = Str::slug(fake()->words(2, true));
                 $assetType = fake()->randomElement([AssetType::ASSET, AssetType::DELIVERABLE]);
                 $slug = $baseSlug;
                 $counter = 1;
-                
+
                 // Ensure unique slug per tenant/brand/asset_type
                 while (Category::where('tenant_id', $company->id)
                     ->where('brand_id', $brand->id)
                     ->where('asset_type', $assetType)
                     ->where('slug', $slug)
                     ->exists()) {
-                    $slug = $baseSlug . '-' . $counter;
+                    $slug = $baseSlug.'-'.$counter;
                     $counter++;
                 }
-                
+
                 Category::create([
                     'tenant_id' => $company->id,
                     'brand_id' => $brand->id,
@@ -428,7 +433,7 @@ class DevelopmentDataSeeder extends Seeder
                 ]);
             }
         }
-        
+
         // Create assets with proper metadata fields (Assets + Executions/deliverables)
         $assetCount = fake()->numberBetween($this->getMinAssetsPerCompany(), $this->getMaxAssetsPerCompany());
         $allCategories = Category::where('tenant_id', $company->id)->get();
@@ -454,7 +459,7 @@ class DevelopmentDataSeeder extends Seeder
             $mimeType = fake()->randomElement($mimeTypes);
             $extension = $this->getExtensionFromMimeType($mimeType);
             $sizeBytes = fake()->numberBetween(10000, 50000000); // 10KB to 50MB
-            
+
             // Create placeholder upload session (required for foreign key)
             $uploadSession = UploadSession::create([
                 'tenant_id' => $company->id,
@@ -467,10 +472,10 @@ class DevelopmentDataSeeder extends Seeder
                 'expires_at' => now()->addDays(30),
                 'last_activity_at' => now(),
             ]);
-            
+
             // Generate realistic metadata fields (include type field for system categories)
             $metadataFieldsData = $this->generateRealisticMetadataFields($metadataFields, $category);
-            
+
             // Most assets are visible and published (public); ~15% stay unpublished for lifecycle testing
             $isPublished = fake()->boolean(85);
             $asset = Asset::create([
@@ -482,10 +487,10 @@ class DevelopmentDataSeeder extends Seeder
                 'status' => AssetStatus::VISIBLE,
                 'type' => $assetType,
                 'title' => fake()->sentence(3),
-                'original_filename' => fake()->word() . '.' . $extension,
+                'original_filename' => fake()->word().'.'.$extension,
                 'mime_type' => $mimeType,
                 'size_bytes' => $sizeBytes,
-                'storage_root_path' => 'dev-seeder/assets/' . Str::uuid() . '.' . $extension, // Placeholder path
+                'storage_root_path' => 'dev-seeder/assets/'.Str::uuid().'.'.$extension, // Placeholder path
                 'metadata' => [
                     'category_id' => $category ? $category->id : null,
                     'fields' => $metadataFieldsData,
@@ -498,9 +503,9 @@ class DevelopmentDataSeeder extends Seeder
                 'published_at' => $isPublished ? now() : null,
                 'published_by_id' => $isPublished ? $user->id : null,
             ]);
-            
+
             // Persist metadata and ensure approved rows so drawer shows values; add tags
-            if ($category && !empty($metadataFieldsData)) {
+            if ($category && ! empty($metadataFieldsData)) {
                 try {
                     $persistenceService = app(MetadataPersistenceService::class);
                     $persistenceService->persistMetadata(
@@ -537,7 +542,7 @@ class DevelopmentDataSeeder extends Seeder
         $meta = $asset->metadata ?? [];
         $changed = false;
         foreach (['starred', 'quality_rating'] as $key) {
-            if (!array_key_exists($key, $metadataFieldsData)) {
+            if (! array_key_exists($key, $metadataFieldsData)) {
                 continue;
             }
             $value = $metadataFieldsData[$key];
@@ -559,7 +564,7 @@ class DevelopmentDataSeeder extends Seeder
             $asset->save();
         }
     }
-    
+
     /** Company 1: at least 50 assorted assets (assets + executions) with metadata, tags, collections. */
     private const FIRST_COMPANY_ASSETS = [
         'small' => 50,
@@ -587,11 +592,11 @@ class DevelopmentDataSeeder extends Seeder
     private function seedAssetsForFirstCompanyBrand(array $planLimits): void
     {
         $company = Tenant::orderBy('id')->first();
-        if (!$company) {
+        if (! $company) {
             return;
         }
         $brand = $company->defaultBrand ?? $company->brands()->where('is_default', true)->first() ?? $company->brands()->first();
-        if (!$brand) {
+        if (! $brand) {
             return;
         }
         $bucket = StorageBucket::firstOrCreate(
@@ -626,7 +631,7 @@ class DevelopmentDataSeeder extends Seeder
         $collections = [];
         $firstUser = $companyUsers->first();
         foreach (array_slice($collectionNames, 0, 3) as $name) {
-            $slug = Str::slug($name . '-' . $brand->id);
+            $slug = Str::slug($name.'-'.$brand->id);
             if (Collection::where('brand_id', $brand->id)->where('slug', $slug)->exists()) {
                 continue;
             }
@@ -687,12 +692,12 @@ class DevelopmentDataSeeder extends Seeder
         // Attach 40–60% of assets to 1–2 collections so "Collection" shows in drawer
         if (count($collections) > 0) {
             foreach ($createdAssets as $asset) {
-                if (!fake()->boolean(50)) {
+                if (! fake()->boolean(50)) {
                     continue;
                 }
                 $attachTo = fake()->randomElements($collections, min(2, count($collections)));
                 foreach ($attachTo as $coll) {
-                    if (!$asset->collections()->where('collection_id', $coll->id)->exists()) {
+                    if (! $asset->collections()->where('collection_id', $coll->id)->exists()) {
                         $asset->collections()->attach($coll->id);
                     }
                 }
@@ -745,10 +750,10 @@ class DevelopmentDataSeeder extends Seeder
             'status' => AssetStatus::VISIBLE,
             'type' => $assetType,
             'title' => fake()->sentence(3),
-            'original_filename' => fake()->word() . '.' . $extension,
+            'original_filename' => fake()->word().'.'.$extension,
             'mime_type' => $mimeType,
             'size_bytes' => $sizeBytes,
-            'storage_root_path' => 'dev-seeder/assets/' . Str::uuid() . '.' . $extension,
+            'storage_root_path' => 'dev-seeder/assets/'.Str::uuid().'.'.$extension,
             'metadata' => [
                 'category_id' => $category->id,
                 'fields' => $metadataFieldsData,
@@ -761,7 +766,7 @@ class DevelopmentDataSeeder extends Seeder
             'published_at' => $isPublished ? now() : null,
             'published_by_id' => $isPublished ? $user->id : null,
         ]);
-        if (!empty($metadataFieldsData)) {
+        if (! empty($metadataFieldsData)) {
             try {
                 app(MetadataPersistenceService::class)->persistMetadata(
                     $asset,
@@ -783,6 +788,7 @@ class DevelopmentDataSeeder extends Seeder
         }
         // Add 1–3 tags so Tags and filters show data
         $this->addTagsToAsset($asset, 1, 3);
+
         return $asset;
     }
 
@@ -842,7 +848,7 @@ class DevelopmentDataSeeder extends Seeder
                 ->where('asset_id', $asset->id)
                 ->where('tag', $tag)
                 ->exists();
-            if (!$exists) {
+            if (! $exists) {
                 DB::table('asset_tags')->insert([
                     'asset_id' => $asset->id,
                     'tag' => $tag,
@@ -861,15 +867,16 @@ class DevelopmentDataSeeder extends Seeder
     {
         // Rough estimate: average 5 users per company for small, 5-10 for medium, 5-20 for large
         $size = $this->getSize();
-        $avgUsersPerCompany = match($size) {
+        $avgUsersPerCompany = match ($size) {
             'small' => 5,
             'medium' => 7,
             'large' => 10,
             default => 10,
         };
+
         return (int) ($companiesCount * $avgUsersPerCompany);
     }
-    
+
     /**
      * Create support tickets.
      */
@@ -878,37 +885,39 @@ class DevelopmentDataSeeder extends Seeder
         $ticketsCount = $this->getTicketsCount();
         $companies = Tenant::inRandomOrder()->limit($ticketsCount)->get();
         $users = User::inRandomOrder()->limit($ticketsCount * 2)->get();
-        
-        $prefix = 'SUP-DEV-' . Str::random(6) . '-';
+
+        $prefix = 'SUP-DEV-'.Str::random(6).'-';
         foreach ($companies as $index => $company) {
-            if ($index >= $ticketsCount) break;
-            
+            if ($index >= $ticketsCount) {
+                break;
+            }
+
             $createdBy = $users->random();
             $assignedTo = fake()->boolean(60) ? $users->random() : null;
-            
+
             Ticket::withoutEvents(function () use ($prefix, $index, $company, $createdBy, $assignedTo) {
                 Ticket::create([
-                'ticket_number' => $prefix . str_pad($index + 1, 4, '0', STR_PAD_LEFT),
-                'type' => fake()->randomElement(['tenant', 'tenant_internal', 'internal']),
-                'status' => fake()->randomElement([
-                    TicketStatus::OPEN,
-                    TicketStatus::WAITING_ON_SUPPORT,
-                    TicketStatus::IN_PROGRESS,
-                    TicketStatus::RESOLVED,
-                ]),
-                'tenant_id' => $company->id,
-                'created_by_user_id' => $createdBy->id,
-                'assigned_to_user_id' => $assignedTo?->id,
-                'assigned_team' => fake()->randomElement(['support', 'admin', 'engineering']),
-                'metadata' => [
-                    'subject' => fake()->sentence(),
-                    'category' => fake()->word(),
-                ],
+                    'ticket_number' => $prefix.str_pad($index + 1, 4, '0', STR_PAD_LEFT),
+                    'type' => fake()->randomElement(['tenant', 'tenant_internal', 'internal']),
+                    'status' => fake()->randomElement([
+                        TicketStatus::OPEN,
+                        TicketStatus::WAITING_ON_SUPPORT,
+                        TicketStatus::IN_PROGRESS,
+                        TicketStatus::RESOLVED,
+                    ]),
+                    'tenant_id' => $company->id,
+                    'created_by_user_id' => $createdBy->id,
+                    'assigned_to_user_id' => $assignedTo?->id,
+                    'assigned_team' => fake()->randomElement(['support', 'admin', 'engineering']),
+                    'metadata' => [
+                        'subject' => fake()->sentence(),
+                        'category' => fake()->word(),
+                    ],
                 ]);
             });
         }
     }
-    
+
     /**
      * Get random plan based on distribution.
      */
@@ -916,17 +925,17 @@ class DevelopmentDataSeeder extends Seeder
     {
         $rand = fake()->randomFloat(2, 0, 1);
         $cumulative = 0;
-        
+
         foreach (self::PLAN_DISTRIBUTION as $plan => $probability) {
             $cumulative += $probability;
             if ($rand <= $cumulative) {
                 return $plan;
             }
         }
-        
+
         return 'free';
     }
-    
+
     /**
      * Get plan limits from config.
      */
@@ -934,14 +943,14 @@ class DevelopmentDataSeeder extends Seeder
     {
         $plans = config('plans', []);
         $limits = [];
-        
+
         foreach ($plans as $planName => $planConfig) {
             $limits[$planName] = $planConfig['limits'] ?? [];
         }
-        
+
         return $limits;
     }
-    
+
     /**
      * Get file extension from MIME type.
      */
@@ -958,7 +967,7 @@ class DevelopmentDataSeeder extends Seeder
             default => 'bin',
         };
     }
-    
+
     /**
      * Get metadata field definitions for seeding. Includes any field that is user-editable and
      * visible on upload OR filterable (so type fields and common fields are always included).
@@ -975,6 +984,7 @@ class DevelopmentDataSeeder extends Seeder
             })
             ->orderBy('id')
             ->get(['id', 'key', 'type']);
+
         return $query->isEmpty()
             ? DB::table('metadata_fields')->whereNull('deprecated_at')->get(['id', 'key', 'type'])
             : $query;
@@ -1027,18 +1037,18 @@ class DevelopmentDataSeeder extends Seeder
 
         $fillChance = $highFillRate ? 90 : 50;
         $minFields = ($highFillRate || $category) ? 4 : 1;
-        $remaining = $metadataFields->filter(fn ($f) => !isset($fields[$f->key]))->values();
+        $remaining = $metadataFields->filter(fn ($f) => ! isset($fields[$f->key]))->values();
         $added = 0;
         foreach ($remaining as $field) {
             $needMore = count($fields) < $minFields;
             $roll = fake()->boolean($fillChance);
-            if (!$needMore && !$roll) {
+            if (! $needMore && ! $roll) {
                 continue;
             }
-            if ($needMore && !$roll) {
+            if ($needMore && ! $roll) {
                 $roll = true; // Force add to reach minimum
             }
-            if (!$roll) {
+            if (! $roll) {
                 continue;
             }
 
@@ -1060,7 +1070,7 @@ class DevelopmentDataSeeder extends Seeder
 
         return $fields;
     }
-    
+
     /**
      * Get a realistic value for a select field. Uses seeded option values for type fields so filters work.
      */
@@ -1095,7 +1105,7 @@ class DevelopmentDataSeeder extends Seeder
             default => fake()->word(),
         };
     }
-    
+
     /**
      * Get a realistic value for a multiselect field.
      */

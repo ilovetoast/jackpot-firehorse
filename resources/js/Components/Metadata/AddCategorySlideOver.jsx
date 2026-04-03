@@ -98,8 +98,15 @@ export default function AddCategorySlideOver({
         }
 
         const limits = categoryLimitsProp ?? fetchedCategoryLimits
-        if (limits && !limits.can_create) {
+        if (limits && limits.can_create === false) {
             setError("You've reached your category limit for this plan.")
+            return
+        }
+        const vis = limits?.visible_by_asset_type?.[type]
+        if (vis?.at_cap) {
+            setError(
+                `You already have ${vis.max} visible categories for this library. Hide a category first, or contact support.`
+            )
             return
         }
 
@@ -159,17 +166,19 @@ export default function AddCategorySlideOver({
 
     const type = assetTypeProp ?? assetType
     const limits = categoryLimitsProp ?? fetchedCategoryLimits
-    const atLimit = limits && !limits.can_create
+    const visCap = limits?.visible_by_asset_type?.[type]
+    const atVisibleCap = !!visCap?.at_cap
+    const atLimit = limits && limits.can_create === false
     const canSave =
         (name?.trim().length ?? 0) > 2 &&
         !loading &&
         !atLimit &&
+        !atVisibleCap &&
         (!isPrivate || hasRestrictSelection)
 
-    const limitsLabel =
-        limits && limits.max > 0
-            ? `${limits.current} of ${limits.max} custom categories used`
-            : null
+    const limitsLabel = visCap
+        ? `Visible: ${visCap.visible} / ${visCap.max} (${type === 'deliverable' ? 'executions' : 'assets'})`
+        : null
 
     return (
         <>

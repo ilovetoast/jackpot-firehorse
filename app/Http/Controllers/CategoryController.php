@@ -6,7 +6,7 @@ use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Services\CategoryService;
-use App\Services\CategoryUpgradeService;
+use App\Services\CategoryVisibilityLimitService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Traits\HandlesFlashMessages;
@@ -23,7 +23,7 @@ class CategoryController extends Controller
         protected CategoryService $categoryService,
         protected PlanService $planService,
         protected SystemCategoryService $systemCategoryService,
-        protected CategoryUpgradeService $categoryUpgradeService
+        protected CategoryVisibilityLimitService $categoryVisibilityLimitService
     ) {}
 
     /**
@@ -204,6 +204,7 @@ class CategoryController extends Controller
                         'id' => $category->id,
                         'name' => $category->name,
                         'slug' => $category->slug,
+                        'icon' => $category->icon,
                         'asset_type' => $category->asset_type->value,
                         'is_system' => $category->is_system,
                         'is_private' => $category->is_private,
@@ -250,15 +251,11 @@ class CategoryController extends Controller
         // Check if user has admin/owner role or manage categories/manage brands permission - using policy
         $this->authorize('update', $category);
 
-        // System categories are immutable - only allow hide changes
-        // is_locked is site admin only and cannot be changed by tenants
         if ($category->is_system) {
             $validated = $request->validate([
-                'is_hidden' => 'nullable|boolean',
-                // is_locked is site admin only - not accepted from tenant requests
+                'is_hidden' => 'sometimes|boolean',
             ]);
 
-            // Explicitly reject is_locked if somehow sent
             if ($request->has('is_locked')) {
                 abort(403, 'Lock status can only be managed by site administrators.');
             }
@@ -340,9 +337,13 @@ class CategoryController extends Controller
             'is_hidden' => 'required|boolean',
         ]);
 
-        $category->update(['is_hidden' => $validated['is_hidden']]);
+        try {
+            $updated = $this->categoryService->setHidden($category, $validated['is_hidden']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
-        return response()->json(['success' => true, 'is_hidden' => $category->is_hidden]);
+        return response()->json(['success' => true, 'is_hidden' => $updated->is_hidden]);
     }
 
     /**
@@ -534,44 +535,6 @@ class CategoryController extends Controller
     }
 
     /**
-     * Preview what changes would be applied if upgrading a category.
-     */
-    public function previewUpgrade(Request $request, Brand $brand, Category $category)
-    {
-        $tenant = app('tenant');
-        $user = $request->user();
-
-        // Verify brand belongs to tenant
-        if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
-        }
-
-        // Verify category belongs to tenant/brand
-        if ($category->tenant_id !== $tenant->id) {
-            abort(403, 'Category does not belong to this tenant.');
-        }
-
-        if ($category->brand_id !== $brand->id) {
-            abort(403, 'Category does not belong to this brand.');
-        }
-
-        // Check if user has permission to manage brand categories
-        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
-            abort(403, 'Only administrators, owners, and brand managers can preview category upgrades.');
-        }
-
-        try {
-            $preview = $this->categoryUpgradeService->previewUpgrade($category);
-
-            return response()->json($preview);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => $e->getMessage(),
-            ], 400);
-        }
-    }
-
-    /**
      * Add a system category template to a brand.
      */
     public function addSystemTemplate(Request $request, Brand $brand)
@@ -596,13 +559,15 @@ class CategoryController extends Controller
         try {
             $systemCategory = \App\Models\SystemCategory::findOrFail($validated['system_category_id']);
 
-            // Verify this is the latest version
             if (! $systemCategory->isLatestVersion()) {
-                // Get the latest version instead
-                $systemCategory = $systemCategory->getLatestVersion();
+                $resolved = $systemCategory->getLatestVersion();
+                $systemCategory = $resolved ?? $systemCategory;
             }
 
-            // Add the template to the brand
+            if (! $systemCategory->is_hidden) {
+                $this->categoryVisibilityLimitService->assertCanMakeVisible($brand, $systemCategory->asset_type);
+            }
+
             $category = $this->systemCategoryService->addTemplateToBrand($brand, $systemCategory);
 
             if (! $category) {
@@ -634,95 +599,6 @@ class CategoryController extends Controller
         } catch (\Exception $e) {
             if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json(['error' => $e->getMessage()], 422);
-            }
-
-            return back()->withErrors([
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * Apply an upgrade to a category.
-     */
-    public function applyUpgrade(Request $request, Brand $brand, Category $category)
-    {
-        $tenant = app('tenant');
-        $user = $request->user();
-
-        // Verify brand belongs to tenant
-        if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
-        }
-
-        // Verify category belongs to tenant/brand
-        if ($category->tenant_id !== $tenant->id) {
-            abort(403, 'Category does not belong to this tenant.');
-        }
-
-        if ($category->brand_id !== $brand->id) {
-            abort(403, 'Category does not belong to this brand.');
-        }
-
-        // Check if user has permission to manage brand categories
-        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
-            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json([
-                    'error' => 'Only administrators, owners, and brand managers can upgrade categories.',
-                ], 403);
-            }
-            abort(403, 'Only administrators, owners, and brand managers can upgrade categories.');
-        }
-
-        try {
-            $validated = $request->validate([
-                'approved_fields' => 'nullable|array',
-                'approved_fields.*' => 'string|in:name,icon,is_private,is_hidden',
-            ]);
-
-            // Ensure approved_fields is always an array (even if empty)
-            $validated['approved_fields'] = $validated['approved_fields'] ?? [];
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json([
-                    'error' => 'Validation failed: '.implode(', ', array_merge(...array_values($e->errors()))),
-                ], 422);
-            }
-            throw $e;
-        }
-
-        try {
-            $updated = $this->categoryUpgradeService->applyUpgrade($category, $validated['approved_fields']);
-
-            // Return JSON for AJAX requests, redirect for regular requests
-            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Category upgraded successfully.',
-                    'category' => [
-                        'id' => $updated->id,
-                        'name' => $updated->name,
-                        'slug' => $updated->slug ?? \Illuminate\Support\Str::slug($updated->name),
-                        'brand_id' => $updated->brand_id,
-                        'asset_type' => $updated->asset_type?->value ?? 'asset',
-                        'is_system' => $updated->is_system,
-                        'is_hidden' => $updated->is_hidden,
-                        'is_private' => $updated->is_private,
-                        'sort_order' => $updated->sort_order,
-                        'system_version' => $updated->system_version,
-                        'upgrade_available' => $updated->upgrade_available ?? false,
-                        'deletion_available' => $updated->deletion_available ?? false,
-                    ],
-                ]);
-            }
-
-            return redirect()->route('brands.edit', $brand)->with('success', 'Category upgraded successfully.');
-        } catch (\Exception $e) {
-            // Return JSON for AJAX requests, redirect for regular requests
-            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json([
-                    'error' => $e->getMessage(),
-                ], 400);
             }
 
             return back()->withErrors([

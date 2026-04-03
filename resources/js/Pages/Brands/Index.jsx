@@ -250,11 +250,6 @@ export default function BrandsIndex({ brands, limits }) {
                                                             <h3 className="text-base font-semibold leading-6 text-gray-900">
                                                                 Categories
                                                             </h3>
-                                                            {brand.categories && brand.categories.some(cat => cat.upgrade_available && cat.is_system) && (
-                                                                <span className="inline-flex items-center rounded-md px-2.5 py-1.5 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
-                                                                    Update available
-                                                                </span>
-                                                            )}
                                                         </div>
                                                         {brand.categories && brand.categories.length > 0 ? (
                                                             <div className="overflow-hidden bg-white rounded-lg border border-gray-200">

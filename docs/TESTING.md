@@ -109,6 +109,7 @@ php artisan test tests/Unit
 | `CollectionsControllerTest.php` | Collections controller |
 | `CategoryScopedVisibilityTest.php` | Category-scoped visibility |
 | `CategoryScopedVisibilityErrorHandlingTest.php` | Category visibility errors |
+| `CategoryCatalogAndVisibilityTest.php` | System template auto_provision, visible-folder cap, system rename, private plan gate |
 | `ApprovalFlowTest.php` | Approval → publish → visibility |
 | `AssetVisibilityApprovalTest.php` | Asset visibility and approval |
 | `AssetDeliverableLifecycleConsistencyTest.php` | Asset vs deliverable lifecycle |

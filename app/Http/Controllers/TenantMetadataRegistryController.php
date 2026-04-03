@@ -10,9 +10,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\MetadataVisibilityProfile;
+use App\Models\SystemCategory;
 use App\Models\Tenant;
+use App\Services\SystemCategoryService;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
@@ -20,6 +23,7 @@ use App\Support\Metadata\CategoryTypeResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -75,17 +79,16 @@ class TenantMetadataRegistryController extends Controller
 
         // Brands list for By Category brand selector (one brand at a time to avoid duplicate category names)
         // Include category_limits per brand for Add Category modal
+        $visibilityLimit = app(\App\Services\CategoryVisibilityLimitService::class);
         $planService = app(\App\Services\PlanService::class);
-        $categoryService = app(\App\Services\CategoryService::class);
         $limits = $planService->getPlanLimits($tenant);
-        $maxCategories = $limits['max_categories'] ?? 0;
 
         $brands = $tenant->brands()
             ->orderBy('name')
             ->get()
-            ->map(function ($b) use ($categoryService, $tenant, $maxCategories) {
+            ->map(function ($b) use ($visibilityLimit) {
                 $currentCount = $b->categories()->custom()->count();
-                $canCreate = $categoryService->canCreate($tenant, $b);
+                $visibleByAssetType = $visibilityLimit->limitsPayloadForBrand($b);
 
                 return [
                     'id' => $b->id,
@@ -94,8 +97,9 @@ class TenantMetadataRegistryController extends Controller
                     'accent_color' => $b->accent_color,
                     'category_limits' => [
                         'current' => $currentCount,
-                        'max' => $maxCategories,
-                        'can_create' => $canCreate,
+                        'max' => null,
+                        'can_create' => true,
+                        'visible_by_asset_type' => $visibleByAssetType,
                     ],
                 ];
             })
@@ -193,6 +197,7 @@ class TenantMetadataRegistryController extends Controller
             'categories' => $categories,
             'initial_category_slug' => $request->query('category'),
             'initial_brand_id' => $request->query('brand') ? (int) $request->query('brand') : null,
+            'canManageBrandCategories' => $user->hasPermissionForTenant($tenant, 'brand_categories.manage'),
             'canManageVisibility' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
             'canManageFields' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),
             'customFieldsLimit' => [
@@ -201,6 +206,82 @@ class TenantMetadataRegistryController extends Controller
                 'can_create' => $canCreateCustomField,
             ],
             'metadata_field_families' => config('metadata_field_families', []),
+        ]);
+    }
+
+    /**
+     * Platform catalog folders not yet copied to this brand (for Metadata → By category sidebar).
+     * Readable with metadata registry view permission — unlike category-form-data, which requires brand_categories.manage.
+     *
+     * GET /api/tenant/metadata/brands/{brand}/available-system-categories
+     */
+    public function availableSystemCategories(Brand $brand): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canView) {
+            abort(403, 'You do not have permission to view the metadata registry.');
+        }
+
+        $systemTemplates = app(SystemCategoryService::class)->getAllTemplates();
+        $categories = $brand->categories()->get();
+
+        // All template row ids per slug + asset_type (every version), so brand rows linked to an older
+        // system_categories.id still count as "already on brand" vs the latest template row.
+        $templateIdsBySlugKey = [];
+        foreach (SystemCategory::query()->get(['id', 'slug', 'asset_type']) as $row) {
+            $at = $row->asset_type instanceof \BackedEnum ? $row->asset_type->value : (string) $row->asset_type;
+            $key = Str::lower((string) $row->slug).'|'.$at;
+            $templateIdsBySlugKey[$key] ??= [];
+            $templateIdsBySlugKey[$key][] = (int) $row->id;
+        }
+
+        $available = [];
+
+        foreach ($systemTemplates as $template) {
+            $typeVal = $template->asset_type->value;
+            $slugKey = Str::lower((string) $template->slug).'|'.$typeVal;
+            $relatedTemplateIds = $templateIdsBySlugKey[$slugKey] ?? [(int) $template->id];
+
+            $exists = $categories->contains(function (Category $c) use ($template, $typeVal, $relatedTemplateIds) {
+                if ($c->asset_type->value !== $typeVal) {
+                    return false;
+                }
+                if (Str::lower((string) $c->slug) === Str::lower((string) $template->slug)) {
+                    return true;
+                }
+                $sid = $c->system_category_id !== null ? (int) $c->system_category_id : null;
+
+                return $sid !== null && $sid > 0 && in_array($sid, $relatedTemplateIds, true);
+            });
+
+            if (! $exists) {
+                $available[] = [
+                    'system_category_id' => $template->id,
+                    'name' => $template->name,
+                    'slug' => $template->slug,
+                    'icon' => $template->icon ?? 'folder',
+                    'asset_type' => $template->asset_type->value,
+                    'is_private' => $template->is_private,
+                    'is_hidden' => $template->is_hidden,
+                ];
+            }
+        }
+
+        return response()->json([
+            'available_system_templates' => $available,
         ]);
     }
 

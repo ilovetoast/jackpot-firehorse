@@ -13,6 +13,7 @@ use App\Services\AiUsageService;
 use App\Services\Insights\BrandActivityFeedService;
 use App\Services\MetadataAnalyticsService;
 use App\Services\PlanService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -36,7 +37,8 @@ class AnalyticsOverviewController extends Controller
      */
     public function index(Request $request): Response
     {
-        $data = $this->getOverviewData($request);
+        // Fast first paint: skip MetadataAnalyticsService on the document request; the page fetches it via XHR.
+        $data = $this->getOverviewData($request, includeMetadataAnalytics: false);
 
         return Inertia::render('Insights/Overview', [
             'stats' => [
@@ -50,12 +52,42 @@ class AnalyticsOverviewController extends Controller
             ],
             'ai_usage' => $data['ai_usage'],
             'ai_monthly_cap_alert' => $data['ai_monthly_cap_alert'],
-            'metadata_overview' => $data['metadata_overview'],
-            'metadata_coverage' => $data['metadata_coverage'],
-            'ai_effectiveness' => $data['ai_effectiveness'],
-            'rights_risk' => $data['rights_risk'],
             'plan' => $data['plan'],
             'brand_guidelines' => $data['brand_guidelines'],
+        ]);
+    }
+
+    /**
+     * Heavy metadata analytics for Insights Overview (deferred from full page load).
+     * GET /app/insights/overview/metadata-analytics
+     */
+    public function metadataAnalytics(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand) {
+            abort(403, 'Tenant and brand must be selected.');
+        }
+        $user = Auth::user();
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to view insights.');
+        }
+
+        $analytics = $this->metadataAnalytics->getAnalytics(
+            $tenant->id,
+            $brand->id,
+            null,
+            null,
+            null,
+            false,
+            ['overview', 'coverage', 'ai_effectiveness', 'rights_risk'],
+        );
+
+        return response()->json([
+            'metadata_overview' => $analytics['overview'] ?? [],
+            'metadata_coverage' => $analytics['coverage'] ?? [],
+            'ai_effectiveness' => $analytics['ai_effectiveness'] ?? [],
+            'rights_risk' => $analytics['rights_risk'] ?? [],
         ]);
     }
 
@@ -89,7 +121,7 @@ class AnalyticsOverviewController extends Controller
      */
     public function usage(Request $request): Response
     {
-        $data = $this->getOverviewData($request);
+        $data = $this->getOverviewData($request, includeMetadataAnalytics: false);
 
         return Inertia::render('Insights/Usage', [
             'stats' => [
@@ -106,9 +138,9 @@ class AnalyticsOverviewController extends Controller
     }
 
     /**
-     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, ai_monthly_cap_alert: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array}
+     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, ai_monthly_cap_alert: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array, brand_guidelines: array}
      */
-    private function getOverviewData(Request $request): array
+    private function getOverviewData(Request $request, bool $includeMetadataAnalytics = true): array
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -128,8 +160,11 @@ class AnalyticsOverviewController extends Controller
         $now = now();
         $startOfMonth = $now->copy()->startOfMonth();
         $endOfMonth = $now->copy()->endOfMonth();
-        $totalAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)->count();
-        $storageBytes = $this->getCompletedAssetsQuery($tenant->id, $brand->id)->sum('size_bytes');
+        $completedStats = (clone $this->getCompletedAssetsQuery($tenant->id, $brand->id))
+            ->selectRaw('COUNT(*) as completed_asset_count, COALESCE(SUM(size_bytes), 0) as bytes_sum')
+            ->first();
+        $totalAssets = (int) ($completedStats->completed_asset_count ?? 0);
+        $storageBytes = (int) ($completedStats->bytes_sum ?? 0);
         $storageMB = round($storageBytes / 1024 / 1024, 2);
         $downloadLinksThisMonth = Download::where('tenant_id', $tenant->id)
             ->where('status', DownloadStatus::READY)
@@ -169,7 +204,17 @@ class AnalyticsOverviewController extends Controller
             }
         }
 
-        $metadataAnalytics = $this->metadataAnalytics->getAnalytics($tenant->id, $brand->id, null, null, null, false);
+        $metadataAnalytics = $includeMetadataAnalytics
+            ? $this->metadataAnalytics->getAnalytics(
+                $tenant->id,
+                $brand->id,
+                null,
+                null,
+                null,
+                false,
+                ['overview', 'coverage', 'ai_effectiveness', 'rights_risk'],
+            )
+            : [];
 
         $brand->loadMissing('brandModel.activeVersion');
         $brandModel = $brand->brandModel;

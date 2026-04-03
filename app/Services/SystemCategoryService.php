@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AssetType;
+use App\Jobs\ProvisionSystemCategoryToExistingBrandsJob;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\SystemCategory;
@@ -108,29 +109,28 @@ class SystemCategoryService
         $data['is_hidden'] = $data['is_hidden'] ?? false;
         $data['sort_order'] = $data['sort_order'] ?? 0;
         $data['version'] = $data['version'] ?? 1; // New templates start at version 1
+        // Admin-created templates are catalog-only unless explicitly auto_provisioned
+        if (! array_key_exists('auto_provision', $data)) {
+            $data['auto_provision'] = false;
+        }
 
         $template = SystemCategory::create($data);
 
-        // Notify existing brands about the new system category
-        // This makes it available for them to add on their brand edit page
-        $this->notifyBrandsOfNewCategory($template);
+        if ($template->auto_provision) {
+            ProvisionSystemCategoryToExistingBrandsJob::dispatch($template->id);
+        }
 
         return $template;
     }
 
     /**
-     * Update a system category template.
-     * If updating the latest version, creates a new version instead of modifying the existing one.
+     * Update a system category template in place (no versioning).
+     * After save, display name/icon are pushed to all brand category rows for this template (slug + type).
      */
     public function updateTemplate(SystemCategory $systemCategory, array $data): SystemCategory
     {
-        // Check if this is the latest version
-        if ($systemCategory->isLatestVersion()) {
-            // Create a new version instead of updating
-            return $this->createNewVersion($systemCategory, $data);
-        }
+        $wasAutoProvision = (bool) $systemCategory->auto_provision;
 
-        // For older versions, allow direct update (though this should rarely happen)
         // Generate slug if name changed and slug not provided
         if (isset($data['name']) && $data['name'] !== $systemCategory->name) {
             if (! isset($data['slug']) || $data['slug'] === $systemCategory->slug) {
@@ -155,150 +155,42 @@ class SystemCategoryService
 
         $systemCategory->update($data);
 
-        return $systemCategory->fresh();
-    }
+        $fresh = $systemCategory->fresh();
 
-    /**
-     * Create a new version of an existing system category template.
-     * Clones the existing record, increments the version, and applies changes.
-     * Does NOT touch existing brand categories.
-     *
-     * @param  array  $changes  Array containing 'summary' and other fields to update
-     * @return SystemCategory The new version
-     */
-    public function createNewVersion(SystemCategory $existing, array $changes): SystemCategory
-    {
-        // Find the maximum version for this slug/asset_type combination
-        $maxVersion = SystemCategory::where('slug', $existing->slug)
-            ->where('asset_type', $existing->asset_type)
-            ->max('version') ?? 0;
-
-        // Prepare data for new version
-        $newVersionData = [
-            'name' => $changes['name'] ?? $existing->name,
-            'slug' => $existing->slug, // Keep same slug
-            'icon' => $changes['icon'] ?? $existing->icon,
-            'asset_type' => $existing->asset_type, // Keep same asset_type
-            'is_hidden' => $changes['is_hidden'] ?? $existing->is_hidden,
-            'sort_order' => $changes['sort_order'] ?? $existing->sort_order,
-            'version' => $maxVersion + 1,
-            'change_summary' => $changes['summary'] ?? $changes['change_summary'] ?? null,
-        ];
-
-        // Create the new version
-        $newVersion = SystemCategory::create($newVersionData);
-
-        // Detect and mark outdated categories
-        $this->detectOutdatedCategories($newVersion);
-
-        return $newVersion;
-    }
-
-    /**
-     * Get upgrade statistics for a system category template.
-     * Returns counts of brands with queued upgrades and brands that have already upgraded.
-     *
-     * @return array{queued_upgrades: int, upgraded: int, total_brands: int}
-     */
-    public function getUpgradeStatistics(SystemCategory $systemCategory): array
-    {
-        // Get all system category IDs for this template (all versions with same slug/asset_type)
-        $templateIds = SystemCategory::where('slug', $systemCategory->slug)
-            ->where('asset_type', $systemCategory->asset_type)
-            ->pluck('id')
-            ->toArray();
-
-        // Find all categories that match this system category:
-        // 1. Categories linked via system_category_id (any version)
-        // 2. Categories with matching slug and asset_type (legacy categories)
-        $matchingCategories = \App\Models\Category::where(function ($query) use ($templateIds, $systemCategory) {
-            $query->whereIn('system_category_id', $templateIds)
-                ->orWhere(function ($q) use ($systemCategory) {
-                    $q->where('slug', $systemCategory->slug)
-                        ->where('asset_type', $systemCategory->asset_type->value);
-                });
-        })
-            ->where('is_system', true)
-            ->get();
-
-        // Count unique brands
-        $uniqueBrandIds = $matchingCategories->pluck('brand_id')->unique()->filter();
-
-        // Count categories with upgrade_available = true (queued upgrades)
-        $queuedUpgrades = $matchingCategories->where('upgrade_available', true)
-            ->pluck('brand_id')
-            ->unique()
-            ->count();
-
-        // Count categories that are already at the latest version (upgraded)
-        $upgraded = $matchingCategories->where('system_version', $systemCategory->version)
-            ->where('upgrade_available', false)
-            ->pluck('brand_id')
-            ->unique()
-            ->count();
-
-        // Total brands with this category
-        $totalBrands = $uniqueBrandIds->count();
-
-        return [
-            'queued_upgrades' => $queuedUpgrades,
-            'upgraded' => $upgraded,
-            'total_brands' => $totalBrands,
-        ];
-    }
-
-    /**
-     * Detect categories that are outdated compared to the latest system category version.
-     * Marks them with upgrade_available = true.
-     *
-     * @param  SystemCategory  $latest  The latest system category version
-     * @return int Number of categories marked as needing upgrade
-     */
-    public function detectOutdatedCategories(SystemCategory $latest): int
-    {
-        // Find all categories that need upgrading:
-        // 1. Categories with system_category_id matching this template (any version)
-        // 2. Categories with matching slug/asset_type (legacy categories not linked)
-        // 3. Categories with system_version < latest.version
-
-        // First, get all system category IDs for this template (same slug/asset_type)
-        $templateIds = SystemCategory::where('slug', $latest->slug)
-            ->where('asset_type', $latest->asset_type)
-            ->pluck('id')
-            ->toArray();
-
-        // Find categories that need upgrading:
-        // - Categories linked via system_category_id with version < latest
-        // - Categories with matching slug/asset_type that are system categories
-        $outdated = Category::where(function ($query) use ($templateIds, $latest) {
-            // Categories linked via system_category_id
-            $query->whereIn('system_category_id', $templateIds)
-                ->where(function ($q) use ($latest) {
-                    $q->whereNull('system_version')
-                        ->orWhere('system_version', '<', $latest->version);
-                });
-        })
-            ->orWhere(function ($query) use ($latest) {
-                // Legacy categories with matching slug/asset_type (not linked via system_category_id)
-                $query->where('slug', $latest->slug)
-                    ->where('asset_type', $latest->asset_type->value)
-                    ->where('is_system', true)
-                    ->where(function ($q) use ($latest) {
-                        $q->whereNull('system_category_id')
-                            ->orWhereNull('system_version')
-                            ->orWhere('system_version', '<', $latest->version);
-                    });
-            })
-            ->get();
-
-        // Mark them as needing upgrade
-        $count = 0;
-        foreach ($outdated as $category) {
-            $category->update(['upgrade_available' => true]);
-            $count++;
+        if (! $wasAutoProvision && $fresh && $fresh->auto_provision) {
+            ProvisionSystemCategoryToExistingBrandsJob::dispatch($fresh->id);
         }
 
-        return $count;
+        if ($fresh) {
+            $this->pushTemplateDisplayToBrandCategories($fresh);
+        }
+
+        return $fresh;
+    }
+
+    /**
+     * Push template display fields (name, icon, system link) to every brand category row for this template.
+     * Tenants cannot edit system name/icon locally; the catalog template is the source of truth.
+     */
+    public function pushTemplateDisplayToBrandCategories(SystemCategory $template): int
+    {
+        $icon = $template->icon ?? 'folder';
+
+        return Category::query()
+            ->whereNull('deleted_at')
+            ->where('is_system', true)
+            ->where('asset_type', $template->asset_type)
+            ->where(function ($q) use ($template) {
+                $q->where('system_category_id', $template->id)
+                    ->orWhere('slug', $template->slug);
+            })
+            ->update([
+                'name' => $template->name,
+                'icon' => $icon,
+                'system_category_id' => $template->id,
+                'system_version' => $template->version,
+                'upgrade_available' => false,
+            ]);
     }
 
     /**
@@ -327,7 +219,6 @@ class SystemCategoryService
             ->get();
 
         // Mark all brand categories for deletion (user must accept the deletion)
-        // This follows the same pattern as upgrades - user must accept the change
         foreach ($brandCategories as $category) {
             $category->update(['deletion_available' => true]);
         }
@@ -379,17 +270,43 @@ class SystemCategoryService
         $templates = $this->getAllTemplates();
 
         foreach ($templates as $template) {
+            if (! $template->auto_provision) {
+                continue;
+            }
             $this->addTemplateToBrand($brand, $template);
         }
+    }
+
+    /**
+     * Add a system template row to every brand that does not yet have this slug (auto-provision backfill).
+     * New rows use is_hidden=true so existing tenants see the folder under Hidden until they show it.
+     *
+     * @return int Number of brand category rows created (0 if slug already existed for that brand)
+     */
+    public function provisionAutoProvisionTemplateToExistingBrands(SystemCategory $template): int
+    {
+        $created = 0;
+
+        Brand::query()->orderBy('id')->chunkById(200, function ($brands) use ($template, &$created) {
+            foreach ($brands as $brand) {
+                $row = $this->addTemplateToBrand($brand, $template, forceHiddenOnCreate: true);
+                if ($row !== null) {
+                    $created++;
+                }
+            }
+        });
+
+        return $created;
     }
 
     /**
      * Add a single system category template to a brand.
      * Creates a brand-specific category from the template if it doesn't already exist.
      *
-     * @return Category|null The created category, or null if it already exists
+     * @param  bool  $forceHiddenOnCreate  When true, new rows are hidden on the brand (backfill to existing brands).
+     * @return Category|null The created or restored category, or null if it already exists and is not trashed
      */
-    public function addTemplateToBrand(Brand $brand, SystemCategory $template): ?Category
+    public function addTemplateToBrand(Brand $brand, SystemCategory $template, bool $forceHiddenOnCreate = false): ?Category
     {
         // Check if category already exists for this brand (including soft-deleted)
         $existing = Category::withTrashed()
@@ -407,7 +324,7 @@ class SystemCategoryService
                 $existing->update([
                     'name' => $template->name,
                     'icon' => $template->icon,
-                    'is_hidden' => $template->is_hidden,
+                    'is_hidden' => $forceHiddenOnCreate ? true : $template->is_hidden,
                     'system_category_id' => $template->id,
                     'system_version' => $template->version,
                     'upgrade_available' => false,
@@ -439,7 +356,7 @@ class SystemCategoryService
             'is_system' => true,
             'is_locked' => true, // System categories are locked by default (site admin only)
             'is_private' => false, // System categories are never private
-            'is_hidden' => $template->is_hidden,
+            'is_hidden' => $forceHiddenOnCreate ? true : $template->is_hidden,
             'system_category_id' => $template->id,
             'system_version' => $template->version,
             'upgrade_available' => false,
@@ -462,21 +379,5 @@ class SystemCategoryService
         }
 
         return $category;
-    }
-
-    /**
-     * Notify existing brands about a new system category.
-     * This doesn't automatically create the category, but makes it available
-     * for brands to add on their brand edit page.
-     *
-     * @param  SystemCategory  $newCategory  The newly created system category
-     */
-    protected function notifyBrandsOfNewCategory(SystemCategory $newCategory): void
-    {
-        // For new system categories, we don't need to mark anything as needing upgrade
-        // since they don't exist yet for any brands. They will show up as available
-        // templates on the brand edit page for all brands.
-        // This method is here for future extensibility if we need to track
-        // which brands have been notified about new categories.
     }
 }

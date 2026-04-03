@@ -1,10 +1,10 @@
 <?php
 
-use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\SignupController;
 use App\Http\Controllers\BrandGatewayController;
 use App\Http\Controllers\PublicBrandPortalController;
+use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -272,6 +272,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
         Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
+        Route::get('/api/tenant/metadata/brands/{brand}/available-system-categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'availableSystemCategories'])->name('tenant.metadata.brands.available-system-categories');
         Route::get('/api/tenant/metadata/fields/archived', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getArchivedFields'])->name('tenant.metadata.fields.archived');
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
@@ -528,6 +529,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Insights (Analytics renamed) — /insights → Overview; Metadata, Usage, Review as sub-pages
             Route::get('/insights', fn () => redirect()->route('insights.overview'))->name('insights');
             Route::get('/insights/overview', [\App\Http\Controllers\AnalyticsOverviewController::class, 'index'])->name('insights.overview');
+            Route::get('/insights/overview/metadata-analytics', [\App\Http\Controllers\AnalyticsOverviewController::class, 'metadataAnalytics'])->name('insights.overview.metadata-analytics');
             Route::get('/insights/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('insights.metadata');
             Route::get('/insights/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('insights.metadata.data');
             Route::get('/insights/usage', [\App\Http\Controllers\AnalyticsOverviewController::class, 'usage'])->name('insights.usage');
@@ -875,8 +877,6 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // DISABLED: Category management moved to brands pages
             // Route::resource('categories', \App\Http\Controllers\CategoryController::class)->except(['create', 'edit', 'show']);
             // Route::post('/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('categories.update-order');
-            // Route::get('/categories/{category}/upgrade/preview', [\App\Http\Controllers\CategoryController::class, 'previewUpgrade'])->name('categories.upgrade.preview');
-            // Route::post('/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('categories.upgrade.apply');
 
             // Category routes moved to brands
             Route::post('/brands/{brand}/categories', [\App\Http\Controllers\CategoryController::class, 'store'])->name('brands.categories.store');
@@ -887,8 +887,6 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::delete('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'destroy'])->name('brands.categories.destroy');
             Route::put('/api/brands/{brand}/categories/reorder', [\App\Http\Controllers\CategoryController::class, 'reorder'])->name('brands.categories.reorder');
             Route::post('/brands/{brand}/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('brands.categories.update-order');
-            Route::get('/brands/{brand}/categories/{category}/upgrade/preview', [\App\Http\Controllers\CategoryController::class, 'previewUpgrade'])->name('brands.categories.upgrade.preview');
-            Route::post('/brands/{brand}/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('brands.categories.upgrade.apply');
             Route::post('/brands/{brand}/categories/{category}/accept-deletion', [\App\Http\Controllers\CategoryController::class, 'acceptDeletion'])->name('brands.categories.accept-deletion');
             Route::patch('/brands/{brand}/categories/{category}/fields/reorder', [\App\Http\Controllers\CategoryController::class, 'reorderFields'])->name('brands.categories.fields.reorder');
 

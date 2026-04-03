@@ -246,26 +246,25 @@ function PlatformProceduresContent() {
                                 <div className="flex gap-3">
                                     <InformationCircleIcon className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
                                     <p className="text-sm text-indigo-950">
-                                        When you update a system category template, a new version is created. Existing brands
-                                        will see an &quot;Update available&quot; badge and can choose to upgrade their category to the
-                                        latest version while preserving any customizations they&apos;ve made.
+                                        Template changes save in place. Existing brand categories keep their own names and icons
+                                        until a tenant edits them; we do not push template renames to every brand.
                                     </p>
                                 </div>
                             </div>
                             <div>
-                                <h4 className="text-sm font-semibold text-slate-900 mb-2">Versioning System</h4>
+                                <h4 className="text-sm font-semibold text-slate-900 mb-2">Catalog &amp; new brands</h4>
                                 <ul className="list-disc list-inside space-y-1 text-sm text-slate-700">
                                     <li>
-                                        <strong>New Versions:</strong> Each update creates a new version of the template,
-                                        preserving the old version for reference
+                                        <strong>Auto-add to new brands:</strong> Only templates marked for auto-provision are
+                                        copied when a brand is created; others stay in the catalog until a tenant adds them.
                                     </li>
                                     <li>
-                                        <strong>No Auto-Updates:</strong> Existing brand categories are never automatically
-                                        modified — tenant admins must explicitly choose to upgrade
+                                        <strong>Tenant control:</strong> Brands can rename, change icons, and hide system
+                                        categories locally (slug stays fixed for stability).
                                     </li>
                                     <li>
-                                        <strong>Customization Preservation:</strong> When upgrading, tenant admins can select
-                                        which fields to update
+                                        <strong>Visibility:</strong> Each brand has a cap on how many non-hidden categories
+                                        they can show per asset type (assets and deliverables).
                                     </li>
                                 </ul>
                             </div>

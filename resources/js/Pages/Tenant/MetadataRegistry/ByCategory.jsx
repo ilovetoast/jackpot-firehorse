@@ -46,7 +46,6 @@ import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import AddCategoryModal from '../../../Components/Metadata/AddCategoryModal'
 import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSettingsSlideOver'
 import CategorySettingsModal from '../../../Components/Metadata/CategorySettingsModal'
-import UpgradeCategoryModal from '../../../Components/Metadata/UpgradeCategoryModal'
 import CategoryList from '../../../Components/Metadata/CategoryList'
 import {
     normalizeOptions,
@@ -101,6 +100,7 @@ export default function ByCategoryView({
     selectedBrandId,
     onBrandChange,
     categories, 
+    canManageBrandCategories = false,
     canManageVisibility = true, // Default true so toggles are clickable; API enforces permission
     canManageFields = false,
     customFieldsLimit = null,
@@ -151,8 +151,6 @@ export default function ByCategoryView({
     const [categorySettingsCategory, setCategorySettingsCategory] = useState(null)
     const [categoryMenuOpen, setCategoryMenuOpen] = useState(false)
     const [categoryFormData, setCategoryFormData] = useState({ brand_roles: [], brand_users: [] })
-    const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
-    const [upgradeLoading, setUpgradeLoading] = useState(false)
     const [confirmRevertOpen, setConfirmRevertOpen] = useState(false)
     const [categoryToRevert, setCategoryToRevert] = useState(null)
     const [highlightedFieldId, setHighlightedFieldId] = useState(null)
@@ -222,7 +220,7 @@ export default function ByCategoryView({
         if (!stillInList) setSelectedCategoryId(null)
     }, [selectedBrandId, categoriesForBrand, selectedCategoryId])
 
-    // Group categories by asset_type (within the selected brand)
+    // Group categories by asset_type (within the selected brand), stable order for sidebar + reorder UI
     const groupedCategories = useMemo(() => {
         const groups = {
             asset: [],
@@ -236,6 +234,17 @@ export default function ByCategoryView({
             }
             groups[assetType].push(category)
         })
+
+        const sortInGroup = (list) =>
+            [...list].sort((a, b) => {
+                const ao = a.sort_order ?? 9999
+                const bo = b.sort_order ?? 9999
+                if (ao !== bo) return ao - bo
+                return String(a.name || '').localeCompare(String(b.name || ''))
+            })
+
+        groups.asset = sortInGroup(groups.asset)
+        groups.deliverable = sortInGroup(groups.deliverable)
 
         return groups
     }, [categoriesForBrand])
@@ -1038,6 +1047,24 @@ export default function ByCategoryView({
         })
     }, [selectedBrandId, selectedCategory?.slug])
 
+    const handleAfterAddSystemCategory = useCallback(
+        (category) => {
+            const params = {}
+            if (selectedBrandId) params.brand = selectedBrandId
+            if (category?.slug) params.category = category.slug
+            router.get(METADATA_REGISTRY_URL, params, {
+                preserveState: true,
+                preserveScroll: true,
+                onSuccess: () => {
+                    if (category?.id != null) {
+                        setSelectedCategoryId(category.id)
+                    }
+                },
+            })
+        },
+        [selectedBrandId]
+    )
+
     // Select category: update URL and local state
     const handleSelectCategory = useCallback((categoryId) => {
         const cat = categoriesForBrand.find(c => c.id === categoryId)
@@ -1298,51 +1325,6 @@ export default function ByCategoryView({
         }
     }
 
-    // Upgrade system category to latest version
-    const handleUpgradeConfirm = async () => {
-        if (!selectedCategory?.id || !brandId) return
-        setUpgradeLoading(true)
-        try {
-            const response = await fetch(`/app/brands/${brandId}/categories/${selectedCategory.id}/upgrade`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ approved_fields: [] }),
-            })
-            const data = await response.json().catch(() => ({}))
-            if (response.ok) {
-                setSuccessMessage(data.message ?? 'Category upgraded.')
-                setTimeout(() => setSuccessMessage(null), 4000)
-                setUpgradeModalOpen(false)
-                if (data.category) {
-                    setLocalCategories((prev) =>
-                        prev.map((c) => (c.id === data.category.id ? { ...c, ...data.category } : c))
-                    )
-                } else {
-                    refreshMetadataRegistry()
-                }
-            } else {
-                setSuccessMessage(data.error ?? 'Failed to upgrade.')
-                setTimeout(() => setSuccessMessage(null), 5000)
-            }
-        } catch (err) {
-            setSuccessMessage('Network error. Please try again.')
-            setTimeout(() => setSuccessMessage(null), 5000)
-        } finally {
-            setUpgradeLoading(false)
-        }
-    }
-
-    // Open upgrade modal for category (from list)
-    const handleUpgradeClick = (category) => {
-        setSelectedCategoryId(category.id)
-        setUpgradeModalOpen(true)
-    }
-
     // Revert system category to default (from list)
     const handleRevertClick = (category) => {
         setCategoryToRevert(category)
@@ -1601,7 +1583,12 @@ export default function ByCategoryView({
             {/* LEFT PANEL — Brand Content Structure (sticky) */}
             <div className="lg:w-80 flex-shrink-0 lg:sticky lg:top-6 lg:self-start overflow-y-auto scrollbar-thin max-h-[calc(100vh-8rem)]">
                 <div className="rounded-lg bg-white shadow-sm border border-gray-100 p-5">
-                    <h2 className="text-base font-semibold text-gray-900 mb-4">Brand Content Structure</h2>
+                    <h2 className="text-base font-semibold text-gray-900">Brand Content Structure</h2>
+                    <p className="mt-1.5 text-xs text-gray-500 leading-relaxed">
+                        Drag the handle beside a visible folder to set sidebar order in the asset library and executions.
+                        The eye icon hides a folder from those sidebars; hidden folders stay listed below so you can still manage fields.
+                        Platform folders you haven&apos;t added yet appear in the same panel as hidden folders, under <span className="font-medium text-gray-600">Available from catalog</span>.
+                    </p>
                     {brands.length > 1 && (
                         <div className="mb-4">
                             <label htmlFor="by-category-brand" className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
@@ -1627,13 +1614,14 @@ export default function ByCategoryView({
                         selectedCategoryId={selectedCategoryId}
                         onSelectCategory={handleSelectCategory}
                         canManageVisibility={canManageVisibility}
+                        canManageBrandCategories={canManageBrandCategories}
                         brandId={brandId}
                         onCategoriesChange={onCategoriesChange}
+                        onAfterAddSystemCategory={handleAfterAddSystemCategory}
                         onRename={(cat) => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name) }}
                         onCategorySettingsClick={handleCategorySettingsClick}
                         onDelete={(cat) => { setCategoryToDelete(cat); setConfirmDeleteOpen(true) }}
                         onRevert={handleRevertClick}
-                        onUpgrade={handleUpgradeClick}
                         onSaveRename={(cat, name) => handleRenameCategory(cat, name)}
                         onCancelRename={() => { setEditingCategoryId(null); setEditingCategoryName('') }}
                         onAddCategory={brandId ? handleAddCategory : undefined}
@@ -1681,21 +1669,8 @@ export default function ByCategoryView({
                                 <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                                     {selectedCategory.is_system && (
                                         <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-normal text-gray-500 bg-gray-100">
-                                            System{selectedCategory.system_version ? ` · v${selectedCategory.system_version}` : ''}
+                                            System
                                         </span>
-                                    )}
-                                    {(selectedCategory.upgrade_available || selectedCategory.has_update_available) && selectedCategory.is_system && (
-                                        <>
-                                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-normal text-amber-700 bg-gray-100">Update Available</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setUpgradeModalOpen(true)}
-                                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-amber-700 bg-gray-100 hover:bg-amber-50 transition-colors"
-                                            >
-                                                <ArrowUpCircleIcon className="h-3 w-3" />
-                                                Upgrade
-                                            </button>
-                                        </>
                                     )}
                                     {selectedCategory.is_customized && (
                                         <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-gray-500 bg-gray-100" title="Customized from system default">
@@ -2241,16 +2216,6 @@ export default function ByCategoryView({
                 loading={copyOrResetLoading}
                 saveProfileLoading={saveProfileLoading}
             />
-            {/* Upgrade category modal */}
-            <UpgradeCategoryModal
-                isOpen={upgradeModalOpen}
-                onClose={() => setUpgradeModalOpen(false)}
-                category={selectedCategory}
-                brandId={brandId}
-                onConfirm={handleUpgradeConfirm}
-                loading={upgradeLoading}
-            />
-
             {/* Add Category Modal */}
             <AddCategoryModal
                 isOpen={addCategoryOpen}

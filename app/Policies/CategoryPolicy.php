@@ -18,8 +18,8 @@ use App\Models\User;
  * - Hidden categories (is_hidden=true): Require 'manage categories' permission (or specific permission)
  *
  * Mutation Rules:
- * - System categories (is_system=true): Immutable - cannot be renamed, deleted, or have icon changed
- *   - Enterprise/Pro plans can hide system categories
+ * - System categories (is_system=true): Cannot be renamed, deleted, or have icon changed by tenants (admin template is source of truth)
+ *   - Tenants may show/hide system categories (plan limits apply)
  *   - is_locked is site admin only (cannot be set/changed by tenants)
  * - Locked categories (is_locked=true): Cannot be updated or deleted (except is_hidden for system categories)
  *   - is_locked can only be set/changed by site administrators
@@ -146,45 +146,9 @@ class CategoryPolicy
             }
         }
 
-        // System categories can only be updated if:
-        // 1. Plan has edit_system_categories feature, OR
-        // 2. The system template no longer exists (orphaned category)
+        // System categories: tenants may adjust visibility only (CategoryService enforces fields).
         if ($category->is_system) {
-            // Check if template still exists
-            $templateExists = false;
-            if ($category->system_category_id) {
-                $templateExists = \App\Models\SystemCategory::where('id', $category->system_category_id)->exists();
-            } else {
-                // Legacy category - check by slug/asset_type
-                $templateExists = \App\Models\SystemCategory::where('slug', $category->slug)
-                    ->where('asset_type', $category->asset_type->value)
-                    ->exists();
-            }
-
-            // If template exists, require edit_system_categories feature
-            if ($templateExists) {
-                $planService = app(\App\Services\PlanService::class);
-                $canEditSystem = $planService->hasFeature($tenant, 'edit_system_categories');
-
-                // If plan allows editing system categories, allow updates even if locked
-                // (CategoryService will handle which fields can be updated for locked categories)
-                if ($canEditSystem) {
-                    return true;
-                }
-                // Log why update was denied for debugging
-                \Log::info('Category update denied', [
-                    'category_id' => $category->id,
-                    'category_name' => $category->name,
-                    'is_system' => $category->is_system,
-                    'template_exists' => $templateExists,
-                    'can_edit_system' => $canEditSystem,
-                    'tenant_id' => $tenant->id,
-                    'plan' => $planService->getCurrentPlan($tenant),
-                ]);
-
-                return false;
-            }
-            // Template is deleted, allow update
+            return true;
         }
 
         // Cannot update locked custom categories
@@ -227,37 +191,6 @@ class CategoryPolicy
 
         // Use the category's helper method to check if it can be deleted
         if (! $category->canBeDeleted()) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Determine if the user can upgrade the category.
-     *
-     * Only tenant admins/owners can upgrade system categories that have upgrades available.
-     */
-    public function upgrade(User $user, Category $category): bool
-    {
-        // User must belong to the tenant
-        if (! $user->belongsToTenant($category->tenant_id)) {
-            return false;
-        }
-
-        // User must have brand_categories.manage permission
-        $tenant = $this->resolveCategoryTenant($category);
-        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
-            return false;
-        }
-
-        // Category must be a system category
-        if (! $category->is_system) {
-            return false;
-        }
-
-        // Category must have upgrade available
-        if (! $category->upgrade_available) {
             return false;
         }
 

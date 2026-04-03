@@ -32,6 +32,14 @@ The result is a system that doesn't just store assets — it **protects brand in
   - final marketing assets
   - collections and campaigns
 
+**System vs custom library categories**
+
+- **System templates** (platform catalog): Site admins define global templates. **Auto-add** (`auto_provision`) copies the folder when a brand is created and queues adding it to **existing** brands that lack that slug; those backfilled rows start **hidden** on each brand so sidebars do not change until a tenant shows the folder in Metadata → By category. Seeded defaults are auto-provisioned. Catalog-only templates (auto-add off) must be added per brand from the catalog.
+- **Tenant edits:** Brands can rename and change icons for system-backed categories locally; **slugs stay fixed** for stable links and metadata. Template renames in admin do **not** push to existing brand rows.
+- **Visibility cap:** Each brand has a maximum number of **non-hidden** categories per **asset** and **deliverable** library (default 20 each, `config/categories.php`). Hidden folders do not count. **Reference** / style-reference material is outside that cap.
+- **Sidebar order:** In **Metadata → By category**, drag handles on **visible** folders set `sort_order`, which drives the asset library and executions sidebars. **Hidden** folders are grouped in a collapsible section (still editable for field settings).
+- **Plans:** Creating ordinary custom categories is **not** limited by historical “max categories” plan counts. **Private** (role-restricted) custom categories remain plan-gated (Pro / Premium / Enterprise) with clear upgrade messaging when blocked.
+
 **Value:** Teams spend less time searching and less time guessing which asset is "correct."
 
 ---

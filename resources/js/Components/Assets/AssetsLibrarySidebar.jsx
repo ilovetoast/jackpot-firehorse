@@ -109,6 +109,9 @@ export default function AssetsLibrarySidebar({
                         )}
                         {filterActiveCategories(categories).map((category) => {
                             const isSelected = selectedCategoryId === category.id && selectedCategoryId != null
+                            const categoryCount = Number(category.asset_count)
+                            const showCategoryCount =
+                                category.id != null && Number.isFinite(categoryCount) && categoryCount > 0
                             return (
                                 <button
                                     key={category.id}
@@ -137,10 +140,9 @@ export default function AssetsLibrarySidebar({
                                         style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
                                     />
                                     <span className="flex-1">{category.name}</span>
-                                    {category.id != null &&
-                                        typeof category.asset_count === 'number' && (
+                                    {showCategoryCount && (
                                         <span className="text-xs font-normal opacity-80 ml-2" style={{ color: isSelected ? activeTextColor : unselectedCountColor }}>
-                                            {category.asset_count}
+                                            {categoryCount}
                                         </span>
                                     )}
                                     {category.is_private && (
