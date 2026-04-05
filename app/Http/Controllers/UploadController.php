@@ -1700,6 +1700,7 @@ class UploadController extends Controller
             $title = $item['title'] ?? null;
             $resolvedFilename = $item['resolved_filename'] ?? null;
             $editorPublishDescription = null;
+            $jackpotAiProvenance = null;
 
             $uploadSession = null; // Initialize for use in catch blocks
             
@@ -2087,6 +2088,21 @@ class UploadController extends Controller
                         }
                     }
 
+                    // Reserved keys (EditorAssetBridge / internal) — never upload-schema fields
+                    if (array_key_exists('editor_publish_description', $metadataFields)) {
+                        $editorPublishDescription = $metadataFields['editor_publish_description'];
+                        unset($metadataFields['editor_publish_description']);
+                    }
+                    if (array_key_exists('jackpot_ai_provenance', $metadataFields)) {
+                        $jp = $metadataFields['jackpot_ai_provenance'];
+                        unset($metadataFields['jackpot_ai_provenance']);
+                        if (is_array($jp)) {
+                            $jackpotAiProvenance = $jp;
+                        } elseif (is_object($jp)) {
+                            $jackpotAiProvenance = (array) $jp;
+                        }
+                    }
+
                     // Phase 2 – Step 4: Validate metadata against schema BEFORE asset creation
                     // Skip when no category (builder-staged uploads have no category)
                     if (!empty($metadataFields) && $category) {
@@ -2109,12 +2125,6 @@ class UploadController extends Controller
                                 foreach ($group['fields'] ?? [] as $field) {
                                     $allowedFieldKeys[] = $field['key'];
                                 }
-                            }
-
-                            // Generative editor publish notes (EditorAssetBridgeController) — not schema fields
-                            if (array_key_exists('editor_publish_description', $metadataFields)) {
-                                $editorPublishDescription = $metadataFields['editor_publish_description'];
-                                unset($metadataFields['editor_publish_description']);
                             }
 
                             // Drop keys not in upload schema (e.g. legacy editor composition: source, document, …)
@@ -2158,19 +2168,28 @@ class UploadController extends Controller
                         $skipAiMetadata
                     );
 
-                    // Generative editor publish modal: description is not a schema field; store on asset JSON metadata.
-                    if ($editorPublishDescription !== null && $editorPublishDescription !== '' && $asset && $asset->id) {
-                        $note = is_string($editorPublishDescription)
-                            ? $editorPublishDescription
-                            : (is_scalar($editorPublishDescription) ? (string) $editorPublishDescription : '');
+                    // Generative editor publish: description + IPTC-style AI provenance on asset JSON metadata.
+                    if ($asset && $asset->id) {
+                        $note = '';
+                        if ($editorPublishDescription !== null && $editorPublishDescription !== '') {
+                            $note = is_string($editorPublishDescription)
+                                ? $editorPublishDescription
+                                : (is_scalar($editorPublishDescription) ? (string) $editorPublishDescription : '');
+                        }
+                        $merge = [];
                         if ($note !== '') {
+                            $merge['editor_publish_description'] = $note;
+                        }
+                        if (is_array($jackpotAiProvenance) && $jackpotAiProvenance !== []) {
+                            $merge['jackpot_ai_provenance'] = $jackpotAiProvenance;
+                        }
+                        if ($merge !== []) {
                             $asset->refresh();
                             $currentMetadata = $asset->metadata ?? [];
                             if (! is_array($currentMetadata)) {
                                 $currentMetadata = [];
                             }
-                            $currentMetadata['editor_publish_description'] = $note;
-                            $asset->update(['metadata' => $currentMetadata]);
+                            $asset->update(['metadata' => array_merge($currentMetadata, $merge)]);
                         }
                     }
 

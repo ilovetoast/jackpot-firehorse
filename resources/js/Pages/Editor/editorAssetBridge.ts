@@ -192,6 +192,40 @@ function collectTextFontFamilies(doc: DocumentModel): string[] {
     return out
 }
 
+/** Serializable composition hints for server-side {@code jackpot_ai_provenance} (IPTC-style DAM JSON). */
+export function buildEditorProvenanceHints(doc: DocumentModel): Record<string, unknown> {
+    const referenceAssetIds: string[] = []
+    const seen = new Set<string>()
+    let hasGenerative = false
+    let hasBrandInfluence = false
+    for (const l of doc.layers) {
+        if (l.type !== 'generative_image') {
+            continue
+        }
+        hasGenerative = true
+        if (l.applyBrandDna !== false) {
+            hasBrandInfluence = true
+        }
+        for (const id of l.referenceAssetIds ?? []) {
+            const s = String(id).trim().toLowerCase()
+            if (s && !seen.has(s)) {
+                seen.add(s)
+                referenceAssetIds.push(s)
+            }
+        }
+    }
+    return {
+        document_id: doc.id,
+        layers_count: doc.layers.length,
+        has_text: doc.layers.some((l) => l.type === 'text'),
+        has_images: doc.layers.some((l) => l.type === 'image'),
+        has_generative: hasGenerative,
+        has_brand_influence: hasBrandInfluence,
+        reference_asset_ids: referenceAssetIds,
+        font_families: collectTextFontFamilies(doc),
+    }
+}
+
 export function buildPromotionMetadata(doc: DocumentModel): EditorPromotionMetadata {
     const reference_count = doc.layers.reduce((acc, l) => {
         if (l.type !== 'generative_image') {
@@ -254,6 +288,7 @@ export async function promoteCompositionToAsset(
     // are not in the resolved upload schema and finalize rejects the whole manifest.
     const mergedMeta: Record<string, unknown> = {
         ...(options?.fieldMetadata ?? {}),
+        editor_provenance: buildEditorProvenanceHints(doc),
     }
     fd.append('metadata', JSON.stringify(mergedMeta))
     const cids = options?.collectionIds?.filter((id) => Number.isFinite(id) && id > 0) ?? []

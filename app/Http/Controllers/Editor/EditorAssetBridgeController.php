@@ -8,6 +8,7 @@ use App\Http\Controllers\UploadController;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\Lifecycle\LifecycleResolver;
+use App\Support\GenerativeAiProvenance;
 use App\Services\NotificationOrchestrator;
 use App\Services\UploadInitiationService;
 use Aws\S3\Exception\S3Exception;
@@ -470,6 +471,18 @@ class EditorAssetBridgeController extends Controller
         if ($description !== '') {
             $metaDecoded['editor_publish_description'] = $description;
         }
+
+        $provenanceHints = [];
+        if (isset($metaDecoded['editor_provenance']) && is_array($metaDecoded['editor_provenance'])) {
+            $provenanceHints = $metaDecoded['editor_provenance'];
+        }
+        unset($metaDecoded['editor_provenance']);
+        $metaDecoded['jackpot_ai_provenance'] = GenerativeAiProvenance::forPublishedComposition(
+            $user,
+            $brand,
+            $tenant,
+            $provenanceHints
+        );
 
         $collectionIds = [];
         if (! empty($validated['collection_ids'])) {

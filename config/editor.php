@@ -21,4 +21,18 @@ return [
         'orphan_cleanup_days' => max(1, (int) env('GENERATIVE_ORPHAN_CLEANUP_DAYS', 7)),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | AI provenance (DAM JSON metadata, not binary XMP)
+    |--------------------------------------------------------------------------
+    |
+    | Shown in asset.metadata["jackpot_ai_provenance"] for editor publish and persisted generative layers.
+    |
+    */
+    'provenance' => [
+        'vendor_name' => env('JACKPOT_PROVENANCE_VENDOR', 'Velvetysoft'),
+        /** Empty string → "{APP_NAME} Generative Editor" */
+        'generator_label' => env('JACKPOT_PROVENANCE_GENERATOR_LABEL', ''),
+    ],
+
 ];

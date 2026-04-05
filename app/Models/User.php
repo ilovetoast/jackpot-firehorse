@@ -298,6 +298,40 @@ class User extends Authenticatable
     }
 
     /**
+     * Creator / prostaff — Phase 1: all prostaff rows for this user.
+     */
+    public function prostaffMemberships(): HasMany
+    {
+        return $this->hasMany(ProstaffMembership::class);
+    }
+
+    /**
+     * Active prostaff membership for a brand, if any (any status; filter in later phases).
+     */
+    public function prostaffMembershipForBrand(Brand $brand): ?ProstaffMembership
+    {
+        return $this->prostaffMemberships()
+            ->where('brand_id', $brand->id)
+            ->first();
+    }
+
+    /**
+     * True when this user has an active prostaff row for the brand (status = active).
+     */
+    public function isProstaffForBrand(Brand $brand): bool
+    {
+        return $this->prostaffMembershipForBrand($brand)?->status === 'active';
+    }
+
+    /**
+     * Drop cached {@see activeBrandMembership()} result for a brand (e.g. after prostaff or pivot changes).
+     */
+    public function forgetActiveBrandMembershipForBrand(Brand $brand): void
+    {
+        unset($this->activeBrandMembershipByBrandId[(string) $brand->id]);
+    }
+
+    /**
      * Get the tickets created by this user.
      */
     public function createdTickets(): \Illuminate\Database\Eloquent\Relations\HasMany
@@ -360,6 +394,14 @@ class User extends Authenticatable
         $this->tenantRoleForTenantCache[$tenantId] = $role;
 
         return $role;
+    }
+
+    /**
+     * Clear cached tenant pivot role for this tenant (e.g. after attaching the user to the tenant).
+     */
+    public function forgetTenantRoleCacheForTenant(Tenant $tenant): void
+    {
+        unset($this->tenantRoleForTenantCache[(string) $tenant->id]);
     }
 
     /**
@@ -518,6 +560,12 @@ class User extends Authenticatable
             'role' => $role,
             'requires_approval' => (bool) ($pivot->requires_approval ?? false),
         ];
+
+        // Creator / prostaff Phase 2: runtime only — prostaff always treated as requiring approval.
+        if ($this->isProstaffForBrand($brand)) {
+            $resolved['requires_approval'] = true;
+        }
+
         $this->activeBrandMembershipByBrandId[$cacheKey] = $resolved;
 
         return $resolved;

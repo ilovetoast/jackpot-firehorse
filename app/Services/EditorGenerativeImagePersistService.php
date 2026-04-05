@@ -11,6 +11,7 @@ use App\Models\AssetVersion;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\GenerativeAiProvenance;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -112,6 +113,7 @@ final class EditorGenerativeImagePersistService
                 'generated_at' => now()->toIso8601String(),
                 'ai_generated' => true,
                 'asset_role' => 'generative_layer',
+                'jackpot_ai_provenance' => $this->buildLayerProvenance($user, $brand, $tenant, $context),
             ];
             if ($layerUuid !== '') {
                 $meta['generative_layer_uuid'] = $layerUuid;
@@ -274,6 +276,7 @@ final class EditorGenerativeImagePersistService
             $meta['ai_generated'] = true;
             $meta['asset_role'] = 'generative_layer';
             $meta['generative_layer_uuid'] = $layerUuid;
+            $meta['jackpot_ai_provenance'] = $this->buildLayerProvenance($user, $brand, $tenant, $context);
             if (! empty($context['composition_id'])) {
                 $meta['composition_id'] = (string) $context['composition_id'];
             }
@@ -418,6 +421,19 @@ final class EditorGenerativeImagePersistService
             'image/webp' => 'webp',
             default => 'bin',
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function buildLayerProvenance(User $user, Brand $brand, Tenant $tenant, array $context): array
+    {
+        $operation = isset($context['operation']) && is_string($context['operation']) && $context['operation'] !== ''
+            ? $context['operation']
+            : (! empty($context['source_asset_id']) ? 'generative_edit' : 'generative_generate');
+
+        return GenerativeAiProvenance::forPersistedGenerativeOutput($user, $brand, $tenant, $context, $operation);
     }
 
     /**
