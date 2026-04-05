@@ -234,9 +234,24 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Monthly limit reached'], 429);
         }
 
+        $refIds = [];
+        if (isset($validated['references']) && is_array($validated['references'])) {
+            foreach ($validated['references'] as $rid) {
+                $refIds[] = strtolower(trim((string) $rid));
+            }
+            $refIds = array_values(array_unique(array_filter($refIds, static fn ($s) => $s !== '')));
+        }
+
         $persistContext = array_filter([
+            'operation' => 'generative_generate',
             'composition_id' => ! empty($validated['composition_id']) ? (string) (int) $validated['composition_id'] : null,
             'generative_layer_uuid' => isset($validated['generative_layer_uuid']) ? (string) $validated['generative_layer_uuid'] : null,
+            'reference_asset_ids' => $refIds !== [] ? $refIds : null,
+            'model_provider' => $provider,
+            'model_api_id' => $model,
+            'resolved_model_key' => $result['resolved_model_key'] ?? $registryKey,
+            'model_display_name' => $result['model_display_name'] ?? null,
+            'brand_context_applied' => ! empty($validated['brand_context']) ? true : null,
         ], static fn ($v) => $v !== null && $v !== '');
 
         $final = $this->finalizeGenerativeImageOutput(

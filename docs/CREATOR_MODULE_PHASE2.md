@@ -23,6 +23,8 @@ flowchart TD
 
 **`$data` keys (optional):** `target_uploads`, `period_type`, `period_start`, `assigned_by_user_id`, `custom_fields`
 
+**Idempotent assign:** If a row already exists for `(brand_id, user_id)` with `status = active`, `assign()` returns that membership **without** updating targets, period, or other fields (avoids resetting goals mid-period). Removed/paused rows still go through the full assign path and `updateOrCreate`.
+
 ## Removal flow
 
 **Service:** `App\Services\Prostaff\RemoveProstaffMember`  
@@ -52,7 +54,8 @@ This is **not** written back to `brand_user`; it only affects callers using `act
 
 | Method | Purpose |
 |--------|---------|
-| `isProstaffForBrand(Brand $brand): bool` | `true` when `prostaff_memberships.status === 'active'` for that brand. |
+| `activeProstaffMembership(Brand $brand): ?ProstaffMembership` | The **active** prostaff row only; prefer this in Phase 3+ to avoid duplicate queries/logic. |
+| `isProstaffForBrand(Brand $brand): bool` | `true` when `activeProstaffMembership` is non-null. |
 | `forgetActiveBrandMembershipForBrand(Brand $brand)` | Clears in-request cache after pivot/prostaff changes. |
 | `forgetTenantRoleCacheForTenant(Tenant $tenant)` | Clears tenant role cache after attaching to tenant. |
 

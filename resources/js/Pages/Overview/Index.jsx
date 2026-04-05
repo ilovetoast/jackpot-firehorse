@@ -297,7 +297,7 @@ export default function Overview() {
         <div className="relative h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none bg-[#0B0B0D]">
             <AppHead title="Overview" />
 
-            <div className="absolute top-0 left-0 right-0 z-50">
+            <div className="absolute top-0 left-0 right-0 z-50 overflow-visible">
                 <AppNav
                     brand={authFromPage?.activeBrand || auth?.activeBrand}
                     tenant={tenantNavFromAuth(authFromPage)}

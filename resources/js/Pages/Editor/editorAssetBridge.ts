@@ -192,7 +192,7 @@ function collectTextFontFamilies(doc: DocumentModel): string[] {
     return out
 }
 
-/** Serializable composition hints for server-side {@code jackpot_ai_provenance} (IPTC-style DAM JSON). */
+/** Serializable composition hints for server-side `jackpot_ai_provenance` (IPTC-style DAM JSON). */
 export function buildEditorProvenanceHints(doc: DocumentModel): Record<string, unknown> {
     const referenceAssetIds: string[] = []
     const seen = new Set<string>()

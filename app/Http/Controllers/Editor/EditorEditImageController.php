@@ -258,8 +258,13 @@ class EditorEditImageController extends Controller
         }
 
         $persistContext = array_filter([
+            'operation' => 'generative_edit',
             'composition_id' => ! empty($validated['composition_id']) ? (string) (int) $validated['composition_id'] : null,
             'generative_layer_uuid' => isset($validated['generative_layer_uuid']) ? (string) $validated['generative_layer_uuid'] : null,
+            'source_asset_id' => ! empty($validated['asset_id']) ? (string) $validated['asset_id'] : null,
+            'resolved_model_key' => $result['resolved_model_key'] ?? $modelKey,
+            'model_key' => $modelKey,
+            'brand_context_applied' => ! empty($validated['brand_context']) ? true : null,
         ], static fn ($v) => $v !== null && $v !== '');
 
         $final = $this->finalizeGenerativeImageOutput(

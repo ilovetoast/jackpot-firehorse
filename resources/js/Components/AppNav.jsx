@@ -112,6 +112,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
 
     const effectivePermissions = Array.isArray(auth.effective_permissions) ? auth.effective_permissions : []
     const can = (p) => effectivePermissions.includes(p)
+    const canViewWorkspaceInsights = Boolean(auth?.permissions?.can_view_workspace_insights)
     const brands = collectionOnly ? [] : (auth.brands || [])
     // C12: In collection-only mode there is no active brand
     const activeBrand = collectionOnly ? null : auth.activeBrand
@@ -146,9 +147,6 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     /** Company default brand color (from shared auth) + active brand; drives workspace menu accent */
     const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || '#6366f1'
     const agencyBrandColor = agencyHomeCompany?.primary_color || '#4f46e5'
-    const agencyMonogramChar = agencyHomeCompany
-        ? (agencyHomeCompany.name || '').trim().charAt(0).toUpperCase() || '?'
-        : '?'
 
     const currentWorkspace = activeCompany
         ? {
@@ -360,10 +358,23 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         }
 
         const showBrandSettings = can('brand_settings.manage')
-        const subBase =
-            'block px-2.5 py-1.5 leading-snug transition-colors duration-150 ease-out rounded-md mx-0.5'
-        const subIdle = 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-        const subActive = 'bg-indigo-50 text-indigo-700 font-medium'
+        const showInsightsNav = canViewWorkspaceInsights
+        const showOverviewDropdown = showInsightsNav || showBrandSettings
+
+        if (!showOverviewDropdown) {
+            return (
+                <Link href="/app/overview" title={overviewNavTitle} className={overviewLinkClass} style={linkStyle}>
+                    <HomeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Overview
+                </Link>
+            )
+        }
+
+        const subLinkBase =
+            'block border-l-[3px] px-3 py-2 text-sm font-medium leading-snug transition-[border-color,background-color,color] duration-150 ease-out'
+        const subLinkInactive =
+            'border-transparent text-gray-600 hover:bg-slate-50 hover:text-gray-900 hover:[border-left-color:var(--overview-dd-accent)]'
+        const subLinkActive = 'bg-slate-50 text-gray-900'
 
         return (
             <div
@@ -373,7 +384,6 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             >
                 <Link
                     href="/app/overview"
-                    title={overviewNavTitle}
                     className={overviewLinkClass}
                     style={linkStyle}
                     aria-haspopup="true"
@@ -389,25 +399,40 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                     />
                 </Link>
                 <div
-                    className={`absolute left-0 top-full z-[100] min-w-[10.5rem] pt-1.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
+                    className={`absolute left-0 top-full z-[100] min-w-[11rem] pt-1.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         overviewNavHover
                             ? 'pointer-events-auto translate-y-0 opacity-100'
                             : 'pointer-events-none translate-y-1 opacity-0'
                     }`}
                 >
-                    <div className="rounded-lg bg-white py-0.5 text-xs shadow-lg ring-1 ring-black/5 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10">
+                    <div
+                        className="rounded-md bg-white py-0.5 text-sm shadow-sm ring-1 ring-slate-200/90 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10"
+                        style={{ '--overview-dd-accent': accent }}
+                    >
                         <Link
-                            href={route('insights.overview')}
-                            className={`${subBase} ${insightsPathActive ? subActive : subIdle}`}
+                            href="/app/overview"
+                            className={`${subLinkBase} ${overviewPathActive ? subLinkActive : subLinkInactive}`}
+                            style={overviewPathActive ? { borderLeftColor: accent } : undefined}
                         >
-                            Insights
+                            Overview
                         </Link>
+                        {showInsightsNav ? (
+                            <Link
+                                href={route('insights.overview')}
+                                className={`${subLinkBase} ${insightsPathActive ? subLinkActive : subLinkInactive}`}
+                                style={insightsPathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                Insights
+                            </Link>
+                        ) : null}
                         {showBrandSettings ? (
                             <Link
                                 href={route('brands.edit', { brand: activeBrand.id })}
-                                className={`${subBase} ${brandSettingsPathActive ? subActive : subIdle}`}
+                                title={brandSettingsLabel}
+                                className={`${subLinkBase} ${brandSettingsPathActive ? subLinkActive : subLinkInactive}`}
+                                style={brandSettingsPathActive ? { borderLeftColor: accent } : undefined}
                             >
-                                {brandSettingsLabel}
+                                Settings
                             </Link>
                         ) : null}
                     </div>
@@ -539,7 +564,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
 
             {/* Cinematic header group: shared hover + matched bg transition between agency strip and nav */}
             <div
-                className={variant === 'transparent' ? 'relative z-[55] flex flex-col' : undefined}
+                className={variant === 'transparent' ? 'relative z-[55] flex flex-col overflow-visible' : undefined}
                 onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
                 onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
             >
@@ -564,7 +589,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                 </div>
             )}
 
-            {/* Agency strip — monogram + name + dashboard; agency primary color as left accent (light + cinematic) */}
+            {/* Agency strip — workspace label + name + dashboard; agency primary color as left accent (light + cinematic) */}
             {isAppPage && showAgencyQuickLink && agencyHomeCompany && !hideAgencyStrip && (
                 <div
                     className={`flex items-center transition-colors duration-300 ${
@@ -597,20 +622,6 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                 >
                     <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2 sm:px-6 sm:py-2.5 lg:px-8">
                         <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
-                            <span
-                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold leading-none ring-1 ring-inset ${
-                                    isTransparentVariant ? 'ring-white/15' : 'ring-black/[0.06]'
-                                }`}
-                                style={{
-                                    backgroundColor: isTransparentVariant
-                                        ? `color-mix(in srgb, ${agencyBrandColor} 38%, rgba(255,255,255,0.07))`
-                                        : `color-mix(in srgb, ${agencyBrandColor} 22%, white)`,
-                                    color: isTransparentVariant ? '#ffffff' : agencyBrandColor,
-                                }}
-                                aria-hidden
-                            >
-                                {agencyMonogramChar}
-                            </span>
                             <div className="min-w-0 flex-1">
                                 <p
                                     className={`hidden text-[10px] font-semibold uppercase tracking-wider sm:block ${
@@ -804,8 +815,9 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         ) : suppressWorkspaceChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:block" aria-hidden="true" />
                         ) : (
-                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto overflow-y-visible">
-                                {renderDesktopOverviewNav()}
+                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6">
+                                <div className="shrink-0">{renderDesktopOverviewNav()}</div>
+                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -866,10 +878,12 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
                                     Generative
                                 </Link>
+                                </div>
                             </div>
                         )) : (
-                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:ml-6 overflow-x-auto overflow-y-visible">
-                                {renderDesktopOverviewNav()}
+                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:ml-6">
+                                <div className="shrink-0">{renderDesktopOverviewNav()}</div>
+                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -930,6 +944,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
                                     Generative
                                 </Link>
+                                </div>
                             </div>
                         )}
                     </div>

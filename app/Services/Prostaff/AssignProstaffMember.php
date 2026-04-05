@@ -18,6 +18,15 @@ class AssignProstaffMember
      */
     public function assign(User $user, Brand $brand, array $data = []): ProstaffMembership
     {
+        $existing = ProstaffMembership::query()
+            ->where('brand_id', $brand->id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($existing !== null && $existing->status === 'active') {
+            return $existing->fresh() ?? $existing;
+        }
+
         $tenant = Tenant::query()->findOrFail($brand->tenant_id);
 
         $this->assertAssignableAsProstaff($user, $tenant, $brand);

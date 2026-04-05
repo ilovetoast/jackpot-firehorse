@@ -512,6 +512,9 @@ class HandleInertiaRequests extends Middleware
                     'can_view_company_overview' => $tenant && in_array('company.view', $effectivePermissions, true),
                     // Nav: show Brand Guidelines when DNA is published for everyone, or unpublished only for brand_settings.manage
                     'show_brand_guidelines_nav' => $showBrandGuidelinesNav,
+                    // /app/insights/* — same rule as AnalyticsOverviewController (User::canViewBrandWorkspaceInsights)
+                    'can_view_workspace_insights' => $tenant && $activeBrand && $user
+                        && $user->canViewBrandWorkspaceInsights($tenant, $activeBrand),
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

@@ -9,12 +9,12 @@ use App\Models\AgencyTier;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
+use App\Models\User;
 use App\Services\Agency\BrandReadinessService;
 use App\Services\AgencyBrandAccessService;
 use App\Services\IncubationWorkspaceService;
 use App\Services\TenantAgencyService;
 use App\Support\DashboardLinks;
-use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -146,33 +146,33 @@ class AgencyDashboardController extends Controller
             ->pluck('id', 'tenant_id');
 
         $incubatedClients = $incubatedRows->map(function ($client) use ($tenantAgencyIdByClientId) {
-                // Phase AG-8: Compute days remaining for incubation window awareness
-                $daysRemaining = null;
-                $expiringsSoon = false;
-                if ($client->incubation_expires_at) {
-                    $daysRemaining = (int) now()->diffInDays($client->incubation_expires_at, false);
-                    // Negative means already expired, but we don't enforce - just show warning
-                    $expiringsSoon = $daysRemaining >= 0 && $daysRemaining < 7;
-                }
+            // Phase AG-8: Compute days remaining for incubation window awareness
+            $daysRemaining = null;
+            $expiringsSoon = false;
+            if ($client->incubation_expires_at) {
+                $daysRemaining = (int) now()->diffInDays($client->incubation_expires_at, false);
+                // Negative means already expired, but we don't enforce - just show warning
+                $expiringsSoon = $daysRemaining >= 0 && $daysRemaining < 7;
+            }
 
-                $locked = $this->incubationWorkspaceService->isWorkspaceLocked($client);
+            $locked = $this->incubationWorkspaceService->isWorkspaceLocked($client);
 
-                return [
-                    'id' => $client->id,
-                    'name' => $client->name,
-                    'slug' => $client->slug,
-                    'incubated_at' => $client->incubated_at?->toISOString(),
-                    'incubation_expires_at' => $client->incubation_expires_at?->toISOString(),
-                    'incubation_target_plan_key' => $client->incubation_target_plan_key,
-                    'incubation_extension_requested_at' => $client->incubation_extension_requested_at?->toISOString(),
-                    // Agency ↔ client link id for sync (adds agency staff to client workspace)
-                    'tenant_agency_id' => $tenantAgencyIdByClientId[$client->id] ?? null,
-                    // Phase AG-8: Computed flags for UI nudges (no enforcement)
-                    'days_remaining' => $daysRemaining,
-                    'expiring_soon' => $expiringsSoon,
-                    'incubation_locked' => $locked,
-                ];
-            });
+            return [
+                'id' => $client->id,
+                'name' => $client->name,
+                'slug' => $client->slug,
+                'incubated_at' => $client->incubated_at?->toISOString(),
+                'incubation_expires_at' => $client->incubation_expires_at?->toISOString(),
+                'incubation_target_plan_key' => $client->incubation_target_plan_key,
+                'incubation_extension_requested_at' => $client->incubation_extension_requested_at?->toISOString(),
+                // Agency ↔ client link id for sync (adds agency staff to client workspace)
+                'tenant_agency_id' => $tenantAgencyIdByClientId[$client->id] ?? null,
+                // Phase AG-8: Computed flags for UI nudges (no enforcement)
+                'days_remaining' => $daysRemaining,
+                'expiring_soon' => $expiringsSoon,
+                'incubation_locked' => $locked,
+            ];
+        });
 
         // Get activated clients (clients with completed transfers)
         $activatedClients = AgencyPartnerReward::where('agency_tenant_id', $tenant->id)
@@ -330,6 +330,9 @@ class AgencyDashboardController extends Controller
             ] : null,
         ];
 
+        $agencyTeam = $this->buildAgencyWorkspaceTeamPayload($tenant);
+        $agencyBrandsSummary = $this->buildAgencyWorkspaceBrandsSummary($tenant);
+
         return Inertia::render('Agency/Dashboard', [
             'tenant' => $tenant,
             'agency' => [
@@ -371,7 +374,91 @@ class AgencyDashboardController extends Controller
             'managed_agency' => $managedAgency,
             'dashboard_links' => $dashboardLinks,
             'can_create_incubated_client' => $canCreateIncubatedClient,
+            'agency_team' => $agencyTeam,
+            'agency_brands_summary' => $agencyBrandsSummary,
         ]);
+    }
+
+    /**
+     * Agency workspace members + per-brand roles (same shape as company team API, for dashboard display).
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function buildAgencyWorkspaceTeamPayload(Tenant $agencyTenant): array
+    {
+        $tenantBrandIds = $agencyTenant->brands()->pluck('id')->all();
+        if ($tenantBrandIds === []) {
+            return [];
+        }
+
+        $firstUserId = $agencyTenant->users()->orderBy('tenant_user.created_at')->first()?->id;
+
+        $members = $agencyTenant->users()
+            ->with([
+                'brands' => fn ($q) => $q->whereIn('brands.id', $tenantBrandIds)->wherePivotNull('removed_at'),
+            ])
+            ->orderByRaw('CASE WHEN COALESCE(tenant_user.is_agency_managed, 0) = 1 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN tenant_user.agency_tenant_id IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('tenant_user.agency_tenant_id')
+            ->orderBy('users.created_at')
+            ->limit(200)
+            ->get();
+
+        $agencyIds = $members->pluck('pivot.agency_tenant_id')->filter()->unique()->values();
+        $agencyNames = Tenant::whereIn('id', $agencyIds)->pluck('name', 'id');
+
+        return $members->map(function ($member) use ($firstUserId, $agencyNames) {
+            $role = $member->pivot->role ?? null;
+            if (empty($role)) {
+                $role = ($firstUserId && (int) $firstUserId === (int) $member->id) ? 'owner' : 'member';
+            }
+
+            $brandRoles = collect($member->brands)->map(function ($brand) {
+                return [
+                    'brand_id' => $brand->id,
+                    'brand_name' => $brand->name,
+                    'role' => $brand->pivot->role ?? 'viewer',
+                ];
+            })->values()->all();
+
+            $agencyTenantId = $member->pivot->agency_tenant_id ? (int) $member->pivot->agency_tenant_id : null;
+
+            return [
+                'id' => $member->id,
+                'name' => $member->name,
+                'email' => $member->email,
+                'company_role' => strtolower((string) $role),
+                'brand_roles' => $brandRoles,
+                'joined_at' => $member->pivot->created_at?->toIso8601String(),
+                'is_agency_managed' => (bool) ($member->pivot->is_agency_managed ?? false),
+                'agency_tenant_id' => $agencyTenantId,
+                'agency_tenant_name' => $agencyTenantId ? ($agencyNames[$agencyTenantId] ?? null) : null,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Brands in the agency tenant with count of users who have active brand access.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function buildAgencyWorkspaceBrandsSummary(Tenant $agencyTenant): array
+    {
+        return $agencyTenant->brands()
+            ->withCount([
+                'users' => fn ($q) => $q->whereNull('brand_user.removed_at'),
+            ])
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'is_default' => (bool) $b->is_default,
+                'members_with_access' => (int) $b->users_count,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

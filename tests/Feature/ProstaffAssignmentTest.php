@@ -236,4 +236,39 @@ class ProstaffAssignmentTest extends TestCase
         $this->assertNotNull($row->ended_at);
         $this->assertFalse($user->fresh()->isProstaffForBrand($this->brand));
     }
+
+    public function test_second_assign_when_already_active_does_not_overwrite_targets(): void
+    {
+        $user = User::create([
+            'email' => 'idempotent@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'I',
+            'last_name' => 'D',
+        ]);
+        $user->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $user->brands()->attach($this->brand->id, [
+            'role' => 'contributor',
+            'requires_approval' => true,
+            'removed_at' => null,
+        ]);
+
+        $assign = app(AssignProstaffMember::class);
+        $first = $assign->assign($user, $this->brand, [
+            'target_uploads' => 10,
+            'period_type' => 'month',
+            'assigned_by_user_id' => $this->actor->id,
+        ]);
+        $startedAt = $first->started_at;
+
+        $second = $assign->assign($user, $this->brand, [
+            'target_uploads' => 999,
+            'period_type' => 'year',
+            'assigned_by_user_id' => $this->actor->id,
+        ]);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame(10, $second->target_uploads);
+        $this->assertSame('month', $second->period_type);
+        $this->assertTrue($startedAt?->equalTo($second->started_at));
+    }
 }

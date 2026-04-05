@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\EventType;
+use App\Services\Prostaff\ResolveProstaffPeriod;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -316,11 +317,78 @@ class User extends Authenticatable
     }
 
     /**
+     * Active prostaff row for this brand, if any (status = active only).
+     */
+    public function activeProstaffMembership(Brand $brand): ?ProstaffMembership
+    {
+        return $this->prostaffMemberships()
+            ->where('brand_id', $brand->id)
+            ->where('status', 'active')
+            ->first();
+    }
+
+    /**
      * True when this user has an active prostaff row for the brand (status = active).
      */
     public function isProstaffForBrand(Brand $brand): bool
     {
-        return $this->prostaffMembershipForBrand($brand)?->status === 'active';
+        return $this->activeProstaffMembership($brand) !== null;
+    }
+
+    /**
+     * Creator Phase 4: current calendar month / quarter / year counters for this user on the brand (no asset scans).
+     *
+     * @return array{
+     *     membership: ProstaffMembership|null,
+     *     periods: array<string, array{
+     *         period_start: \Illuminate\Support\Carbon,
+     *         period_end: \Illuminate\Support\Carbon,
+     *         actual_uploads: int,
+     *         target_uploads: int|null,
+     *         completion_percentage: float,
+     *         stat_id: int|null,
+     *     }>,
+     * }
+     */
+    public function getProstaffStatsForBrand(Brand $brand): array
+    {
+        $membership = $this->activeProstaffMembership($brand);
+        if ($membership === null) {
+            return [
+                'membership' => null,
+                'periods' => [],
+            ];
+        }
+
+        $resolver = app(ResolveProstaffPeriod::class);
+        $now = now();
+        $boundsByType = $resolver->resolve($membership, $now);
+
+        $periods = [];
+        foreach (['month', 'quarter', 'year'] as $type) {
+            $bounds = $boundsByType[$type];
+            $periodStart = $bounds['period_start']->toDateString();
+
+            $stat = ProstaffPeriodStat::query()
+                ->where('prostaff_membership_id', $membership->id)
+                ->where('period_type', $type)
+                ->whereDate('period_start', $periodStart)
+                ->first();
+
+            $periods[$type] = [
+                'period_start' => $bounds['period_start'],
+                'period_end' => $bounds['period_end'],
+                'actual_uploads' => $stat !== null ? (int) $stat->actual_uploads : 0,
+                'target_uploads' => $stat !== null && $stat->target_uploads !== null ? (int) $stat->target_uploads : null,
+                'completion_percentage' => $stat !== null ? (float) $stat->completion_percentage : 0.0,
+                'stat_id' => $stat?->id,
+            ];
+        }
+
+        return [
+            'membership' => $membership,
+            'periods' => $periods,
+        ];
     }
 
     /**

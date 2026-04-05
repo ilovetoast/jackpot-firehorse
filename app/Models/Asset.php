@@ -6,9 +6,10 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
+use App\Jobs\FullPdfExtractionJob;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
-use App\Jobs\FullPdfExtractionJob;
+use DomainException;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -237,6 +238,23 @@ class Asset extends Model
     }
 
     /**
+     * Prostaff attribution: {@see $prostaff_user_id} may be set once (null → id) in the upload service; never reassigned.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (Asset $asset): void {
+            if (! $asset->isDirty('prostaff_user_id')) {
+                return;
+            }
+
+            $original = $asset->getOriginal('prostaff_user_id');
+            if ($original !== null && $original !== '') {
+                throw new DomainException('prostaff_user_id is immutable once set');
+            }
+        });
+    }
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var list<string>
@@ -320,6 +338,7 @@ class Asset extends Model
             // Nullable: optional capture time from embedded EXIF when mapped (fill_if_empty). Safe null everywhere — no sorts assume non-null.
             'captured_at' => 'datetime',
             'approval_status' => ApprovalStatus::class,
+            'submitted_by_prostaff' => 'boolean',
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
             'approval_summary_generated_at' => 'datetime', // Phase AF-6
@@ -721,6 +740,19 @@ class Asset extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Prostaff member attributed on upload (Phase 3); may differ from {@see user()} in edge cases.
+     */
+    public function prostaffUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'prostaff_user_id');
+    }
+
+    public function isProstaffAsset(): bool
+    {
+        return $this->submitted_by_prostaff === true;
     }
 
     /**

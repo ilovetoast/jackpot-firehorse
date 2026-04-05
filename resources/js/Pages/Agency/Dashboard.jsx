@@ -11,6 +11,7 @@ import {
     LinkIcon,
     Squares2X2Icon,
     ArrowTrendingUpIcon,
+    UsersIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
@@ -26,6 +27,7 @@ const DASH_TABS = [
     { id: 'overview', label: 'Overview', icon: Squares2X2Icon },
     { id: 'clients', label: 'Clients', icon: BuildingOfficeIcon },
     { id: 'progress', label: 'Progress', icon: ArrowTrendingUpIcon },
+    { id: 'team', label: 'Team', icon: UsersIcon },
 ]
 
 export default function AgencyDashboard({
@@ -41,6 +43,8 @@ export default function AgencyDashboard({
     managed_agency = null,
     dashboard_links = {},
     can_create_incubated_client = false,
+    agency_team = [],
+    agency_brands_summary = [],
 }) {
     const [dashTab, setDashTab] = useState('overview')
     const [readinessToast, setReadinessToast] = useState(null)
@@ -49,7 +53,7 @@ export default function AgencyDashboard({
 
     useEffect(() => {
         const tab = new URLSearchParams(window.location.search).get('tab')
-        if (tab === 'clients' || tab === 'overview' || tab === 'progress') {
+        if (tab === 'clients' || tab === 'overview' || tab === 'progress' || tab === 'team') {
             setDashTab(tab)
         }
     }, [])
@@ -125,6 +129,9 @@ export default function AgencyDashboard({
     const dashLinks = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
     const hasDashboardLinks = Boolean(dashLinks.company || dashLinks.brand)
 
+    const effectivePerms = Array.isArray(authFromPage?.effective_permissions) ? authFromPage.effective_permissions : []
+    const canManageAgencyTeam = effectivePerms.includes('team.manage')
+
     const { incubated = [], activated = [], pending_transfers = [] } = clients
     const { total: totalReferrals = 0, activated: activatedReferrals = [], pending: pendingReferrals = [] } = referrals
 
@@ -135,6 +142,11 @@ export default function AgencyDashboard({
             month: 'short',
             day: 'numeric',
         })
+    }
+
+    const formatCompanyRole = (r) => {
+        if (!r || typeof r !== 'string') return 'Member'
+        return r.charAt(0).toUpperCase() + r.slice(1)
     }
 
     /** Human copy for incubation window deadline (advisory). */
@@ -321,7 +333,7 @@ export default function AgencyDashboard({
                                     </h1>
                                     <p className="mt-2 text-sm text-white/50">
                                         Overview lists your client brands. Use Clients for onboarding and readiness; Progress for partner
-                                        tier, rewards, and incubation status.
+                                        tier, rewards, and incubation status; Team for your agency workspace members and brand access.
                                     </p>
                                 </div>
                                 {hasDashboardLinks && (
@@ -356,7 +368,7 @@ export default function AgencyDashboard({
                                             key={t.id}
                                             type="button"
                                             onClick={() => goDashTab(t.id)}
-                                            className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
+                                            className={`flex items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-medium transition ${
                                                 active
                                                     ? 'bg-white/10 text-white ring-1 ring-white/15'
                                                     : 'text-white/50 hover:bg-white/[0.06] hover:text-white/85'
@@ -503,6 +515,134 @@ export default function AgencyDashboard({
                                             </p>
                                         </div>
                                     )}
+                                </div>
+                            </section>
+                        )}
+
+                        {dashTab === 'team' && (
+                            <section className="mb-2 space-y-6">
+                                <div className={`${glassPanel} p-6 sm:p-8`}>
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                                                Agency workspace
+                                            </span>
+                                            <h2 className="mt-1 text-lg font-semibold text-white">Brands and access</h2>
+                                            <p className={`mt-2 max-w-2xl ${bodyMuted}`}>
+                                                Brands in your agency company and how many team members have active access. Client-workspace
+                                                brands are managed from the Clients tab.
+                                            </p>
+                                        </div>
+                                        {canManageAgencyTeam && (
+                                            <Link
+                                                href="/app/companies/team"
+                                                className="inline-flex shrink-0 items-center justify-center rounded-md bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                                            >
+                                                Manage team
+                                            </Link>
+                                        )}
+                                    </div>
+                                    {agency_brands_summary.length > 0 ? (
+                                        <ul className="mt-6 divide-y divide-white/10 rounded-md border border-white/10">
+                                            {agency_brands_summary.map((b) => (
+                                                <li
+                                                    key={b.id}
+                                                    className="flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between"
+                                                >
+                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                        <span className="font-medium text-white/90">{b.name}</span>
+                                                        {b.is_default ? (
+                                                            <span
+                                                                className="rounded-sm border border-white/10 py-0.5 pl-2 pr-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/80"
+                                                                style={{ borderLeftWidth: 3, borderLeftColor: brandColor }}
+                                                            >
+                                                                Default
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                    <span className="text-sm tabular-nums text-white/45">
+                                                        {b.members_with_access} member{b.members_with_access !== 1 ? 's' : ''}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className={`mt-6 ${bodyMuted}`}>No brands in this workspace yet.</p>
+                                    )}
+                                </div>
+
+                                <div className={`${glassPanel} p-6 sm:p-8`}>
+                                    <h2 className="text-lg font-semibold text-white">Team</h2>
+                                    <p className={`mt-2 ${bodyMuted}`}>
+                                        People in your agency company, company roles, and brand-level roles. Rows marked “synced” were added
+                                        via client workspace access from another agency tenant.
+                                    </p>
+                                    {agency_team.length > 0 ? (
+                                        <div className="mt-6 overflow-x-auto rounded-md border border-white/10">
+                                            <table className="min-w-full text-left text-sm">
+                                                <thead>
+                                                    <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                                                        <th className="px-4 py-3 font-semibold">Member</th>
+                                                        <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
+                                                        <th className="px-4 py-3 font-semibold">Brand access</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-white/10">
+                                                    {agency_team.map((m) => (
+                                                        <tr key={m.id} className="transition-colors hover:bg-white/[0.04]">
+                                                            <td className="px-4 py-3 align-top">
+                                                                <div className="font-medium text-white/90">{m.name}</div>
+                                                                <div className="text-xs text-white/45">{m.email}</div>
+                                                                {m.is_agency_managed && m.agency_tenant_name ? (
+                                                                    <div className="mt-1 text-[11px] text-sky-200/80">
+                                                                        Synced · {m.agency_tenant_name}
+                                                                    </div>
+                                                                ) : null}
+                                                                <div className="mt-1 text-xs text-white/40 sm:hidden">
+                                                                    {formatCompanyRole(m.company_role)}
+                                                                </div>
+                                                            </td>
+                                                            <td className="hidden px-4 py-3 align-top text-white/70 sm:table-cell">
+                                                                {formatCompanyRole(m.company_role)}
+                                                            </td>
+                                                            <td className="px-4 py-3 align-top">
+                                                                {m.brand_roles?.length ? (
+                                                                    <div className="flex flex-wrap gap-1.5">
+                                                                        {m.brand_roles.map((br) => (
+                                                                            <span
+                                                                                key={`${m.id}-${br.brand_id}`}
+                                                                                className="inline-flex max-w-full items-center gap-1 rounded-sm border border-white/10 bg-white/[0.05] px-2 py-0.5 text-xs text-white/75 transition-colors hover:border-white/20 hover:[border-left-width:3px] hover:[border-left-style:solid] hover:[border-left-color:var(--agency-team-accent)]"
+                                                                                style={
+                                                                                    {
+                                                                                        '--agency-team-accent': brandColor,
+                                                                                    }
+                                                                                }
+                                                                            >
+                                                                                <span className="max-w-[140px] truncate">{br.brand_name}</span>
+                                                                                <span className="text-white/40">·</span>
+                                                                                <span className="shrink-0 capitalize text-white/50">
+                                                                                    {br.role}
+                                                                                </span>
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-xs text-white/35">No brand access</span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <p className={`mt-6 ${bodyMuted}`}>No team members loaded.</p>
+                                    )}
+                                    {!canManageAgencyTeam && agency_team.length > 0 ? (
+                                        <p className={`mt-4 ${bodySmall}`}>
+                                            Ask an owner or admin to change roles or invites in Company settings → Team.
+                                        </p>
+                                    ) : null}
                                 </div>
                             </section>
                         )}
