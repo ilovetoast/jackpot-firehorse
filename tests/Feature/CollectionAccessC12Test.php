@@ -9,6 +9,7 @@ use App\Models\CollectionUser;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 /**
@@ -24,9 +25,13 @@ class CollectionAccessC12Test extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected User $adminUser;
+
     protected User $inviteeUser;
+
     protected Collection $privateCollection;
 
     protected function setUp(): void
@@ -82,7 +87,7 @@ class CollectionAccessC12Test extends TestCase
         $response = $this->actingAs($this->adminUser)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
             ->withoutMiddleware(\App\Http\Middleware\EnsureUserWithinPlanLimit::class)
-            ->post('/app/collections/' . $this->privateCollection->id . '/access-invite', [
+            ->post('/app/collections/'.$this->privateCollection->id.'/access-invite', [
                 'email' => $this->inviteeUser->email,
                 '_token' => csrf_token(),
             ]);
@@ -98,6 +103,62 @@ class CollectionAccessC12Test extends TestCase
             'user_id' => $this->inviteeUser->id,
             'brand_id' => $this->brand->id,
         ]);
+    }
+
+    public function test_gateway_login_redirects_to_collection_invite_when_url_intended_is_set(): void
+    {
+        $invitation = CollectionInvitation::create([
+            'collection_id' => $this->privateCollection->id,
+            'email' => $this->inviteeUser->email,
+            'token' => 'login-handoff-token',
+            'invited_by_user_id' => $this->adminUser->id,
+            'sent_at' => now(),
+        ]);
+        $acceptUrl = route('collection-invite.accept', ['token' => $invitation->token]);
+
+        $response = $this->withSession(['url.intended' => $acceptUrl])
+            ->post(route('gateway.login'), [
+                'email' => $this->inviteeUser->email,
+                'password' => 'password',
+            ]);
+
+        $response->assertRedirect($acceptUrl);
+        $response->assertSessionMissing('url.intended');
+        $this->assertAuthenticatedAs($this->inviteeUser);
+    }
+
+    public function test_gateway_login_sends_collection_only_user_to_collection_landing_without_intended_url(): void
+    {
+        CollectionUser::create([
+            'user_id' => $this->inviteeUser->id,
+            'collection_id' => $this->privateCollection->id,
+            'invited_by_user_id' => $this->adminUser->id,
+            'accepted_at' => now(),
+        ]);
+
+        $response = $this->post(route('gateway.login'), [
+            'email' => $this->inviteeUser->email,
+            'password' => 'password',
+        ]);
+
+        $response->assertRedirect(route('collection-invite.landing', ['collection' => $this->privateCollection->id]));
+        $this->assertAuthenticatedAs($this->inviteeUser);
+    }
+
+    public function test_gateway_index_redirects_collection_only_user_when_brand_picker_would_be_empty(): void
+    {
+        CollectionUser::create([
+            'user_id' => $this->inviteeUser->id,
+            'collection_id' => $this->privateCollection->id,
+            'invited_by_user_id' => $this->adminUser->id,
+            'accepted_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->inviteeUser)
+            ->withSession(['tenant_id' => $this->tenant->id])
+            ->get(route('gateway'));
+
+        $response->assertRedirect(route('collection-invite.landing', ['collection' => $this->privateCollection->id]));
     }
 
     public function test_accepting_invite_creates_collection_user_grant_and_does_not_create_brand_membership(): void
@@ -197,6 +258,56 @@ class CollectionAccessC12Test extends TestCase
         $this->assertDatabaseMissing('collection_user', [
             'id' => $grant->id,
         ]);
+    }
+
+    public function test_access_invite_json_succeeds_for_restricted_collection(): void
+    {
+        Mail::fake();
+
+        $restricted = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Restricted Collection',
+            'slug' => 'restricted-collection',
+            'visibility' => 'restricted',
+            'is_public' => false,
+            'created_by' => $this->adminUser->id,
+        ]);
+
+        $response = $this->actingAs($this->adminUser)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->withoutMiddleware(\App\Http\Middleware\EnsureUserWithinPlanLimit::class)
+            ->postJson('/app/collections/'.$restricted->id.'/access-invite', [
+                'email' => 'restricted-invite@example.com',
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('collection_invitations', [
+            'collection_id' => $restricted->id,
+            'email' => 'restricted-invite@example.com',
+        ]);
+    }
+
+    public function test_access_invite_rejected_for_brand_visibility_collection(): void
+    {
+        $brandOnly = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Brand Wide Collection',
+            'slug' => 'brand-wide-collection',
+            'visibility' => 'brand',
+            'is_public' => false,
+            'created_by' => $this->adminUser->id,
+        ]);
+
+        $response = $this->actingAs($this->adminUser)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->withoutMiddleware(\App\Http\Middleware\EnsureUserWithinPlanLimit::class)
+            ->postJson('/app/collections/'.$brandOnly->id.'/access-invite', [
+                'email' => 'someone@example.com',
+            ]);
+
+        $response->assertStatus(403);
     }
 
     public function test_normal_brand_member_unchanged_by_collection_grants(): void

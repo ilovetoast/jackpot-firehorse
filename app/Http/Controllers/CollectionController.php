@@ -8,6 +8,8 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
+use App\Models\CollectionMember;
+use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetEligibilityService;
@@ -19,12 +21,14 @@ use App\Services\Collections\CollectionGridMetadataFilterService;
 use App\Services\FeatureGate;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataVisibilityResolver;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -40,8 +44,7 @@ class CollectionController extends Controller
         protected AssetSortService $assetSortService,
         protected MetadataFilterService $metadataFilterService,
         protected CollectionGridMetadataFilterService $collectionGridMetadataFilterService,
-    ) {
-    }
+    ) {}
 
     /**
      * Show the collections page (read-only UI).
@@ -159,6 +162,9 @@ class CollectionController extends Controller
                 'name' => $c->name,
                 'description' => $c->description,
                 'visibility' => $c->visibility,
+                'access_mode' => $c->access_mode ?? 'all_brand',
+                'allowed_brand_roles' => $c->allowed_brand_roles ?? [],
+                'allows_external_guests' => (bool) ($c->allows_external_guests ?? false),
                 'is_public' => $c->is_public,
                 'assets_count' => (int) ($c->assets_count ?? 0),
                 'featured_image_url' => isset($bestAssetIds[$c->id])
@@ -194,6 +200,9 @@ class CollectionController extends Controller
                     'name' => $collection->name,
                     'description' => $collection->description,
                     'visibility' => $collection->visibility ?? 'brand',
+                    'access_mode' => $collection->access_mode ?? 'all_brand',
+                    'allowed_brand_roles' => $collection->allowed_brand_roles ?? [],
+                    'allows_external_guests' => (bool) ($collection->allows_external_guests ?? false),
                     'slug' => $collection->slug,
                     'brand_slug' => $collectionBrand?->slug,
                     'is_public' => $collection->is_public,
@@ -415,6 +424,7 @@ class CollectionController extends Controller
             ->values()
             ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name, 'is_public' => $c->is_public])
             ->all();
+
         return response()->json(['collections' => $collections]);
     }
 
@@ -451,6 +461,10 @@ class CollectionController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:65535'],
             'visibility' => ['nullable', 'string', 'in:brand,restricted,private'],
+            'access_mode' => ['nullable', 'string', 'in:all_brand,role_limited,invite_only'],
+            'allowed_brand_roles' => ['nullable', 'array'],
+            'allowed_brand_roles.*' => ['string', Rule::in(RoleRegistry::brandRoles())],
+            'allows_external_guests' => ['nullable', 'boolean'],
             'is_public' => ['nullable', 'boolean'],
         ]);
 
@@ -462,29 +476,51 @@ class CollectionController extends Controller
             throw ValidationException::withMessages(['name' => ['A collection with this name already exists for this brand.']]);
         }
 
-        $visibility = $validated['visibility'] ?? 'brand';
+        $accessMode = $validated['access_mode'] ?? null;
+        if ($accessMode === null) {
+            $legacyVis = $validated['visibility'] ?? 'brand';
+            $accessMode = in_array($legacyVis, ['restricted', 'private'], true) ? 'invite_only' : 'all_brand';
+        }
+
+        $allowsExternal = (bool) ($validated['allows_external_guests'] ?? false);
+        if ($accessMode === 'invite_only' && ! array_key_exists('allows_external_guests', $validated) && ! array_key_exists('access_mode', $validated)) {
+            $allowsExternal = in_array($validated['visibility'] ?? 'brand', ['restricted', 'private'], true);
+        }
+        if ($accessMode === 'all_brand') {
+            $allowsExternal = false;
+        }
+
+        $roles = $validated['allowed_brand_roles'] ?? null;
+        if (is_array($roles) && $roles !== []) {
+            $roles = array_values(array_intersect($roles, RoleRegistry::brandRoles()));
+            $roles = $roles === [] ? null : $roles;
+        } else {
+            $roles = null;
+        }
+        if ($accessMode === 'all_brand') {
+            $roles = null;
+        }
+
         // C10: Only allow is_public = true when tenant has Public Collections feature
         $isPublic = isset($validated['is_public']) && $validated['is_public']
             && $this->featureGate->publicCollectionsEnabled($tenant);
 
-        $collection = Collection::create([
+        $collection = new Collection([
             'tenant_id' => $tenant->id,
             'brand_id' => $brand->id,
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
-            'visibility' => $visibility,
+            'access_mode' => $accessMode,
+            'allowed_brand_roles' => $roles,
+            'allows_external_guests' => $allowsExternal,
             'is_public' => $isPublic,
             'created_by' => $user->id,
         ]);
+        $this->syncCollectionVisibilityFromAccessMode($collection);
+        $collection->save();
 
         return response()->json([
-            'collection' => [
-                'id' => $collection->id,
-                'name' => $collection->name,
-                'description' => $collection->description,
-                'visibility' => $collection->visibility,
-                'is_public' => $collection->is_public,
-            ],
+            'collection' => $this->collectionJsonForEdit($collection),
         ], 201);
     }
 
@@ -502,13 +538,30 @@ class CollectionController extends Controller
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:65535'],
-            'visibility' => ['nullable', 'string', 'in:brand,restricted,private'],
+            'access_mode' => ['sometimes', 'string', 'in:all_brand,role_limited,invite_only'],
+            'allowed_brand_roles' => ['nullable', 'array'],
+            'allowed_brand_roles.*' => ['string', Rule::in(RoleRegistry::brandRoles())],
+            'allows_external_guests' => ['nullable', 'boolean'],
             'is_public' => ['nullable', 'boolean'],
         ]);
 
-        if (array_key_exists('visibility', $validated) && in_array($validated['visibility'], ['brand', 'restricted', 'private'], true)) {
-            $collection->visibility = $validated['visibility'];
+        if (array_key_exists('access_mode', $validated)) {
+            $collection->access_mode = $validated['access_mode'];
         }
+        if (array_key_exists('allowed_brand_roles', $validated)) {
+            $roles = $validated['allowed_brand_roles'];
+            if (is_array($roles) && $roles !== []) {
+                $roles = array_values(array_intersect($roles, RoleRegistry::brandRoles()));
+                $collection->allowed_brand_roles = $roles === [] ? null : $roles;
+            } else {
+                $collection->allowed_brand_roles = null;
+            }
+        }
+        if (array_key_exists('allows_external_guests', $validated)) {
+            $collection->allows_external_guests = (bool) $validated['allows_external_guests'];
+        }
+        $this->syncCollectionVisibilityFromAccessMode($collection);
+
         if (array_key_exists('name', $validated) && $validated['name'] !== $collection->name) {
             $exists = Collection::query()
                 ->where('brand_id', $collection->brand_id)
@@ -533,23 +586,175 @@ class CollectionController extends Controller
                 $counter = 0;
                 while (Collection::query()->where('slug', $slug)->where('id', '!=', $collection->id)->exists()) {
                     $counter++;
-                    $slug = $baseSlug . '-' . $counter;
+                    $slug = $baseSlug.'-'.$counter;
                 }
                 $collection->slug = $slug;
             }
         }
+        // Restricted/private collections cannot be public share links
+        if (in_array($collection->visibility, ['restricted', 'private'], true)) {
+            $collection->is_public = false;
+        }
         $collection->save();
 
         return response()->json([
-            'collection' => [
-                'id' => $collection->id,
-                'name' => $collection->name,
-                'description' => $collection->description,
-                'visibility' => $collection->visibility,
-                'is_public' => $collection->is_public,
-                'slug' => $collection->slug,
-            ],
+            'collection' => $this->collectionJsonForEdit($collection->fresh()),
         ]);
+    }
+
+    /**
+     * Brand teammates eligible for internal collection invites + current collection_members.
+     */
+    /**
+     * Snapshot stats for the collection (assets, access rows, download links created from this collection).
+     */
+    public function stats(Request $request, Collection $collection): JsonResponse
+    {
+        Gate::forUser($request->user())->authorize('update', $collection);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $collection->tenant_id !== $tenant->id || $collection->brand_id !== $brand->id) {
+            abort(404, 'Collection not found.');
+        }
+
+        $assetsVisible = $collection->assets()
+            ->where('assets.status', AssetStatus::VISIBLE)
+            ->whereNull('assets.deleted_at')
+            ->count();
+
+        $internalAccepted = $collection->members()->whereNotNull('accepted_at')->count();
+        $internalPending = $collection->members()->whereNull('accepted_at')->count();
+
+        $externalGrants = $collection->collectionAccessGrants()->whereNotNull('accepted_at')->count();
+        $pendingInvites = $collection->collectionInvitations()->count();
+
+        $downloadBase = Download::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('download_options->collection_id', $collection->id);
+
+        return response()->json([
+            'assets_visible_count' => $assetsVisible,
+            'internal_members' => [
+                'accepted' => $internalAccepted,
+                'pending' => $internalPending,
+            ],
+            'external_access' => [
+                'active_grants' => $externalGrants,
+                'pending_invites' => $pendingInvites,
+            ],
+            'downloads_from_collection' => [
+                'download_groups_created' => (clone $downloadBase)->count(),
+                'link_opens_recorded' => (int) (clone $downloadBase)->sum('access_count'),
+            ],
+            'is_public' => (bool) $collection->is_public,
+        ]);
+    }
+
+    public function internalInviteData(Request $request, Collection $collection): JsonResponse
+    {
+        $user = $request->user();
+        Gate::forUser($user)->authorize('invite', $collection);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $collection->tenant_id !== $tenant->id || $collection->brand_id !== $brand->id) {
+            abort(404, 'Collection not found.');
+        }
+
+        $brandUsers = User::query()
+            ->whereHas('brands', function ($q) use ($brand) {
+                $q->where('brands.id', $brand->id)->whereNull('brand_user.removed_at');
+            })
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->limit(500)
+            ->get(['id', 'first_name', 'last_name', 'email', 'avatar_url']);
+
+        $brandUsersPayload = $brandUsers->map(function (User $u) use ($brand) {
+            return [
+                'id' => $u->id,
+                'first_name' => $u->first_name,
+                'last_name' => $u->last_name,
+                'email' => $u->email,
+                'avatar_url' => $u->avatar_url,
+                'brand_role' => $u->getRoleForBrand($brand),
+            ];
+        })->values()->all();
+
+        $members = $collection->members()
+            ->with(['user:id,first_name,last_name,email,avatar_url'])
+            ->orderByDesc('invited_at')
+            ->get()
+            ->map(fn (CollectionMember $m) => [
+                'id' => $m->id,
+                'user_id' => $m->user_id,
+                'invited_at' => $m->invited_at?->toIso8601String(),
+                'accepted_at' => $m->accepted_at?->toIso8601String(),
+                'user' => $m->user ? [
+                    'id' => $m->user->id,
+                    'name' => $m->user->name,
+                    'email' => $m->user->email,
+                    'first_name' => $m->user->first_name,
+                    'last_name' => $m->user->last_name,
+                    'avatar_url' => $m->user->avatar_url,
+                ] : null,
+            ])
+            ->values()
+            ->all();
+
+        return response()->json([
+            'brand_users' => $brandUsersPayload,
+            'members' => $members,
+        ]);
+    }
+
+    /**
+     * Remove a brand teammate from the collection member list (C7).
+     */
+    public function destroyMember(Request $request, Collection $collection, CollectionMember $member): JsonResponse
+    {
+        Gate::forUser($request->user())->authorize('removeMember', $collection);
+
+        if ($member->collection_id !== (int) $collection->id) {
+            abort(404, 'Member not found.');
+        }
+
+        $member->delete();
+
+        return response()->json(['ok' => true]);
+    }
+
+    private function syncCollectionVisibilityFromAccessMode(Collection $collection): void
+    {
+        $mode = $collection->access_mode ?? 'all_brand';
+        if ($mode === 'all_brand') {
+            $collection->allows_external_guests = false;
+            $collection->allowed_brand_roles = null;
+        }
+        $collection->visibility = match ($mode) {
+            'role_limited' => 'restricted',
+            'invite_only' => 'private',
+            default => 'brand',
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectionJsonForEdit(Collection $collection): array
+    {
+        return [
+            'id' => $collection->id,
+            'name' => $collection->name,
+            'description' => $collection->description,
+            'visibility' => $collection->visibility,
+            'access_mode' => $collection->access_mode ?? 'all_brand',
+            'allowed_brand_roles' => $collection->allowed_brand_roles ?? [],
+            'allows_external_guests' => (bool) ($collection->allows_external_guests ?? false),
+            'is_public' => $collection->is_public,
+            'slug' => $collection->slug,
+        ];
     }
 
     /**
@@ -677,11 +882,13 @@ class CollectionController extends Controller
 
             if (! $collection) {
                 $errors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+
                 continue;
             }
 
             if (! Gate::forUser($user)->allows('removeAsset', $collection)) {
                 $errors[] = "You do not have permission to remove assets from collection: {$collection->name}.";
+
                 continue;
             }
 
@@ -703,11 +910,13 @@ class CollectionController extends Controller
 
             if (! $collection) {
                 $errors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+
                 continue;
             }
 
             if (! Gate::forUser($user)->allows('addAsset', $collection)) {
                 $errors[] = "You do not have permission to add assets to collection: {$collection->name}.";
+
                 continue;
             }
 
@@ -751,7 +960,7 @@ class CollectionController extends Controller
      * @param  \Illuminate\Support\Collection<int, Asset>  $assetsById
      * @param  array<string>  $assetIds  Ordered by asset_collections.created_at
      * @param  array<int, string>  $categorySlugs  category_id => slug
-     * @return string|null  Asset UUID or null if none suitable
+     * @return string|null Asset UUID or null if none suitable
      */
     private function pickBestFeaturedAsset($assetsById, array $assetIds, array $categorySlugs): ?string
     {
@@ -800,7 +1009,7 @@ class CollectionController extends Controller
     /**
      * Build asset_id => worst incident severity map for health badge.
      *
-     * @param string[] $assetIds
+     * @param  string[]  $assetIds
      * @return array<string, string>
      */
     private function buildIncidentSeverityByAsset(array $assetIds): array
@@ -894,7 +1103,7 @@ class CollectionController extends Controller
             $variant = $thumbnailStyle === 'medium' ? \App\Support\AssetVariant::THUMB_MEDIUM : \App\Support\AssetVariant::THUMB_SMALL;
             $finalThumbnailUrl = $asset->deliveryUrl($variant, \App\Support\DeliveryContext::AUTHENTICATED);
             if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
-                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?') . 'v=' . urlencode($thumbnailVersion);
+                $finalThumbnailUrl .= (str_contains($finalThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($thumbnailVersion);
             }
         }
 
@@ -1001,58 +1210,55 @@ class CollectionController extends Controller
 
     /**
      * C9.2: Check if collection field is visible for a category.
-     * 
+     *
      * GET /app/collections/field-visibility?category_id={id}
-     * 
+     *
      * Returns whether the collection metadata field is visible for the given category.
      * Uses the same visibility rules as other system metadata fields.
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function checkFieldVisibility(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $categoryId = $request->query('category_id');
-        
-        if (!$tenant || !$categoryId) {
+
+        if (! $tenant || ! $categoryId) {
             // If no category, assume visible (no suppression)
             return response()->json(['visible' => true]);
         }
-        
+
         $category = Category::where('id', $categoryId)
             ->where('tenant_id', $tenant->id)
             ->first();
-        
-        if (!$category) {
+
+        if (! $category) {
             // Category not found, assume visible
             return response()->json(['visible' => true]);
         }
-        
+
         // Get collection metadata field (if it exists and is not deprecated)
         $collectionField = DB::table('metadata_fields')
             ->where('key', 'collection')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')
             ->first();
-        
-        if (!$collectionField) {
+
+        if (! $collectionField) {
             // Collection field doesn't exist or is deprecated
             // C9.2: Default to visible if field doesn't exist (Collections are a feature, not deprecated)
             return response()->json(['visible' => true]);
         }
-        
+
         // Use MetadataVisibilityResolver to check visibility
         $visibilityResolver = app(MetadataVisibilityResolver::class);
-        
+
         // Create a field array with field_id for the resolver
         $field = [
             'field_id' => $collectionField->id,
             'key' => 'collection',
         ];
-        
+
         $isVisible = $visibilityResolver->isFieldVisible($field, $category, $tenant);
-        
+
         return response()->json(['visible' => $isVisible]);
     }
 }

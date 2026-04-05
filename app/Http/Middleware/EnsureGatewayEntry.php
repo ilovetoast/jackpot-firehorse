@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\User;
 use App\Services\PlanService;
 use Closure;
 use Illuminate\Http\Request;
@@ -40,8 +41,25 @@ class EnsureGatewayEntry
 
         $brandId = session('brand_id');
         $tenantId = session('tenant_id');
+        $user = Auth::user();
 
-        if (! $brandId || ! $tenantId) {
+        if (! $tenantId) {
+            session(['intended_url' => $request->fullUrl()]);
+
+            return redirect('/gateway');
+        }
+
+        // C12: Collection-only (external) users — no brand_user row; tenant + accepted collection grant only.
+        // Without this branch, every /app/* request loops to /gateway, which shows an empty brand picker.
+        if (! $brandId) {
+            $this->maybePrimeSingleCollectionGrantSession($user, (int) $tenantId);
+            $collectionId = session('collection_id');
+            if ($collectionId
+                && $this->userHasNoBrandMembershipForTenant($user, (int) $tenantId)
+                && $this->userHasAcceptedCollectionGrant($user, (int) $tenantId, (int) $collectionId)) {
+                return $next($request);
+            }
+
             session(['intended_url' => $request->fullUrl()]);
 
             return redirect('/gateway');
@@ -60,7 +78,6 @@ class EnsureGatewayEntry
             return redirect('/gateway');
         }
 
-        $user = Auth::user();
         $tenant = Tenant::find($tenantId);
 
         // Brand plan limit enforcement: if the session brand is disabled by plan limit,
@@ -105,5 +122,49 @@ class EnsureGatewayEntry
         }
 
         return $next($request);
+    }
+
+    /**
+     * External collaborators only have collection_user grants — no brand pivot rows.
+     */
+    private function userHasNoBrandMembershipForTenant(User $user, int $tenantId): bool
+    {
+        return ! $user->brands()
+            ->where('tenant_id', $tenantId)
+            ->whereNull('brand_user.removed_at')
+            ->exists();
+    }
+
+    private function userHasAcceptedCollectionGrant(User $user, int $tenantId, int $collectionId): bool
+    {
+        return $user->collectionAccessGrants()
+            ->where('collection_id', $collectionId)
+            ->whereNotNull('accepted_at')
+            ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenantId))
+            ->exists();
+    }
+
+    /**
+     * If the user has exactly one collection grant in this tenant, pin session collection_id so ResolveTenant can enter collection-only mode.
+     */
+    private function maybePrimeSingleCollectionGrantSession(User $user, int $tenantId): void
+    {
+        if (session()->has('collection_id')) {
+            return;
+        }
+
+        if (! $this->userHasNoBrandMembershipForTenant($user, $tenantId)) {
+            return;
+        }
+
+        $ids = $user->collectionAccessGrants()
+            ->whereNotNull('accepted_at')
+            ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenantId))
+            ->orderBy('collection_id')
+            ->pluck('collection_id');
+
+        if ($ids->count() === 1) {
+            session(['collection_id' => (int) $ids->first()]);
+        }
     }
 }

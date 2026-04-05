@@ -4,42 +4,82 @@ namespace App\Mail;
 
 use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\Collection;
+use App\Models\NotificationTemplate;
 use App\Models\User;
+use App\Support\TransactionalEmailHtml;
 use Illuminate\Bus\Queueable;
-use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Phase C12.0: Invite to collection-only access (no brand membership).
+ * Collection-only access invite (external email). Uses notification template `invite_collection_access`
+ * when present (brand logo in shell), same pattern as {@see InviteMember}.
  */
 class InviteCollectionAccess extends BaseMailable
 {
     use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
 
+    public ?NotificationTemplate $template = null;
+
     public function __construct(
         public Collection $collection,
         public User $inviter,
         public string $inviteUrl
-    ) {}
+    ) {
+        $this->collection->loadMissing(['brand', 'tenant']);
+        $this->template = NotificationTemplate::getByKey('invite_collection_access');
+    }
 
     public function envelope(): Envelope
     {
-        $this->applyTenantMailBranding($this->collection->tenant);
+        $tenant = $this->collection->tenant;
+        $this->applyTenantMailBranding($tenant);
+
+        $brandName = $this->collection->brand?->name ?? $tenant?->name ?? '';
+        $subject = $this->template
+            ? $this->template->render([
+                'tenant_name' => $tenant?->name ?? '',
+                'brand_name' => $brandName,
+                'collection_name' => $this->collection->name,
+                'inviter_name' => $this->inviter->name,
+            ])['subject']
+            : 'You\'re invited to view a collection: '.$this->collection->name;
 
         return new Envelope(
-            subject: 'You\'re invited to view a collection: ' . $this->collection->name,
+            subject: $subject,
         );
     }
 
     public function content(): Content
     {
+        $tenant = $this->collection->tenant;
+        $brand = $this->collection->brand;
+
+        if ($this->template) {
+            $rendered = $this->template->render([
+                'tenant_name' => $tenant?->name ?? '',
+                'brand_name' => $brand?->name ?? ($tenant?->name ?? ''),
+                'collection_name' => $this->collection->name,
+                'inviter_name' => $this->inviter->name,
+                'invite_url' => $this->inviteUrl,
+                'app_name' => config('app.name'),
+                'app_url' => rtrim((string) config('app.url'), '/'),
+                'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($brand),
+            ]);
+
+            return new Content(
+                htmlString: $rendered['body_html'],
+            );
+        }
+
         return new Content(
             view: 'emails.invite-collection-access',
             with: [
                 'collection' => $this->collection,
+                'brand' => $brand,
+                'tenant' => $tenant,
                 'inviter' => $this->inviter,
                 'inviteUrl' => $this->inviteUrl,
             ],

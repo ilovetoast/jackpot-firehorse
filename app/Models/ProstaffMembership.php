@@ -22,6 +22,7 @@ class ProstaffMembership extends Model
         'target_uploads',
         'period_type',
         'period_start',
+        'tier',
         'requires_approval',
         'custom_fields',
         'assigned_by_user_id',

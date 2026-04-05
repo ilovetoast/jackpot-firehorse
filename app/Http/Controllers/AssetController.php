@@ -28,7 +28,9 @@ use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
@@ -121,6 +123,8 @@ class AssetController extends Controller
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
+                'prostaff_filter_options' => [],
+                'dam_prostaff_filter_config' => GetProstaffDamFilterOptions::damProstaffFilterConfig(),
             ]);
         }
 
@@ -480,7 +484,7 @@ class AssetController extends Controller
             $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
             $specialFilterKeys = ['tags', 'collection']; // Applied from asset_tags/asset_collections; may be missing from schema
             $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
-            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
+            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'submitted_by_prostaff', 'prostaff_user_id', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
             $filters = [];
             $multiValueKeys = ['tags', 'collection', 'dominant_hue_group'];
             foreach ($filterKeys as $key) {
@@ -575,6 +579,19 @@ class AssetController extends Controller
             }
         }
 
+        if ($tenant && app(FeatureGate::class)->creatorModuleEnabled($tenant)) {
+            if ($request->boolean('submitted_by_prostaff')) {
+                $assetsQuery->where('assets.submitted_by_prostaff', true);
+                $baseQueryForFilterVisibility->where('assets.submitted_by_prostaff', true);
+            }
+
+            $prostaffUserId = filter_var($request->input('prostaff_user_id'), FILTER_VALIDATE_INT);
+            if ($prostaffUserId !== false && $prostaffUserId > 0) {
+                $assetsQuery->where('assets.prostaff_user_id', $prostaffUserId);
+                $baseQueryForFilterVisibility->where('assets.prostaff_user_id', $prostaffUserId);
+            }
+        }
+
         // Phase L: Centralized sort (after search/filters, before pagination)
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
@@ -597,7 +614,18 @@ class AssetController extends Controller
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
         // Eager load relations used in the map to avoid N+1 and lazy-load errors on load_more (page 2+)
         $perPage = 36;
-        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy', 'currentVersion', 'tenant', 'latestBrandIntelligenceScore', 'brandReferenceAsset'])->paginate($perPage);
+        $paginator = $assetsQuery->with([
+            'user',
+            'prostaffUser' => static function ($query): void {
+                $query->select(['id', 'first_name', 'last_name', 'email']);
+            },
+            'publishedBy',
+            'archivedBy',
+            'currentVersion',
+            'tenant',
+            'latestBrandIntelligenceScore',
+            'brandReferenceAsset',
+        ])->paginate($perPage);
         $assetModels = $paginator->getCollection();
         $t1 = microtime(true);
 
@@ -872,6 +900,12 @@ class AssetController extends Controller
                         ] : null,
                         'user_id' => $asset->user_id, // For delete-own permission check
                         'uploaded_by' => $uploadedBy, // User who uploaded the asset
+                        'submitted_by_prostaff' => (bool) $asset->submitted_by_prostaff,
+                        'prostaff_user_id' => $asset->prostaff_user_id !== null ? (int) $asset->prostaff_user_id : null,
+                        'prostaff_user_name' => $asset->prostaffUser
+                            ? (trim((string) $asset->prostaffUser->name) !== '' ? trim((string) $asset->prostaffUser->name) : (string) ($asset->prostaffUser->email ?? ''))
+                            : null,
+                        'is_prostaff_asset' => (bool) $asset->submitted_by_prostaff,
                         // Thumbnail URLs — all via AssetDeliveryService (AUTHENTICATED context)
                         'thumbnail_small' => $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
                         'thumbnail_medium' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null,
@@ -954,6 +988,10 @@ class AssetController extends Controller
                         'category' => null,
                         'user_id' => $asset->user_id ?? null,
                         'uploaded_by' => null,
+                        'submitted_by_prostaff' => (bool) ($asset->submitted_by_prostaff ?? false),
+                        'prostaff_user_id' => isset($asset->prostaff_user_id) && $asset->prostaff_user_id !== null ? (int) $asset->prostaff_user_id : null,
+                        'prostaff_user_name' => null,
+                        'is_prostaff_asset' => (bool) ($asset->submitted_by_prostaff ?? false),
                         'preview_thumbnail_url' => null,
                         'final_thumbnail_url' => null,
                         'thumbnail_url_large' => null,
@@ -1504,6 +1542,8 @@ class AssetController extends Controller
             'reference_materials_count' => $referenceMaterialsCount,
             'staged_count' => $stagedCount,
             'uploaded_by_users' => $uploadedByUsersPayload,
+            'prostaff_filter_options' => app(GetProstaffDamFilterOptions::class)->activeMemberOptionsForBrand($brand),
+            'dam_prostaff_filter_config' => GetProstaffDamFilterOptions::damProstaffFilterConfig(),
         ]);
     }
 

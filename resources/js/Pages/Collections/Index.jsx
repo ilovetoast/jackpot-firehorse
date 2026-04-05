@@ -892,6 +892,8 @@ export default function CollectionsIndex({
                     setBulkSelectedAssetIds(ids)
                     setShowBulkActionsModal(true)
                 }}
+                createDownloadSource={selectedCollectionId != null ? 'collection' : 'grid'}
+                collectionId={selectedCollectionId}
             />
 
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (

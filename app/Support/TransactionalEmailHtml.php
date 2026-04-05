@@ -54,10 +54,12 @@ HTML;
      * Tenant-scoped emails (invite): white header + Jackpot + optional tenant logo cells from {@see tenantLogoBlockFromBrand()}.
      *
      * @param  string  $cardInnerHtml  Body below the dual-logo row
+     * @param  string|null  $headerCaptionLine  Uppercase caption under logos; supports {{mustache}} vars (default: Invitation · {{tenant_name}})
      */
-    public static function tenantShell(string $cardInnerHtml, ?string $copyrightYear = null): string
+    public static function tenantShell(string $cardInnerHtml, ?string $copyrightYear = null, ?string $headerCaptionLine = null): string
     {
         $y = $copyrightYear ?? date('Y');
+        $caption = $headerCaptionLine ?? 'Invitation · {{tenant_name}}';
 
         return <<<HTML
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f5f7;margin:0;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
@@ -78,7 +80,7 @@ HTML;
                       {{tenant_logo_block}}
                     </tr>
                   </table>
-                  <p style="margin:12px 0 0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Invitation · {{tenant_name}}</p>
+                  <p style="margin:12px 0 0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">{$caption}</p>
                 </td>
               </tr>
             </table>

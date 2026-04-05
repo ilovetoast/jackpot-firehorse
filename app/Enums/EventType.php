@@ -261,6 +261,12 @@ class EventType
     public const PORTAL_ASSET_CLICKED = 'portal.asset_clicked';
     public const PORTAL_DOWNLOAD = 'portal.download';
 
+    // Creator (Prostaff) tenant module lifecycle (Phase 9)
+    public const CREATOR_MODULE_ACTIVATED = 'tenant_module.creator.activated';
+    public const CREATOR_MODULE_EXPIRED = 'tenant_module.creator.expired';
+    public const CREATOR_MODULE_CANCELLED = 'tenant_module.creator.cancelled';
+    public const CREATOR_MODULE_ADMIN_GRANTED = 'tenant_module.creator.admin_granted';
+
     /**
      * Get all event types as an array.
      * 
@@ -412,6 +418,10 @@ class EventType
             self::PORTAL_COLLECTION_VIEWED,
             self::PORTAL_ASSET_CLICKED,
             self::PORTAL_DOWNLOAD,
+            self::CREATOR_MODULE_ACTIVATED,
+            self::CREATOR_MODULE_EXPIRED,
+            self::CREATOR_MODULE_CANCELLED,
+            self::CREATOR_MODULE_ADMIN_GRANTED,
         ];
     }
 

@@ -45,6 +45,9 @@ class CollectionInviteController extends Controller
         if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             throw ValidationException::withMessages(['user_id' => ['User must belong to the same tenant.']]);
         }
+        if ($user->activeBrandMembership($collection->brand) === null) {
+            throw ValidationException::withMessages(['user_id' => ['User must be a member of this brand.']]);
+        }
 
         $member = CollectionMember::query()
             ->where('collection_id', $collection->id)

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\TenantModule;
 
 /**
  * Phase AF-5: Feature Gate Service
@@ -207,5 +208,33 @@ class FeatureGate
         }
 
         return true;
+    }
+
+    /**
+     * Creator (Prostaff) module: tenant add-on row in {@see tenant_modules}.
+     *
+     * True when status is active or trial, optional expiry is still in the future (or null),
+     * and admin grants include a required {@see TenantModule::$expires_at}.
+     */
+    public function creatorModuleEnabled(Tenant $tenant): bool
+    {
+        $row = TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', TenantModule::KEY_CREATOR)
+            ->first();
+
+        if ($row === null) {
+            return false;
+        }
+
+        if ($row->granted_by_admin && $row->expires_at === null) {
+            return false;
+        }
+
+        return TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', TenantModule::KEY_CREATOR)
+            ->active()
+            ->exists();
     }
 }

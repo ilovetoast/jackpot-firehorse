@@ -18,6 +18,8 @@ export default function SelectionActionBar({
     currentPageItems = [],
     /** Open bulk actions modal (Publish, Archive, Trash, Metadata, etc.) */
     onOpenBulkEdit = null,
+    createDownloadSource = 'grid',
+    collectionId = null,
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -235,6 +237,8 @@ export default function SelectionActionBar({
                 bucketCount={selectedCount}
                 previewItems={items}
                 onSuccess={handleCreateSuccess}
+                createDownloadSource={createDownloadSource}
+                collectionId={collectionId}
             />
 
             <ConfirmDialog

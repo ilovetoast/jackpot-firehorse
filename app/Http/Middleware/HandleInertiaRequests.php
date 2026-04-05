@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
 use App\Services\AuthPermissionService;
+use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
 use App\Services\PlanService;
@@ -373,6 +374,7 @@ class HandleInertiaRequests extends Middleware
                 'name' => $tenant->name,
                 'type' => $tenant->is_agency ? 'agency_workspace' : 'company',
             ] : null,
+            'creator_module_status' => app(CreatorModuleStatusService::class)->sharedPayload($tenant),
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)

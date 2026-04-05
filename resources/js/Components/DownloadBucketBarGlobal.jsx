@@ -12,9 +12,15 @@ import DownloadBucketBar from './DownloadBucketBar'
 export default function DownloadBucketBarGlobal() {
     const selection = useSelectionOptional()
     const bucket = useBucketOptional()
-    const { auth } = usePage().props
+    const page = usePage()
+    const { auth } = page.props
 
     if (!selection) return null
+
+    const path = (page.url || '').split('?')[0]
+    const onCollectionsPage = path === '/app/collections' || path.startsWith('/app/collections/')
+    const selectedCollectionId = onCollectionsPage ? page.props.selected_collection?.id ?? null : null
+    const createDownloadSource = selectedCollectionId != null ? 'collection' : 'grid'
 
     const { selectedItems, selectedCount, deselectItem, clearSelection, getSelectedIds } = selection
     const primaryColor = auth?.activeBrand?.primary_color || undefined
@@ -45,9 +51,11 @@ export default function DownloadBucketBarGlobal() {
             items={items}
             onRemove={deselectItem}
             onClear={clearSelection}
-        onBeforeCreateDownloadClick={onBeforeCreateDownloadClick}
-        onCreateSuccess={clearSelection}
-        primaryColor={primaryColor}
+            onBeforeCreateDownloadClick={onBeforeCreateDownloadClick}
+            onCreateSuccess={clearSelection}
+            primaryColor={primaryColor}
+            createDownloadSource={createDownloadSource}
+            collectionId={selectedCollectionId}
         />
     )
 }

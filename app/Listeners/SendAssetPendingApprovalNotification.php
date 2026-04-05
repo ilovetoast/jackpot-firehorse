@@ -37,6 +37,10 @@ class SendAssetPendingApprovalNotification implements ShouldQueue
         $uploader = $event->uploader;
         $categoryName = $event->categoryName;
 
+        if ($asset->isProstaffAsset()) {
+            return;
+        }
+
         try {
             // Get tenant and brand from asset
             $tenant = $asset->tenant;

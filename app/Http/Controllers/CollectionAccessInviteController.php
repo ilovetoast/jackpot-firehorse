@@ -7,6 +7,7 @@ use App\Models\Collection;
 use App\Models\CollectionInvitation;
 use App\Models\CollectionUser;
 use App\Models\User;
+use App\Services\BrandGateway\BrandThemeBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,19 +21,39 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Phase C12.0: Private collection invitations — collection-only access (no brand membership).
- * For PRIVATE collections only. Creates collection_user grants, NOT brand membership.
+ * Phase C12.0: Private / restricted collection invitations — collection-only access (no brand membership).
+ * For private and restricted visibility. Creates collection_user grants, NOT brand membership.
  */
 class CollectionAccessInviteController extends Controller
 {
+    public function __construct(
+        protected BrandThemeBuilder $brandThemeBuilder
+    ) {}
+
     /**
-     * Invite by email to a private collection (collection-only access).
+     * Email-based collection-only (external) invites when allowed on the collection.
+     */
+    private function allowsCollectionOnlyEmailInvites(Collection $collection): bool
+    {
+        if (! ($collection->allows_external_guests ?? false)) {
+            return false;
+        }
+        $mode = $collection->access_mode ?? null;
+        if ($mode === null || $mode === '') {
+            return in_array($collection->visibility ?? 'brand', ['private', 'restricted'], true);
+        }
+
+        return in_array($mode, ['role_limited', 'invite_only'], true);
+    }
+
+    /**
+     * Invite by email to a private or restricted collection (collection-only access).
      * Creates pending CollectionInvitation; on accept, creates CollectionUser grant only.
      */
     public function invite(Request $request, Collection $collection): RedirectResponse|JsonResponse
     {
-        if (($collection->visibility ?? 'brand') !== 'private') {
-            abort(403, 'Only private collections can have collection-only invites.');
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
+            abort(403, 'Collection-only email invites are only available for private or restricted collections.');
         }
 
         Gate::forUser($request->user())->authorize('invite', $collection);
@@ -92,10 +113,11 @@ class CollectionAccessInviteController extends Controller
      */
     public function index(Request $request, Collection $collection): Response|JsonResponse|array
     {
-        if (($collection->visibility ?? 'brand') !== 'private') {
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
             if ($request->wantsJson()) {
                 return response()->json(['grants' => [], 'pending' => []], 200);
             }
+
             return Inertia::location(url()->previous());
         }
 
@@ -147,10 +169,10 @@ class CollectionAccessInviteController extends Controller
     /**
      * Revoke collection-only access (remove grant). Does NOT affect brand membership.
      */
-    public function revoke(Request $request, Collection $collection, CollectionUser $collection_user): RedirectResponse
+    public function revoke(Request $request, Collection $collection, CollectionUser $collection_user): RedirectResponse|JsonResponse
     {
-        if (($collection->visibility ?? 'brand') !== 'private') {
-            abort(403, 'Only private collections have collection-only access.');
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
+            abort(403, 'This collection does not use collection-only access grants.');
         }
 
         Gate::forUser($request->user())->authorize('removeMember', $collection);
@@ -161,6 +183,10 @@ class CollectionAccessInviteController extends Controller
 
         $collection_user->delete();
 
+        if ($request->wantsJson()) {
+            return response()->json(['ok' => true]);
+        }
+
         return back()->with('success', 'Access revoked.');
     }
 
@@ -169,22 +195,51 @@ class CollectionAccessInviteController extends Controller
      */
     public function acceptShow(Request $request, string $token): Response|RedirectResponse
     {
-        $invitation = CollectionInvitation::where('token', $token)->with('collection.brand.tenant')->first();
+        $invitation = CollectionInvitation::where('token', $token)
+            ->with(['collection.brand', 'collection.tenant', 'invitedBy'])
+            ->first();
 
         if (! $invitation) {
             return redirect()->route('login')->withErrors(['invitation' => 'Invalid or expired invitation link.']);
         }
 
         $collection = $invitation->collection;
-        if (($collection->visibility ?? 'brand') !== 'private') {
+        $collection->loadMissing(['brand', 'tenant']);
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
             return redirect()->route('login')->withErrors(['invitation' => 'This invitation is no longer valid.']);
         }
+
+        $theme = $this->brandThemeBuilder->build($collection->tenant, $collection->brand, true);
+        $gatewayContext = [
+            'is_authenticated' => Auth::check(),
+            'is_multi_company' => false,
+            'is_multi_brand' => false,
+        ];
+
+        $invitePageProps = [
+            'token' => $token,
+            'theme' => $theme,
+            'context' => $gatewayContext,
+            'collection' => [
+                'id' => $collection->id,
+                'name' => $collection->name,
+            ],
+            'brand' => $collection->brand ? [
+                'id' => $collection->brand->id,
+                'name' => $collection->brand->name,
+                'slug' => $collection->brand->slug,
+            ] : null,
+            'email' => $invitation->email,
+            'inviter' => $invitation->invitedBy ? [
+                'name' => $invitation->invitedBy->name,
+            ] : null,
+        ];
 
         if (Auth::check()) {
             $user = Auth::user();
             if (strtolower($user->email) !== strtolower($invitation->email)) {
                 return redirect()->route('login')->withErrors([
-                    'invitation' => 'This invitation is for ' . $invitation->email . '. Please log in with that account.',
+                    'invitation' => 'This invitation is for '.$invitation->email.'. Please log in with that account.',
                 ]);
             }
             // Already accepted? Redirect to collection
@@ -192,35 +247,19 @@ class CollectionAccessInviteController extends Controller
             if ($grant) {
                 return redirect()->route('collection-invite.landing', ['collection' => $collection->id]);
             }
-            return Inertia::render('Auth/CollectionInviteAccept', [
-                'token' => $token,
-                'collection' => [
-                    'id' => $collection->id,
-                    'name' => $collection->name,
-                ],
-                'email' => $invitation->email,
-                'inviter' => $invitation->invitedBy ? [
-                    'name' => $invitation->invitedBy->name,
-                ] : null,
-            ]);
+
+            return Inertia::render('Auth/CollectionInviteAccept', $invitePageProps);
         }
 
         $user = User::where('email', $invitation->email)->first();
         if ($user) {
-            return redirect()->route('login')->with('url.intended', route('collection-invite.accept', ['token' => $token]));
+            // Persist (not flash): /login redirects again to /gateway, which would drop a one-request flash.
+            session()->put('url.intended', route('collection-invite.accept', ['token' => $token]));
+
+            return redirect()->route('login');
         }
 
-        return Inertia::render('Auth/CollectionInviteRegistration', [
-            'token' => $token,
-            'collection' => [
-                'id' => $collection->id,
-                'name' => $collection->name,
-            ],
-            'email' => $invitation->email,
-            'inviter' => $invitation->invitedBy ? [
-                'name' => $invitation->invitedBy->name,
-            ] : null,
-        ]);
+        return Inertia::render('Auth/CollectionInviteRegistration', $invitePageProps);
     }
 
     /**
@@ -231,7 +270,9 @@ class CollectionAccessInviteController extends Controller
         $request->validate(['token' => 'sometimes']);
 
         if (! Auth::check()) {
-            return redirect()->route('login')->with('url.intended', route('collection-invite.accept', ['token' => $token]));
+            session()->put('url.intended', route('collection-invite.accept', ['token' => $token]));
+
+            return redirect()->route('login');
         }
 
         $invitation = CollectionInvitation::where('token', $token)->with('collection')->first();
@@ -245,7 +286,7 @@ class CollectionAccessInviteController extends Controller
         }
 
         $collection = $invitation->collection;
-        if (($collection->visibility ?? 'brand') !== 'private') {
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
             return redirect()->route('login')->withErrors(['invitation' => 'This invitation is no longer valid.']);
         }
 
@@ -287,7 +328,7 @@ class CollectionAccessInviteController extends Controller
         }
 
         $collection = $invitation->collection;
-        if (($collection->visibility ?? 'brand') !== 'private') {
+        if (! $this->allowsCollectionOnlyEmailInvites($collection)) {
             return redirect()->route('login')->withErrors(['invitation' => 'This invitation is no longer valid.']);
         }
 

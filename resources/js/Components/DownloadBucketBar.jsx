@@ -29,6 +29,9 @@ export default function DownloadBucketBar({
   items: itemsProp = null, // Phase 3: when provided, use instead of fetch (SelectionContext)
   onBeforeCreateDownloadClick = null, // Phase 3: sync SelectionContext to bucket before opening
   onCreateSuccess = null, // Phase 3: clear SelectionContext after download created
+  /** When set to `collection`, Create Download sends `collection_id` for analytics (collections page only). */
+  createDownloadSource = 'grid',
+  collectionId = null,
 }) {
   const { errors: pageErrors = {}, auth } = usePage().props
   const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -330,6 +333,8 @@ export default function DownloadBucketBar({
       bucketCount={bucketCount}
       previewItems={displayPreviewItems}
       onSuccess={handleCreateSuccess}
+      createDownloadSource={createDownloadSource}
+      collectionId={collectionId}
     />
     </>
   )

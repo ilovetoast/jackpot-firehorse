@@ -23,6 +23,7 @@ use App\Services\MultipartUploadUrlService;
 use App\Services\PlanService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
+use App\Exceptions\CreatorModuleInactiveException;
 use App\Services\UploadInitiationService;
 use App\Services\UploadMetadataSchemaResolver;
 use Aws\S3\S3Client;
@@ -409,6 +410,8 @@ class UploadController extends Controller
                 'file_size' => $asset->file_size,
                 'mime_type' => $asset->mime_type,
             ], 201);
+        } catch (CreatorModuleInactiveException $e) {
+            return response()->json($e->clientPayload(), 403);
         } catch (\RuntimeException $e) {
             // Fail loudly - return detailed error for debugging
             Log::error('Upload completion failed', [
@@ -2452,6 +2455,14 @@ class UploadController extends Controller
 
                 // Note: Activity logging is handled by UploadCompletionService::complete()
                 // which logs ASSET_UPLOAD_FINALIZED (the canonical event for processing start)
+            } catch (CreatorModuleInactiveException $e) {
+                $results[] = array_merge(
+                    [
+                        'upload_key' => $uploadKey,
+                        'status' => 'failed',
+                    ],
+                    $e->clientPayload()
+                );
             } catch (\RuntimeException $e) {
                 // Phase 2.5 Step 2: Normalize error response for finalize failures
                 $errorMessage = $e->getMessage();

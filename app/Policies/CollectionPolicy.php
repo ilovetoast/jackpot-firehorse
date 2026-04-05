@@ -19,19 +19,10 @@ class CollectionPolicy
      * Determine if the user can view the collection (C6: visibility + membership).
      * C12: Users with collection-only access grant can view without brand membership.
      *
-     * Rules:
-     * - C12: If user has accepted collection_user grant for this collection → allow (no brand required)
-     * - If user cannot view the brand → deny
-     * - If visibility = brand → allow (anyone who can view the brand)
-     * - If visibility = restricted → allow if user is creator or in collection_members
-     * - If visibility = private → allow if user is creator or in collection_members
-     * - Otherwise deny
-     *
-     * No Spatie checks. No asset permission elevation.
+     * @see docs/COLLECTIONS_ACCESS.md (access_mode, allowed_brand_roles, allows_external_guests)
      */
     public function view(User $user, Collection $collection): bool
     {
-        // C12: Collection-only access grant (no brand membership)
         if ($user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
             return true;
         }
@@ -40,6 +31,60 @@ class CollectionPolicy
             return false;
         }
 
+        $mode = $collection->access_mode;
+        if ($mode === null || $mode === '') {
+            return $this->viewByLegacyVisibility($user, $collection);
+        }
+
+        if ($mode === 'all_brand') {
+            return true;
+        }
+
+        if ($collection->created_by !== null && (int) $collection->created_by === (int) $user->id) {
+            return true;
+        }
+
+        $membership = $user->activeBrandMembership($collection->brand);
+        $role = $membership['role'] ?? null;
+
+        $allowedRoles = $collection->allowed_brand_roles;
+        if (! is_array($allowedRoles)) {
+            $allowedRoles = [];
+        }
+        $roleAllowed = $role !== null && in_array($role, $allowedRoles, true);
+
+        if ($mode === 'role_limited') {
+            if ($collection->relationLoaded('members')) {
+                if ($collection->members->where('user_id', $user->id)->isNotEmpty()) {
+                    return true;
+                }
+            } elseif ($collection->members()->where('user_id', $user->id)->exists()) {
+                return true;
+            }
+
+            return $roleAllowed;
+        }
+
+        if ($mode === 'invite_only') {
+            if ($collection->relationLoaded('members')) {
+                if ($collection->members->where('user_id', $user->id)->whereNotNull('accepted_at')->isNotEmpty()) {
+                    return true;
+                }
+            } elseif ($collection->members()->where('user_id', $user->id)->whereNotNull('accepted_at')->exists()) {
+                return true;
+            }
+
+            return $roleAllowed;
+        }
+
+        return $this->viewByLegacyVisibility($user, $collection);
+    }
+
+    /**
+     * Rows without access_mode (pre-migration) or unknown mode.
+     */
+    private function viewByLegacyVisibility(User $user, Collection $collection): bool
+    {
         $visibility = $collection->visibility ?? 'brand';
 
         if ($visibility === 'brand') {
@@ -50,7 +95,6 @@ class CollectionPolicy
             if ($collection->created_by !== null && (int) $collection->created_by === (int) $user->id) {
                 return true;
             }
-            // C7: Only accepted members can view (invited but not accepted = no access)
             if ($collection->relationLoaded('members')) {
                 return $collection->members
                     ->where('user_id', $user->id)
@@ -95,6 +139,7 @@ class CollectionPolicy
         if ($role === null) {
             return false;
         }
+
         return in_array($role, ['admin', 'brand_manager', 'contributor'], true);
     }
 
@@ -122,6 +167,7 @@ class CollectionPolicy
             return false;
         }
         $role = $membership['role'] ?? null;
+
         return $role !== null && RoleRegistry::isBrandApproverRole($role);
     }
 
@@ -136,6 +182,7 @@ class CollectionPolicy
             return false;
         }
         $role = $membership['role'] ?? null;
+
         return $role !== null && RoleRegistry::isBrandApproverRole($role);
     }
 
@@ -150,6 +197,7 @@ class CollectionPolicy
             return false;
         }
         $role = $membership['role'] ?? null;
+
         return $role !== null && RoleRegistry::isBrandApproverRole($role);
     }
 
@@ -180,6 +228,7 @@ class CollectionPolicy
         if ($role === null) {
             return false;
         }
+
         return in_array($role, ['admin', 'brand_manager', 'contributor'], true);
     }
 
@@ -207,6 +256,7 @@ class CollectionPolicy
             return false;
         }
         $role = $membership['role'] ?? null;
+
         return $role !== null && RoleRegistry::isBrandApproverRole($role);
     }
 
@@ -224,6 +274,7 @@ class CollectionPolicy
         if ($role !== null && RoleRegistry::isBrandApproverRole($role)) {
             return true;
         }
+
         return $collection->created_by !== null && (int) $collection->created_by === (int) $user->id;
     }
 
@@ -241,6 +292,7 @@ class CollectionPolicy
         if ($role !== null && RoleRegistry::isBrandApproverRole($role)) {
             return true;
         }
+
         return $collection->created_by !== null && (int) $collection->created_by === (int) $user->id;
     }
 }

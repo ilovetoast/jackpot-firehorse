@@ -44,6 +44,20 @@ abstract class Controller
     }
 
     /**
+     * Post-login handoff for collection-only email invites ({@see CollectionAccessInviteController}).
+     */
+    protected static function isCollectionInviteAcceptUrl(?string $url): bool
+    {
+        if ($url === null || $url === '') {
+            return false;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH) ?? '';
+
+        return $path !== '' && str_starts_with($path, '/invite/collection/');
+    }
+
+    /**
      * STARRED CANONICAL (reading): Normalize any legacy/API value to boolean for "is starred?".
      * Write path: we always store strict boolean in assets.metadata.starred (see syncSortFieldToAsset).
      * Read path: when reading from DB/JSON we may still see true|'true'|1|'1' until backfilled.

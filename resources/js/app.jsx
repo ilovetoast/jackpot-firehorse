@@ -97,7 +97,10 @@ createInertiaApp({
         const PageComponent = pageModule.default || pageModule
         
         // Standalone cinematic pages: no global UI (FlashMessage, tray, download bar)
-        const isExperience = name.startsWith('Experience/') || name.startsWith('Gateway/')
+        const isExperience =
+            name.startsWith('Experience/') ||
+            name.startsWith('Gateway/') ||
+            name.startsWith('Auth/CollectionInvite')
         if (isExperience) {
             return (props) => (
                 <>

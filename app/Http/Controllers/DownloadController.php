@@ -11,6 +11,7 @@ use App\Enums\ZipStatus;
 use App\Jobs\BuildDownloadZipJob;
 use App\Mail\DownloadShareEmail;
 use App\Models\Asset;
+use App\Models\Collection;
 use App\Models\Brand;
 use App\Models\Download;
 use App\Models\Tenant;
@@ -35,6 +36,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -527,6 +529,7 @@ class DownloadController extends Controller
     {
         $request->validate([
             'source' => 'required|string|in:grid,drawer,collection,admin',
+            'collection_id' => 'nullable|integer|exists:collections,id',
             'name' => 'nullable|string|max:255',
             'expires_at' => 'nullable|string',
             'access_mode' => 'nullable|string|in:public,brand,company,team,users,restricted',
@@ -537,6 +540,19 @@ class DownloadController extends Controller
             'landing_copy.headline' => 'nullable|string',
             'landing_copy.subtext' => 'nullable|string',
         ]);
+
+        $sourceInput = (string) $request->input('source');
+        if ($sourceInput === 'collection') {
+            if (! $request->filled('collection_id')) {
+                throw ValidationException::withMessages([
+                    'collection_id' => ['Choose a collection context, or create the download from the main asset library.'],
+                ]);
+            }
+        } elseif ($request->filled('collection_id')) {
+            throw ValidationException::withMessages([
+                'collection_id' => ['Collection context is only used when source is collection.'],
+            ]);
+        }
 
         $tenant = app('tenant');
         $user = Auth::user();
@@ -552,6 +568,32 @@ class DownloadController extends Controller
                 ? 'Add at least one asset to the download bucket.'
                 : 'None of the selected assets can be included in a download. Downloads only include published, non-archived assets. Publish any drafts first, then try again.';
             throw ValidationException::withMessages(['message' => $message]);
+        }
+
+        $collectionIdForOptions = null;
+        if ($sourceInput === 'collection') {
+            $brand = app('brand');
+            if (! $brand) {
+                throw ValidationException::withMessages(['message' => ['Brand context required.']]);
+            }
+            $cid = (int) $request->integer('collection_id');
+            $collection = Collection::query()->where('id', $cid)->firstOrFail();
+            if ($collection->tenant_id !== $tenant->id || $collection->brand_id !== $brand->id) {
+                throw ValidationException::withMessages(['collection_id' => ['Collection not found.']]);
+            }
+            Gate::forUser($user)->authorize('view', $collection);
+            $uniqueAssetIds = array_values(array_unique($visibleIds, SORT_REGULAR));
+            $linkedCount = DB::table('asset_collections')
+                ->where('collection_id', $collection->id)
+                ->whereIn('asset_id', $uniqueAssetIds)
+                ->distinct()
+                ->count('asset_id');
+            if ((int) $linkedCount !== count($uniqueAssetIds)) {
+                throw ValidationException::withMessages([
+                    'message' => ['All selected assets must belong to the collection you are downloading from.'],
+                ]);
+            }
+            $collectionIdForOptions = $collection->id;
         }
 
         $accessModeInput = $request->input('access_mode', 'public');
@@ -639,7 +681,11 @@ class DownloadController extends Controller
 
         // Phase D-4: Estimate total bytes and store; skip build job if streaming enabled and over threshold
         $estimatedBytes = Asset::whereIn('id', $visibleIds)->sum('size_bytes');
-        $download->download_options = array_merge($download->download_options ?? [], ['estimated_bytes' => $estimatedBytes]);
+        $downloadOptions = array_merge($download->download_options ?? [], ['estimated_bytes' => $estimatedBytes]);
+        if ($collectionIdForOptions !== null) {
+            $downloadOptions['collection_id'] = $collectionIdForOptions;
+        }
+        $download->download_options = $downloadOptions;
         $download->saveQuietly();
 
         $streamingEnabled = config('features.streaming_downloads', false);

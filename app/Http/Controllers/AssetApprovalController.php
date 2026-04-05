@@ -155,6 +155,7 @@ class AssetApprovalController extends Controller
                 'final_thumbnail_url' => $finalThumbnailUrl,
                 'preview_thumbnail_url' => $previewThumbnailUrl,
                 'thumbnail_status' => $thumbnailStatus,
+                'is_prostaff_asset' => (bool) $asset->submitted_by_prostaff,
             ];
         });
 

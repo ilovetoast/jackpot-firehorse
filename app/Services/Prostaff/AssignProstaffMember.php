@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\DB;
 
 class AssignProstaffMember
 {
+    public function __construct(
+        private EnsureCreatorModuleEnabled $ensureCreatorModuleEnabled
+    ) {}
+
     /**
      * @param  array<string, mixed>  $data
      *                                      Keys: target_uploads?, period_type?, period_start?, assigned_by_user_id?, custom_fields?
@@ -30,6 +34,8 @@ class AssignProstaffMember
         $tenant = Tenant::query()->findOrFail($brand->tenant_id);
 
         $this->assertAssignableAsProstaff($user, $tenant, $brand);
+
+        $this->ensureCreatorModuleEnabled->assertEnabled($tenant);
 
         if (! $user->belongsToTenant($tenant->id)) {
             $user->tenants()->attach($tenant->id, ['role' => 'member']);

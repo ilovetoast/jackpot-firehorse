@@ -4,16 +4,17 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\ProstaffUploadBatch;
 use App\Models\User;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Phase AF-3: Approval Notification Service
- * 
+ *
  * Handles in-app notifications for approval events.
  * Respects active brand membership only.
- * 
+ *
  * Recipient Rules:
  * - Asset submitted/resubmitted: All approval_capable users with active membership
  * - Asset approved: Original uploader (if still active member)
@@ -27,21 +28,23 @@ class ApprovalNotificationService
     public function notifyOnSubmitted(Asset $asset, User $uploader): void
     {
         $brand = $asset->brand;
-        if (!$brand) {
+        if (! $brand) {
             Log::warning('[ApprovalNotificationService] Asset has no brand, skipping notification', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
         // Phase AF-5: Gate notifications based on plan feature
         $tenant = $brand->tenant;
         $featureGate = app(FeatureGate::class);
-        if (!$featureGate->notificationsEnabled($tenant)) {
+        if (! $featureGate->notificationsEnabled($tenant)) {
             Log::info('[ApprovalNotificationService] Notifications disabled for tenant plan, skipping', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $tenant->id,
             ]);
+
             return;
         }
 
@@ -56,6 +59,7 @@ class ApprovalNotificationService
                 'asset_id' => $asset->id,
                 'brand_id' => $brand->id,
             ]);
+
             return;
         }
 
@@ -78,37 +82,40 @@ class ApprovalNotificationService
     public function notifyOnApproved(Asset $asset, User $approver): void
     {
         $uploader = $asset->user;
-        if (!$uploader) {
+        if (! $uploader) {
             Log::warning('[ApprovalNotificationService] Asset has no uploader, skipping notification', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
         $brand = $asset->brand;
-        if (!$brand) {
+        if (! $brand) {
             return;
         }
 
         // Phase AF-5: Gate notifications based on plan feature
         $tenant = $brand->tenant;
         $featureGate = app(FeatureGate::class);
-        if (!$featureGate->notificationsEnabled($tenant)) {
+        if (! $featureGate->notificationsEnabled($tenant)) {
             Log::info('[ApprovalNotificationService] Notifications disabled for tenant plan, skipping', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $tenant->id,
             ]);
+
             return;
         }
 
         // Phase MI-1: Verify uploader has active brand membership
         $membership = $uploader->activeBrandMembership($brand);
-        if (!$membership) {
+        if (! $membership) {
             Log::info('[ApprovalNotificationService] Uploader no longer has active membership, skipping notification', [
                 'asset_id' => $asset->id,
                 'uploader_id' => $uploader->id,
                 'brand_id' => $brand->id,
             ]);
+
             return;
         }
 
@@ -135,37 +142,40 @@ class ApprovalNotificationService
     public function notifyOnRejected(Asset $asset, User $rejector, string $rejectionReason): void
     {
         $uploader = $asset->user;
-        if (!$uploader) {
+        if (! $uploader) {
             Log::warning('[ApprovalNotificationService] Asset has no uploader, skipping notification', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
         $brand = $asset->brand;
-        if (!$brand) {
+        if (! $brand) {
             return;
         }
 
         // Phase AF-5: Gate notifications based on plan feature
         $tenant = $brand->tenant;
         $featureGate = app(FeatureGate::class);
-        if (!$featureGate->notificationsEnabled($tenant)) {
+        if (! $featureGate->notificationsEnabled($tenant)) {
             Log::info('[ApprovalNotificationService] Notifications disabled for tenant plan, skipping', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $tenant->id,
             ]);
+
             return;
         }
 
         // Phase MI-1: Verify uploader has active brand membership
         $membership = $uploader->activeBrandMembership($brand);
-        if (!$membership) {
+        if (! $membership) {
             Log::info('[ApprovalNotificationService] Uploader no longer has active membership, skipping notification', [
                 'asset_id' => $asset->id,
                 'uploader_id' => $uploader->id,
                 'brand_id' => $brand->id,
             ]);
+
             return;
         }
 
@@ -195,21 +205,23 @@ class ApprovalNotificationService
     public function notifyOnResubmitted(Asset $asset, User $resubmitter): void
     {
         $brand = $asset->brand;
-        if (!$brand) {
+        if (! $brand) {
             Log::warning('[ApprovalNotificationService] Asset has no brand, skipping notification', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
         // Phase AF-5: Gate notifications based on plan feature
         $tenant = $brand->tenant;
         $featureGate = app(FeatureGate::class);
-        if (!$featureGate->notificationsEnabled($tenant)) {
+        if (! $featureGate->notificationsEnabled($tenant)) {
             Log::info('[ApprovalNotificationService] Notifications disabled for tenant plan, skipping', [
                 'asset_id' => $asset->id,
                 'tenant_id' => $tenant->id,
             ]);
+
             return;
         }
 
@@ -224,6 +236,7 @@ class ApprovalNotificationService
                 'asset_id' => $asset->id,
                 'brand_id' => $brand->id,
             ]);
+
             return;
         }
 
@@ -241,8 +254,90 @@ class ApprovalNotificationService
     }
 
     /**
+     * Public wrapper for prostaff batch notifications and other callers that need the same resolver.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    public function approvalCapableRecipientsForBrand(Brand $brand): \Illuminate\Support\Collection
+    {
+        return $this->getApprovalCapableUsers($brand);
+    }
+
+    /**
+     * Phase 5: grouped in-app notification for multiple prostaff uploads in one batch window.
+     */
+    public function notifyProstaffUploadBatch(ProstaffUploadBatch $batch): void
+    {
+        $brand = $batch->brand;
+        if (! $brand) {
+            Log::warning('[ApprovalNotificationService] Prostaff batch missing brand', [
+                'batch_id' => $batch->id,
+            ]);
+
+            return;
+        }
+
+        $tenant = $brand->tenant;
+        $featureGate = app(FeatureGate::class);
+        if (! $featureGate->notificationsEnabled($tenant)) {
+            Log::info('[ApprovalNotificationService] Prostaff batch skipped (notifications disabled for plan)', [
+                'batch_id' => $batch->id,
+                'tenant_id' => $tenant->id,
+            ]);
+
+            return;
+        }
+
+        $uploader = $batch->prostaffUser;
+        $resolver = app(\App\Services\Prostaff\ResolveProstaffBatchNotificationRecipients::class);
+        $recipients = $resolver->resolve($brand, $uploader);
+
+        if ($recipients->isEmpty()) {
+            Log::info('[ApprovalNotificationService] No recipients for prostaff upload batch', [
+                'batch_id' => $batch->id,
+                'brand_id' => $brand->id,
+            ]);
+
+            return;
+        }
+
+        $uploaderName = $uploader?->name ?? 'Prostaff uploader';
+        $count = (int) $batch->upload_count;
+        $message = $count === 1
+            ? "1 upload from {$uploaderName}"
+            : "{$count} uploads from {$uploaderName}";
+
+        $data = [
+            'brand_id' => $brand->id,
+            'brand_name' => $brand->name,
+            'tenant_id' => $tenant->id,
+            'tenant_name' => $tenant->name,
+            'upload_count' => $count,
+            'prostaff_user_id' => $batch->prostaff_user_id,
+            'prostaff_user_name' => $uploaderName,
+            'first_asset_id' => $batch->first_asset_id,
+            'last_asset_id' => $batch->last_asset_id,
+            'message' => $message,
+            'action' => 'prostaff_batch',
+            'created_at' => now()->toISOString(),
+        ];
+
+        $this->createNotifications(
+            recipients: $recipients,
+            type: 'prostaff.upload.batch',
+            data: $data,
+        );
+
+        Log::info('[ApprovalNotificationService] Prostaff upload batch notified', [
+            'batch_id' => $batch->id,
+            'recipient_count' => $recipients->count(),
+            'upload_count' => $count,
+        ]);
+    }
+
+    /**
      * Get all approval_capable users with active brand membership.
-     * 
+     *
      * Phase MI-1: Uses activeBrandMembership to ensure only active members are included.
      */
     protected function getApprovalCapableUsers(Brand $brand): \Illuminate\Support\Collection
@@ -256,7 +351,7 @@ class ApprovalNotificationService
         foreach ($tenantUsers as $user) {
             // Phase MI-1: Check active brand membership
             $membership = $user->activeBrandMembership($brand);
-            if (!$membership) {
+            if (! $membership) {
                 continue;
             }
 
@@ -270,7 +365,7 @@ class ApprovalNotificationService
             $tenantRole = $user->getRoleForTenant($tenant);
             if (in_array($tenantRole, ['admin', 'owner'])) {
                 // Avoid duplicates if already added via brand role
-                if (!$users->contains('id', $user->id)) {
+                if (! $users->contains('id', $user->id)) {
                     $users->push($user);
                 }
             }
@@ -285,10 +380,10 @@ class ApprovalNotificationService
     protected function buildNotificationData(Asset $asset, User $actor, string $action): array
     {
         $brand = $asset->brand;
-        
+
         // Get asset title with proper fallback (title -> original_filename -> 'Untitled Asset')
         $assetName = $asset->title ?? $asset->original_filename ?? 'Untitled Asset';
-        
+
         $tenant = $brand?->tenant;
 
         return [

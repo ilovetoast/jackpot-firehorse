@@ -745,6 +745,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/collections/{collection}/assets', [\App\Http\Controllers\CollectionController::class, 'addAsset'])->name('collections.assets.store');
             Route::delete('/collections/{collection}/assets/{asset}', [\App\Http\Controllers\CollectionController::class, 'removeAsset'])->name('collections.assets.destroy');
             Route::put('/assets/{asset}/collections', [\App\Http\Controllers\CollectionController::class, 'syncAssetCollections'])->name('assets.collections.sync');
+            Route::get('/collections/{collection}/stats', [\App\Http\Controllers\CollectionController::class, 'stats'])->name('collections.stats');
+            Route::get('/collections/{collection}/internal-invite-data', [\App\Http\Controllers\CollectionController::class, 'internalInviteData'])->name('collections.internal-invite-data');
+            Route::delete('/collections/{collection}/members/{member}', [\App\Http\Controllers\CollectionController::class, 'destroyMember'])->name('collections.members.destroy');
             Route::post('/collections/{collection}/invite', [\App\Http\Controllers\CollectionInviteController::class, 'invite'])->name('collections.invite');
             Route::post('/collections/{collection}/accept', [\App\Http\Controllers\CollectionInviteController::class, 'accept'])->name('collections.accept');
             Route::post('/collections/{collection}/decline', [\App\Http\Controllers\CollectionInviteController::class, 'decline'])->name('collections.decline');
@@ -880,6 +883,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/brands/{brand}/approvals', [\App\Http\Controllers\AssetApprovalController::class, 'index'])->name('api.brands.approvals');
             // Phase J.2: Pending assets for review modal
             Route::get('/api/brands/{brand}/pending-assets', [\App\Http\Controllers\AssetApprovalController::class, 'pendingAssets'])->name('api.brands.pending-assets');
+            Route::get('/api/brands/{brand}/prostaff/dashboard', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'index'])->name('api.brands.prostaff.dashboard');
+            Route::get('/api/brands/{brand}/prostaff/options', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'filterOptions'])->name('api.brands.prostaff.options');
+            Route::post('/api/brands/{brand}/prostaff/members', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'store'])->name('api.brands.prostaff.members.store');
+            Route::get('/api/prostaff/me', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'me'])->name('api.prostaff.me');
             Route::post('/brands/{brand}/assets/{asset}/approve', [\App\Http\Controllers\AssetApprovalController::class, 'approve'])->name('brands.assets.approve');
             Route::post('/brands/{brand}/assets/{asset}/reject', [\App\Http\Controllers\AssetApprovalController::class, 'reject'])->name('brands.assets.reject');
             // Phase AF-2: Re-submission and comments

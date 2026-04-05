@@ -15,7 +15,9 @@ use App\Models\Category;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Services\Prostaff\EnsureCreatorModuleEnabled;
 use App\Services\Prostaff\RecordProstaffPerformanceIncrement;
+use App\Services\Prostaff\RecordProstaffUploadBatch;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
@@ -361,6 +363,14 @@ class UploadCompletionService
 
         $isProstaffUpload = $this->isProstaffUploader($userId, $targetBrandId);
 
+        if ($isProstaffUpload) {
+            $tenantForGate = Tenant::query()->find($uploadSession->tenant_id);
+            if ($tenantForGate === null) {
+                throw new \RuntimeException('Tenant context is missing for this upload.');
+            }
+            app(EnsureCreatorModuleEnabled::class)->assertEnabled($tenantForGate);
+        }
+
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
@@ -695,9 +705,11 @@ class UploadCompletionService
                     $commentService = app(\App\Services\AssetApprovalCommentService::class);
                     $commentService->recordSubmitted($asset, $user);
 
-                    // Phase AF-3: Notify approvers
-                    $notificationService = app(\App\Services\ApprovalNotificationService::class);
-                    $notificationService->notifyOnSubmitted($asset, $user);
+                    // Phase AF-3: Notify approvers (Phase 5: prostaff uses batched notifications, not per-asset)
+                    if (! $isProstaffUpload) {
+                        $notificationService = app(\App\Services\ApprovalNotificationService::class);
+                        $notificationService->notifyOnSubmitted($asset, $user);
+                    }
                     $approvalWorkflowNotified = true;
 
                     $approvalReason = $contributorRequiresApproval ? 'brand.contributor_upload_requires_approval' : 'brand_user.requires_approval';
@@ -780,6 +792,14 @@ class UploadCompletionService
                 if ($brandForStats !== null && $userForStats !== null) {
                     app(RecordProstaffPerformanceIncrement::class)->record($userForStats, $brandForStats, now());
                 }
+
+                $assetIdForBatch = $asset->id;
+                DB::afterCommit(function () use ($assetIdForBatch): void {
+                    $assetForBatch = Asset::query()->find($assetIdForBatch);
+                    if ($assetForBatch !== null && $assetForBatch->isProstaffAsset()) {
+                        app(RecordProstaffUploadBatch::class)->record($assetForBatch);
+                    }
+                });
             }
 
             // Update upload session status and uploaded size (transition already validated above)
@@ -1463,6 +1483,8 @@ class UploadCompletionService
             );
         }
 
+        $this->assertCreatorModuleEnabledForProstaffActor($userId, (int) $asset->brand_id);
+
         // Finalize multipart upload if needed
         if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
             Log::info('[UploadCompletionService] Finalizing multipart upload for replace', [
@@ -1693,6 +1715,8 @@ class UploadCompletionService
             );
         }
 
+        $this->assertCreatorModuleEnabledForProstaffActor($userId, (int) $asset->brand_id);
+
         if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
             Log::info('[UploadCompletionService] Finalizing multipart upload for in-place replace', [
                 'upload_session_id' => $uploadSession->id,
@@ -1837,6 +1861,27 @@ class UploadCompletionService
     }
 
     /**
+     * Block prostaff replace / new uploads when the Creator module is off or expired.
+     */
+    protected function assertCreatorModuleEnabledForProstaffActor(?int $userId, int $brandId): void
+    {
+        if (! $this->isProstaffUploader($userId, $brandId)) {
+            return;
+        }
+
+        $brand = Brand::query()->find($brandId);
+        if ($brand === null) {
+            return;
+        }
+
+        $tenant = Tenant::query()->find($brand->tenant_id);
+        if ($tenant === null) {
+            throw new \RuntimeException('Tenant context is missing for this brand.');
+        }
+        app(EnsureCreatorModuleEnabled::class)->assertEnabled($tenant);
+    }
+
+    /**
      * Phase 3: uploader is active prostaff for the upload brand.
      */
     protected function isProstaffUploader(?int $userId, ?int $brandId): bool
@@ -1878,7 +1923,7 @@ class UploadCompletionService
 
         $asset->refresh();
         app(\App\Services\AssetApprovalCommentService::class)->recordSubmitted($asset, $user);
-        app(\App\Services\ApprovalNotificationService::class)->notifyOnSubmitted($asset, $user);
+        // Phase 5: prostaff approvers are notified via ProcessProstaffUploadBatchJob (grouped), not per asset.
 
         return true;
     }

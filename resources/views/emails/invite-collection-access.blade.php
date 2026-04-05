@@ -1,11 +1,20 @@
-<x-email.layout>
-    <h2 style="margin-top: 0;">You've been invited to view a collection</h2>
+@php
+    $headerLine = $brand?->name ?? $tenant?->name ?? null;
+@endphp
+<x-email.layout :title="'Collection invitation — '.config('app.name')" :headerText="$headerLine">
+    <h2 style="margin-top: 0;">You've been invited to a collection</h2>
 
     <p>Hi there,</p>
 
     <p>
         <strong>{{ $inviter->name }}</strong> has invited you to view the collection
-        <strong>{{ $collection->name }}</strong> on {{ config('app.name') }}.
+        <strong>{{ $collection->name }}</strong>
+        @if($brand)
+            for <strong>{{ $brand->name }}</strong>
+        @elseif($tenant)
+            on <strong>{{ $tenant->name }}</strong>
+        @endif
+        on {{ config('app.name') }}.
     </p>
 
     <p>
@@ -13,7 +22,7 @@
     </p>
 
     <div style="text-align: center;">
-        <a href="{{ $inviteUrl }}" class="button">Accept Invitation</a>
+        <a href="{{ $inviteUrl }}" class="button">View collection invitation</a>
     </div>
 
     <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">

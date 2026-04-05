@@ -4,7 +4,7 @@
  * Lists collections for the current brand; selection is URL-driven (?collection=id).
  */
 import { router } from '@inertiajs/react'
-import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
+import { RectangleStackIcon, PlusIcon, GlobeAltIcon, UserGroupIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionsSidebar({
     collections = [],
@@ -73,6 +73,7 @@ export default function CollectionsSidebar({
                                 collections.map((c) => {
                                     const isActive = selectedCollectionId != null && c.id === selectedCollectionId
                                     const showPublic = publicCollectionsEnabled && !!c.is_public
+                                    const showExternalGuests = !!c.allows_external_guests
                                     const count = typeof c.assets_count === 'number' ? c.assets_count : null
                                     const itemTextColor = isActive && activeTextColor ? activeTextColor : listTextColor
                                     return (
@@ -105,6 +106,14 @@ export default function CollectionsSidebar({
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
                                                     style={{ color: itemTextColor }}
                                                     title="Public collection — viewable via shareable link"
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+                                            {showExternalGuests && (
+                                                <UserGroupIcon
+                                                    className="h-4 w-4 flex-shrink-0 opacity-80"
+                                                    style={{ color: itemTextColor }}
+                                                    title="External guests allowed — collection-only access by email"
                                                     aria-hidden="true"
                                                 />
                                             )}

@@ -305,11 +305,15 @@ class DownloadEventEmitter
      */
     protected static function buildDownloadMetadata(Download $download): array
     {
-        return [
+        $options = $download->download_options ?? [];
+        $collectionId = $options['collection_id'] ?? null;
+
+        return array_filter([
             'download_type' => $download->download_type->value,
             'source' => $download->source->value,
             'access_mode' => $download->access_mode->value,
             'version' => $download->version,
-        ];
+            'collection_id' => $collectionId !== null && $collectionId !== '' ? (int) $collectionId : null,
+        ], fn ($v) => $v !== null);
     }
 }

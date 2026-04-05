@@ -1,17 +1,63 @@
 /**
- * Create Collection Modal (C5/C7 scaffold).
- * Fields: name (required), description (optional), visibility (brand/restricted/private).
- * is_public not exposed. Submit → POST /app/collections.
+ * Create collection — name, description, access preset (icon cards), optional isolated external guests.
  */
 import { useState } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/outline'
+import {
+    XMarkIcon,
+    UsersIcon,
+    AdjustmentsHorizontalIcon,
+    UserPlusIcon,
+    LockClosedIcon,
+} from '@heroicons/react/24/outline'
+
+const ACCESS_PRESETS = [
+    {
+        value: 'all_brand',
+        title: 'Everyone in the brand',
+        description: 'All teammates with this brand can view the collection.',
+        icon: UsersIcon,
+    },
+    {
+        value: 'role_limited',
+        title: 'By role',
+        description: 'Start with all brand roles allowed—you can narrow roles after creating.',
+        icon: AdjustmentsHorizontalIcon,
+    },
+    {
+        value: 'invite_only',
+        title: 'Invite-only',
+        description: 'Only people you add (brand teammates and/or isolated email guests).',
+        icon: UserPlusIcon,
+    },
+]
+
+/** Sensible default so a new “by role” collection is usable before first edit. */
+const DEFAULT_ROLE_LIMITED_ROLES = ['admin', 'brand_manager', 'contributor', 'viewer']
+
+function SectionDivider({ children }) {
+    return (
+        <div className="relative py-3" role="presentation">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    {children}
+                </span>
+            </div>
+        </div>
+    )
+}
 
 export default function CreateCollectionModal({ open, onClose, onCreated }) {
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
-    const [visibility, setVisibility] = useState('brand')
+    const [accessPreset, setAccessPreset] = useState('all_brand')
+    const [allowExternalGuests, setAllowExternalGuests] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
+
+    const showExternalChoice = accessPreset !== 'all_brand'
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -22,25 +68,31 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
         }
         setSubmitting(true)
         try {
-            const response = await window.axios.post('/app/collections', {
+            const payload = {
                 name: name.trim(),
                 description: description.trim() || null,
-                visibility: visibility || 'brand',
-            }, {
-                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                access_mode: accessPreset,
+                allowed_brand_roles:
+                    accessPreset === 'role_limited' ? [...DEFAULT_ROLE_LIMITED_ROLES] : [],
+                allows_external_guests: showExternalChoice && allowExternalGuests,
+            }
+            const response = await window.axios.post('/app/collections', payload, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             })
             const data = response.data
             if (data?.collection?.id) {
                 onCreated?.(data.collection)
                 setName('')
                 setDescription('')
-                setVisibility('brand')
+                setAccessPreset('all_brand')
+                setAllowExternalGuests(false)
                 onClose()
             }
         } catch (err) {
-            const msg = err.response?.data?.errors?.name?.[0]
-                ?? err.response?.data?.message
-                ?? 'Failed to create collection.'
+            const msg =
+                err.response?.data?.errors?.name?.[0] ??
+                err.response?.data?.message ??
+                'Failed to create collection.'
             setError(msg)
         } finally {
             setSubmitting(false)
@@ -52,7 +104,8 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
             setError(null)
             setName('')
             setDescription('')
-            setVisibility('brand')
+            setAccessPreset('all_brand')
+            setAllowExternalGuests(false)
             onClose()
         }
     }
@@ -63,8 +116,8 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
         <div className="fixed inset-0 z-[80] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                 <div className="fixed inset-0 bg-gray-500/75 transition-opacity z-[80]" aria-hidden="true" onClick={handleClose} />
-                <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg z-[81]">
-                    <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                <div className="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl z-[81] max-h-[92vh] flex flex-col">
+                    <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4 overflow-y-auto flex-1 min-h-0">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-semibold text-gray-900" id="modal-title">Create collection</h3>
                             <button
@@ -82,7 +135,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                                     {error}
                                 </div>
                             )}
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 <div>
                                     <label htmlFor="collection-name" className="block text-sm font-medium text-gray-700">
                                         Name <span className="text-red-500">*</span>
@@ -113,24 +166,108 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                                         disabled={submitting}
                                     />
                                 </div>
+
                                 <div>
-                                    <label htmlFor="collection-visibility" className="block text-sm font-medium text-gray-700">
-                                        Visibility
-                                    </label>
-                                    <select
-                                        id="collection-visibility"
-                                        value={visibility}
-                                        onChange={(e) => setVisibility(e.target.value)}
-                                        disabled={submitting}
-                                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                                    >
-                                        <option value="brand">Brand — anyone in the brand can view</option>
-                                        <option value="restricted">Restricted — only invited members</option>
-                                        <option value="private">Private — only you and invited members</option>
-                                    </select>
+                                    <span className="block text-sm font-medium text-gray-900">Who can view</span>
+                                    <p className="mt-0.5 text-xs text-gray-500">
+                                        You can refine roles and invites after the collection exists.
+                                    </p>
+                                    <fieldset className="mt-3 space-y-2" disabled={submitting}>
+                                        <legend className="sr-only">Access preset</legend>
+                                        {ACCESS_PRESETS.map(({ value, title, description, icon: Icon }) => {
+                                            const selected = accessPreset === value
+                                            return (
+                                                <label
+                                                    key={value}
+                                                    className={`flex cursor-pointer gap-3 rounded-lg border-2 p-3 text-left transition-colors ${
+                                                        selected
+                                                            ? 'border-indigo-600 bg-indigo-50/60 ring-1 ring-indigo-600/20'
+                                                            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/80'
+                                                    }`}
+                                                >
+                                                    <input
+                                                        type="radio"
+                                                        name="create_collection_access"
+                                                        value={value}
+                                                        checked={selected}
+                                                        onChange={() => {
+                                                            setAccessPreset(value)
+                                                            if (value === 'all_brand') {
+                                                                setAllowExternalGuests(false)
+                                                            }
+                                                        }}
+                                                        className="mt-1 h-4 w-4 shrink-0 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                                        <Icon className={`h-5 w-5 ${selected ? 'text-indigo-600' : 'text-gray-500'}`} aria-hidden="true" />
+                                                    </span>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block text-sm font-medium text-gray-900">{title}</span>
+                                                        <span className="mt-0.5 block text-xs text-gray-600">{description}</span>
+                                                    </span>
+                                                </label>
+                                            )
+                                        })}
+                                    </fieldset>
                                 </div>
+
+                                {showExternalChoice && (
+                                    <>
+                                        <SectionDivider>Isolated guests (optional)</SectionDivider>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAllowExternalGuests((v) => !v)}
+                                            disabled={submitting}
+                                            className={`flex w-full gap-3 rounded-xl border-2 p-4 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 ${
+                                                allowExternalGuests
+                                                    ? 'border-amber-300 bg-amber-50/50 shadow-sm'
+                                                    : 'border-dashed border-gray-300 bg-gray-50/50'
+                                            }`}
+                                        >
+                                            <span
+                                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${
+                                                    allowExternalGuests ? 'bg-amber-200 text-amber-900' : 'bg-gray-200 text-gray-600'
+                                                }`}
+                                            >
+                                                <LockClosedIcon className="h-6 w-6" aria-hidden="true" />
+                                            </span>
+                                            <span className="min-w-0 flex-1">
+                                                <span className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-sm font-semibold text-gray-900">
+                                                        Allow email invites to isolated workspace
+                                                    </span>
+                                                    <span
+                                                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                                            allowExternalGuests
+                                                                ? 'bg-amber-200 text-amber-950'
+                                                                : 'bg-gray-200 text-gray-700'
+                                                        }`}
+                                                    >
+                                                        {allowExternalGuests ? 'On' : 'Off'}
+                                                    </span>
+                                                </span>
+                                                <span className="mt-1 block text-xs text-gray-600 leading-relaxed">
+                                                    External people get collection-only access—not your full brand. Turn on if you may invite clients or
+                                                    partners by email; you can always add brand teammates later from collection settings.
+                                                </span>
+                                            </span>
+                                            <span
+                                                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                                                    allowExternalGuests ? 'bg-amber-600' : 'bg-gray-300'
+                                                }`}
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    className={`pointer-events-none inline-block h-5 w-5 translate-y-px rounded-full bg-white shadow transition ${
+                                                        allowExternalGuests ? 'translate-x-5' : 'translate-x-1'
+                                                    }`}
+                                                />
+                                            </span>
+                                        </button>
+                                    </>
+                                )}
                             </div>
-                            <div className="mt-6 flex justify-end gap-3">
+                            <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-4">
                                 <button
                                     type="button"
                                     onClick={handleClose}

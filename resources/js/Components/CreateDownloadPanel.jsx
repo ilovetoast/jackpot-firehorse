@@ -55,6 +55,8 @@ export default function CreateDownloadPanel({
   bucketCount = 0,
   previewItems: initialPreviewItems = [],
   onSuccess,
+  createDownloadSource = 'grid',
+  collectionId = null,
 }) {
   const { auth, download_features: features = {}, errors: pageErrors = {} } = usePage().props
   const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
@@ -160,8 +162,11 @@ export default function CreateDownloadPanel({
     setSubmitting(true)
 
     const payload = {
-      source: 'grid',
+      source: createDownloadSource === 'collection' && collectionId != null ? 'collection' : 'grid',
       access_mode: accessMode,
+    }
+    if (payload.source === 'collection' && collectionId != null) {
+      payload.collection_id = collectionId
     }
     if (canRename && name.trim()) payload.name = name.trim()
     if (neverExpires && canNonExpiring) {

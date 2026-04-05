@@ -9,6 +9,23 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Collection extends Model
 {
+    protected static function booted(): void
+    {
+        static::creating(function (Collection $collection) {
+            if ($collection->access_mode === null || $collection->access_mode === '') {
+                $collection->access_mode = match ($collection->visibility ?? 'brand') {
+                    'restricted' => 'role_limited',
+                    'private' => 'invite_only',
+                    default => 'all_brand',
+                };
+            }
+            if (in_array($collection->access_mode, ['role_limited', 'invite_only'], true)
+                && ! array_key_exists('allows_external_guests', $collection->getAttributes())) {
+                $collection->allows_external_guests = true;
+            }
+        });
+    }
+
     /**
      * The attributes that are mass assignable.
      *
@@ -21,6 +38,9 @@ class Collection extends Model
         'slug',
         'description',
         'visibility',
+        'access_mode',
+        'allowed_brand_roles',
+        'allows_external_guests',
         'is_public',
         'created_by',
         'public_zip_path',
@@ -35,6 +55,8 @@ class Collection extends Model
     {
         return [
             'is_public' => 'boolean',
+            'allows_external_guests' => 'boolean',
+            'allowed_brand_roles' => 'array',
             'public_zip_built_at' => 'datetime',
             'public_zip_asset_count' => 'integer',
         ];

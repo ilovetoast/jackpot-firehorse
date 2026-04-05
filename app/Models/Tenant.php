@@ -147,6 +147,16 @@ class Tenant extends Model
     }
 
     /**
+     * Feature modules billed as add-ons (e.g. Creator / Prostaff). Not used for storage add-on MB (see storage_addon_* columns).
+     *
+     * @return HasMany<TenantModule, $this>
+     */
+    public function modules(): HasMany
+    {
+        return $this->hasMany(TenantModule::class);
+    }
+
+    /**
      * Get the default brand for this tenant.
      */
     public function defaultBrand(): HasOne

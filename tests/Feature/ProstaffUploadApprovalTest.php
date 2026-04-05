@@ -63,6 +63,8 @@ class ProstaffUploadApprovalTest extends TestCase
             ],
         ]);
 
+        $this->enableCreatorModuleForTenant($this->tenant);
+
         $this->categoryNoApproval = Category::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,

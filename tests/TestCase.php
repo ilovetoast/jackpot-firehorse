@@ -2,6 +2,8 @@
 
 namespace Tests;
 
+use App\Models\Tenant;
+use App\Models\TenantModule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use RuntimeException;
@@ -85,6 +87,28 @@ abstract class TestCase extends BaseTestCase
         throw new RuntimeException(
             "Refusing to run tests: database [{$database}] is not an isolated testing database. ".
             'Use DB_DATABASE=testing (see phpunit.xml and tests/bootstrap.php). See docs/TESTING_DATABASE.md.'
+        );
+    }
+
+    /**
+     * Phase 8: Creator (Prostaff) module gate — prostaff flows require an enabled {@see TenantModule} row in tests.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function enableCreatorModuleForTenant(Tenant $tenant, array $overrides = []): TenantModule
+    {
+        $defaults = [
+            'status' => 'active',
+            'expires_at' => null,
+            'granted_by_admin' => false,
+        ];
+
+        return TenantModule::query()->updateOrCreate(
+            [
+                'tenant_id' => $tenant->id,
+                'module_key' => TenantModule::KEY_CREATOR,
+            ],
+            array_merge($defaults, $overrides)
         );
     }
 }

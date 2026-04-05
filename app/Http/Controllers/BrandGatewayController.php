@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\BrandGateway\BrandContextResolver;
 use App\Services\BrandGateway\BrandThemeBuilder;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -29,9 +30,20 @@ class BrandGatewayController extends Controller
      * Main gateway entry point.
      * Works for authenticated users, guests, and invite flows.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $context = $this->contextResolver->resolve($request);
+
+        if (Auth::check()
+            && ! $request->query('switch')
+            && ($context['tenant']['id'] ?? null)
+            && count($context['available_brands']) === 0) {
+            $landing = $this->redirectExternalCollectionUserToLanding(Auth::user(), (int) $context['tenant']['id']);
+            if ($landing) {
+                return $landing;
+            }
+        }
+
         $theme = $this->buildThemeFromContext($context);
         $mode = $this->determineMode($request, $context);
 
@@ -140,6 +152,13 @@ class BrandGatewayController extends Controller
             ]);
         }
 
+        $intendedUrl = session()->get('url.intended');
+        if ($intendedUrl && static::isCollectionInviteAcceptUrl($intendedUrl)) {
+            session()->forget('url.intended');
+
+            return redirect()->to($intendedUrl);
+        }
+
         $tenants = $user->tenants()->with('defaultBrand')->get();
 
         if ($tenants->isEmpty()) {
@@ -152,6 +171,21 @@ class BrandGatewayController extends Controller
 
         if (! $tenant) {
             $tenant = $tenants->first();
+        }
+
+        if ($tenants->count() > 1 && ! $tenantId) {
+            return redirect()->route('gateway');
+        }
+
+        $collectionLanding = $this->redirectExternalCollectionUserToLanding($user, (int) $tenant->id);
+        if ($collectionLanding) {
+            $this->trackGatewayEvent(EventType::GATEWAY_LOGIN, [
+                'tenant' => ['id' => $tenant->id],
+                'brand' => null,
+                'is_authenticated' => true,
+            ]);
+
+            return $collectionLanding;
         }
 
         $defaultBrand = $tenant->defaultBrand ?? $tenant->brands()->first();
@@ -170,10 +204,6 @@ class BrandGatewayController extends Controller
             'brand' => ['id' => $defaultBrand->id],
             'is_authenticated' => true,
         ]);
-
-        if ($tenants->count() > 1 && ! $tenantId) {
-            return redirect()->route('gateway');
-        }
 
         return $this->redirectToGatewayIntended();
     }
@@ -497,6 +527,17 @@ class BrandGatewayController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
+        $collectionLanding = $this->redirectExternalCollectionUserToLanding($user, (int) $tenant->id);
+        if ($collectionLanding) {
+            $this->trackGatewayEvent(EventType::GATEWAY_SWITCH_USED, [
+                'tenant' => ['id' => $tenant->id],
+                'brand' => null,
+                'is_authenticated' => true,
+            ], ['switch_type' => 'company']);
+
+            return $collectionLanding;
+        }
+
         $defaultBrand = $tenant->defaultBrand ?? $tenant->brands()->first();
 
         session([
@@ -647,8 +688,39 @@ class BrandGatewayController extends Controller
     }
 
     /**
-     * Determine which UI mode the gateway should display.
+     * Collection-only external users: tenant membership + collection_user grant, no brand_user row.
+     * Prefer session collection_id when it matches an accepted grant; otherwise the first grant in this tenant.
      */
+    protected function redirectExternalCollectionUserToLanding(User $user, int $tenantId): ?RedirectResponse
+    {
+        if ($user->brands()->where('tenant_id', $tenantId)->whereNull('brand_user.removed_at')->exists()) {
+            return null;
+        }
+
+        $grantCollectionIds = $user->collectionAccessGrants()
+            ->whereNotNull('accepted_at')
+            ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenantId))
+            ->orderBy('collection_id')
+            ->pluck('collection_id');
+
+        if ($grantCollectionIds->isEmpty()) {
+            return null;
+        }
+
+        $sessionCollectionId = session('collection_id');
+        $collectionId = ($sessionCollectionId && $grantCollectionIds->contains((int) $sessionCollectionId))
+            ? (int) $sessionCollectionId
+            : (int) $grantCollectionIds->first();
+
+        session([
+            'tenant_id' => $tenantId,
+            'collection_id' => $collectionId,
+        ]);
+        session()->forget('brand_id');
+
+        return redirect()->route('collection-invite.landing', ['collection' => $collectionId]);
+    }
+
     /**
      * Determine which UI mode the gateway should display.
      *

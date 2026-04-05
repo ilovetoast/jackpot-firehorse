@@ -49,6 +49,13 @@ class LoginController extends Controller
                 ])->onlyInput('email');
             }
 
+            $intendedUrl = session()->get('url.intended');
+            if ($intendedUrl && static::isCollectionInviteAcceptUrl($intendedUrl)) {
+                session()->forget('url.intended');
+
+                return redirect()->to($intendedUrl);
+            }
+
             $tenants = $user->tenants()->with('defaultBrand')->get();
 
             // Auto-select tenant if user has tenants

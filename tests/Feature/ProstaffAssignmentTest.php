@@ -38,6 +38,8 @@ class ProstaffAssignmentTest extends TestCase
             'slug' => 'b1-assign',
         ]);
 
+        $this->enableCreatorModuleForTenant($this->tenant);
+
         $this->actor = User::create([
             'email' => 'actor@example.com',
             'password' => bcrypt('password'),
