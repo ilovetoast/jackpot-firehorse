@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
@@ -10,6 +10,7 @@ import GlobalUserControls from './Layout/GlobalUserControls'
 import {
     ArrowDownTrayIcon,
     BookOpenIcon,
+    ChevronDownIcon,
     ChevronRightIcon,
     FolderIcon,
     HomeIcon,
@@ -27,6 +28,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
     const [navHovered, setNavHovered] = useState(false)
+    const [overviewNavHover, setOverviewNavHover] = useState(false)
+    const overviewNavCloseTimerRef = useRef(null)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
@@ -298,6 +301,121 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         }
     }, [isAppPage, isCollectionOnlyNav, isAdminPage, hideWorkspaceAppNav])
 
+    useEffect(
+        () => () => {
+            if (overviewNavCloseTimerRef.current) {
+                clearTimeout(overviewNavCloseTimerRef.current)
+            }
+        },
+        []
+    )
+
+    const clearOverviewNavCloseTimer = () => {
+        if (overviewNavCloseTimerRef.current) {
+            clearTimeout(overviewNavCloseTimerRef.current)
+            overviewNavCloseTimerRef.current = null
+        }
+    }
+
+    const openOverviewSubmenu = () => {
+        clearOverviewNavCloseTimer()
+        if (activeBrand) {
+            setOverviewNavHover(true)
+        }
+    }
+
+    const scheduleCloseOverviewSubmenu = () => {
+        clearOverviewNavCloseTimer()
+        overviewNavCloseTimerRef.current = setTimeout(() => {
+            setOverviewNavHover(false)
+            overviewNavCloseTimerRef.current = null
+        }, 160)
+    }
+
+    /** Desktop workspace nav: Overview + hover panel (Insights, brand settings) when a brand is active. */
+    const renderDesktopOverviewNav = () => {
+        const overviewPathActive =
+            currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
+        const insightsPathActive = currentUrl.startsWith('/app/insights')
+        const brandSettingsPathActive =
+            Boolean(activeBrand?.id) && currentUrl.startsWith(`/app/brands/${activeBrand.id}`)
+        const overviewGroupActive = overviewPathActive || insightsPathActive || brandSettingsPathActive
+
+        const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+        const accent = activeBrand?.primary_color || '#6366f1'
+        const linkStyle = {
+            color: overviewGroupActive ? textColor : inactiveNavColor,
+            borderBottomColor: overviewGroupActive ? accent : 'transparent',
+        }
+        const overviewLinkClass =
+            'inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2'
+
+        if (!activeBrand) {
+            return (
+                <Link href="/app/overview" title={overviewNavTitle} className={overviewLinkClass} style={linkStyle}>
+                    <HomeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Overview
+                </Link>
+            )
+        }
+
+        const showBrandSettings = can('brand_settings.manage')
+        const subBase =
+            'block px-2.5 py-1.5 leading-snug transition-colors duration-150 ease-out rounded-md mx-0.5'
+        const subIdle = 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        const subActive = 'bg-indigo-50 text-indigo-700 font-medium'
+
+        return (
+            <div
+                className="relative shrink-0"
+                onMouseEnter={openOverviewSubmenu}
+                onMouseLeave={scheduleCloseOverviewSubmenu}
+            >
+                <Link
+                    href="/app/overview"
+                    title={overviewNavTitle}
+                    className={overviewLinkClass}
+                    style={linkStyle}
+                    aria-haspopup="true"
+                    aria-expanded={overviewNavHover}
+                >
+                    <HomeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Overview
+                    <ChevronDownIcon
+                        className={`h-3.5 w-3.5 shrink-0 opacity-50 motion-safe:transition-transform duration-200 ease-out ${
+                            overviewNavHover ? '-rotate-180' : ''
+                        }`}
+                        aria-hidden="true"
+                    />
+                </Link>
+                <div
+                    className={`absolute left-0 top-full z-[100] min-w-[10.5rem] pt-1.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
+                        overviewNavHover
+                            ? 'pointer-events-auto translate-y-0 opacity-100'
+                            : 'pointer-events-none translate-y-1 opacity-0'
+                    }`}
+                >
+                    <div className="rounded-lg bg-white py-0.5 text-xs shadow-lg ring-1 ring-black/5 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10">
+                        <Link
+                            href={route('insights.overview')}
+                            className={`${subBase} ${insightsPathActive ? subActive : subIdle}`}
+                        >
+                            Insights
+                        </Link>
+                        {showBrandSettings ? (
+                            <Link
+                                href={route('brands.edit', { brand: activeBrand.id })}
+                                className={`${subBase} ${brandSettingsPathActive ? subActive : subIdle}`}
+                            >
+                                {brandSettingsLabel}
+                            </Link>
+                        ) : null}
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
         { href: '/app/overview', label: 'Overview', shortLabel: 'Overview', icon: HomeIcon, isActive: (url) => url === '/app/overview' || url.startsWith('/app/overview') },
@@ -543,7 +661,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             )}
 
             <nav
-                className={`relative app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''} ${variant === 'transparent' && !navHovered ? '' : 'shadow-sm'}`}
+                className={`relative z-50 overflow-visible app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''} ${variant === 'transparent' && !navHovered ? '' : 'shadow-sm'}`}
                 style={{
                     backgroundColor: navColor,
                     transition: cinematicSurfaceTransition,
@@ -553,8 +671,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                 aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
             >
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
-                <div className="flex h-20 min-w-0 justify-between gap-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+                <div className="flex h-20 min-w-0 justify-between gap-2 overflow-visible">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-3">
                         {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
                         {isAppPage && isCollectionOnlyNav && (
                             <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
@@ -686,23 +804,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         ) : suppressWorkspaceChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:block" aria-hidden="true" />
                         ) : (
-                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto">
-                                <Link
-                                    href="/app/overview"
-                                    title={overviewNavTitle}
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
-                                    style={{
-                                        color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
-                                            ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
-                                            ? (activeBrand?.primary_color || '#6366f1')
-                                            : 'transparent'
-                                    }}
-                                >
-                                    <HomeIcon className="h-4 w-4 shrink-0" />
-                                    Overview
-                                </Link>
+                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto overflow-y-visible">
+                                {renderDesktopOverviewNav()}
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -765,23 +868,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 </Link>
                             </div>
                         )) : (
-                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:ml-6 overflow-x-auto">
-                                <Link
-                                    href="/app/overview"
-                                    title={overviewNavTitle}
-                                    className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
-                                    style={{
-                                        color: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
-                                            ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview'))
-                                            ? (activeBrand?.primary_color || '#6366f1')
-                                            : 'transparent'
-                                    }}
-                                >
-                                    <HomeIcon className="h-4 w-4 shrink-0" />
-                                    Overview
-                                </Link>
+                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:ml-6 overflow-x-auto overflow-y-visible">
+                                {renderDesktopOverviewNav()}
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
