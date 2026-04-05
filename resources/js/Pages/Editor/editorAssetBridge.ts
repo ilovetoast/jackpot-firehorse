@@ -229,9 +229,18 @@ export async function promoteCompositionToAsset(
 ): Promise<{ assetId: string }> {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
     const safeBase = name.replace(/\.(png|jpg|jpeg|webp)$/i, '').trim() || 'composition'
+    const safeStem = safeBase.replace(/[^a-z0-9-_]+/gi, '_')
+    const mime = (blob.type || '').toLowerCase()
+    const ext =
+        mime === 'image/jpeg' || mime === 'image/jpg'
+            ? 'jpg'
+            : mime === 'image/webp'
+              ? 'webp'
+              : mime === 'image/png'
+                ? 'png'
+                : 'jpg'
     const fd = new FormData()
-    const filename = `${safeBase.replace(/[^a-z0-9-_]+/gi, '_')}.png`
-    fd.append('file', blob, filename)
+    fd.append('file', blob, `${safeStem}.${ext}`)
     fd.append('name', safeBase)
     if (options?.categoryId != null && Number.isFinite(options.categoryId)) {
         fd.append('category_id', String(Math.floor(options.categoryId)))
@@ -262,11 +271,22 @@ export async function promoteCompositionToAsset(
     try {
         data = JSON.parse(text)
     } catch {
-        throw new Error(text || 'Save failed')
+        data = null
+    }
+    if (res.status === 413) {
+        throw new Error(
+            'Upload too large for the server (often a 1MB nginx limit). Try again after deploy, or ask your admin to raise client_max_body_size to match PHP upload limits.'
+        )
     }
     if (!res.ok) {
-        const msg = (data as { message?: string })?.message || text
+        const msg =
+            (data && typeof data === 'object' && 'message' in data && typeof (data as { message?: string }).message === 'string'
+                ? (data as { message: string }).message
+                : null) || text || 'Save failed'
         throw new Error(msg)
+    }
+    if (data === null || typeof data !== 'object') {
+        throw new Error(text || 'Save failed')
     }
     const results = (data as { results?: Array<{ status?: string; asset_id?: number | string }> }).results
     const first = results?.[0]

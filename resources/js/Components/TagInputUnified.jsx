@@ -77,6 +77,9 @@ const TagInputUnified = forwardRef(function TagInputUnified({
                     return `/app/api/assets/${assetId}/tags/autocomplete?q=${encodeURIComponent(query)}`
                 case 'upload':
                 case 'filter':
+                    if (tenantId == null || tenantId === '') {
+                        return null
+                    }
                     return `/app/api/tenants/${tenantId}/tags/autocomplete?q=${encodeURIComponent(query)}`
             default:
                 return null

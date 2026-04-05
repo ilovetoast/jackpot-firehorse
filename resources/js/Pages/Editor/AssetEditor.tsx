@@ -96,6 +96,7 @@ import {
     type EditorPublishCategory,
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
+import { compressImageBlobForLegacyUploadLimit, editorPublishFileByteBudget } from './editorPublishCompress'
 import {
     assetVersionStripLabel,
     fetchAssetVersions,
@@ -2347,38 +2348,46 @@ export default function AssetEditor() {
             setPromoteError(null)
             setPromoteOk(false)
 
-            const exportStagePng = async () => {
+            const exportStageForPublish = async () => {
                 const node = stageRef.current
                 if (!node) {
                     throw new Error('Stage not ready')
                 }
                 const doc = documentRef.current
                 await waitForImagesToLoad(node)
-                return toPng(node, {
+                // Downscale large documents first — strict proxies often cap the *entire* POST near 1MiB.
+                const maxEdge = 1920
+                const docMax = Math.max(doc.width, doc.height, 1)
+                const layoutScale = docMax > maxEdge ? maxEdge / docMax : 1
+                const outW = Math.round(doc.width * layoutScale)
+                const outH = Math.round(doc.height * layoutScale)
+                const opts = {
                     cacheBust: true,
                     skipFonts: true,
                     pixelRatio: 1,
                     backgroundColor: '#ffffff',
-                    width: doc.width,
-                    height: doc.height,
+                    width: outW,
+                    height: outH,
                     fetchRequestInit: editorHtmlToImageFetchRequestInit,
                     style: {
                         transform: 'none',
-                        width: `${doc.width}px`,
-                        height: `${doc.height}px`,
+                        width: `${outW}px`,
+                        height: `${outH}px`,
                     },
-                })
+                } as const
+                return toJpeg(node, { ...opts, quality: 0.88 })
             }
 
             try {
                 let dataUrl: string
                 try {
-                    dataUrl = await exportStagePng()
+                    dataUrl = await exportStageForPublish()
                 } catch (e) {
                     console.warn('Retry export...', e)
-                    dataUrl = await exportStagePng()
+                    dataUrl = await exportStageForPublish()
                 }
-                const blob = await (await fetch(dataUrl)).blob()
+                let blob = await (await fetch(dataUrl)).blob()
+                blob = await compressImageBlobForLegacyUploadLimit(blob, editorPublishFileByteBudget())
                 const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
                 await promoteCompositionToAsset(blob, name, documentRef.current, {
                     categoryId: opts.categoryId,
@@ -3585,7 +3594,7 @@ export default function AssetEditor() {
                                 type="button"
                                 disabled={promoteSaving}
                                 onClick={() => void openPublishModal()}
-                                title="Export the canvas as a PNG and publish it to your brand library. Choose a category and details first."
+                                title="Export the canvas as a JPEG and publish it to your brand library. Choose a category and details first."
                                 className="inline-flex items-center rounded-md border border-emerald-600 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-900/50"
                             >
                                 {promoteSaving ? 'Publishing…' : 'Publish'}
@@ -6717,9 +6726,9 @@ export default function AssetEditor() {
                         </div>
                         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
                             <p className="text-xs text-gray-600 dark:text-gray-400">
-                                Publishes a PNG of the canvas through the same upload pipeline as the main asset uploader.
-                                Choose a library or deliverable category; category-specific metadata uses the same schema
-                                as uploads.
+                                Publishes a JPEG export of the canvas. The file is compressed so publish works on servers
+                                with a strict upload size cap (about 1MB for the whole request). Choose a library or
+                                deliverable category; category-specific metadata uses the same schema as uploads.
                             </p>
                             {publishCategoriesLoading && (
                                 <p

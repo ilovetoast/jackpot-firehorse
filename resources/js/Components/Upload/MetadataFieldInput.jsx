@@ -30,7 +30,7 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
     { field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null },
     ref
 ) {
-    const { tenant } = usePage().props
+    const { auth, currentWorkspace } = usePage().props
     const isRequired = field.is_required || false
     // UPLOAD CONTEXT FIX: During upload, all fields are editable (approval happens after upload)
     // For non-upload contexts (e.g., asset drawer), respect can_edit permission
@@ -74,7 +74,7 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
 
     // Phase J.2.8: Special handling for tags field
     if (field.key === 'tags') {
-        const tenantId = tenant?.id
+        const tenantId = auth?.activeCompany?.id ?? currentWorkspace?.id ?? null
 
         return (
             <div className="flex items-start gap-2 min-w-0">
