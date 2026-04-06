@@ -4179,15 +4179,15 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             role="dialog"
             aria-modal="true"
         >
-            <div className="flex min-h-screen items-end justify-center px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div className="flex min-h-screen items-center justify-center px-4 py-8 text-center sm:px-6 sm:py-10">
                 {/* Background overlay */}
                 <div
                     className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
                     onClick={!hasUploadingItems && batchStatus !== 'finalizing' ? onClose : undefined}
                 />
 
-                {/* Modal panel - wider for Phase 3 layout */}
-                <div className="relative inline-block transform overflow-hidden rounded-lg bg-white text-left align-bottom shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-4xl sm:align-middle">
+                {/* Modal panel - wider for Phase 3 layout; flex parent keeps vertical + horizontal center at all breakpoints */}
+                <div className="relative z-10 w-full max-w-4xl transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all">
                     <div className={`bg-white px-4 pt-5 pb-4 sm:p-6 relative ${isFinalizeSuccess ? 'opacity-20 pointer-events-none' : ''}`}>
                         {/* Header */}
                         <div className="flex items-center justify-between mb-4">

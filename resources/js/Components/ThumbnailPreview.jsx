@@ -409,7 +409,10 @@ export default function ThumbnailPreview({
         }
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
+            <div
+                className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
+                style={masonryWrapperStyle}
+            >
                 {/* Background placeholder - only show if image not loaded and not animating */}
                 {!imageLoaded && !isAnimating && (
                     <div className="absolute inset-0 bg-gray-100" />
@@ -463,7 +466,10 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
+            <div
+                className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
+                style={masonryWrapperStyle}
+            >
                 {/* Preview image always renders when preview_thumbnail_url exists */}
                 {/* imageLoaded only affects opacity, not DOM presence */}
                 <img
@@ -555,7 +561,10 @@ export default function ThumbnailPreview({
                                      !isTerminalState
         
         return (
-            <div className={`relative ${className} ${contrastBackdropClass}`} style={masonryWrapperStyle}>
+            <div
+                className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
+                style={masonryWrapperStyle}
+            >
                 {/* Background placeholder - show while image loads */}
                 {!imageLoaded && (
                     <div className="absolute inset-0 bg-gray-100" />

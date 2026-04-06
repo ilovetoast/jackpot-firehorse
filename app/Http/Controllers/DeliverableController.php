@@ -813,14 +813,10 @@ class DeliverableController extends Controller
         // Phase L.5.1: Enable filters in "All Categories" view (reuse $schema resolved above for applyFilters)
         $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
 
-        // Phase M: Hide filters with zero values in scoped dataset (before pagination)
+        // Phase M: Hide filters with zero values in scoped dataset, except always-visible library keys
         if (! empty($filterableSchema)) {
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
-            $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
-                $key = $field['field_key'] ?? $field['key'] ?? null;
-
-                return $key && in_array($key, $keysWithValues, true);
-            }));
+            $filterableSchema = $this->metadataFilterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
         }
 
         // available_values is required by Phase H filter visibility rules

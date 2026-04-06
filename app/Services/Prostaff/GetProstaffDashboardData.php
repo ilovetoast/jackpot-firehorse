@@ -4,12 +4,15 @@ namespace App\Services\Prostaff;
 
 use App\Enums\ApprovalStatus;
 use App\Enums\AssetType;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\ProstaffMembership;
 use App\Models\ProstaffPeriodStat;
 use App\Models\User;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Log;
@@ -387,7 +390,14 @@ class GetProstaffDashboardData
      *     period_type: string,
      *     period_start: string,
      *     period_end: string,
+     *     uploads_remaining: int|null,
      *     uploads: list<array{asset_id: string, status: string, created_at: string}>,
+     *     pending_assets: list<array{id: string, title: string, thumbnail_url: string|null, uploaded_at: string|null}>,
+     *     rejected_assets: list<array{id: string, title: string, thumbnail_url: string|null, uploaded_at: string|null, rejection_reason: string|null}>,
+     *     approved_assets: list<array{id: string, title: string, thumbnail_url: string|null, uploaded_at: string|null, published_at: string|null}>,
+     *     creator_rank_percentile: int|null,
+     *     creator_rank_position: int|null,
+     *     total_creators: int,
      * }
      */
     public function currentUserDashboard(User $user, Brand $brand): array
@@ -441,6 +451,45 @@ class GetProstaffDashboardData
             ];
         }
 
+        $target = $row['target_uploads'];
+        $actual = (int) $row['actual_uploads'];
+        $uploadsRemaining = ($target !== null && (int) $target > 0)
+            ? max(0, (int) $target - $actual)
+            : null;
+
+        $comparison = $this->anonymizedVolumeComparison($brand, (int) $user->id);
+        $totalCreators = (int) ($comparison['cohort_size'] ?? 0);
+        $rankPosition = $comparison['solo'] ? null : ($comparison['rank_by_volume'] ?? null);
+        $rankPercentile = $comparison['solo'] ? null : ($comparison['top_percent'] ?? null);
+        if ($totalCreators <= 1) {
+            $rankPercentile = null;
+            $rankPosition = null;
+        }
+
+        $pendingLimit = 10;
+        $rejectedLimit = 10;
+        $approvedLimit = 5;
+
+        $pendingModels = $this->prostaffAssetQuery($brand, (int) $user->id)
+            ->where('approval_status', ApprovalStatus::PENDING)
+            ->orderByDesc('created_at')
+            ->limit($pendingLimit)
+            ->get();
+
+        $rejectedModels = $this->prostaffAssetQuery($brand, (int) $user->id)
+            ->where('approval_status', ApprovalStatus::REJECTED)
+            ->orderByDesc('rejected_at')
+            ->orderByDesc('created_at')
+            ->limit($rejectedLimit)
+            ->get();
+
+        $approvedModels = $this->prostaffAssetQuery($brand, (int) $user->id)
+            ->where('approval_status', ApprovalStatus::APPROVED)
+            ->orderByDesc('published_at')
+            ->orderByDesc('updated_at')
+            ->limit($approvedLimit)
+            ->get();
+
         return [
             'target_uploads' => $row['target_uploads'],
             'actual_uploads' => $row['actual_uploads'],
@@ -450,8 +499,91 @@ class GetProstaffDashboardData
             'period_type' => $row['period_type'],
             'period_start' => $row['period_start'],
             'period_end' => $row['period_end'],
+            'uploads_remaining' => $uploadsRemaining,
             'uploads' => $uploadPayload,
+            'pending_assets' => $pendingModels->map(fn (Asset $a) => $this->mapProstaffHomeAsset($a, false))->all(),
+            'rejected_assets' => $rejectedModels->map(fn (Asset $a) => $this->mapProstaffHomeAsset($a, true))->all(),
+            'approved_assets' => $approvedModels->map(fn (Asset $a) => $this->mapProstaffHomeAsset($a, false, true))->all(),
+            'creator_rank_percentile' => $rankPercentile,
+            'creator_rank_position' => $rankPosition,
+            'total_creators' => $totalCreators,
         ];
+    }
+
+    /**
+     * Base query: creator-tagged assets for a user on a brand (non-deleted DAM assets).
+     */
+    private function prostaffAssetQuery(Brand $brand, int $prostaffUserId)
+    {
+        return Asset::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where('submitted_by_prostaff', true)
+            ->where('prostaff_user_id', $prostaffUserId)
+            ->whereNull('deleted_at');
+    }
+
+    /**
+     * @return array{id: string, title: string, thumbnail_url: string|null, uploaded_at: string|null, rejection_reason?: string|null, published_at?: string|null}
+     */
+    private function mapProstaffHomeAsset(Asset $asset, bool $includeRejection, bool $includePublished = false): array
+    {
+        $out = [
+            'id' => (string) $asset->id,
+            'title' => $this->assetDisplayTitle($asset),
+            'thumbnail_url' => $this->gridThumbnailUrlForAsset($asset),
+            'uploaded_at' => $asset->created_at?->toIso8601String(),
+        ];
+        if ($includeRejection) {
+            $reason = $asset->rejection_reason;
+            $out['rejection_reason'] = ($reason !== null && $reason !== '') ? (string) $reason : null;
+        }
+        if ($includePublished) {
+            $out['published_at'] = $asset->published_at?->toIso8601String();
+        }
+
+        return $out;
+    }
+
+    private function assetDisplayTitle(Asset $asset): string
+    {
+        $title = $asset->title;
+        if ($title !== null && $title !== '' && $title !== 'Unknown' && $title !== 'Untitled Asset') {
+            return (string) $title;
+        }
+        if ($asset->original_filename) {
+            $base = pathinfo((string) $asset->original_filename, PATHINFO_FILENAME);
+
+            return $base !== '' ? $base : (string) $asset->original_filename;
+        }
+
+        return 'Asset';
+    }
+
+    private function gridThumbnailUrlForAsset(Asset $asset): ?string
+    {
+        $metadata = $asset->metadata ?? [];
+        $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : (string) ($asset->thumbnail_status ?? 'pending');
+
+        $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
+
+        $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+        if ($thumbnailStatus === ThumbnailStatus::COMPLETED->value || $thumbnailsExistInMetadata) {
+            $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
+            $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
+            if ($pathExists) {
+                $variant = $thumbnailStyle === 'medium' ? AssetVariant::THUMB_MEDIUM : AssetVariant::THUMB_SMALL;
+                $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED) ?: null;
+                if ($finalThumbnailUrl) {
+                    return $finalThumbnailUrl;
+                }
+            }
+        }
+
+        return $previewThumbnailUrl;
     }
 
     /**

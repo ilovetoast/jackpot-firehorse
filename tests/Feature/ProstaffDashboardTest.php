@@ -410,8 +410,7 @@ class ProstaffDashboardTest extends TestCase
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('Overview/CreatorProgress')
-                ->has('peer_comparison')
-                ->has('pipeline')
+                ->has('creator_home')
                 ->where('creator.id', (int) $this->prostaffA->id)
                 ->where('canManageCreators', false));
     }
@@ -577,6 +576,15 @@ class ProstaffDashboardTest extends TestCase
         $uploads = $response->json('uploads');
         $this->assertCount(1, $uploads);
         $this->assertSame('Mine', Asset::find((int) $uploads[0]['asset_id'])->title);
+        $response->assertJsonStructure([
+            'pending_assets',
+            'rejected_assets',
+            'approved_assets',
+            'uploads_remaining',
+            'creator_rank_percentile',
+            'creator_rank_position',
+            'total_creators',
+        ]);
     }
 
     public function test_non_prostaff_prostaff_me_returns_eligible_false(): void

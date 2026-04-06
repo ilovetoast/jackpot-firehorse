@@ -26,12 +26,14 @@
  * @param {number|null} props.selectedAssetId - ID of currently selected asset
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import AssetCard from './AssetCard'
 import AssetGridContainer from './AssetGridContainer'
 import { useSelectionOptional } from '../contexts/SelectionContext'
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
+/** Matches Tailwind `gap-7` (1.75rem) for column width math */
+const MASONRY_COLUMN_GAP_PX = 28
 /** After a completed rubber-band, suppress AssetCard clicks (see AssetCard handleClick). */
 const MARQUEE_SUPPRESS_CLICK_MS = 600
 
@@ -84,6 +86,8 @@ export default function AssetGrid({
     const selection = useSelectionOptional()
 
     const containerRef = useRef(null)
+    const masonryMeasureRef = useRef(null)
+    const [masonryColumnCount, setMasonryColumnCount] = useState(1)
     const itemRefs = useRef(new Map())
     const marqueeSessionRef = useRef(null)
     const [marqueeRect, setMarqueeRect] = useState(null)
@@ -171,6 +175,36 @@ export default function AssetGrid({
         const t = setTimeout(() => setAnimatedIds(new Set()), 1000)
         return () => clearTimeout(t)
     }, [animatedIds])
+
+    const clampedCardSize = useMemo(() => Math.max(160, Math.min(600, cardSize)), [cardSize])
+
+    useLayoutEffect(() => {
+        if (layoutMode !== 'masonry') return
+        const el = masonryMeasureRef.current
+        if (!el) return
+        const gap = MASONRY_COLUMN_GAP_PX
+        const colUnit = clampedCardSize + gap
+        const update = () => {
+            const w = el.getBoundingClientRect().width
+            if (w < 8) return
+            const n = Math.max(1, Math.floor((w + gap) / colUnit))
+            setMasonryColumnCount((prev) => (prev !== n ? n : prev))
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [layoutMode, clampedCardSize])
+
+    const masonryColumns = useMemo(() => {
+        if (layoutMode !== 'masonry') return []
+        const n = Math.max(1, masonryColumnCount)
+        const cols = Array.from({ length: n }, () => [])
+        safeAssets.forEach((asset, index) => {
+            cols[index % n].push({ asset, index })
+        })
+        return cols
+    }, [layoutMode, safeAssets, masonryColumnCount])
 
     const handleContainerPointerDown = useCallback(
         (e) => {
@@ -265,6 +299,46 @@ export default function AssetGrid({
         }
     }
 
+    const renderAssetCell = (asset, index) => {
+        const isEntering = animatedIds.has(asset.id)
+        const isVisible = !isEntering || visibleIds.has(asset.id)
+        const delay = isEntering && minAnimatedIndex >= 0 ? (index - minAnimatedIndex) * staggerMs : 0
+        return (
+            <div
+                key={asset.id}
+                ref={(el) => setItemRef(asset.id, el)}
+                data-asset-card
+                data-asset-id={asset.id}
+                className={`transition-all duration-300 ease-out ${
+                    isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-[0.98]'
+                }`}
+                style={{ transitionDelay: `${delay}ms` }}
+            >
+                <AssetCard
+                    asset={asset}
+                    onClick={onAssetClick}
+                    onDoubleClick={onAssetDoubleClick}
+                    showInfo={showInfo}
+                    isSelected={selectedAssetId === asset.id}
+                    primaryColor={primaryColor}
+                    cardVariant={cardVariant}
+                    isBulkSelected={selectedAssetIds.includes(asset.id)}
+                    onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null}
+                    isInBucket={bucketAssetIds.includes(asset.id)}
+                    onBucketToggle={onBucketToggle ? () => onBucketToggle(asset.id) : null}
+                    isPendingApprovalMode={isPendingApprovalMode}
+                    isPendingPublicationFilter={isPendingPublicationFilter}
+                    onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null}
+                    cardStyle={cardStyle}
+                    cardSize={cardSize}
+                    selectionAssetType={selectionAssetType}
+                    layoutMode={layoutMode}
+                    masonryMaxHeightPx={masonryMaxPx}
+                />
+            </div>
+        )
+    }
+
     return (
         <div
             ref={containerRef}
@@ -285,47 +359,29 @@ export default function AssetGrid({
                     aria-hidden
                 />
             )}
-            <AssetGridContainer cardSize={cardSize} layoutMode={layoutMode}>
-                {safeAssets.map((asset, index) => {
-                    const isEntering = animatedIds.has(asset.id)
-                    const isVisible = !isEntering || visibleIds.has(asset.id)
-                    const delay = isEntering && minAnimatedIndex >= 0 ? (index - minAnimatedIndex) * staggerMs : 0
-                    return (
-                        <div
-                            key={asset.id}
-                            ref={(el) => setItemRef(asset.id, el)}
-                            data-asset-card
-                            data-asset-id={asset.id}
-                            className={`transition-all duration-300 ease-out ${
-                                isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-[0.98]'
-                            }`}
-                            style={{ transitionDelay: `${delay}ms` }}
-                        >
-                            <AssetCard
-                                asset={asset}
-                                onClick={onAssetClick}
-                                onDoubleClick={onAssetDoubleClick}
-                                showInfo={showInfo}
-                                isSelected={selectedAssetId === asset.id}
-                                primaryColor={primaryColor}
-                                cardVariant={cardVariant}
-                                isBulkSelected={selectedAssetIds.includes(asset.id)}
-                                onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null}
-                                isInBucket={bucketAssetIds.includes(asset.id)}
-                                onBucketToggle={onBucketToggle ? () => onBucketToggle(asset.id) : null}
-                                isPendingApprovalMode={isPendingApprovalMode}
-                                isPendingPublicationFilter={isPendingPublicationFilter}
-                                onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null}
-                                cardStyle={cardStyle}
-                                cardSize={cardSize}
-                                selectionAssetType={selectionAssetType}
-                                layoutMode={layoutMode}
-                                masonryMaxHeightPx={masonryMaxPx}
-                            />
-                        </div>
-                    )
-                })}
-            </AssetGridContainer>
+            {layoutMode === 'masonry' ? (
+                <div
+                    ref={masonryMeasureRef}
+                    className="w-full min-w-0"
+                    style={{ '--asset-card-size': `${clampedCardSize}px` }}
+                >
+                    {/*
+                      Top-align columns so the first tile in each column shares one baseline
+                      (items-center left empty space above shorter columns).
+                    */}
+                    <div className="flex w-full min-w-0 items-start gap-7">
+                        {masonryColumns.map((col, ci) => (
+                            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-7">
+                                {col.map(({ asset, index }) => renderAssetCell(asset, index))}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <AssetGridContainer cardSize={cardSize} layoutMode={layoutMode}>
+                    {safeAssets.map((asset, index) => renderAssetCell(asset, index))}
+                </AssetGridContainer>
+            )}
         </div>
     )
 }

@@ -649,7 +649,15 @@ class BulkMetadataService
         $fieldType = $field->type ?? 'text';
 
         if ($fieldType === 'multiselect') {
-            return is_array($value) && ! empty($value);
+            if (! is_array($value)) {
+                return false;
+            }
+            // Optional multiselect (e.g. tags): [] is valid after remove-all or clear-to-empty in preview.
+            if ($value === []) {
+                return ! ($field->is_required ?? false);
+            }
+
+            return true;
         }
 
         switch ($fieldType) {

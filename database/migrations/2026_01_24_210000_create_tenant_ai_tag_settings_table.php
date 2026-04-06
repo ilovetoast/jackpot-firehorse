@@ -33,7 +33,8 @@ return new class extends Migration
             // Quantity cap controls
             $table->enum('ai_auto_tag_limit_mode', ['best_practices', 'custom'])->default('best_practices');
             $table->integer('ai_auto_tag_limit_value')->nullable(); // Used when mode = 'custom'
-            
+            $table->integer('ai_best_practices_limit')->default(5); // 1–10 when mode = best_practices
+
             $table->timestamps();
 
             // Foreign key constraint for tenant_id

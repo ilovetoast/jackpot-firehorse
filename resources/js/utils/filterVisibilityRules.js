@@ -50,7 +50,7 @@
  * @module filterVisibilityRules
  */
 
-import { isFilterCompatible } from './filterScopeRules';
+import { isFilterCompatible, LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN } from './filterScopeRules';
 
 /**
  * Filter visibility state
@@ -132,6 +132,10 @@ export function hasAvailableValues(filter, available_values = {}) {
     
     if (isSystemPrimary) {
         return true; // System primary filters always have values
+    }
+
+    if (LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN.has(filterKey)) {
+        return true;
     }
     
     // Metadata primary filters need to check available_values

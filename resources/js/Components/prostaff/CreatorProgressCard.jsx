@@ -32,7 +32,7 @@ function statusBadge(status) {
  * Prostaff self-service progress on Overview (data from GET /app/api/prostaff/me).
  *
  * @param {{
- *   data?: { actual_uploads?: number, target_uploads?: number|null, completion_percentage?: number, period_type?: string, status?: string } | null,
+ *   data?: { actual_uploads?: number, target_uploads?: number|null, uploads_remaining?: number|null, completion_percentage?: number, period_type?: string, status?: string } | null,
  *   loading?: boolean,
  *   brandColor?: string,
  * }} props
@@ -43,7 +43,7 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
             <div
                 className="animate-fadeInUp-d2 relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] p-5 shadow-[0_0_40px_-12px_rgba(255,255,255,0.12)] backdrop-blur-xl"
                 aria-busy="true"
-                aria-label="Loading creator progress"
+                aria-label="Loading Creator Home"
             >
                 <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/[0.04] to-transparent" />
                 <div className="relative space-y-4">
@@ -63,6 +63,19 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
     const target = data.target_uploads != null ? Number(data.target_uploads) : null
     const pctRaw = Number(data.completion_percentage)
     const pct = Number.isFinite(pctRaw) ? Math.min(100, Math.max(0, pctRaw)) : 0
+    const uploadsRemaining =
+        data.uploads_remaining != null && Number.isFinite(Number(data.uploads_remaining))
+            ? Number(data.uploads_remaining)
+            : null
+    const targetNum = target != null && Number.isFinite(target) ? Number(target) : null
+    const progressHint =
+        targetNum != null && targetNum > 0
+            ? uploadsRemaining != null && uploadsRemaining > 0
+                ? `${uploadsRemaining} upload${uploadsRemaining === 1 ? '' : 's'} to reach your target`
+                : uploadsRemaining === 0
+                  ? "You've reached your target for this period"
+                  : null
+            : null
 
     return (
         <motion.div
@@ -78,9 +91,7 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
             />
             <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-white/45">
-                        Your creator progress
-                    </h2>
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-white/45">Creator Home</h2>
                     <p className="mt-1 text-xs text-white/40">
                         Upload quota · {periodLabel(data.period_type)}
                     </p>
@@ -90,6 +101,13 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                         {target != null && Number.isFinite(target) ? target : '—'}
                         <span className="text-sm font-normal text-white/50"> uploads</span>
                     </p>
+                    {uploadsRemaining != null && targetNum != null && targetNum > 0 ? (
+                        <p className="mt-2 text-xs text-white/45">
+                            <span className="font-semibold tabular-nums text-white/70">{uploadsRemaining}</span> upload
+                            {uploadsRemaining === 1 ? '' : 's'} remaining
+                        </p>
+                    ) : null}
+                    {progressHint ? <p className="mt-1 text-xs text-white/40">{progressHint}</p> : null}
                 </div>
                 <div className="shrink-0 sm:pt-0.5">{statusBadge(data.status)}</div>
             </div>
@@ -115,12 +133,12 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                     }
                     className="inline-flex items-center gap-1 text-sm font-semibold text-white/80 transition hover:text-white"
                 >
-                    Open creator dashboard
+                    Open Creator Home
                     <span aria-hidden className="text-white/45">
                         →
                     </span>
                 </Link>
-                <p className="mt-1 text-xs text-white/35">Pipeline, comparisons, and detailed profile</p>
+                <p className="mt-1 text-xs text-white/35">Review status, approved work, and benchmarks</p>
             </div>
         </motion.div>
     )

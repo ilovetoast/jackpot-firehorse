@@ -68,7 +68,7 @@ function richPlaceholderClasses(asset) {
   }
 }
 
-export default function AssetPlaceholder({ asset, primaryColor: _primaryColor, brand = null, size = 'lg', rich = false }) {
+export default function AssetPlaceholder({ asset, primaryColor = null, brand = null, size = 'lg', rich = false }) {
   const photoClass = PHOTO_ICON_SIZE[size] || PHOTO_ICON_SIZE.lg
 
   if (isImageAsset(asset) && !rich) {
@@ -118,6 +118,33 @@ export default function AssetPlaceholder({ asset, primaryColor: _primaryColor, b
           aria-hidden
         />
         <div className={`absolute inset-0 opacity-[0.5] ${wrap}`} aria-hidden />
+        <div className={`relative z-[1] ${iconChipClass}`}>
+          <FileTypeIcon
+            fileExtension={asset?.file_extension}
+            mimeType={asset?.mime_type}
+            size={size === 'sm' ? 'md' : 'lg'}
+            iconClassName="text-white/90 drop-shadow-md"
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Processing / pending (no rich failure copy): brand-tinted tile — matches cinematic rich placeholders, avoids flat white video tiles.
+  const brandPrimary = primaryColor || brand?.primary_color
+  if (brandPrimary) {
+    const secondary = brand?.secondary_color || brand?.accent_color || brandPrimary
+    const cinematicBg = buildBrandCinematicTileBackground(brandPrimary, secondary)
+    const iconChipClass =
+      'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
+    return (
+      <div
+        className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10"
+        style={{
+          background: cinematicBg,
+          boxShadow: `inset 0 0 1px ${hexToRgba(brandPrimary, 0.35)}`,
+        }}
+      >
         <div className={`relative z-[1] ${iconChipClass}`}>
           <FileTypeIcon
             fileExtension={asset?.file_extension}

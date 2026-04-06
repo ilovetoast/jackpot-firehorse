@@ -1126,14 +1126,10 @@ class AssetController extends Controller
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
         }
 
-        // Phase M: Hide filters with zero values in scoped dataset (before pagination)
+        // Phase M: Hide filters with zero values in scoped dataset, except always-visible library keys
         if (! empty($filterableSchema)) {
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
-            $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
-                $key = $field['field_key'] ?? $field['key'] ?? null;
-
-                return $key && in_array($key, $keysWithValues, true);
-            }));
+            $filterableSchema = $this->metadataFilterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
         }
 
         // available_values is required by Phase H filter visibility rules
@@ -2084,6 +2080,8 @@ class AssetController extends Controller
      */
     public function previewUrl(Asset $asset): JsonResponse
     {
+        Gate::authorize('view', $asset);
+
         $tenant = app('tenant');
 
         // Verify asset belongs to tenant
@@ -2091,6 +2089,12 @@ class AssetController extends Controller
             return response()->json([
                 'message' => 'Asset not found',
             ], 404);
+        }
+
+        // Video playback (AssetDrawer, etc.): do not require full AI/metadata completion — only that
+        // the file is integrated enough to stream. Strict isComplete() blocks 422 while tagging lags.
+        if ($this->assetIsStreamableVideo($asset)) {
+            return $this->jsonVideoStreamUrl($asset);
         }
 
         // Verify asset processing is completed (check processing state, not status)
@@ -2106,6 +2110,44 @@ class AssetController extends Controller
         return response()->json([
             'url' => $previewUrl,
             'expires_at' => $previewUrl ? now()->addMinutes(15)->toIso8601String() : null,
+        ], 200);
+    }
+
+    /**
+     * True when the asset should be treated as video for relaxed preview-url / view JSON rules.
+     */
+    private function assetIsStreamableVideo(Asset $asset): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_starts_with($mime, 'video/')) {
+            return true;
+        }
+
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+
+        return in_array($ext, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mpeg', 'mpg'], true);
+    }
+
+    /**
+     * Signed URL for in-browser video (prefer transcoded preview, else original).
+     * Does not use AssetCompletionService::isComplete() — videos can play while AI tagging / metadata lag.
+     */
+    private function jsonVideoStreamUrl(Asset $asset): JsonResponse
+    {
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
+        if ($url === '' || $url === null) {
+            $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+        }
+
+        if (! $url) {
+            return response()->json([
+                'message' => 'Video file not available yet',
+            ], 422);
+        }
+
+        return response()->json([
+            'url' => $url,
+            'expires_at' => now()->addMinutes(15)->toIso8601String(),
         ], 200);
     }
 

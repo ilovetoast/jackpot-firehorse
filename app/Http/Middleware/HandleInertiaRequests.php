@@ -498,6 +498,7 @@ class HandleInertiaRequests extends Middleware
                         'name' => $activeBrand->name,
                         'slug' => $activeBrand->slug,
                         'logo_path' => $activeBrand->logo_path,
+                        'logo_dark_path' => $activeBrand->logo_dark_path,
                         'primary_color' => $activeBrand->primary_color,
                         'secondary_color' => $activeBrand->secondary_color,
                         'icon_style' => $activeBrand->icon_style ?? 'subtle',

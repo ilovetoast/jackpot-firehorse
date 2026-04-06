@@ -1222,14 +1222,18 @@ class CollectionController extends Controller
      */
     private function buildGridLookupsForAssets(\Illuminate\Support\Collection $assets, Tenant $tenant, Brand $brand): array
     {
+        // Keep extraction aligned with mapAssetToGridArray (metadata is array-cast on Asset).
         $categoryIds = $assets
             ->map(function (Asset $a) {
                 $m = $a->metadata;
+                if (! is_array($m) || ! isset($m['category_id'])) {
+                    return null;
+                }
+                $raw = $m['category_id'];
 
-                return is_array($m) ? ($m['category_id'] ?? null) : null;
+                return is_numeric($raw) ? (int) $raw : null;
             })
-            ->filter(fn ($id) => $id !== null && $id !== '' && is_numeric($id))
-            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id !== null && $id > 0)
             ->unique()
             ->values()
             ->all();
@@ -1306,18 +1310,9 @@ class CollectionController extends Controller
             if (is_numeric($rawCatId)) {
                 $categoryId = (int) $rawCatId;
             }
-            $category = null;
-            if ($categoryId !== null) {
-                if ($categoriesById !== []) {
-                    $category = $categoriesById[$categoryId] ?? null;
-                } else {
-                    $category = Category::query()
-                        ->where('id', $categoryId)
-                        ->where('tenant_id', $tenant->id)
-                        ->where('brand_id', $brand->id)
-                        ->first();
-                }
-            }
+            // Use batch map only. Empty map after whereIn means missing/deleted rows — do not fall back to
+            // per-asset queries (that caused N+1 when the batch returned [] but assets still referenced ids).
+            $category = $categoryId !== null ? ($categoriesById[$categoryId] ?? null) : null;
             if ($category) {
                 $categoryName = $category->name;
             }
@@ -1326,12 +1321,7 @@ class CollectionController extends Controller
         $uploadedBy = null;
         if ($asset->user_id) {
             $uid = (int) $asset->user_id;
-            $uploader = null;
-            if ($uploadersById !== []) {
-                $uploader = $uploadersById[$uid] ?? null;
-            } else {
-                $uploader = User::query()->find($uid);
-            }
+            $uploader = $uploadersById[$uid] ?? null;
             if ($uploader) {
                 $uploadedBy = [
                     'id' => $uploader->id,

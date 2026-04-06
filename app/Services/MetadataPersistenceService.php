@@ -334,8 +334,15 @@ class MetadataPersistenceService
      * Remove canonical tag strings from an asset: denormalized asset_tags and matching approved user asset_metadata rows for the tags field.
      *
      * @param  list<string>  $rawTagsToRemove
+     * @param  bool  $scheduleIntelligenceRescore  When false, skips debounced EBI rescoring (use for brand-settings bulk purges to avoid queue storms).
      */
-    public function removeCanonicalTagsFromAsset(Asset $asset, Tenant $tenant, array $rawTagsToRemove, int $tagsMetadataFieldId): void
+    public function removeCanonicalTagsFromAsset(
+        Asset $asset,
+        Tenant $tenant,
+        array $rawTagsToRemove,
+        int $tagsMetadataFieldId,
+        bool $scheduleIntelligenceRescore = true
+    ): void
     {
         $canonicalRemove = [];
         foreach ($rawTagsToRemove as $raw) {
@@ -379,7 +386,7 @@ class MetadataPersistenceService
             }
         }
 
-        if ($removedAny) {
+        if ($removedAny && $scheduleIntelligenceRescore) {
             $this->brandIntelligenceScheduleService->scheduleDebouncedRescoreAfterUserEdit($asset);
         }
     }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, usePage } from '@inertiajs/react'
 import JackpotLogo from './JackpotLogo'
 import { usePermission } from '../hooks/usePermission'
@@ -74,10 +74,19 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         // Try to get the first active brand from valid brands array
         const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
+            const fallbackSrc =
+                textColor === '#ffffff' && firstBrand.logo_dark_path
+                    ? firstBrand.logo_dark_path
+                    : firstBrand.logo_path
             return (
                 <Link href="/app" className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
-                    {firstBrand.logo_path ? (
-                        <img src={firstBrand.logo_path} alt={firstBrand.name || 'Brand'} className="h-12 w-auto max-w-full object-contain object-left" style={logoFilterStyle} />
+                    {fallbackSrc ? (
+                        <img
+                            src={fallbackSrc}
+                            alt={firstBrand.name || 'Brand'}
+                            className="h-12 w-auto max-w-full object-contain object-left"
+                            style={textColor === '#ffffff' && firstBrand.logo_dark_path ? undefined : logoFilterStyle}
+                        />
                     ) : (
                         <>
                             <BrandIconUnified brand={firstBrand} size="lg" />
@@ -104,6 +113,18 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const brandName = activeBrand.name || 'Brand'
     /** Transparent / cinematic nav passes white text — avoid light gray hover (unreadable). */
     const isDarkNavChrome = textColor === '#ffffff'
+    /** Prefer light-on-dark logo asset on cinematic nav when configured (matches Brand Guidelines hero). */
+    const navLogoSrc = useMemo(() => {
+        if (isDarkNavChrome && activeBrand.logo_dark_path) {
+            return activeBrand.logo_dark_path
+        }
+        return activeBrand.logo_path
+    }, [isDarkNavChrome, activeBrand.logo_dark_path, activeBrand.logo_path])
+    const useDarkVariantLogo = Boolean(isDarkNavChrome && activeBrand.logo_dark_path)
+
+    useEffect(() => {
+        setLogoError(false)
+    }, [navLogoSrc])
     /** Match GET /app (company portal), not Ziggy during Inertia — avoids logo ↔ text flash on nav. */
     const navPath = inertiaPathname(page.url)
     const isOnCompanyOverview = navPath === '/app' || navPath === '/app/'
@@ -130,12 +151,12 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     title="Open menu"
                 >
                     {!(isOnCompanyOverview && canViewCompanyOverview && tenant) ? (
-                        activeBrand.logo_path && !logoError ? (
+                        navLogoSrc && !logoError ? (
                             <img
-                                src={activeBrand.logo_path}
+                                src={navLogoSrc}
                                 alt={brandName}
                                 className="h-12 w-auto max-w-full object-contain object-left"
-                                style={logoFilterStyle}
+                                style={useDarkVariantLogo ? undefined : logoFilterStyle}
                                 onError={() => setLogoError(true)}
                             />
                         ) : (
@@ -298,12 +319,12 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const singleBrandHref = rootLinkHref ?? '/app'
     return (
         <Link href={singleBrandHref} className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
-            {activeBrand.logo_path && !logoError ? (
+            {navLogoSrc && !logoError ? (
                 <img
-                    src={activeBrand.logo_path}
+                    src={navLogoSrc}
                     alt={brandName}
                     className="h-12 w-auto max-w-full object-contain object-left"
-                    style={logoFilterStyle}
+                    style={useDarkVariantLogo ? undefined : logoFilterStyle}
                     onError={() => setLogoError(true)}
                 />
             ) : (

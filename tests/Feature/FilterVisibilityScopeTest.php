@@ -27,7 +27,7 @@ use Tests\TestCase;
  * in the scoped asset set. Prevents empty filters from appearing in the UI.
  *
  * Invariants:
- * - Filter omitted when no values exist in scope.
+ * - Filter omitted when no values exist in scope (except always-visible library technical keys).
  * - Filter appears when at least one value exists in scope.
  */
 class FilterVisibilityScopeTest extends TestCase
@@ -101,10 +101,7 @@ class FilterVisibilityScopeTest extends TestCase
         $filterableSchema = $this->filterService->getFilterableFields($schema, $this->category, $this->tenant);
         $baseQuery = $this->baseQueryForCategory();
         $keysWithValues = $this->filterService->getFieldKeysWithValuesInScope($baseQuery, $filterableSchema);
-        $filtered = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
-            $key = $field['field_key'] ?? $field['key'] ?? null;
-            return $key && in_array($key, $keysWithValues, true);
-        }));
+        $filtered = $this->filterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
 
         return array_map(function ($field) {
             return $field['field_key'] ?? $field['key'] ?? '';
@@ -205,5 +202,20 @@ class FilterVisibilityScopeTest extends TestCase
         $payloadKeys = $this->getFilterPayloadFieldKeys();
 
         $this->assertContains('photo_type', $payloadKeys, 'photo_type should appear when at least one asset has a value');
+    }
+
+    public function test_always_visible_library_keys_remain_without_scope_values(): void
+    {
+        $filterableSchema = [
+            ['field_key' => 'orientation', 'key' => 'orientation'],
+            ['field_key' => 'photo_type', 'key' => 'photo_type'],
+        ];
+        $keysWithValues = [];
+
+        $filtered = $this->filterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
+        $keys = array_map(fn ($f) => $f['field_key'] ?? $f['key'] ?? '', $filtered);
+
+        $this->assertContains('orientation', $keys);
+        $this->assertNotContains('photo_type', $keys);
     }
 }

@@ -28,6 +28,7 @@ import InviteExperience from '../../Components/portal/InviteExperience'
 import AgencyTemplates from '../../Components/portal/AgencyTemplates'
 import BrandCreatorsSettingsPanel from '../../Components/prostaff/BrandCreatorsSettingsPanel'
 import BrandTagsSettingsSection from '../../Components/brand/BrandTagsSettingsSection'
+import ColorPickerControl from '../../Components/BrandGuidelines/controls/ColorPickerControl'
 
 // Phase 1: Categories and Metadata sections hidden from Brand Identity page (will be re-homed later)
 const SHOW_CATEGORIES_AND_METADATA = false
@@ -3170,121 +3171,70 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Brand Colors</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Define your brand's color palette. These colors will be used throughout the application.
+                                        Define your brand&apos;s color palette. These colors will be used throughout the application.
+                                    </p>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Use the swatch for the system color picker, or click the hex code to type a #RRGGBB value.
                                     </p>
                                 </div>
                                 <div className="mt-6">
                                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
                                         <div>
-                                    <label htmlFor="primary_color" className="block text-sm font-medium leading-6 text-gray-900">
-                                        Primary Color
-                                    </label>
-                                    <div className="mt-2 flex gap-2">
-                                        {hexForColorInput(data.primary_color) ? (
-                                            <input
-                                                type="color"
-                                                id="primary_color_picker"
-                                                value={hexForColorInput(data.primary_color)}
-                                                onChange={(e) => {
-                                                    setData('primary_color', e.target.value)
-                                                    if (!data.nav_color || data.nav_color === data.primary_color) {
-                                                        setData('nav_color', e.target.value)
-                                                    }
-                                                }}
-                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                            />
-                                        ) : (
-                                            <div
-                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
-                                                title="No primary color"
-                                                aria-hidden
-                                            />
-                                        )}
-                                        <input
-                                            type="text"
-                                            name="primary_color"
-                                            id="primary_color"
-                                            value={data.primary_color}
-                                            onChange={(e) => {
-                                                setData('primary_color', e.target.value)
-                                                if (!data.nav_color || data.nav_color === data.primary_color) {
-                                                    setData('nav_color', e.target.value)
-                                                }
-                                            }}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="e.g. #502c6d"
-                                            autoComplete="off"
-                                        />
-                                    </div>
-                                            {errors.primary_color && <p className="mt-2 text-sm text-red-600">{errors.primary_color}</p>}
+                                            <div className="block text-sm font-medium leading-6 text-gray-900">Primary Color</div>
+                                            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/80 px-3 py-2">
+                                                <ColorPickerControl
+                                                    label="Primary"
+                                                    hideLabel
+                                                    value={hexForColorInput(data.primary_color) ?? '#6366f1'}
+                                                    onChange={(hex) => {
+                                                        const syncNav =
+                                                            !data.nav_color || data.nav_color === data.primary_color
+                                                        if (syncNav) {
+                                                            setData({
+                                                                ...data,
+                                                                primary_color: hex,
+                                                                nav_color: hex,
+                                                            })
+                                                        } else {
+                                                            setData('primary_color', hex)
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                            {errors.primary_color && (
+                                                <p className="mt-2 text-sm text-red-600">{errors.primary_color}</p>
+                                            )}
                                         </div>
 
                                         <div>
-                                    <label htmlFor="secondary_color" className="block text-sm font-medium leading-6 text-gray-900">
-                                        Secondary Color
-                                    </label>
-                                    <div className="mt-2 flex gap-2">
-                                        {hexForColorInput(data.secondary_color) ? (
-                                            <input
-                                                type="color"
-                                                id="secondary_color_picker"
-                                                value={hexForColorInput(data.secondary_color)}
-                                                onChange={(e) => setData('secondary_color', e.target.value)}
-                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                            />
-                                        ) : (
-                                            <div
-                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
-                                                title="No secondary color"
-                                                aria-hidden
-                                            />
-                                        )}
-                                        <input
-                                            type="text"
-                                            name="secondary_color"
-                                            id="secondary_color"
-                                            value={data.secondary_color}
-                                            onChange={(e) => setData('secondary_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="e.g. #ffffff"
-                                            autoComplete="off"
-                                        />
-                                    </div>
-                                            {errors.secondary_color && <p className="mt-2 text-sm text-red-600">{errors.secondary_color}</p>}
+                                            <div className="block text-sm font-medium leading-6 text-gray-900">Secondary Color</div>
+                                            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/80 px-3 py-2">
+                                                <ColorPickerControl
+                                                    label="Secondary"
+                                                    hideLabel
+                                                    value={hexForColorInput(data.secondary_color) ?? '#8b5cf6'}
+                                                    onChange={(hex) => setData('secondary_color', hex)}
+                                                />
+                                            </div>
+                                            {errors.secondary_color && (
+                                                <p className="mt-2 text-sm text-red-600">{errors.secondary_color}</p>
+                                            )}
                                         </div>
 
                                         <div>
-                                    <label htmlFor="accent_color" className="block text-sm font-medium leading-6 text-gray-900">
-                                        Accent Color
-                                    </label>
-                                    <div className="mt-2 flex gap-2">
-                                        {hexForColorInput(data.accent_color) ? (
-                                            <input
-                                                type="color"
-                                                id="accent_color_picker"
-                                                value={hexForColorInput(data.accent_color)}
-                                                onChange={(e) => setData('accent_color', e.target.value)}
-                                                className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                            />
-                                        ) : (
-                                            <div
-                                                className="h-10 w-20 shrink-0 rounded border-2 border-dashed border-gray-300 bg-gray-50"
-                                                title="No accent color"
-                                                aria-hidden
-                                            />
-                                        )}
-                                        <input
-                                            type="text"
-                                            name="accent_color"
-                                            id="accent_color"
-                                            value={data.accent_color}
-                                            onChange={(e) => setData('accent_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                            placeholder="Optional"
-                                            autoComplete="off"
-                                        />
-                                    </div>
-                                            {errors.accent_color && <p className="mt-2 text-sm text-red-600">{errors.accent_color}</p>}
+                                            <div className="block text-sm font-medium leading-6 text-gray-900">Accent Color</div>
+                                            <p className="mt-1 text-xs text-gray-500">Optional.</p>
+                                            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/80 px-3 py-2">
+                                                <ColorPickerControl
+                                                    label="Accent"
+                                                    hideLabel
+                                                    value={hexForColorInput(data.accent_color) ?? '#ec4899'}
+                                                    onChange={(hex) => setData('accent_color', hex)}
+                                                />
+                                            </div>
+                                            {errors.accent_color && (
+                                                <p className="mt-2 text-sm text-red-600">{errors.accent_color}</p>
+                                            )}
                                         </div>
                                     </div>
 

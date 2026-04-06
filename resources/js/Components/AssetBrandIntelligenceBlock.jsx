@@ -389,7 +389,11 @@ export default function AssetBrandIntelligenceBlock({
                 </p>
             ) : (
                 <div className="mt-2">
-                    <BrandSignalBreakdown brandIntelligence={bi} brandId={asset?.brand_id ?? asset?.brand?.id} />
+                    <BrandSignalBreakdown
+                        brandIntelligence={bi}
+                        brandId={asset?.brand_id ?? asset?.brand?.id}
+                        asset={asset}
+                    />
                 </div>
             )}
             {!rescoreLoading &&

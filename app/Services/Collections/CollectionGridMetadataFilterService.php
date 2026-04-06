@@ -134,11 +134,7 @@ class CollectionGridMetadataFilterService
 
         if (! empty($filterableSchema)) {
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
-            $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
-                $key = $field['field_key'] ?? $field['key'] ?? null;
-
-                return $key && in_array($key, $keysWithValues, true);
-            }));
+            $filterableSchema = $this->metadataFilterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
         }
 
         $availableValues = [];

@@ -315,7 +315,13 @@ const TagInputUnified = forwardRef(function TagInputUnified({
         flushPending: flushPendingTags,
     }), [flushPendingTags])
 
-    const handleBlur = () => {
+    const handleBlur = (e) => {
+        // Don't flush/commit partial input when focus moves into the suggestion list (click or Tab).
+        // Otherwise blur runs before click: flushPendingTags adds the typed fragment, not the chosen tag.
+        const next = e?.relatedTarget
+        if (next instanceof Node && suggestionsRef.current?.contains(next)) {
+            return
+        }
         flushPendingTags()
         setTimeout(() => {
             setShowSuggestions(false)
@@ -415,6 +421,11 @@ const TagInputUnified = forwardRef(function TagInputUnified({
                                     key={`${suggestion.tag}-${index}`}
                                     id={`unified-suggestion-${index}`}
                                     type="button"
+                                    onMouseDown={(ev) => {
+                                        // Keep focus on the input through mousedown so blur doesn't run before click
+                                        // (upload/filter blur would otherwise flush partial text via flushPendingTags).
+                                        ev.preventDefault()
+                                    }}
                                     onClick={() => handleSuggestionClick(suggestion)}
                                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
                                         index === selectedIndex ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900'

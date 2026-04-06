@@ -44,6 +44,18 @@
  */
 
 /**
+ * Technical metadata filters shown on every grid (Assets, Deliverables, Collections)
+ * regardless of facet counts or asset_types like `image` vs UI asset_type `deliverable`.
+ */
+export const LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN = new Set([
+    'orientation',
+    'color_space',
+    'resolution_class',
+    'print_type',
+    'dominant_hue_group',
+]);
+
+/**
  * Filter descriptor (from FilterDescriptor contract)
  * 
  * @typedef {Object} FilterDescriptor
@@ -244,6 +256,11 @@ export function isAssetTypeCompatible(filter, asset_type) {
     
     if (!asset_type || typeof asset_type !== 'string') {
         return false;
+    }
+
+    const filterKey = filter.key || filter.field_key;
+    if (filterKey && LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN.has(filterKey)) {
+        return true;
     }
     
     // If filter.asset_types is null, undefined, or missing, filter applies to all asset types

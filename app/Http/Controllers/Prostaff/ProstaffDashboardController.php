@@ -174,21 +174,13 @@ class ProstaffDashboardController extends Controller
             return redirect()->route('overview')->with('warning', $e->getMessage());
         }
 
-        $service = app(GetProstaffDashboardData::class);
-        $performance = $service->creatorDashboardRowForUser($brand, (int) $authUser->id);
-        if ($performance === null) {
-            abort(404);
-        }
-
-        $rejections = $service->rejectedProstaffUploadsForUser($brand, (int) $authUser->id);
-        $awaitingBrandReviewCount = $service->pendingProstaffApprovalCountForUser($brand, (int) $authUser->id);
-        $pipeline = $service->pipelineCountsForProstaffUser($brand, (int) $authUser->id);
-        $peerComparison = $service->anonymizedVolumeComparison($brand, (int) $authUser->id);
-
         $membership = $authUser->activeProstaffMembership($brand);
         if ($membership === null) {
             abort(404);
         }
+
+        $service = app(GetProstaffDashboardData::class);
+        $creatorHome = $service->currentUserDashboard($authUser, $brand);
 
         $access = app(ResolveCreatorsDashboardAccess::class);
 
@@ -207,17 +199,8 @@ class ProstaffDashboardController extends Controller
                 'name' => $authUser->name,
                 'email' => $authUser->email,
             ],
-            'performance' => $performance,
-            'rejections' => $rejections,
-            'awaiting_brand_review_count' => $awaitingBrandReviewCount,
-            'pipeline' => $pipeline,
-            'peer_comparison' => $peerComparison,
+            'creator_home' => $creatorHome,
             'canManageCreators' => $access->canManage($authUser, $tenant, $brand),
-            'membership' => [
-                'id' => $membership->id,
-                'target_uploads' => $membership->target_uploads,
-                'period_type' => $membership->period_type ?? 'month',
-            ],
         ]);
     }
 

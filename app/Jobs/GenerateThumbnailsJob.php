@@ -640,7 +640,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (empty($finalThumbnails)) {
                 $errorMessage = 'Thumbnail generation failed: No thumbnails were generated (all styles failed)';
                 
-                Log::error('Thumbnail generation failed - no final thumbnails generated', [
+                Log::warning('Thumbnail generation produced no final thumbnails (terminal — pipeline continues)', [
                     'asset_id' => $asset->id,
                     'preview_thumbnails' => count($previewThumbnails),
                     'final_thumbnails' => count($finalThumbnails),
@@ -684,6 +684,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                             'thumbnail_generation_failed_at' => now()->toIso8601String(),
                             'thumbnail_generation_error' => $errorMessage,
                         ]),
+                        'pipeline_status' => 'complete',
                     ]);
                 } else {
                     $currentMetadata = $asset->metadata ?? [];
@@ -692,8 +693,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $currentMetadata['thumbnail_generation_error'] = $errorMessage;
                     $asset->update(['metadata' => $currentMetadata]);
                 }
-                
-                throw new \RuntimeException($errorMessage);
+
+                $asset->refresh();
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+
+                return;
             }
 
             // CRITICAL: Verify FINAL thumbnail files exist AND are valid before marking as completed
@@ -710,6 +714,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             // - Persist actual error message
             // - Do NOT mark as COMPLETED
             // - Do NOT record "completed" event
+            // - Return without throwing so Bus::chain continues (finalize still runs when version pipeline is complete)
             // - Preview thumbnails may still exist (non-fatal)
             $bucket = $asset->storageBucket;
             $s3Client = $this->createS3Client();
@@ -799,11 +804,11 @@ class GenerateThumbnailsJob implements ShouldQueue
             // - Persist actual error message with details
             // - Do NOT mark as COMPLETED
             // - Do NOT record "completed" event
-            // - Throw exception to prevent "completed" event logging below
+            // - Return without throwing so chain continues; see finalizeTerminalThumbnailFailureAndContinuePipeline
             if (!$allThumbnailsValid) {
                 $errorMessage = 'Thumbnail generation failed: ' . implode('; ', $verificationErrors);
                 
-                Log::error('Thumbnail generation failed - verification failed', [
+                Log::warning('Thumbnail verification failed (terminal — pipeline continues)', [
                     'asset_id' => $asset->id,
                     'thumbnail_count' => count($finalThumbnails),
                     'errors' => $verificationErrors,
@@ -847,6 +852,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                             'thumbnail_generation_failed_at' => now()->toIso8601String(),
                             'thumbnail_generation_error' => $errorMessage,
                         ]),
+                        'pipeline_status' => 'complete',
                     ]);
                 } else {
                     $currentMetadata = $asset->metadata ?? [];
@@ -855,8 +861,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $currentMetadata['thumbnail_generation_error'] = $errorMessage;
                     $asset->update(['metadata' => $currentMetadata]);
                 }
-                
-                throw new \RuntimeException($errorMessage);
+
+                $asset->refresh();
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+
+                return;
             }
             
             // Step 6: Persist metadata - version only when version exists; asset for legacy
@@ -1293,6 +1302,25 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'thumbnail_started_at' => null,
                     ]);
             }
+
+            // All styles produced no output: retries will not help; rethrow would spam Sentry and the queue.
+            // Complete the job successfully so Bus::chain continues (same intent as the in-process empty-thumbnails branch).
+            if (isset($asset) && $this->isTerminalNoThumbnailsAllStylesFailed($e)) {
+                $asset->refresh();
+                $expectedStatus = 'generating_thumbnails';
+                $currentStatus = $asset->analysis_status ?? 'uploading';
+                if ($currentStatus === $expectedStatus) {
+                    $asset->update(['analysis_status' => 'extracting_metadata']);
+                    $asset->refresh();
+                    \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+                }
+                Log::warning('[GenerateThumbnailsJob] Terminal no-thumbnails failure — job completed without rethrow', [
+                    'asset_id' => $asset->id,
+                    'message' => $e->getMessage(),
+                ]);
+
+                return;
+            }
             
             // Fail immediately for non-retryable exceptions (asset deleted, 4xx client errors)
             // Prevents wasted retries and MaxAttemptsExceededException spam
@@ -1312,6 +1340,86 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
+    }
+
+    /**
+     * True when generation failed with no output (terminal). Retrying the job will not help.
+     */
+    private function isTerminalNoThumbnailsAllStylesFailed(\Throwable $e): bool
+    {
+        $msg = $e->getMessage();
+
+        return str_contains($msg, 'No thumbnails were generated (all styles failed)');
+    }
+
+    /**
+     * After a handled in-process thumbnail failure (no output or S3 verification failed).
+     * Do not throw: the job completes successfully so Bus::chain continues; asset stays thumbnail FAILED.
+     * Avoids queue retries and Sentry noise for sources that will not improve on retry.
+     */
+    private function finalizeTerminalThumbnailFailureAndContinuePipeline(Asset $asset, string $technicalMessage): void
+    {
+        $expectedStatus = 'generating_thumbnails';
+        $currentStatus = $asset->analysis_status ?? 'uploading';
+        if ($currentStatus === $expectedStatus) {
+            $asset->update(['analysis_status' => 'extracting_metadata']);
+            $asset->refresh();
+            \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+        }
+
+        try {
+            $mime = $asset->metadata['mime_type'] ?? $asset->mime_type ?? null;
+            // Use base Exception so observability does not treat this as an unhandled RuntimeException fingerprint.
+            app(AssetDerivativeFailureService::class)->recordFailure(
+                $asset,
+                DerivativeType::THUMBNAIL,
+                DerivativeProcessor::THUMBNAIL_GENERATOR,
+                new \Exception($technicalMessage),
+                null,
+                null,
+                $mime
+            );
+        } catch (\Throwable $t) {
+            Log::warning('[GenerateThumbnailsJob] AssetDerivativeFailureService recording failed (terminal path)', [
+                'asset_id' => $asset->id,
+                'error' => $t->getMessage(),
+            ]);
+        }
+
+        try {
+            app(ReliabilityEngine::class)->report([
+                'source_type' => 'asset',
+                'source_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'severity' => 'warning',
+                'title' => 'Thumbnail preview not generated (terminal)',
+                'message' => $technicalMessage,
+                'retryable' => false,
+                'metadata' => [
+                    'derivative_failure' => true,
+                    'terminal_no_retry' => true,
+                ],
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('[GenerateThumbnailsJob] ReliabilityEngine report failed (terminal path)', [
+                'asset_id' => $asset->id,
+                'error' => $t->getMessage(),
+            ]);
+        }
+
+        \App\Services\UploadDiagnosticLogger::jobFail('GenerateThumbnailsJob', $asset->id, $technicalMessage, [
+            'terminal_thumbnail_failure' => true,
+        ]);
+
+        Log::warning('[GenerateThumbnailsJob] Terminal thumbnail failure — queue success, pipeline continues', [
+            'asset_id' => $asset->id,
+            'message' => $technicalMessage,
+        ]);
+
+        PipelineLogger::warning('THUMBNAILS: TERMINAL HANDLED (NO EXCEPTION)', [
+            'asset_id' => $asset->id,
+            'message' => $technicalMessage,
+        ]);
     }
 
     /**

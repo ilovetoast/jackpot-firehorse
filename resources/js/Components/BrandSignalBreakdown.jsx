@@ -40,10 +40,10 @@ const SIGNAL_DEFS = [
 ]
 
 const SIGNAL_POSITIVE_LABEL = {
-    has_logo: 'Detected',
-    has_brand_colors: 'On palette',
-    has_typography: 'Detected',
-    has_reference_similarity: 'Ready',
+    has_logo: 'Matched',
+    has_brand_colors: 'Matches palette',
+    has_typography: 'Configured',
+    has_reference_similarity: 'Reference available',
 }
 
 const SIGNAL_NEGATIVE_LABEL = {
@@ -158,6 +158,31 @@ function signalStatus(value) {
     return 'unknown'
 }
 
+/**
+ * Explains what the positive signal is based on (not necessarily on-pixel vision).
+ * @param {string} signalKey
+ * @param {object} [asset]
+ */
+function getSignalSourceLabel(signalKey, asset) {
+    switch (signalKey) {
+        case 'has_logo':
+            return 'From name / metadata'
+        case 'has_typography':
+            return 'From brand settings'
+        case 'has_brand_colors':
+            return 'From palette comparison'
+        case 'has_reference_similarity':
+            return 'From reference assets'
+        default:
+            return ''
+    }
+}
+
+function isVideoAsset(asset) {
+    const mime = asset && typeof asset.mime_type === 'string' ? asset.mime_type.toLowerCase() : ''
+    return mime.startsWith('video/')
+}
+
 function countTruthySignals(signals) {
     if (!signals || typeof signals !== 'object') return null
     const n = SIGNAL_KEYS.filter((k) => signals[k] === true).length
@@ -215,8 +240,9 @@ function ScoreDots({ count, tone }) {
  * @param {object} [props.brandIntelligence]
  * @param {object} [props.data]
  * @param {string|number} [props.brandId] — for “Fix issues” navigation
+ * @param {object} [props.asset] — optional; used for MIME (video notice) and signal source copy
  */
-export default function BrandSignalBreakdown({ brandIntelligence = null, data = null, brandId = null }) {
+export default function BrandSignalBreakdown({ brandIntelligence = null, data = null, brandId = null, asset = null }) {
     const [expanded, setExpanded] = useState(false)
     const [refDetailOpen, setRefDetailOpen] = useState(false)
     const [confSeg, setConfSeg] = useState(0)
@@ -406,11 +432,20 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             >
                 <div className="overflow-hidden min-h-0">
                     <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-1.5 transition-opacity duration-300 ease-out">
+                        <div className="text-xs text-gray-500 mb-2">
+                            Analysis based on metadata and brand configuration.
+                        </div>
+                        {isVideoAsset(asset) && (
+                            <div className="text-xs text-yellow-600 mb-2">
+                                Visual analysis not applied to video assets.
+                            </div>
+                        )}
                         <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
                             {SIGNAL_DEFS.map(({ key, label, Icon }) => {
                                 const st = signalStatus(signals[key])
                                 const ok = SIGNAL_POSITIVE_LABEL[key]
                                 const bad = SIGNAL_NEGATIVE_LABEL[key]
+                                const sourceLine = getSignalSourceLabel(key, asset)
                                 return (
                                     <div key={key} className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1">
                                         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
@@ -426,6 +461,9 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                                     </span>
                                                 )}
                                             </div>
+                                            {sourceLine ? (
+                                                <div className="text-xs text-gray-500 mt-0.5 leading-snug">{sourceLine}</div>
+                                            ) : null}
                                         </div>
                                     </div>
                                 )

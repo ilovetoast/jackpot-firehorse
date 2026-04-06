@@ -883,6 +883,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
             Route::get('/api/brands/{brand}/tags/summary', [\App\Http\Controllers\BrandTagManagementController::class, 'summary'])->name('api.brands.tags.summary');
             Route::post('/api/brands/{brand}/tags/purge', [\App\Http\Controllers\BrandTagManagementController::class, 'purge'])->name('api.brands.tags.purge');
+            Route::post('/api/brands/{brand}/tags/purge-bulk', [\App\Http\Controllers\BrandTagManagementController::class, 'purgeBulk'])->name('api.brands.tags.purge-bulk');
 
             // Phase AF-1: Asset approval workflow
             Route::get('/brands/{brand}/approvals', [\App\Http\Controllers\BrandController::class, 'approvals'])->name('brands.approvals');

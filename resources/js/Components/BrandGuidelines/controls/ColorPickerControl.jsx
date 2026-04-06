@@ -1,6 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 
-export default function ColorPickerControl({ label, value, onChange, onReset, showReset = false }) {
+export default function ColorPickerControl({
+    label,
+    value,
+    onChange,
+    onReset,
+    showReset = false,
+    /** When true, only the swatch + hex controls render (use with an external field label). */
+    hideLabel = false,
+}) {
     const [editing, setEditing] = useState(false)
     const [hexInput, setHexInput] = useState(value || '')
     const inputRef = useRef(null)
@@ -17,8 +25,12 @@ export default function ColorPickerControl({ label, value, onChange, onReset, sh
     }
 
     return (
-        <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-gray-500 font-medium shrink-0">{label}</span>
+        <div
+            className={`flex items-center gap-2 ${hideLabel ? 'justify-start' : 'justify-between'}`}
+        >
+            {!hideLabel && (
+                <span className="text-xs text-gray-500 font-medium shrink-0">{label}</span>
+            )}
             <div className="flex items-center gap-1.5">
                 <button
                     type="button"

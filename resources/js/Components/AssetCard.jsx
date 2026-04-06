@@ -476,7 +476,8 @@ export default function AssetCard({
             {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
                 className={`${
-                    isMasonry ? 'w-full flex flex-col' : aspectRatio
+                    /* Masonry: center content vertically in min-height tile (short logos vs tall neighbors) */
+                    isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
                 } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
                     ...(isMasonry
@@ -548,8 +549,9 @@ export default function AssetCard({
                             asset={asset}
                             alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
                             className={`${
+                                /* Masonry: no `display:block` — ThumbnailPreview uses flex to center img in min-height box */
                                 isMasonry
-                                    ? 'block w-full h-auto max-h-full'
+                                    ? 'w-full max-h-full min-h-0'
                                     : 'w-full h-full'
                             } ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
                             retryCount={0}
@@ -557,6 +559,7 @@ export default function AssetCard({
                             size="lg"
                             thumbnailVersion={thumbnailVersion}
                             shouldAnimateThumbnail={shouldAnimateThumbnail}
+                            primaryColor={primaryColor}
                             masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
                             masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                         />

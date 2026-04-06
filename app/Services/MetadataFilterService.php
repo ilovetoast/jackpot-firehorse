@@ -23,9 +23,47 @@ use Illuminate\Support\Facades\DB;
  */
 class MetadataFilterService
 {
+    /**
+     * Library/technical filters always included in grid filterable_schema even when the
+     * scoped dataset has no matching facet values, so every user sees the same controls.
+     *
+     * @var list<string>
+     */
+    public const ALWAYS_VISIBLE_GRID_FILTER_FIELD_KEYS = [
+        'orientation',
+        'color_space',
+        'resolution_class',
+        'print_type',
+        'dominant_hue_group',
+    ];
+
     public function __construct(
         protected MetadataVisibilityResolver $visibilityResolver
     ) {
+    }
+
+    /**
+     * Restrict schema to fields that have values in scope, except always-visible library keys.
+     *
+     * @param  array<int, array<string, mixed>>  $filterableSchema
+     * @param  array<int, string>  $keysWithValues
+     * @return array<int, array<string, mixed>>
+     */
+    public function restrictFilterableSchemaToKeysWithValuesInScope(array $filterableSchema, array $keysWithValues): array
+    {
+        $always = array_flip(self::ALWAYS_VISIBLE_GRID_FILTER_FIELD_KEYS);
+
+        return array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues, $always) {
+            $key = $field['field_key'] ?? $field['key'] ?? null;
+            if (! is_string($key) || $key === '') {
+                return false;
+            }
+            if (isset($always[$key])) {
+                return true;
+            }
+
+            return in_array($key, $keysWithValues, true);
+        }));
     }
     /**
      * Apply metadata filters to asset query.
